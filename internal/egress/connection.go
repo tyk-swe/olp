@@ -254,6 +254,16 @@ func connectionCount(value *int, fallback int) int {
 // Trust roots augment system roots on both TLS legs; a client certificate is
 // offered only to the provider, never to an HTTPS proxy.
 func (p Policy) ConnectionClient(options *ConnectionOptions, secret []byte, defaultResponseHeaderTimeout time.Duration) (*http.Client, error) {
+	return p.connectionClient(options, secret, defaultResponseHeaderTimeout, false)
+}
+
+// RawConnectionClient preserves encoded bytes and uses a fresh HTTP/1 connection
+// per dispatch. Callers must also supply non-rewindable bodies.
+func (p Policy) RawConnectionClient(options *ConnectionOptions, secret []byte, timeout time.Duration) (*http.Client, error) {
+	return p.connectionClient(options, secret, timeout, true)
+}
+
+func (p Policy) connectionClient(options *ConnectionOptions, secret []byte, defaultResponseHeaderTimeout time.Duration, raw bool) (*http.Client, error) {
 	if err := p.ValidateConnection(options); err != nil {
 		return nil, err
 	}
@@ -304,7 +314,15 @@ func (p Policy) ConnectionClient(options *ConnectionOptions, secret []byte, defa
 		ResponseHeaderTimeout: milliseconds(options.ResponseHeaderTimeoutMS, defaultResponseHeaderTimeout), ExpectContinueTimeout: time.Second, MaxResponseHeaderBytes: 32 << 10,
 		IdleConnTimeout: milliseconds(options.IdleConnTimeoutMS, 90*time.Second), MaxIdleConns: connectionCount(options.MaxIdleConns, 128), MaxIdleConnsPerHost: connectionCount(options.MaxIdleConnsPerHost, 16), MaxConnsPerHost: connectionCount(options.MaxConnsPerHost, 64), ForceAttemptHTTP2: true,
 	}
-	return &http.Client{Transport: &connectionTransport{policy: policy, transport: transport}, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrRedirect }}, nil
+	redirect := func(*http.Request, []*http.Request) error { return ErrRedirect }
+	if raw {
+		transport.DisableCompression = true
+		transport.DisableKeepAlives = true
+		transport.ForceAttemptHTTP2 = false
+		transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+		redirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
+	return &http.Client{Transport: &connectionTransport{policy: policy, transport: transport}, CheckRedirect: redirect}, nil
 }
 
 type connectionTransport struct {

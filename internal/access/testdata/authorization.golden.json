@@ -37,6 +37,7 @@
     "GET /api/v1/code/pools": "YYYYYYYYYYYY",
     "GET /api/v1/code/refusals": "YYYYYYYYYYYY",
     "GET /api/v1/code/routes": "YYYYYYYYYYYY",
+    "GET /api/v1/code/routes/{id}/client-config": "YYYYYYYYYYYY",
     "GET /api/v1/code/routes/{id}/revisions": "YYYYYYYYYYYY",
     "GET /api/v1/code/token-windows": "YYYYYYYYYYYY",
     "GET /api/v1/configuration/export": "Y-Y-----Y-YY",

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/oif"
 )
@@ -43,6 +45,20 @@ func Decode(raw []byte, encoding string, limit int64) ([]byte, error) {
 			return nil, codemode.Refuse(413, "code_body_too_large")
 		}
 		return body, nil
+	case "zstd":
+		reader, err := zstd.NewReader(bytes.NewReader(raw), zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(uint64(limit)))
+		if err != nil {
+			return nil, codemode.Refuse(400, "code_encoding_invalid")
+		}
+		defer reader.Close()
+		body, err := io.ReadAll(io.LimitReader(reader, limit+1))
+		if err != nil {
+			return nil, codemode.Refuse(400, "code_encoding_invalid")
+		}
+		if int64(len(body)) > limit {
+			return nil, codemode.Refuse(413, "code_body_too_large")
+		}
+		return body, nil
 	default:
 		return nil, codemode.Refuse(415, "code_encoding_unsupported")
 	}
@@ -59,8 +75,10 @@ func Classify(body []byte, headers http.Header, path string, websocket bool) (Re
 	if conversation.Kind() != oif.Absent && conversation.Kind() != oif.Null {
 		return request, codemode.Refuse(409, "code_parent_unresolved")
 	}
+	compact := false
 	for _, item := range field(root, "input").Elements() {
 		kind, _ := field(item, "type").Text()
+		compact = compact || kind == "compaction_trigger"
 		if kind == "item_reference" {
 			return request, codemode.Refuse(409, "code_parent_unresolved")
 		}
@@ -70,7 +88,7 @@ func Classify(body []byte, headers http.Header, path string, websocket bool) (Re
 		return request, codemode.Refuse(400, "code_model_invalid")
 	}
 	request.Operation.Name = "responses"
-	if path == "responses/compact" && !websocket {
+	if path == "responses/compact" && !websocket || path == "responses" && compact {
 		request.Operation.Name = "compact"
 	} else if path != "responses" {
 		return request, codemode.Refuse(400, "code_operation_unsupported")
@@ -150,7 +168,7 @@ func Identity(headers http.Header, root oif.Value) (codemode.Identity, error) {
 	if !readHeader("thread-id", &result.Conversation) || !readField("thread_id", &result.Conversation) || !readHeader("x-codex-parent-thread-id", &result.Parent) || !readField("x-codex-parent-thread-id", &result.Parent) {
 		return result, codemode.Refuse(400, "code_identity_ambiguous")
 	}
-	if result.Conversation == "" && !readHeader("session_id", &result.Conversation) {
+	if result.Conversation == "" && (!readHeader("session-id", &result.Conversation) || !readHeader("session_id", &result.Conversation)) {
 		return result, codemode.Refuse(400, "code_identity_ambiguous")
 	}
 	var subagent string
@@ -161,6 +179,10 @@ func Identity(headers http.Header, root oif.Value) (codemode.Identity, error) {
 		return result, codemode.Refuse(409, "code_parent_unresolved")
 	}
 	return result, result.Validate()
+}
+
+func ConnectionIdentity(headers http.Header) (codemode.Identity, error) {
+	return Identity(headers, oif.Value{})
 }
 
 func field(value oif.Value, name string) oif.Value { child, _ := value.Lookup(name); return child }

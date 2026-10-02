@@ -5509,6 +5509,12 @@ type ReplaceCodeRouteParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// GetCodeClientConfigurationParams defines parameters for GetCodeClientConfiguration.
+type GetCodeClientConfigurationParams struct {
+	GatewayUrl string  `form:"gateway_url" json:"gateway_url"`
+	Model      *string `form:"model,omitempty" json:"model,omitempty"`
+}
+
 // PublishCodeRouteParams defines parameters for PublishCodeRoute.
 type PublishCodeRouteParams struct {
 	IfMatch        string `json:"If-Match"`

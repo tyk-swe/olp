@@ -70,8 +70,11 @@ headers plus an observed principal. `gateway.CodeLedger`, implemented by
 `resources.CodeStore`, atomically authorizes each generation, creates/reuses a
 whole-tree account pin, reserves all matching hard-token budgets and records an
 attempt. WebSocket upgrade does not substitute for per-generation admission.
-The foundation supplies the ledger; production transport and authorizer
-registration are explicit process-composition dependencies.
+Process composition supplies `gateway.NewCodeForwarder` and
+`providers.CodeAuthorizer` with the existing runtime and plugin host.
+WebSocket handshakes bind and authorize before upstream connection and downstream
+upgrade; every generation is admitted separately. Response IDs become durable,
+route/key-scoped aliases to a binding; ambiguous references refuse.
 
 `Admission.ReserveCodeRate` shares request/token-rate/concurrency accounting
 without ordinary monetary limits. A rate estimate never becomes a hard bound.

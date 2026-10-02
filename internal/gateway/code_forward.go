@@ -3,11 +3,8 @@ package gateway
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -64,7 +61,7 @@ func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	path := r.PathValue("operation")
-	if r.URL.RawQuery != "" || r.URL.RawPath != "" {
+	if r.URL.RawPath != "" {
 		refuse(codemode.Refuse(400, "code_operation_unsupported"))
 		return
 	}
@@ -101,10 +98,6 @@ func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request)
 		refuse(err)
 		return
 	}
-	if observation.PreviousResponse != "" {
-		refuse(codemode.Refuse(409, "code_parent_unresolved"))
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
 	attempt, err := f.prepare(s, r.WithContext(ctx), release, route, observation)
@@ -113,13 +106,13 @@ func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer attempt.finish(ctx)
-	client, err := f.client(s, attempt.config)
+	client, err := f.client(s, r.Context(), release, attempt.config, attempt.permit.Account.ProviderID)
 	if err != nil {
 		refuse(err)
 		return
 	}
 	defer client.CloseIdleConnections()
-	target, err := codeEndpoint(s, attempt.config, path)
+	target, err := codeEndpoint(s, attempt.config, path, r.URL.RawQuery)
 	if err != nil {
 		refuse(err)
 		return
@@ -187,7 +180,7 @@ func (f *CodeForwarder) prepare(s *Server, r *http.Request, release *runtime.Rel
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 	}
-	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: authority.ID, Operation: observation.Operation})
+	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: authority.ID, Operation: observation.Operation, PreviousResponse: observation.PreviousResponse})
 	if err != nil {
 		settleKey(r.Context(), lease, false, nil, s.log)
 		return nil, err
@@ -253,6 +246,11 @@ func (a *codeAttempt) dispatch(ctx context.Context) error {
 }
 
 func (a *codeAttempt) observe(o codexwire.Observation) {
+	if o.ResponseID != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = a.server.CodeLedger.ObserveReference(ctx, a.permit.Attempt.ID, o.ResponseID)
+		cancel()
+	}
 	if o.Status != 0 {
 		a.response(context.Background(), o.Status, nil)
 	}
@@ -314,7 +312,7 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 	}
 }
 
-func codeEndpoint(s *Server, cfg runtime.Configuration, path string) (string, error) {
+func codeEndpoint(s *Server, cfg runtime.Configuration, path, query string) (string, error) {
 	u, err := url.Parse(cfg.Endpoint)
 	if err != nil || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 		return "", codemode.Refuse(502, "code_connection_invalid")
@@ -324,51 +322,24 @@ func codeEndpoint(s *Server, cfg runtime.Configuration, path string) (string, er
 	if _, err := s.egress.ValidateEndpoint(u.String()); err != nil {
 		return "", codemode.Refuse(502, "code_egress_refused")
 	}
+	u.RawQuery = query
 	return u.String(), nil
 }
 
-func (f *CodeForwarder) client(s *Server, cfg runtime.Configuration) (*http.Client, error) {
-	transport := s.egress.Transport(upstreamHeaderTimeout)
-	transport.DisableCompression = true
-	transport.DisableKeepAlives = true
-	transport.ForceAttemptHTTP2 = false
-	transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
-	if network := cfg.Options.Network; network != nil {
-		if network.ProxyURL != "" || network.CredentialID != "" {
-			return nil, codemode.Refuse(422, "code_network_unqualified")
-		}
-		if err := s.egress.ValidateConnection(network); err != nil {
-			return nil, codemode.Refuse(502, "code_connection_invalid")
-		}
-		if network.TrustRootsPEM != "" {
-			roots, err := x509.SystemCertPool()
-			if err != nil {
-				return nil, codemode.Refuse(502, "code_connection_invalid")
-			}
-			if !roots.AppendCertsFromPEM([]byte(network.TrustRootsPEM)) {
-				return nil, codemode.Refuse(502, "code_connection_invalid")
-			}
-			transport.TLSClientConfig.RootCAs = roots
-		}
-		if network.ResponseHeaderTimeoutMS != nil {
-			transport.ResponseHeaderTimeout = time.Duration(*network.ResponseHeaderTimeoutMS) * time.Millisecond
-		}
-		if network.ConnectTimeoutMS != nil {
-			dial := transport.DialContext
-			transport.DialContext = func(ctx context.Context, networkName, address string) (net.Conn, error) {
-				ctx, cancel := context.WithTimeout(ctx, time.Duration(*network.ConnectTimeoutMS)*time.Millisecond)
-				defer cancel()
-				return dial(ctx, networkName, address)
-			}
-		}
-		if network.MaxConnsPerHost != nil {
-			transport.MaxConnsPerHost = *network.MaxConnsPerHost
-		}
-		if network.TLSHandshakeTimeoutMS != nil {
-			transport.TLSHandshakeTimeout = time.Duration(*network.TLSHandshakeTimeoutMS) * time.Millisecond
+func (f *CodeForwarder) client(s *Server, ctx context.Context, release *runtime.Release, cfg runtime.Configuration, providerID string) (*http.Client, error) {
+	var secret []byte
+	if network := cfg.Options.Network; network != nil && network.CredentialID != "" {
+		var err error
+		secret, err = s.Runtime.NetworkSecret(ctx, release, providerID, network.CredentialID)
+		if err != nil {
+			return nil, codemode.Refuse(503, "code_network_credential_unavailable")
 		}
 	}
-	return &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, nil
+	client, err := s.egress.RawConnectionClient(cfg.Options.Network, secret, upstreamHeaderTimeout)
+	if err != nil {
+		return nil, codemode.Refuse(502, "code_connection_invalid")
+	}
+	return client, nil
 }
 
 func (f *CodeForwarder) copyResponse(w http.ResponseWriter, response *http.Response, a *codeAttempt) {

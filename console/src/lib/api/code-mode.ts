@@ -18,6 +18,19 @@ export type CodeTokenWindows = Schemas['CodeTokenWindows'];
 export type CodeRevision = Schemas['CodeRevision'];
 export type CodeClientConfiguration = Schemas['CodeClientConfiguration'];
 
+export async function getCodeClientConfiguration(
+  route: CodeRoute,
+  gatewayURL: string,
+  signal?: AbortSignal
+): Promise<CodeClientConfiguration> {
+  return unwrap(
+    await apiClient.GET('/api/v1/code/routes/{id}/client-config', {
+      params: { path: { id: route.id }, query: { gateway_url: gatewayURL } },
+      signal
+    })
+  );
+}
+
 export type CodeFilters = {
   project_id?: string;
   route_id?: string;

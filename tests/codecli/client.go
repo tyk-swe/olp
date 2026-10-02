@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const Version = "0.153.2"
+const Version = "0.160.0"
 const Model = "gpt-5.4"
 
 type Client struct {

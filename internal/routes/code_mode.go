@@ -17,6 +17,7 @@ func (s *Server) registerCodeMode(mux *http.ServeMux) {
 	s.Access.Route(mux, "PUT /api/v1/code/routes/{id}", s.writeCodeRoute)
 	s.Access.Route(mux, "POST /api/v1/code/routes/{id}/publish", s.publishCodeRoute)
 	s.Access.Route(mux, "GET /api/v1/code/routes/{id}/revisions", s.codeRevisions)
+	s.Access.Route(mux, "GET /api/v1/code/routes/{id}/client-config", s.CodeClientConfiguration)
 }
 
 func (s *Server) codeRoutes(r *http.Request, p access.Principal) (access.Reply, error) {

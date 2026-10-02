@@ -99,73 +99,39 @@ Responses and supports WebSockets, with request/stream retries set to zero.
 OLP transport independently must never replay inference; client retry policy
 does not establish that server guarantee.
 
-## Integration surfaces
+## Integrated composition
 
-The foundation owns composition and public endpoint declaration. Compose:
+Process startup installs `gateway.NewCodeForwarder()`, `resources.CodeStore`
+and `providers.CodeAuthorizer{Pool, Credentials: runtimeManager, Plugins: pluginHost}`.
+The gateway passes the immutable `Snapshot.CodeConnection(route, providerID)`
+configuration and live admitted account to the authorizer.
 
-```go
-gw.CodeAuthorizer = &providers.CodeAuthorizer{
-    Pool: pool, Credentials: runtimeManager, Plugins: pluginHost,
-}
-```
+The authorizer structurally implements `gateway.CodeAuthorizer` without importing
+gateway. It verifies the approved plugin profile, immutable configuration,
+provider/project/credential identity, revocation/lapse/expiry and observed
+principal. It permits network options but refuses semantic headers,
+query/default/model transforms and unknown endpoints. Only upstream
+authentication headers and principal leave this boundary.
 
-Pass the configuration obtained from `Snapshot.CodeConnection(route, providerID)`
-and the live `CodeLedger.Admit` account. The authorizer structurally implements
-`gateway.CodeAuthorizer` without importing gateway. It verifies the approved
-plugin profile, immutable configuration, provider/project/credential identity,
-revocation/lapse/expiry, and observed principal. It permits network options but
-refuses semantic headers, query/default/model transforms and unknown endpoints.
-It returns only upstream authentication headers and principal.
-
-The ready handler is `(*routes.Server).CodeClientConfiguration`. Register it as:
-
-```go
-s.Access.Route(mux, "GET /api/v1/code/routes/{id}/client-config", s.CodeClientConfiguration)
-```
-
-Declare that GET in OpenAPI with the existing code-route read authorization,
-the UUID `id` path parameter, required string `gateway_url` query parameter,
-optional string `model`, and the existing `CodeClientConfiguration` response.
-Regenerate contracts and the authorization golden. The handler enforces project
-visibility and reads `latest_revision_id`'s document, not a mutable draft.
-Add public-boundary tests after registration for scope/project denial, unpublished
-or disabled routes, draft changes after publication, and the returned TOML.
+`GET /api/v1/code/routes/{id}/client-config` is registered and declared in OpenAPI
+with code-route read authority, a UUID path parameter, required `gateway_url`
+and optional `model`. Contracts and authorization golden are generated from it.
+The handler enforces project visibility and reads the published revision rather
+than the mutable draft. The console supplies the separately configurable public
+gateway address.
 
 ### Grant retention during slot rotation
 
-The foundation's `internal/grants/refresh.go` `using` expression only recognizes
-ordinary provider slots and revisions. Parent integration must also recognize
-code accounts and immutable published connections, or changing the ordinary slot
-can retire a grant still selected by a code account/conversation pin.
+`internal/grants/refresh.go` retains credentials referenced by code accounts.
+Its shared selection/execution lookup prefers the latest published immutable
+code-route connection with the matching provider, principal, project and plugin
+digest. Mutable provider fallback also recognizes code-account references.
 
-Add this candidate before the ordinary candidates in its `coalesce`:
-
-```sql
-(SELECT v.connections->c.provider_id::text
- FROM olp.code_routes r
- JOIN olp.code_route_revisions v ON v.id=r.latest_revision_id
- WHERE EXISTS (
-   SELECT 1 FROM olp.code_accounts a
-   WHERE a.credential_id=c.id AND a.provider_id=c.provider_id
-     AND a.principal=c.principal AND a.project_id=r.project_id)
-   AND v.connections->c.provider_id::text->>'profile_revision'=c.plugin_digest
- ORDER BY v.published_at DESC, v.id DESC LIMIT 1)
-```
-
-In the mutable-provider fallback, retain the matching-digest condition, but
-extend the existing provider-slot `EXISTS` condition with:
-
-```sql
-OR EXISTS (SELECT 1 FROM olp.code_accounts a
-           WHERE a.credential_id=c.id AND a.provider_id=c.provider_id
-             AND a.principal=c.principal AND a.project_id=p.project_id)
-```
-
-The same `using` expression feeds due selection and refresh execution, so both
-must share this addition. Add parent integration coverage for removing/rotating
-ordinary slots while a published code route continues using the enrolled
-credential. Revocation/lapse must still refuse; never migrate a pin to another
-principal to keep it working.
+Ordinary slot rotation therefore cannot retire a grant still selected by a code
+account. The integration suite rotates the ordinary slot, changes the mutable
+network configuration and verifies that the retained grant refreshes through
+its published connection. Revocation and lapse still refuse; pins never migrate
+to another principal.
 
 ## Qualification limits
 
@@ -177,10 +143,11 @@ contacts a live account or issues inference. Unit tests independently assert
 the exact OAuth encoding and request fields. The official npm-distributed
 `codex-cli 0.160.0` also accepts the generated TOML with `codex features list`.
 
-These are auth/configuration checks, not evidence of live subscription inference,
-HTTP/SSE/WebSocket transport, resume/fork/compaction/tools, file operations, model
-discovery, or server-mediated search. Those remain the parent transport/client
-qualification matrix. ChatGPT cloud tasks, standalone web-search and account
+These auth/configuration checks do not prove live subscription inference.
+The integrated transport/client evidence and remaining file/search, platform
+and live-account gaps are recorded in
+[the qualification matrix](../../docs/qualification/code-mode.md).
+ChatGPT cloud tasks, standalone web-search and account
 management are outside the generated local-client setup. FedRAMP and tokens
 without usable observed identity/expiry refuse. No operation/model hard-token
 bound is supplied here; budget qualification must be established separately.

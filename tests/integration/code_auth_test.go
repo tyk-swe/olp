@@ -47,6 +47,10 @@ type codexAuthority struct {
 }
 
 func newCodexAuthority(t *testing.T) *codexAuthority {
+	return newCodexAuthorityWithPeer(t, "fixture-account", nil)
+}
+
+func newCodexAuthorityWithPeer(t *testing.T, accountID string, peer http.Handler) *codexAuthority {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -54,7 +58,7 @@ func newCodexAuthority(t *testing.T) *codexAuthority {
 	}
 	certificate := &x509.Certificate{
 		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Codex fixture authority"},
-		DNSNames: []string{"auth.openai.com"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		DNSNames: []string{"auth.openai.com", "chatgpt.com"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
@@ -64,6 +68,10 @@ func newCodexAuthority(t *testing.T) *codexAuthority {
 	}
 	f := &codexAuthority{roots: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host == "chatgpt.com" && peer != nil {
+			peer.ServeHTTP(w, r)
+			return
+		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.calls = append(f.calls, r.Method+" "+r.URL.Path)
@@ -104,7 +112,7 @@ func newCodexAuthority(t *testing.T) *codexAuthority {
 				}
 				f.refreshes++
 			}
-			account := "fixture-account"
+			account := accountID
 			if f.changedAccount.Load() {
 				account = "another-account"
 			}

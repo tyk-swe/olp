@@ -26,7 +26,7 @@ behavior. Component tests use jsdom and browser exports.
 ### Code-mode qualification
 
 `./scripts/code-mode-qualification.sh cli` installs the exact-integrity official
-Codex 0.153.2 package and runs controlled HTTP/SSE and WebSocket journeys without
+Codex 0.160.0 package and runs controlled HTTP/SSE and WebSocket journeys without
 a provider account. It passes only an OLP fixture key into an isolated client
 home; local tool execution, continuation/resume and cancellation are exercised
 by the real CLI. The fixtures are not live subscription qualification.
