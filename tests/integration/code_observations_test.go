@@ -30,7 +30,7 @@ func codeObservedAccount(t *testing.T, f *codeFixture) codemode.Account {
 func TestCodeObservationWindowsMergeAndGateUntilIndependentResets(t *testing.T) {
 	f := newCodeFixture(t)
 	ctx := t.Context()
-	root, err := f.store.BindConnection(ctx, f.route, f.key, codemode.Identity{Conversation: "observation-root"})
+	root, err := f.store.BindConnection(ctx, f.route, f.key, codemode.Identity{Conversation: "observation-root"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

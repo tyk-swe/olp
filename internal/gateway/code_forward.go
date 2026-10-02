@@ -139,6 +139,7 @@ func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request)
 	response, err := client.Do(request)
 	if err != nil {
 		if ctx.Err() == nil {
+			attempt.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
 			attempt.health(ctx, "unavailable")
 		}
 		refuse(codemode.Refuse(502, "code_upstream_unavailable"))
@@ -150,7 +151,7 @@ func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request)
 		w.Header()[name] = values
 	}
 	w.WriteHeader(response.StatusCode)
-	f.copyResponse(w, response, attempt)
+	f.copyResponse(ctx, w, response, attempt)
 	for name, values := range codexwire.ForwardHeaders(response.Trailer, false) {
 		w.Header()[http.TrailerPrefix+name] = values
 	}
@@ -167,6 +168,7 @@ type codeAttempt struct {
 	usage         codemode.Usage
 	terminal      bool
 	conflicting   bool
+	prewarm       bool
 }
 
 func (f *CodeForwarder) prepare(s *Server, r *http.Request, release *runtime.Release, route codemode.Route, observation codexwire.Request) (*codeAttempt, error) {
@@ -186,7 +188,7 @@ func (f *CodeForwarder) prepare(s *Server, r *http.Request, release *runtime.Rel
 		settleKey(r.Context(), lease, false, nil, s.log)
 		return nil, err
 	}
-	a := &codeAttempt{server: s, permit: permit, lease: lease}
+	a := &codeAttempt{server: s, permit: permit, lease: lease, prewarm: observation.Prewarm}
 	ok := false
 	defer func() {
 		if !ok {
@@ -262,6 +264,12 @@ func (a *codeAttempt) observe(o codexwire.Observation) {
 	if o.Allowance != nil {
 		a.allowance(context.Background(), *o.Allowance)
 	}
+	if o.Outcome != nil {
+		a.outcome(context.Background(), *o.Outcome)
+	}
+	if o.Successful && !a.prewarm {
+		a.health(context.Background(), "healthy")
+	}
 	if !o.Terminal {
 		return
 	}
@@ -276,6 +284,15 @@ func (a *codeAttempt) observe(o codexwire.Observation) {
 }
 
 func (a *codeAttempt) finish(ctx context.Context) {
+	if !a.dispatched {
+		a.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "rejected"})
+	} else if !a.terminal {
+		outcome := codemode.Outcome{Origin: "gateway", Kind: "interrupted"}
+		if errors.Is(ctx.Err(), context.Canceled) {
+			outcome.Origin, outcome.Kind = "client", "canceled"
+		}
+		a.outcome(ctx, outcome)
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	var err error
@@ -294,6 +311,20 @@ func (a *codeAttempt) finish(ctx context.Context) {
 	settleKey(ctx, a.providerLease, a.dispatched, a.usage.Total, a.server.log)
 }
 
+func (a *codeAttempt) outcome(ctx context.Context, outcome codemode.Outcome) {
+	if a.permit.Attempt.ID == "" {
+		return
+	}
+	if outcome.ObservedAt.IsZero() {
+		outcome.ObservedAt = a.server.now().UTC()
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	if err := a.server.CodeLedger.ObserveOutcome(ctx, a.permit.Attempt.ID, outcome); err != nil {
+		a.server.log.Warn("code outcome unavailable", "attempt_id", a.permit.Attempt.ID)
+	}
+}
+
 func (a *codeAttempt) allowance(ctx context.Context, allowance codemode.Allowance) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
@@ -307,6 +338,11 @@ func (a *codeAttempt) health(ctx context.Context, status string) {
 }
 
 func (a *codeAttempt) response(ctx context.Context, status int, headers http.Header) {
+	outcome := codemode.Outcome{Origin: "upstream", Kind: "headers", UpstreamStatus: &status}
+	if status >= 400 {
+		outcome.Kind = "rejected"
+	}
+	a.outcome(ctx, outcome)
 	switch {
 	case status == 429:
 		a.health(ctx, "quota_limited")
@@ -350,7 +386,7 @@ func (f *CodeForwarder) client(s *Server, ctx context.Context, release *runtime.
 	return client, nil
 }
 
-func (f *CodeForwarder) copyResponse(w http.ResponseWriter, response *http.Response, a *codeAttempt) {
+func (f *CodeForwarder) copyResponse(ctx context.Context, w http.ResponseWriter, response *http.Response, a *codeAttempt) {
 	streaming := strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream")
 	encoded := response.Header.Get("Content-Encoding")
 	stream := codexwire.NewStream(codexwire.MaxBody, a.observe)
@@ -374,9 +410,11 @@ func (f *CodeForwarder) copyResponse(w http.ResponseWriter, response *http.Respo
 			}
 			_ = rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 			if _, err := w.Write(part); err != nil {
+				a.outcome(ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
 				return
 			}
 			if err := rc.Flush(); err != nil {
+				a.outcome(ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
 				return
 			}
 		}
@@ -389,6 +427,13 @@ func (f *CodeForwarder) copyResponse(w http.ResponseWriter, response *http.Respo
 						a.observe(codexwire.Observe(decoded, true))
 					}
 				}
+			}
+			if !a.terminal && ctx.Err() == nil {
+				outcome := codemode.Outcome{Origin: "gateway", Kind: "transport_error"}
+				if err == io.EOF {
+					outcome.Origin, outcome.Kind = "upstream", "incomplete"
+				}
+				a.outcome(ctx, outcome)
 			}
 			return
 		}

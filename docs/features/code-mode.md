@@ -155,6 +155,9 @@ block subsequent budgeted admission. Historical unknown usage prevents falsely
 enabling a hard guarantee.
 
 Provider-reported allowance is separate metadata with observation/reset times.
+Primary and secondary windows are retained independently for each metered limit;
+credits remain separate from those windows and from local budgets. Partial
+observations merge by window and do not erase other windows.
 Never infer subscription allowance from a local budget, monetary estimate or a
 successful fixture request. Stale allowance observations cannot replace newer ones.
 Observed exhausted allowance refuses admission until its reported reset.
@@ -187,7 +190,10 @@ fragmentation, TLS fingerprint, source IP or timing. It cannot guarantee that
 an upstream provider accepts an account's use.
 
 Diagnostics retain identifiers, route revisions, native models, operations,
-binding/account identity, bounded refusal codes, reservation/usage metadata and
-state. They exclude prompts, outputs, reasoning, tool payloads, raw headers,
+binding/account identity, bounded refusal codes, reservation/usage metadata,
+upstream status and outcome origin. Upstream completion/rejection, transport loss
+and client cancellation remain distinct from whether usage is known. WebSocket
+handshakes and prewarms alone do not establish serving health. Diagnostics exclude
+prompts, outputs, reasoning, tool payloads, raw headers,
 upstream auth and refresh material. Account names and operator labels are not
 places to store secrets.

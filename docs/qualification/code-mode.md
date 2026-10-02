@@ -55,16 +55,17 @@ prove neither entitlement nor real consumption nor a maximum token bound.
 | Local files/search | Official `exec_command` writes a file, enumerates files, searches and reads it; tool outputs continue over both transports | Controlled only; no hosted search claim |
 | Fresh review | Root WS handshake before review child, including upstream-426 HTTP fallback; HTTP-only unresolved child refuses | Controlled only |
 | Review after a parent task | Official app-server `thread/start`, `turn/start`, then inline `review/start`; shared root/account on both transports | Controlled only |
-| Model hint | Generated static hint reaches ingress and is removed upstream; official `-m` changes body but leaves hint unchanged | Disjoint-pool selection needs server integration qualification |
+| Model hint | Generated static hint reaches ingress and is removed upstream; disjoint-model account selection and pinned reconnect across replicas; official `-m` leaves the hint unchanged | Controlled only; regenerate configuration when changing models |
 
-Unknown server-context item references fail closed. At the followup base revision,
-new model-independent WebSocket bindings require an eligible account covering
-every model on the published route. The generated model hint is ready for the
-server's narrower first-account selection; disjoint-model/no-hint/pinned reconnect
-semantics must be rerun after that integration. Requested subprotocols, binary client messages and overlapping
+Unknown server-context item references fail closed. Without a model hint,
+new WebSocket bindings require an eligible account covering every published model;
+otherwise they refuse with `code_model_selection_required`. Existing bindings
+retain their account and check model permission on each generation. Requested subprotocols, binary client messages and overlapping
 generations on one socket are unqualified and refuse. Observation is bounded to
 16 MiB, generations to ten minutes and sockets to one hour. Allowance observation
-currently represents the primary reported subscription window only.
+retains primary and secondary windows separately for each reported metered limit,
+plus distinct credit metadata. Partial or stale observations cannot erase a newer
+window. Exhausted windows gate admission independently until their resets.
 
 ## Reproduction
 
