@@ -149,16 +149,226 @@ func (e BudgetThresholdEventEvent) Valid() bool {
 
 // Defines values for BudgetWindowKind.
 const (
-	Day   BudgetWindowKind = "day"
-	Month BudgetWindowKind = "month"
+	BudgetWindowKindDay   BudgetWindowKind = "day"
+	BudgetWindowKindMonth BudgetWindowKind = "month"
 )
 
 // Valid indicates whether the value is a known member of the BudgetWindowKind enum.
 func (e BudgetWindowKind) Valid() bool {
 	switch e {
-	case Day:
+	case BudgetWindowKindDay:
 		return true
-	case Month:
+	case BudgetWindowKindMonth:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAccountGrantState.
+const (
+	CodeAccountGrantStateCurrent CodeAccountGrantState = "current"
+	CodeAccountGrantStateExpired CodeAccountGrantState = "expired"
+	CodeAccountGrantStateLapsed  CodeAccountGrantState = "lapsed"
+	CodeAccountGrantStateRevoked CodeAccountGrantState = "revoked"
+)
+
+// Valid indicates whether the value is a known member of the CodeAccountGrantState enum.
+func (e CodeAccountGrantState) Valid() bool {
+	switch e {
+	case CodeAccountGrantStateCurrent:
+		return true
+	case CodeAccountGrantStateExpired:
+		return true
+	case CodeAccountGrantStateLapsed:
+		return true
+	case CodeAccountGrantStateRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAccountHealth.
+const (
+	Healthy      CodeAccountHealth = "healthy"
+	QuotaLimited CodeAccountHealth = "quota_limited"
+	Unavailable  CodeAccountHealth = "unavailable"
+	Unknown      CodeAccountHealth = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the CodeAccountHealth enum.
+func (e CodeAccountHealth) Valid() bool {
+	switch e {
+	case Healthy:
+		return true
+	case QuotaLimited:
+		return true
+	case Unavailable:
+		return true
+	case Unknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAllowanceWindowWindow.
+const (
+	Primary   CodeAllowanceWindowWindow = "primary"
+	Secondary CodeAllowanceWindowWindow = "secondary"
+)
+
+// Valid indicates whether the value is a known member of the CodeAllowanceWindowWindow enum.
+func (e CodeAllowanceWindowWindow) Valid() bool {
+	switch e {
+	case Primary:
+		return true
+	case Secondary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAttemptOutcome.
+const (
+	CodeAttemptOutcomeCanceled       CodeAttemptOutcome = "canceled"
+	CodeAttemptOutcomeCompleted      CodeAttemptOutcome = "completed"
+	CodeAttemptOutcomeFailed         CodeAttemptOutcome = "failed"
+	CodeAttemptOutcomeHeaders        CodeAttemptOutcome = "headers"
+	CodeAttemptOutcomeIncomplete     CodeAttemptOutcome = "incomplete"
+	CodeAttemptOutcomeInterrupted    CodeAttemptOutcome = "interrupted"
+	CodeAttemptOutcomeLessThannil    CodeAttemptOutcome = "<nil>"
+	CodeAttemptOutcomeRejected       CodeAttemptOutcome = "rejected"
+	CodeAttemptOutcomeTransportError CodeAttemptOutcome = "transport_error"
+)
+
+// Valid indicates whether the value is a known member of the CodeAttemptOutcome enum.
+func (e CodeAttemptOutcome) Valid() bool {
+	switch e {
+	case CodeAttemptOutcomeCanceled:
+		return true
+	case CodeAttemptOutcomeCompleted:
+		return true
+	case CodeAttemptOutcomeFailed:
+		return true
+	case CodeAttemptOutcomeHeaders:
+		return true
+	case CodeAttemptOutcomeIncomplete:
+		return true
+	case CodeAttemptOutcomeInterrupted:
+		return true
+	case CodeAttemptOutcomeLessThannil:
+		return true
+	case CodeAttemptOutcomeRejected:
+		return true
+	case CodeAttemptOutcomeTransportError:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAttemptOutcomeOrigin.
+const (
+	CodeAttemptOutcomeOriginClient      CodeAttemptOutcomeOrigin = "client"
+	CodeAttemptOutcomeOriginGateway     CodeAttemptOutcomeOrigin = "gateway"
+	CodeAttemptOutcomeOriginLessThannil CodeAttemptOutcomeOrigin = "<nil>"
+	CodeAttemptOutcomeOriginUpstream    CodeAttemptOutcomeOrigin = "upstream"
+)
+
+// Valid indicates whether the value is a known member of the CodeAttemptOutcomeOrigin enum.
+func (e CodeAttemptOutcomeOrigin) Valid() bool {
+	switch e {
+	case CodeAttemptOutcomeOriginClient:
+		return true
+	case CodeAttemptOutcomeOriginGateway:
+		return true
+	case CodeAttemptOutcomeOriginLessThannil:
+		return true
+	case CodeAttemptOutcomeOriginUpstream:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAttemptState.
+const (
+	Aborted        CodeAttemptState = "aborted"
+	BoundViolation CodeAttemptState = "bound_violation"
+	Prepared       CodeAttemptState = "prepared"
+	Settled        CodeAttemptState = "settled"
+	Uncertain      CodeAttemptState = "uncertain"
+)
+
+// Valid indicates whether the value is a known member of the CodeAttemptState enum.
+func (e CodeAttemptState) Valid() bool {
+	switch e {
+	case Aborted:
+		return true
+	case BoundViolation:
+		return true
+	case Prepared:
+		return true
+	case Settled:
+		return true
+	case Uncertain:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodePoolKind.
+const (
+	CodePoolKindPersonal CodePoolKind = "personal"
+	CodePoolKindShared   CodePoolKind = "shared"
+)
+
+// Valid indicates whether the value is a known member of the CodePoolKind enum.
+func (e CodePoolKind) Valid() bool {
+	switch e {
+	case CodePoolKindPersonal:
+		return true
+	case CodePoolKindShared:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodePoolWriteKind.
+const (
+	CodePoolWriteKindPersonal CodePoolWriteKind = "personal"
+	CodePoolWriteKindShared   CodePoolWriteKind = "shared"
+)
+
+// Valid indicates whether the value is a known member of the CodePoolWriteKind enum.
+func (e CodePoolWriteKind) Valid() bool {
+	switch e {
+	case CodePoolWriteKindPersonal:
+		return true
+	case CodePoolWriteKindShared:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeTokenWindowPeriod.
+const (
+	CodeTokenWindowPeriodDay   CodeTokenWindowPeriod = "day"
+	CodeTokenWindowPeriodMonth CodeTokenWindowPeriod = "month"
+)
+
+// Valid indicates whether the value is a known member of the CodeTokenWindowPeriod enum.
+func (e CodeTokenWindowPeriod) Valid() bool {
+	switch e {
+	case CodeTokenWindowPeriodDay:
+		return true
+	case CodeTokenWindowPeriodMonth:
 		return true
 	default:
 		return false
@@ -1706,6 +1916,317 @@ type CapabilityResponse struct {
 type ChangePasswordRequest struct {
 	CurrentPassword *string `json:"current_password,omitempty"`
 	NewPassword     *string `json:"new_password,omitempty"`
+}
+
+// CodeAccount defines model for CodeAccount.
+type CodeAccount struct {
+	Allowance    nullable.Nullable[CodeAllowance] `json:"allowance"`
+	CredentialId openapi_types.UUID               `json:"credential_id"`
+	Eligible     bool                             `json:"eligible"`
+	Enabled      bool                             `json:"enabled"`
+	Etag         openapi_types.UUID               `json:"etag"`
+	GrantState   CodeAccountGrantState            `json:"grant_state"`
+	Health       CodeAccountHealth                `json:"health"`
+	Id           openapi_types.UUID               `json:"id"`
+	Models       []string                         `json:"models"`
+	Name         string                           `json:"name"`
+	Principal    string                           `json:"principal"`
+	ProjectId    openapi_types.UUID               `json:"project_id"`
+	ProviderId   openapi_types.UUID               `json:"provider_id"`
+}
+
+// CodeAccountGrantState defines model for CodeAccount.GrantState.
+type CodeAccountGrantState string
+
+// CodeAccountHealth defines model for CodeAccount.Health.
+type CodeAccountHealth string
+
+// CodeAccountList defines model for CodeAccountList.
+type CodeAccountList struct {
+	Items      []CodeAccount             `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// CodeAccountWrite defines model for CodeAccountWrite.
+type CodeAccountWrite struct {
+	CredentialId openapi_types.UUID `json:"credential_id"`
+	Enabled      bool               `json:"enabled"`
+	Models       []string           `json:"models"`
+	Name         string             `json:"name"`
+	ProjectId    openapi_types.UUID `json:"project_id"`
+	ProviderId   openapi_types.UUID `json:"provider_id"`
+}
+
+// CodeAllowance Provider-reported subscription metadata. Unknown values remain null and never become local hard budgets or billed spend.
+type CodeAllowance struct {
+	// Credits Provider-reported credits. Informational: absence of add-on credits does not imply exhaustion of subscription windows, and credits do not override an exhausted window. Balance is a bounded decimal string, not inferred spend.
+	Credits           *CodeCredits               `json:"credits,omitempty"`
+	ObservedAt        time.Time                  `json:"observed_at"`
+	RemainingPercent  nullable.Nullable[float32] `json:"remaining_percent"`
+	RemainingRequests nullable.Nullable[int64]   `json:"remaining_requests"`
+	RemainingTokens   nullable.Nullable[int64]   `json:"remaining_tokens"`
+
+	// RequestObservation Observation and reset of one provider count limit, independent of other counts and percentage windows.
+	RequestObservation *CodeCountObservation        `json:"request_observation,omitempty"`
+	ResetsAt           nullable.Nullable[time.Time] `json:"resets_at"`
+
+	// TokenObservation Observation and reset of one provider count limit, independent of other counts and percentage windows.
+	TokenObservation *CodeCountObservation `json:"token_observation,omitempty"`
+
+	// Windows Independent provider windows keyed by limit_id and window. Partial observations merge without replacing newer observations for another window.
+	Windows *[]CodeAllowanceWindow `json:"windows,omitempty"`
+}
+
+// CodeAllowanceWindow defines model for CodeAllowanceWindow.
+type CodeAllowanceWindow struct {
+	LimitId          string                       `json:"limit_id"`
+	ObservedAt       time.Time                    `json:"observed_at"`
+	RemainingPercent float32                      `json:"remaining_percent"`
+	ResetsAt         nullable.Nullable[time.Time] `json:"resets_at"`
+	UsedPercent      float32                      `json:"used_percent"`
+	Window           CodeAllowanceWindowWindow    `json:"window"`
+	WindowMinutes    nullable.Nullable[int64]     `json:"window_minutes"`
+}
+
+// CodeAllowanceWindowWindow defines model for CodeAllowanceWindow.Window.
+type CodeAllowanceWindowWindow string
+
+// CodeAttempt Metadata only. No request or response body, tools, headers or secrets are retained. Reserved tokens are conservative bounds, not reported usage; unreported consumption remains uncertain indefinitely. Cached and reasoning tokens are subsets.
+type CodeAttempt struct {
+	AccountId     openapi_types.UUID           `json:"account_id"`
+	ApiKeyId      openapi_types.UUID           `json:"api_key_id"`
+	BindingId     openapi_types.UUID           `json:"binding_id"`
+	BoundEvidence nullable.Nullable[string]    `json:"bound_evidence"`
+	CachedTokens  nullable.Nullable[int64]     `json:"cached_tokens"`
+	CreatedAt     time.Time                    `json:"created_at"`
+	FinishedAt    nullable.Nullable[time.Time] `json:"finished_at"`
+	Id            openapi_types.UUID           `json:"id"`
+	InputTokens   nullable.Nullable[int64]     `json:"input_tokens"`
+	Model         string                       `json:"model"`
+	Operation     string                       `json:"operation"`
+
+	// Outcome Bounded transport or generation result, independent of usage settlement and durable uncertainty.
+	Outcome           nullable.Nullable[CodeAttemptOutcome]       `json:"outcome"`
+	OutcomeObservedAt nullable.Nullable[time.Time]                `json:"outcome_observed_at"`
+	OutcomeOrigin     nullable.Nullable[CodeAttemptOutcomeOrigin] `json:"outcome_origin"`
+	OutputTokens      nullable.Nullable[int64]                    `json:"output_tokens"`
+	ProjectId         openapi_types.UUID                          `json:"project_id"`
+	ReasoningTokens   nullable.Nullable[int64]                    `json:"reasoning_tokens"`
+	Refusal           nullable.Nullable[string]                   `json:"refusal"`
+	ReportedTokens    nullable.Nullable[int64]                    `json:"reported_tokens"`
+	ReservedTokens    int64                                       `json:"reserved_tokens"`
+	RouteId           openapi_types.UUID                          `json:"route_id"`
+	RouteRevisionId   openapi_types.UUID                          `json:"route_revision_id"`
+	State             CodeAttemptState                            `json:"state"`
+
+	// UpstreamStatus Observed upstream HTTP or WebSocket error status; null when not observed.
+	UpstreamStatus nullable.Nullable[int] `json:"upstream_status"`
+}
+
+// CodeAttemptOutcome Bounded transport or generation result, independent of usage settlement and durable uncertainty.
+type CodeAttemptOutcome string
+
+// CodeAttemptOutcomeOrigin defines model for CodeAttempt.OutcomeOrigin.
+type CodeAttemptOutcomeOrigin string
+
+// CodeAttemptState defines model for CodeAttempt.State.
+type CodeAttemptState string
+
+// CodeAttemptList defines model for CodeAttemptList.
+type CodeAttemptList struct {
+	Items      []CodeAttempt             `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// CodeBinding Persistent per-key conversation tree identity. Retiring any member retires the whole tree; retirement never permits re-binding to another account.
+type CodeBinding struct {
+	AccountId    openapi_types.UUID                    `json:"account_id"`
+	ApiKeyId     openapi_types.UUID                    `json:"api_key_id"`
+	Conversation string                                `json:"conversation"`
+	CreatedAt    time.Time                             `json:"created_at"`
+	Id           openapi_types.UUID                    `json:"id"`
+	ParentId     nullable.Nullable[openapi_types.UUID] `json:"parent_id"`
+	Principal    string                                `json:"principal"`
+	ProjectId    openapi_types.UUID                    `json:"project_id"`
+	RetiredAt    nullable.Nullable[time.Time]          `json:"retired_at"`
+	RootId       openapi_types.UUID                    `json:"root_id"`
+	RouteId      openapi_types.UUID                    `json:"route_id"`
+}
+
+// CodeBindingList defines model for CodeBindingList.
+type CodeBindingList struct {
+	Items      []CodeBinding             `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// CodeBudget Optional hard token caps. Both periods use UTC. All matching attempts in the period count, including earlier usage and uncertainty. Disabling does not release reservations. Route/key scope cannot change.
+type CodeBudget struct {
+	ApiKeyId      nullable.Nullable[openapi_types.UUID] `json:"api_key_id"`
+	DailyTokens   nullable.Nullable[int64]              `json:"daily_tokens"`
+	Enabled       bool                                  `json:"enabled"`
+	Etag          openapi_types.UUID                    `json:"etag"`
+	Id            openapi_types.UUID                    `json:"id"`
+	MonthlyTokens nullable.Nullable[int64]              `json:"monthly_tokens"`
+	ProjectId     openapi_types.UUID                    `json:"project_id"`
+	RouteId       nullable.Nullable[openapi_types.UUID] `json:"route_id"`
+}
+
+// CodeBudgetList defines model for CodeBudgetList.
+type CodeBudgetList struct {
+	Items      []CodeBudget              `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// CodeBudgetWrite defines model for CodeBudgetWrite.
+type CodeBudgetWrite struct {
+	ApiKeyId      nullable.Nullable[openapi_types.UUID] `json:"api_key_id"`
+	DailyTokens   nullable.Nullable[int64]              `json:"daily_tokens"`
+	Enabled       bool                                  `json:"enabled"`
+	MonthlyTokens nullable.Nullable[int64]              `json:"monthly_tokens"`
+	ProjectId     openapi_types.UUID                    `json:"project_id"`
+	RouteId       nullable.Nullable[openapi_types.UUID] `json:"route_id"`
+}
+
+// CodeClientConfiguration defines model for CodeClientConfiguration.
+type CodeClientConfiguration struct {
+	BaseUrl           string   `json:"base_url"`
+	Client            string   `json:"client"`
+	ClientVersion     string   `json:"client_version"`
+	Configuration     string   `json:"configuration"`
+	NativeModels      []string `json:"native_models"`
+	QualificationGaps []string `json:"qualification_gaps"`
+	RouteSlug         string   `json:"route_slug"`
+}
+
+// CodeCountObservation Observation and reset of one provider count limit, independent of other counts and percentage windows.
+type CodeCountObservation struct {
+	ObservedAt time.Time                    `json:"observed_at"`
+	ResetsAt   nullable.Nullable[time.Time] `json:"resets_at"`
+}
+
+// CodeCredits Provider-reported credits. Informational: absence of add-on credits does not imply exhaustion of subscription windows, and credits do not override an exhausted window. Balance is a bounded decimal string, not inferred spend.
+type CodeCredits struct {
+	Balance    nullable.Nullable[string] `json:"balance"`
+	HasCredits bool                      `json:"has_credits"`
+	ObservedAt time.Time                 `json:"observed_at"`
+	Unlimited  bool                      `json:"unlimited"`
+}
+
+// CodePool defines model for CodePool.
+type CodePool struct {
+	AccountIds  []openapi_types.UUID                  `json:"account_ids"`
+	ApiKeyIds   []openapi_types.UUID                  `json:"api_key_ids"`
+	Etag        openapi_types.UUID                    `json:"etag"`
+	Id          openapi_types.UUID                    `json:"id"`
+	Kind        CodePoolKind                          `json:"kind"`
+	Name        string                                `json:"name"`
+	OwnerUserId nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
+	ProjectId   openapi_types.UUID                    `json:"project_id"`
+}
+
+// CodePoolKind defines model for CodePool.Kind.
+type CodePoolKind string
+
+// CodePoolList defines model for CodePoolList.
+type CodePoolList struct {
+	Items      []CodePool                `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// CodePoolWrite defines model for CodePoolWrite.
+type CodePoolWrite struct {
+	AccountIds  []openapi_types.UUID                  `json:"account_ids"`
+	ApiKeyIds   []openapi_types.UUID                  `json:"api_key_ids"`
+	Kind        CodePoolWriteKind                     `json:"kind"`
+	Name        string                                `json:"name"`
+	OwnerUserId nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
+	ProjectId   openapi_types.UUID                    `json:"project_id"`
+}
+
+// CodePoolWriteKind defines model for CodePoolWrite.Kind.
+type CodePoolWriteKind string
+
+// CodeRefusal defines model for CodeRefusal.
+type CodeRefusal struct {
+	ApiKeyId   openapi_types.UUID `json:"api_key_id"`
+	Code       string             `json:"code"`
+	Id         openapi_types.UUID `json:"id"`
+	OccurredAt time.Time          `json:"occurred_at"`
+	ProjectId  openapi_types.UUID `json:"project_id"`
+	RouteId    openapi_types.UUID `json:"route_id"`
+}
+
+// CodeRefusalList defines model for CodeRefusalList.
+type CodeRefusalList struct {
+	Items      []CodeRefusal             `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// CodeRevision defines model for CodeRevision.
+type CodeRevision struct {
+	Id openapi_types.UUID `json:"id"`
+
+	// Route Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
+	Route CodeRoute `json:"route"`
+}
+
+// CodeRevisionList defines model for CodeRevisionList.
+type CodeRevisionList struct {
+	Items      []CodeRevision            `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// CodeRoute Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
+type CodeRoute struct {
+	Enabled     bool                         `json:"enabled"`
+	Etag        openapi_types.UUID           `json:"etag"`
+	Id          openapi_types.UUID           `json:"id"`
+	Models      []string                     `json:"models"`
+	PoolId      openapi_types.UUID           `json:"pool_id"`
+	ProjectId   openapi_types.UUID           `json:"project_id"`
+	PublishedAt nullable.Nullable[time.Time] `json:"published_at"`
+	Revision    int32                        `json:"revision"`
+	RevisionId  string                       `json:"revision_id"`
+	Slug        string                       `json:"slug"`
+}
+
+// CodeRouteList defines model for CodeRouteList.
+type CodeRouteList struct {
+	Items      []CodeRoute               `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// CodeRouteWrite defines model for CodeRouteWrite.
+type CodeRouteWrite struct {
+	Enabled   bool               `json:"enabled"`
+	Models    []string           `json:"models"`
+	PoolId    openapi_types.UUID `json:"pool_id"`
+	ProjectId openapi_types.UUID `json:"project_id"`
+	Slug      string             `json:"slug"`
+}
+
+// CodeTokenWindow defines model for CodeTokenWindow.
+type CodeTokenWindow struct {
+	Measured int64                 `json:"measured"`
+	Period   CodeTokenWindowPeriod `json:"period"`
+	Reserved int64                 `json:"reserved"`
+	StartsAt time.Time             `json:"starts_at"`
+}
+
+// CodeTokenWindowPeriod defines model for CodeTokenWindow.Period.
+type CodeTokenWindowPeriod string
+
+// CodeTokenWindows Persistent reservations charged to this budget. Admission also includes matching attempts made before the budget was enabled; these window counters do not represent subscription allowance or currency.
+type CodeTokenWindows struct {
+	Id        openapi_types.UUID `json:"id"`
+	ProjectId openapi_types.UUID `json:"project_id"`
+	Windows   []CodeTokenWindow  `json:"windows"`
+}
+
+// CodeTokenWindowsList defines model for CodeTokenWindowsList.
+type CodeTokenWindowsList struct {
+	Items      []CodeTokenWindows        `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
 // ConfigurationCapabilityEntry defines model for ConfigurationCapabilityEntry.
@@ -5019,6 +5540,134 @@ type UpdateBudgetGroupParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// ListCodeAccountsParams defines parameters for ListCodeAccounts.
+type ListCodeAccountsParams struct {
+	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// CreateCodeAccountParams defines parameters for CreateCodeAccount.
+type CreateCodeAccountParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ReplaceCodeAccountParams defines parameters for ReplaceCodeAccount.
+type ReplaceCodeAccountParams struct {
+	IfMatch string `json:"If-Match"`
+}
+
+// ListCodeAttemptsParams defines parameters for ListCodeAttempts.
+type ListCodeAttemptsParams struct {
+	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+	RouteId   *openapi_types.UUID `form:"route_id,omitempty" json:"route_id,omitempty"`
+	ApiKeyId  *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+	AccountId *openapi_types.UUID `form:"account_id,omitempty" json:"account_id,omitempty"`
+	BindingId *openapi_types.UUID `form:"binding_id,omitempty" json:"binding_id,omitempty"`
+}
+
+// ListCodeBindingsParams defines parameters for ListCodeBindings.
+type ListCodeBindingsParams struct {
+	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+	RouteId   *openapi_types.UUID `form:"route_id,omitempty" json:"route_id,omitempty"`
+	ApiKeyId  *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+	AccountId *openapi_types.UUID `form:"account_id,omitempty" json:"account_id,omitempty"`
+}
+
+// RetireCodeBindingParams defines parameters for RetireCodeBinding.
+type RetireCodeBindingParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ListCodeBudgetsParams defines parameters for ListCodeBudgets.
+type ListCodeBudgetsParams struct {
+	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// CreateCodeBudgetParams defines parameters for CreateCodeBudget.
+type CreateCodeBudgetParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ReplaceCodeBudgetParams defines parameters for ReplaceCodeBudget.
+type ReplaceCodeBudgetParams struct {
+	IfMatch string `json:"If-Match"`
+}
+
+// ListCodePoolsParams defines parameters for ListCodePools.
+type ListCodePoolsParams struct {
+	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// CreateCodePoolParams defines parameters for CreateCodePool.
+type CreateCodePoolParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ReplaceCodePoolParams defines parameters for ReplaceCodePool.
+type ReplaceCodePoolParams struct {
+	IfMatch string `json:"If-Match"`
+}
+
+// ListCodeRefusalsParams defines parameters for ListCodeRefusals.
+type ListCodeRefusalsParams struct {
+	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+	RouteId   *openapi_types.UUID `form:"route_id,omitempty" json:"route_id,omitempty"`
+	ApiKeyId  *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+}
+
+// ListCodeRoutesParams defines parameters for ListCodeRoutes.
+type ListCodeRoutesParams struct {
+	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// CreateCodeRouteParams defines parameters for CreateCodeRoute.
+type CreateCodeRouteParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ReplaceCodeRouteParams defines parameters for ReplaceCodeRoute.
+type ReplaceCodeRouteParams struct {
+	IfMatch string `json:"If-Match"`
+}
+
+// GetCodeClientConfigurationParams defines parameters for GetCodeClientConfiguration.
+type GetCodeClientConfigurationParams struct {
+	GatewayUrl string  `form:"gateway_url" json:"gateway_url"`
+	Model      *string `form:"model,omitempty" json:"model,omitempty"`
+}
+
+// PublishCodeRouteParams defines parameters for PublishCodeRoute.
+type PublishCodeRouteParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ListCodeRevisionsParams defines parameters for ListCodeRevisions.
+type ListCodeRevisionsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListCodeTokenWindowsParams defines parameters for ListCodeTokenWindows.
+type ListCodeTokenWindowsParams struct {
+	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
 // ApplyConfigurationParams defines parameters for ApplyConfiguration.
 type ApplyConfigurationParams struct {
 	// IdempotencyKey Unique mutation key
@@ -5758,6 +6407,30 @@ type CreateBudgetGroupJSONRequestBody = CreateBudgetGroupRequest
 
 // UpdateBudgetGroupJSONRequestBody defines body for UpdateBudgetGroup for application/json ContentType.
 type UpdateBudgetGroupJSONRequestBody = UpdateBudgetGroupRequest
+
+// CreateCodeAccountJSONRequestBody defines body for CreateCodeAccount for application/json ContentType.
+type CreateCodeAccountJSONRequestBody = CodeAccountWrite
+
+// ReplaceCodeAccountJSONRequestBody defines body for ReplaceCodeAccount for application/json ContentType.
+type ReplaceCodeAccountJSONRequestBody = CodeAccountWrite
+
+// CreateCodeBudgetJSONRequestBody defines body for CreateCodeBudget for application/json ContentType.
+type CreateCodeBudgetJSONRequestBody = CodeBudgetWrite
+
+// ReplaceCodeBudgetJSONRequestBody defines body for ReplaceCodeBudget for application/json ContentType.
+type ReplaceCodeBudgetJSONRequestBody = CodeBudgetWrite
+
+// CreateCodePoolJSONRequestBody defines body for CreateCodePool for application/json ContentType.
+type CreateCodePoolJSONRequestBody = CodePoolWrite
+
+// ReplaceCodePoolJSONRequestBody defines body for ReplaceCodePool for application/json ContentType.
+type ReplaceCodePoolJSONRequestBody = CodePoolWrite
+
+// CreateCodeRouteJSONRequestBody defines body for CreateCodeRoute for application/json ContentType.
+type CreateCodeRouteJSONRequestBody = CodeRouteWrite
+
+// ReplaceCodeRouteJSONRequestBody defines body for ReplaceCodeRoute for application/json ContentType.
+type ReplaceCodeRouteJSONRequestBody = CodeRouteWrite
 
 // ApplyConfigurationJSONRequestBody defines body for ApplyConfiguration for application/json ContentType.
 type ApplyConfigurationJSONRequestBody = ConfigurationPromotionRequest

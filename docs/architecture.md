@@ -17,6 +17,9 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Content-policy validation and matching | `internal/contentpolicy/` |
 | Provider-resource mappings and stored-response accounting | `internal/resources/` and `internal/gateway/` |
 | Admission, request execution, retries, cancellation | `internal/gateway/` |
+| Code-mode contracts, conversation pins, hard-token reservations | `internal/codemode/`, `internal/resources/code_mode.go`, `internal/limits/` |
+| Code-mode public management and immutable publication | Code-mode files in `internal/providers/`, `internal/access/`, `internal/routes/`, `internal/runtime/`, `internal/usage/` |
+| Official coding-client qualification and controlled wire peers | `tests/codecli/`, `tests/fixtures/codex-qualified/`, `tests/integration/code_qualification*_test.go` |
 | Upstream failure classes and upstream acceptance | `internal/upstream/` |
 | Immutable operation sources, envelopes, provenance and codec linking | `internal/oif/` |
 | Ordered generation views and independent operation contracts | `internal/operations/` |
@@ -46,6 +49,46 @@ contract, including the security requirement of every operation. `make api`
 generates Go transport types, ignored TypeScript declarations, and the console's
 route requirements; `/api/v1/openapi.json` serves the embedded contract. Integration
 tests check handler/contract parity.
+
+## Code-mode forwarding boundary
+
+[Code mode](features/code-mode.md) has a distinct `/code/{slug}` forwarding
+contract. Its body retains native model names and does not enter ordinary
+model-route translation, provider preparation, content rewriting or inference
+retry/failover. The [qualification matrix](qualification/code-mode.md) separates
+implemented management/ledger behavior from client and real-provider evidence.
+
+`Snapshot.CodeRoutes` contains immutable published route documents.
+`Snapshot.CodeConnection(route, providerID)` resolves connections frozen under
+`revisionID:providerID`; a missing connection refuses until republish instead of
+falling back to a mutable provider draft. Pool membership, API-key permission,
+account/grant eligibility and retirement remain live admission authority.
+
+`gateway.CodeTransport` owns raw HTTP/SSE and WebSocket forwarding.
+`gateway.CodeAuthorizer` resolves encrypted account authorization and returns
+headers plus an observed principal. `gateway.CodeLedger`, implemented by
+`resources.CodeStore`, atomically authorizes each generation, creates/reuses a
+whole-tree account pin, reserves all matching hard-token budgets and records an
+attempt. WebSocket upgrade does not substitute for per-generation admission.
+Process composition supplies `gateway.NewCodeForwarder` and
+`providers.CodeAuthorizer` with the existing runtime and plugin host.
+WebSocket handshakes bind and authorize before upstream connection and downstream
+upgrade; every generation is admitted separately. Response IDs become durable,
+route/key-scoped aliases to a binding; ambiguous references refuse.
+
+`Admission.ReserveCodeRate` shares request/token-rate/concurrency accounting
+without ordinary monetary limits. A rate estimate never becomes a hard bound.
+The transport must match authorization's principal to the binding, call
+`MarkDispatched` once before upstream dispatch, and never retry. Prepared failures
+may abort; dispatched failures with no final usage settle as durable uncertainty.
+Identical settlement is idempotent, conflicting totals refuse, and a proven-bound
+overrun records `bound_violation`. Provider allowance observations are separate
+from both this ledger and ordinary monetary accounting.
+
+Management stays in the owning feature packages and uses the existing project,
+scope, CSRF, ETag, idempotency and audit infrastructure. Observers may inspect
+in-memory copies only: persisted attempts/refusals contain bounded metadata,
+never request/response bodies, tool payloads or authorization headers.
 
 `internal/runtime/revision.go` reconstructs providers and routes from scanned
 revision metadata and stored JSON. Runtime publication and retained-resource

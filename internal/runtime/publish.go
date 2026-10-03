@@ -147,7 +147,11 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 			snapshot.KeyPolicies[id] = &p
 		}
 	}
-	return snapshot, rows.Err()
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return snapshot, err
+	}
+	return snapshot, compileCodeMode(ctx, tx, snapshot)
 }
 
 // publishedLimits drops a connection quota that bounds nothing so clearing

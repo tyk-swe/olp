@@ -23,6 +23,34 @@ behavior. Component tests use jsdom and browser exports.
 
 ## Focused runs
 
+### Code-mode qualification
+
+`./scripts/code-mode-qualification.sh cli` installs the exact-integrity official
+Codex 0.160.0 package and runs controlled HTTP/SSE and WebSocket journeys without
+a provider account. It passes only an OLP fixture key into an isolated client
+home; local tool execution, continuation/resume and cancellation are exercised
+by the real CLI. The fixtures are not live subscription qualification.
+
+With integration PostgreSQL configured, public management checks run with:
+
+```sh
+go test -race -tags=integration -count=1 -timeout=5m -v \
+  -run '^TestCodeQualificationPublic' ./tests/integration
+```
+
+After the supported transport/authorizer and Codex enrollment fixture are
+integrated, `./scripts/code-mode-qualification.sh process` runs the real gateway
+fleet suite. It requires `OLP_TEST_DATABASE_URL`, `OLP_TEST_VALKEY_URL` and
+`OLP_TEST_BINARY`; missing prerequisites fail rather than skip. It uses the
+additional `codecli` build tag. `all` runs both CLI and process suites.
+
+See [qualification evidence and integration prerequisites](../docs/qualification/code-mode.md)
+for the exact upstream source/package pins and unrun release gates. The foundation
+alone returns 404 at the code transport seam; a successful compile is not a
+passing fleet test. These shell suites do not run browser tests.
+
+### Other focused suites
+
 Run individual suites or pass runner arguments through Make:
 
 ```sh
@@ -59,6 +87,10 @@ Vite runs shell hydration and focused setup/login, cookie, CSRF mutation,
 protected deep-link and unary/streaming inference proxy checks. Failure-path
 restores assert that the destination stays empty.
 Each test installation has an independent database and installation namespace.
+Code-mode process tests run with a separate 15-minute suite deadline. The
+remaining process tests retain their 30-minute deadline; the two selections are
+disjoint and cover the complete package, with the same build tags and race
+detection.
 
 Service-dependent Go tests live in `tests/integration/` or beside feature code
 and require the `integration` build tag. Internal service tests use the
