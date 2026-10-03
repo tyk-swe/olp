@@ -19,11 +19,9 @@ func mergeCodeAllowance(current, incoming codemode.Allowance) codemode.Allowance
 	result := current
 	if incoming.ObservedAt.After(current.ObservedAt) {
 		result.ObservedAt = incoming.ObservedAt
-		if incoming.RemainingTokens != nil || incoming.RemainingRequests != nil {
-			result.RemainingTokens, result.RemainingRequests = incoming.RemainingTokens, incoming.RemainingRequests
-			result.ResetsAt = incoming.ResetsAt
-		}
 	}
+	result.RemainingTokens, result.TokenObservation = mergeCodeCount(current.RemainingTokens, current.TokenObservation, current, incoming.RemainingTokens, incoming.TokenObservation, incoming)
+	result.RemainingRequests, result.RequestObservation = mergeCodeCount(current.RemainingRequests, current.RequestObservation, current, incoming.RemainingRequests, incoming.RequestObservation, incoming)
 	result.Windows = slices.Clone(allowanceWindows(current))
 	for _, w := range allowanceWindows(incoming) {
 		index := slices.IndexFunc(result.Windows, func(old codemode.AllowanceWindow) bool {
@@ -48,6 +46,22 @@ func mergeCodeAllowance(current, incoming codemode.Allowance) codemode.Allowance
 		result.Credits = incoming.Credits
 	}
 	return result
+}
+
+func mergeCodeCount(value *int64, observation *codemode.CountObservation, current codemode.Allowance, incoming *int64, incomingObservation *codemode.CountObservation, update codemode.Allowance) (*int64, *codemode.CountObservation) {
+	if value != nil && observation == nil {
+		observation = &codemode.CountObservation{ResetsAt: current.ResetsAt, ObservedAt: current.ObservedAt}
+	}
+	if incoming == nil {
+		return value, observation
+	}
+	if incomingObservation == nil {
+		incomingObservation = &codemode.CountObservation{ResetsAt: update.ResetsAt, ObservedAt: update.ObservedAt}
+	}
+	if observation == nil || incomingObservation.ObservedAt.After(observation.ObservedAt) {
+		return incoming, incomingObservation
+	}
+	return value, observation
 }
 
 func (s *CodeStore) ObserveOutcome(ctx context.Context, attemptID string, outcome codemode.Outcome) error {

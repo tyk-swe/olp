@@ -1960,12 +1960,18 @@ type CodeAccountWrite struct {
 // CodeAllowance Provider-reported subscription metadata. Unknown values remain null and never become local hard budgets or billed spend.
 type CodeAllowance struct {
 	// Credits Provider-reported credits. Informational: absence of add-on credits does not imply exhaustion of subscription windows, and credits do not override an exhausted window. Balance is a bounded decimal string, not inferred spend.
-	Credits           *CodeCredits                 `json:"credits,omitempty"`
-	ObservedAt        time.Time                    `json:"observed_at"`
-	RemainingPercent  nullable.Nullable[float32]   `json:"remaining_percent"`
-	RemainingRequests nullable.Nullable[int64]     `json:"remaining_requests"`
-	RemainingTokens   nullable.Nullable[int64]     `json:"remaining_tokens"`
-	ResetsAt          nullable.Nullable[time.Time] `json:"resets_at"`
+	Credits           *CodeCredits               `json:"credits,omitempty"`
+	ObservedAt        time.Time                  `json:"observed_at"`
+	RemainingPercent  nullable.Nullable[float32] `json:"remaining_percent"`
+	RemainingRequests nullable.Nullable[int64]   `json:"remaining_requests"`
+	RemainingTokens   nullable.Nullable[int64]   `json:"remaining_tokens"`
+
+	// RequestObservation Observation and reset of one provider count limit, independent of other counts and percentage windows.
+	RequestObservation *CodeCountObservation        `json:"request_observation,omitempty"`
+	ResetsAt           nullable.Nullable[time.Time] `json:"resets_at"`
+
+	// TokenObservation Observation and reset of one provider count limit, independent of other counts and percentage windows.
+	TokenObservation *CodeCountObservation `json:"token_observation,omitempty"`
 
 	// Windows Independent provider windows keyed by limit_id and window. Partial observations merge without replacing newer observations for another window.
 	Windows *[]CodeAllowanceWindow `json:"windows,omitempty"`
@@ -2090,6 +2096,12 @@ type CodeClientConfiguration struct {
 	NativeModels      []string `json:"native_models"`
 	QualificationGaps []string `json:"qualification_gaps"`
 	RouteSlug         string   `json:"route_slug"`
+}
+
+// CodeCountObservation Observation and reset of one provider count limit, independent of other counts and percentage windows.
+type CodeCountObservation struct {
+	ObservedAt time.Time                    `json:"observed_at"`
+	ResetsAt   nullable.Nullable[time.Time] `json:"resets_at"`
 }
 
 // CodeCredits Provider-reported credits. Informational: absence of add-on credits does not imply exhaustion of subscription windows, and credits do not override an exhausted window. Balance is a bounded decimal string, not inferred spend.

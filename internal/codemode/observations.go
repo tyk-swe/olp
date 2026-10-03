@@ -12,6 +12,11 @@ const MaxAllowanceWindows = 128
 var limitID = regexp.MustCompile(`^[a-z0-9][a-z0-9_.]{0,99}$`)
 var creditBalance = regexp.MustCompile(`^-?[0-9]{1,20}(\.[0-9]{1,12})?$`)
 
+type CountObservation struct {
+	ResetsAt   *time.Time `json:"resets_at"`
+	ObservedAt time.Time  `json:"observed_at"`
+}
+
 type AllowanceWindow struct {
 	LimitID          string     `json:"limit_id"`
 	Window           string     `json:"window"`

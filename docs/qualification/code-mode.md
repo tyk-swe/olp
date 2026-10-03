@@ -66,6 +66,12 @@ generations on one socket are unqualified and refuse. Observation is bounded to
 retains primary and secondary windows separately for each reported metered limit,
 plus distinct credit metadata. Partial or stale observations cannot erase a newer
 window. Exhausted windows gate admission independently until their resets.
+Token and request counts also retain independent observation and reset metadata;
+an omitted count is not a refill, and a percentage-window reset cannot release
+an exhausted count. The console shows counts alongside percentage windows.
+Successful generations finishing during an active account cooldown do not clear
+it. Draft edits retain active route publication metadata; generated client setup
+continues to read the published revision until the draft is explicitly published.
 
 ## Reproduction
 

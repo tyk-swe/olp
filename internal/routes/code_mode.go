@@ -21,7 +21,9 @@ func (s *Server) registerCodeMode(mux *http.ServeMux) {
 }
 
 func (s *Server) codeRoutes(r *http.Request, p access.Principal) (access.Reply, error) {
-	return s.Access.CodeList(r, p, `SELECT x.draft||jsonb_build_object('etag',x.etag) FROM olp.code_routes x`)
+	return s.Access.CodeList(r, p, `SELECT x.draft||jsonb_build_object('etag',x.etag,
+		'revision_id',coalesce(v.id::text,''),'revision',coalesce(v.revision,0),'published_at',v.published_at)
+		FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id`)
 }
 
 type codeRouteInput struct {
@@ -47,6 +49,7 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, access.Invalid("models", err.Error())
 	}
 	return s.Access.CodeWrite(r, "code_routes", "code_route", in.ProjectID, in, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
+		out := codemode.Route{ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
 		var matches bool
 		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.code_pools WHERE id=$1 AND project_id=$2)`, in.PoolID, in.ProjectID).Scan(&matches); err != nil {
 			return nil, err
@@ -56,7 +59,8 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 		}
 		if r.PathValue("id") != "" {
 			var slug string
-			if err := tx.QueryRow(r.Context(), `SELECT slug FROM olp.code_routes WHERE id=$1`, id).Scan(&slug); err != nil {
+			if err := tx.QueryRow(r.Context(), `SELECT x.slug,coalesce(v.id::text,''),coalesce(v.revision,0),v.published_at
+				FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id WHERE x.id=$1`, id).Scan(&slug, &out.RevisionID, &out.Revision, &out.PublishedAt); err != nil {
 				return nil, err
 			}
 			if slug != in.Slug {
@@ -69,7 +73,6 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 		if matches {
 			return nil, access.Invalid("slug", "This slug belongs to an ordinary route.")
 		}
-		out := codemode.Route{ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
 		document, _ := json.Marshal(out)
 		_, err := tx.Exec(r.Context(), `INSERT INTO olp.code_routes(id,project_id,slug,draft,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)
 			ON CONFLICT(id) DO UPDATE SET draft=excluded.draft,etag=excluded.etag`, id, in.ProjectID, in.Slug, document, etag, p.UserID())
@@ -128,7 +131,7 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 	}
 	route.RevisionID = access.NewID()
 	route.ETag = access.NewID()
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	route.PublishedAt = &now
 	if err = tx.QueryRow(r.Context(), `SELECT COALESCE(max(revision),0)+1 FROM olp.code_route_revisions WHERE route_id=$1`, id).Scan(&route.Revision); err != nil {
 		return access.Reply{}, err
