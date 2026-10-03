@@ -342,10 +342,7 @@ var walkerReadsMore = []string{
 // old walker read: for the same request and provider defaults, the same input,
 // reply bound, candidates and total.
 func TestWalkerMatchesTheLegacyHeuristic(t *testing.T) {
-	cases := 400
-	if testing.Short() {
-		cases = 60
-	}
+	cases := scaled(400, 60, 40)
 	counters := []Counter{{}, ForModel("claude-sonnet-4-5"), ForModel("gemini-2.5-pro"), ForModel("mistral-large-latest"), ForModel("my-deployment")}
 	// The comparison is only worth something if the requests charge something.
 	var charged, flat int

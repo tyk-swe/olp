@@ -214,16 +214,25 @@ var contractionAlphabet = []string{
 
 // TestScannersAgreeWithPatternsExhaustively compares the scanners with the
 // reference on every string of up to four runes of the structural alphabet.
+// Under the race detector it compares every string of up to three runes and one
+// of each seven of four, in the order the walk makes them, so the same strings
+// are compared every time. Seven shares no factor with the alphabet's sixteen,
+// so the strings that are skipped are not those that end in the same few runes.
 func TestScannersAgreeWithPatternsExhaustively(t *testing.T) {
+	const maxRunes, every = 4, 7
 	for _, sc := range scannersUnderTest {
 		t.Run(sc.name, func(t *testing.T) {
-			failures := 0
+			failures, longest := 0, 0 // longest counts the strings of maxRunes runes
 			var walk func(prefix string, depth int)
 			walk = func(prefix string, depth int) {
 				if failures >= 10 {
 					return
 				}
-				if prefix != "" && !checkSplit(t, sc.name, sc.scan, sc.reference, prefix) {
+				// A string of the greatest length has no depth left.
+				if depth == 0 {
+					longest++
+				}
+				if prefix != "" && (!raceEnabled || depth > 0 || longest%every == 0) && !checkSplit(t, sc.name, sc.scan, sc.reference, prefix) {
 					failures++
 				}
 				if depth == 0 {
@@ -233,7 +242,7 @@ func TestScannersAgreeWithPatternsExhaustively(t *testing.T) {
 					walk(prefix+r, depth-1)
 				}
 			}
-			walk("", 4)
+			walk("", maxRunes)
 		})
 	}
 }
@@ -247,10 +256,7 @@ func TestScannersAgreeWithPatternsOnRandomText(t *testing.T) {
 		"\U000000df", "\U00000e01", "\U00000e31", "\U00000915", "\U0000093e", "\U0001f600", "\U0001d407", "\U00020000", "\U0000fffd",
 		"\x00", "\x7f", "@", "-", "_", ".", ",", "\"", "\\")
 	rng := rand.New(rand.NewPCG(1, 2))
-	n := 12_000
-	if testing.Short() {
-		n = 1_000
-	}
+	n := scaled(12_000, 1_000, 3_000)
 	for _, sc := range scannersUnderTest {
 		t.Run(sc.name, func(t *testing.T) {
 			failures := 0

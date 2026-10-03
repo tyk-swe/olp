@@ -143,10 +143,7 @@ func TestMergesAgreeWithReference(t *testing.T) {
 		}
 		v := e.vocab
 		t.Run(e.name, func(t *testing.T) {
-			n := 3_000
-			if testing.Short() {
-				n = 300
-			}
+			n := scaled(3_000, 300, 600)
 			for range n {
 				size := 2 + rng.IntN(60)
 				if rng.IntN(5) == 0 {
@@ -164,8 +161,8 @@ func TestMergesAgreeWithReference(t *testing.T) {
 				}
 			}
 			// Long pieces only the heap serves. The reference is quadratic, so
-			// these are a few kilobytes.
-			for range 12 {
+			// these are a few kilobytes, and fewer under the race detector.
+			for range scaled(12, 12, 4) {
 				piece := randomPiece(rng, v, 1_000+rng.IntN(3_000))
 				if got, want := largeBounds(v, piece), referenceBounds(v, piece); !slices.Equal(got, want) {
 					t.Fatalf("the heap disagrees with the reference on a %d-byte piece", len(piece))

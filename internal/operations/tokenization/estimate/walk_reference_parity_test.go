@@ -167,10 +167,7 @@ func referenceReading(request *openai.Request, retain int) *input {
 // walker reads from the document to be the one the reference reads from the
 // fields, whether the walk keeps all of the text, none of it or a few bytes.
 func TestWalkerReadsWhatTheReferenceReads(t *testing.T) {
-	cases := 300
-	if testing.Short() {
-		cases = 50
-	}
+	cases := scaled(300, 50, 40)
 	// The comparison is only worth something if the requests have something to
 	// read, which the families that read nothing but a tool catalogue do not.
 	var read, flat, approx int
@@ -211,10 +208,7 @@ func TestWalkerReadsWhatTheReferenceReads(t *testing.T) {
 // defaults supply, which is raw JSON that nothing has checked: the fields the
 // caller left out are read from it, and the caller's own are not.
 func TestWalkerReadsTheDefaultsTheReferenceReads(t *testing.T) {
-	cases := 300
-	if testing.Short() {
-		cases = 50
-	}
+	cases := scaled(300, 50, 40)
 	var supplied int
 	defer func() {
 		if supplied < cases {
