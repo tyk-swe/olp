@@ -39,6 +39,11 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 	if err := access.Decode(r, &in); err != nil {
 		return access.Reply{}, err
 	}
+	projectID, err := access.ParseUUID(in.ProjectID)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	in.ProjectID = projectID
 	if !access.RouteSlug.MatchString(in.Slug) {
 		return access.Reply{}, access.Invalid("slug", "Use a route slug.")
 	}

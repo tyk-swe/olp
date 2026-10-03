@@ -75,6 +75,35 @@ test('manages real project pools, draft routes, publications and overlapping tok
   expect(route.models).toEqual(['fixture-native-model']);
   expect(route.enabled).toBe(false);
   expect(route.revision).toBe(1);
+  const gatewayURL = 'https://gateway.example';
+  await Promise.all([
+    page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname.endsWith('/client-config') &&
+        url.searchParams.get('gateway_url') === gatewayURL
+      );
+    }),
+    page.getByLabel('Public gateway URL').fill(gatewayURL)
+  ]);
+  await expect(page.getByLabel('Project', { exact: true })).toHaveValue(
+    project.body.id
+  );
+  await expect(
+    page.getByRole('button', { name: 'Routes', exact: true })
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    page.getByRole('heading', { name: 'Published route revisions' })
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Edit draft' }).click();
+  await page.getByLabel('Native models').fill('unsaved-native-model');
+  await page
+    .getByLabel('Public gateway URL')
+    .fill('https://changed-gateway.example');
+  await expect(page.getByLabel('Native models')).toHaveValue(
+    'unsaved-native-model'
+  );
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page
     .getByRole('button', { name: 'Token budgets', exact: true })
     .click();

@@ -3,12 +3,65 @@
 package integration_test
 
 import (
+	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/runtime"
 )
+
+func TestCodeRouteCanonicalizesProjectID(t *testing.T) {
+	f := newCodeFixture(t)
+	f.exec(t, `UPDATE olp.api_keys SET policy=jsonb_set(policy,'{allowed_routes}','["coding","canonical-project"]') WHERE id=$1`, f.key)
+	input := map[string]any{"project_id": strings.ToUpper(f.project), "slug": "canonical-project", "pool_id": f.pool, "models": []string{"native-model"}, "enabled": true}
+	path := "/api/v1/code/routes"
+	headers := idem("canonical-project")
+	for _, method := range []string{"POST", "PUT"} {
+		t.Run(method, func(t *testing.T) {
+			status := 200
+			if method == "POST" {
+				status = 201
+			}
+			draft := f.h.want(f.owner, method, path, input, headers, status)
+			if draft["project_id"] != f.project {
+				t.Fatalf("draft project_id = %v, want %s", draft["project_id"], f.project)
+			}
+			path = "/api/v1/code/routes/" + draft["id"].(string)
+			published := f.h.want(f.owner, "POST", path+"/publish", nil, withMatch(draft, idem("canonical-publish-"+method)), 200)
+			f.route = codePublicDecode[codemode.Route](t, published)
+			headers = etagHeader(published)
+			revisions := f.h.want(f.owner, "GET", path+"/revisions", nil, nil, 200)["items"].([]any)
+			for _, revision := range revisions {
+				stored := codePublicDecode[codemode.Route](t, revision.(map[string]any)["route"])
+				if stored.ProjectID != f.project {
+					t.Fatalf("published project_id = %s, want %s", stored.ProjectID, f.project)
+				}
+			}
+			var document []byte
+			if err := f.h.Pool.QueryRow(t.Context(), `SELECT snapshot FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1`).Scan(&document); err != nil {
+				t.Fatal(err)
+			}
+			var snapshot runtime.Snapshot
+			if err := json.Unmarshal(document, &snapshot); err != nil {
+				t.Fatal(err)
+			}
+			f.route = snapshot.CodeRoutes[f.route.Slug]
+			if f.route.ProjectID != f.project {
+				t.Fatalf("runtime project_id = %s, want %s", f.route.ProjectID, f.project)
+			}
+			permit, err := f.store.Admit(t.Context(), f.input("canonical-"+method, "", nil))
+			if err != nil {
+				t.Fatal("canonical route rejected an authorized key:", err)
+			}
+			if err := f.store.Abort(t.Context(), permit.Attempt.ID); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestCodeRouteDraftRetainsActivePublication(t *testing.T) {
 	f := newCodeFixture(t)
