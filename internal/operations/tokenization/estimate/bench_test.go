@@ -172,3 +172,44 @@ func BenchmarkMeterWorstCase(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkEstimate is what counting a short prompt costs for each family, which
+// is the work admission does for most requests: the meter made, the text added and
+// the total taken, with the exact bound of ExactBytes in force. The families with
+// a tokenizer count the prompt exactly and the rest charge four characters to a
+// token. The prompts of 50K and 100K tokens are measured by BenchmarkMeter for the
+// families with a tokenizer, and by BenchmarkHeuristic for the rest, which share
+// one rule and differ only by the factor of each.
+//
+//	go test ./internal/operations/tokenization/estimate -run '^$' -bench BenchmarkEstimate -benchmem
+func BenchmarkEstimate(b *testing.B) {
+	prompt := corpus(b, "prose-2")
+	for _, family := range []struct {
+		name, model string
+		family      Family
+	}{
+		{"openai-o200k", "gpt-4o", FamilyOpenAIO200k},
+		{"openai-cl100k", "gpt-4", FamilyOpenAICL100k},
+		{"anthropic", "claude-sonnet-4-5", FamilyAnthropic},
+		{"gemini", "gemini-2.5-pro", FamilyGemini},
+		{"other", "llama-3.3-70b-instruct", FamilyOther},
+	} {
+		b.Run(family.name, func(b *testing.B) {
+			counter := ForModel(family.model)
+			want := ProvenanceHeuristic
+			if counter.encoding != nil {
+				want = ProvenanceTokenizer
+			}
+			if _, provenance := counter.Count(prompt); counter.Family() != family.family || provenance != want {
+				b.Fatalf("%s is in family %s and counted as %s, want %s and %s: the case no longer measures what it names", family.model, counter.Family(), provenance, family.family, want)
+			}
+			b.SetBytes(int64(len(prompt)))
+			b.ReportAllocs()
+			for b.Loop() {
+				m := counter.Meter()
+				m.Add(prompt)
+				m.Total()
+			}
+		})
+	}
+}

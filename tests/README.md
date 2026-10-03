@@ -172,6 +172,91 @@ uv sync --project tests/fixtures/tokens --frozen
 uv run --project tests/fixtures/tokens --frozen python tests/fixtures/tokens/generate.py
 ```
 
+## Microbenchmarks
+
+The hot path is measured by `testing.B` benchmarks that sit beside the code in
+ordinary `_test.go` files, with no build tag. They use in-memory fakes in place
+of Valkey, PostgreSQL and the network, so they need no services. `make test`
+compiles them and never runs them.
+
+| Package | Benchmarks |
+| --- | --- |
+| `internal/runtime` | `BenchmarkAuthenticate` (key digest and lookup), `BenchmarkEligibility`, `BenchmarkPlanRequest` and `BenchmarkSelectSlots` (route planning and credential selection) |
+| `internal/gateway` | `BenchmarkAdmission` (limit and budget reservation and settlement against a stateless limiter client), `BenchmarkStreamWriter`, and `BenchmarkGateway`, the whole request path with the upstream and the client held in memory: unary, streamed, and an OpenAI stream translated for an Anthropic client |
+| `internal/protocols` | `BenchmarkTranslateRequest`, `BenchmarkTranslateResponse` and `BenchmarkTranslateStream` for OpenAI Chat, Anthropic Messages and Gemini: each dialect to itself, as a route to a provider of the caller's own dialect is served, and each of Anthropic and Gemini to and from OpenAI Chat |
+| `internal/operations/tokenization/estimate` | `BenchmarkEstimate` (a short prompt for every family) beside the encoder benchmarks, of which `BenchmarkMeter` and `BenchmarkHeuristic` measure the long prompts admission counts |
+| `internal/usage`, `internal/plugins` | `BenchmarkCostBound` and `BenchmarkPriceCost`; `BenchmarkSign` |
+
+```sh
+go test -run='^$' -bench=. -benchmem ./internal/...
+go test -run='^$' -bench='BenchmarkAdmission|BenchmarkPlanRequest' -benchmem -count=10 ./internal/gateway ./internal/runtime
+```
+
+`-run='^$'` keeps the unit tests out of the run, and `-benchmem` reports bytes
+and allocations per operation. The first command spends about three minutes in
+the benchmarks at the default `-benchtime` of one second, and a minute and a
+half at `-benchtime=500ms`, on an 8-vCPU machine, with up to a minute more for
+`go test` to vet and link the packages that have none. Ten counts of it take ten
+times as long. A third of that is in the estimate package, in four benchmarks
+that measure the encoder itself rather than what a request pays: `BenchmarkLoad`
+is its first use, `BenchmarkCount` is a whole prompt of 50K and 100K tokens
+counted exactly where admission counts a bounded part, and `BenchmarkUnbrokenPieces`
+and `BenchmarkMeterWorstCase` are input chosen to be slow. The hot path is
+everything else, which skipping them selects, and which takes about two minutes
+at the default `-benchtime` and one at `-benchtime=500ms`:
+
+```sh
+go test -run='^$' -skip='^(BenchmarkLoad|BenchmarkCount|BenchmarkUnbrokenPieces|BenchmarkMeterWorstCase)$' -bench=. -benchmem ./internal/...
+```
+
+A benchmark that is added later is in that selection unless it is named in the
+skip. Name the package and benchmark of the code you changed to get an answer
+sooner. A benchmark checks once, before it is timed, that it exercises what its
+name says, such as an admitted request, a plan that carries the prices it was
+given or a stream that ended, so a change that turns one into an error path, or
+into a case that is no longer the one it names, fails it instead of making it
+fast.
+
+The performance budget of [M1](../docs/roadmap/m01-measured-advantage.md#performance-budget)
+is that a change must not slow a hot-path benchmark, or add allocations to it,
+by more than 10%. Compare a change with its merge base by running the same
+benchmarks on both with `-count=10` and giving the two outputs to
+[`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat), which marks
+a difference only when it is statistically significant:
+
+```sh
+skip='^(BenchmarkLoad|BenchmarkCount|BenchmarkUnbrokenPieces|BenchmarkMeterWorstCase)$'
+git switch --detach "$(git merge-base origin/main HEAD)"
+go test -run='^$' -skip="$skip" -bench=. -benchmem -count=10 ./internal/... > base.txt
+git switch -
+go test -run='^$' -skip="$skip" -bench=. -benchmem -count=10 ./internal/... > head.txt
+go run golang.org/x/perf/cmd/benchstat@latest base.txt head.txt
+```
+
+Time on a shared machine is noisy. Across ten counts the codec, planning and
+admission benchmarks have a standard deviation of 6 to 15% of their mean, and the
+token counts 10 to 30%, so repeat a suspect time on an idle machine, pinned to
+one CPU with `taskset -c 5` where there is more than one: in a trial that took
+the token counts from 10 to 20% down to under 10%. Allocations per operation
+are exact for most benchmarks and vary by well under 1% for the streams, and
+bytes per operation by about as much, so read them first.
+
+The budget says that a feature that is not configured adds no allocations and
+no Valkey or PostgreSQL round trip to a request. An ordinary unit test holds the
+admission side to it, so `make test` does: `TestUnconfiguredFeaturesAddNoAllocations`
+in `internal/gateway` counts allocations with `testing.AllocsPerRun`, and the
+commands a counting limiter client was sent, for the admission and settlement of
+a key without limits or a cost budget and of a provider target without a quota.
+The request of the key has a price list to be estimated from, so that only the
+guard of the cost budget spares it the estimate. The test then admits a key and a
+target that are limited and expects the key to allocate and each to send its
+command, and estimates the same request for a key with a cost budget and expects
+that to allocate, to prove the zeros are not a request that never reaches the
+limiter or one that nothing could price. The test counts the whole process's
+allocations, so it does not run in parallel. It does not cover the read of the shared cooldown
+that precedes each attempt when a limiter is configured, which costs one Valkey
+round trip an attempt whatever the key and the target limit.
+
 ## SDK and live-provider tests
 
 ```sh

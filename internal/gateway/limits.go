@@ -328,7 +328,6 @@ func (t *targetReservation) settle(ctx context.Context, dispatched bool, actual 
 func connectionRequest(provider *runtime.Provider, estimate int64, ttl time.Duration) limits.Request {
 	request := limits.Request{
 		CostOwnerID:     provider.ID,
-		LookupID:        limits.ConnectionLookup(provider.ID),
 		RequestedTokens: estimate,
 		LeaseTTL:        ttl,
 	}
@@ -337,20 +336,27 @@ func connectionRequest(provider *runtime.Provider, estimate int64, ttl time.Dura
 		request.TokensPerMinute = provider.Limits.TokensPerMinute
 		request.MaxConcurrency = provider.Limits.MaxConcurrency
 	}
+	// Naming the quota allocates, so a provider that has none is not made to.
+	if request.HasHardLimits() {
+		request.LookupID = limits.ConnectionLookup(provider.ID)
+	}
 	return request
 }
 
 // slotRequest describes the quota of one credential slot.
 func slotRequest(slot *runtime.Slot, estimate int64, ttl time.Duration) limits.Request {
-	return limits.Request{
+	request := limits.Request{
 		CostOwnerID:       slot.ID,
-		LookupID:          limits.SlotLookup(slot.ID),
 		RequestsPerMinute: slot.RequestsPerMinute,
 		TokensPerMinute:   slot.TokensPerMinute,
 		MaxConcurrency:    slot.MaxConcurrency,
 		RequestedTokens:   estimate,
 		LeaseTTL:          ttl,
 	}
+	if request.HasHardLimits() {
+		request.LookupID = limits.SlotLookup(slot.ID)
+	}
+	return request
 }
 
 // reserveTarget admits one attempt against the provider connection quota and

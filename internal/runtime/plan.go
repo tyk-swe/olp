@@ -135,7 +135,11 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 			row.decision.VendorID = &provider.VendorID
 		}
 		var metadata ModelMetadata
-		_ = json.Unmarshal(provider.Models[target.ProviderModel], &metadata)
+		// A model with no metadata is not decoded: the error that would build is
+		// discarded, for every target of every request.
+		if raw := provider.Models[target.ProviderModel]; len(raw) > 0 {
+			_ = json.Unmarshal(raw, &metadata)
+		}
 		row.decision.MetadataObservedAt = metadata.ObservedAt
 		row.decision.ContextLength = metadata.ContextLength
 		row.decision.MaxOutputTokens = metadata.MaxOutputTokens

@@ -156,7 +156,11 @@ func (c Config) boundModel(model string) string {
 	var metadata struct {
 		Deployment string `json:"deployment"`
 	}
-	_ = json.Unmarshal(c.Models[model], &metadata)
+	// A model with no metadata is not decoded: the error that would build is
+	// discarded, for every attempt.
+	if raw := c.Models[model]; len(raw) > 0 {
+		_ = json.Unmarshal(raw, &metadata)
+	}
 	if metadata.Deployment != "" {
 		return metadata.Deployment
 	}

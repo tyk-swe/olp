@@ -146,6 +146,11 @@ func (x *execution) responseCost() (usage.Cost, bool) {
 // never was gives everything back. Either way this runs before the usage event
 // is consumed or after, and the reservation script makes the order immaterial.
 func (s *Server) settleAdmission(ctx context.Context, x *execution) {
+	if x.lease == nil {
+		// A request that reserved nothing has nothing to settle, and is not made to
+		// total the tokens it would have settled.
+		return
+	}
 	if x.dispatched && x.lease.HasCostReservation() {
 		x.lease.SetActualCost(x.settledCost().String())
 	}
