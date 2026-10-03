@@ -244,16 +244,27 @@ func TestCodeForwardingWebSocketRechecksLivePool(t *testing.T) {
 		t.Fatal(err)
 	}
 	codeForwardAwait(t, f, "settled", 1)
+	path := "/api/v1/code/routes/" + f.route.ID
+	input := map[string]any{"project_id": f.project, "slug": f.route.Slug, "pool_id": strings.ToUpper(f.pool), "models": f.route.Models, "enabled": true}
+	draft := f.h.want(f.owner, "PUT", path, input, map[string]string{"If-Match": `"` + f.route.ETag + `"`}, 200)
+	f.h.want(f.owner, "POST", path+"/publish", nil, withMatch(draft, idem("uppercase-pool-publication")), 200)
+	if err := conn.Write(ctx, websocket.MessageText, frame); err != nil {
+		t.Fatal(err)
+	}
+	if _, response, err := conn.Read(ctx); err != nil || !bytes.Contains(response, []byte(`"type":"response.completed"`)) {
+		t.Fatalf("pool UUID spelling interrupted the pinned socket: %s %v", response, err)
+	}
+	codeForwardAwait(t, f, "settled", 2)
 	f.exec(t, `DELETE FROM olp.code_pool_keys WHERE api_key_id=$1`, f.key)
 	if err := conn.Write(ctx, websocket.MessageText, frame); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = conn.Read(ctx)
-	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation || calls.Load() != 1 {
+	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation || calls.Load() != 2 {
 		t.Fatalf("long-lived socket bypassed live authority: %v", err)
 	}
 	usage, err := limiter.ProviderUsage(t.Context(), lookup)
-	if err != nil || usage.ConcurrentRequests != 0 || usage.RequestsThisMinute != 1 {
+	if err != nil || usage.ConcurrentRequests != 0 || usage.RequestsThisMinute != 2 {
 		t.Fatalf("refused socket generation leaked lease: %+v %v", usage, err)
 	}
 }

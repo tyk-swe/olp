@@ -47,7 +47,7 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 	if !access.RouteSlug.MatchString(in.Slug) {
 		return access.Reply{}, access.Invalid("slug", "Use a route slug.")
 	}
-	if _, err := access.ParseUUID(in.PoolID); err != nil {
+	if in.PoolID, err = access.ParseUUID(in.PoolID); err != nil {
 		return access.Reply{}, err
 	}
 	if err := codemode.ValidateModels(in.Models); err != nil {

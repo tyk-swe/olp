@@ -191,8 +191,11 @@ func TestCodeFoundationRotationAndLiveAuthority(t *testing.T) {
 	}
 	rotated := access.NewID()
 	f.addCredential(t, rotated, "fixture-principal", 2)
-	body := map[string]any{"project_id": f.project, "provider_id": f.provider, "credential_id": rotated, "name": "Rotated", "enabled": true, "models": []string{"native-model"}}
+	body := map[string]any{"project_id": f.project, "provider_id": strings.ToUpper(f.provider), "credential_id": strings.ToUpper(rotated), "name": "Rotated", "enabled": true, "models": []string{"native-model"}}
 	updated := f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+f.account, body, etagHeader(f.accountRecord), 200)
+	if updated["provider_id"] != f.provider || updated["credential_id"] != rotated {
+		t.Fatalf("account IDs = %v/%v, want %s/%s", updated["provider_id"], updated["credential_id"], f.provider, rotated)
+	}
 	next, err = f.store.Admit(t.Context(), f.input("rotation", "", nil))
 	if err != nil || next.Binding.ID != initial.Binding.ID || next.Account.CredentialID != rotated {
 		t.Fatal("same-principal rotation lost pin", err)

@@ -41,8 +41,9 @@ func (s *Server) writeCodeAccount(r *http.Request, _ access.Principal) (access.R
 	if err := access.ValidText("name", in.Name, 100); err != nil {
 		return access.Reply{}, err
 	}
-	for _, id := range []string{in.ProviderID, in.CredentialID} {
-		if _, err := access.ParseUUID(id); err != nil {
+	for _, id := range []*string{&in.ProviderID, &in.CredentialID} {
+		var err error
+		if *id, err = access.ParseUUID(*id); err != nil {
 			return access.Reply{}, err
 		}
 	}
