@@ -564,7 +564,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		ctx, cancel := context.WithTimeout(r.Context(), overall)
 		defer cancel()
 		reservationEstimate := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
-		if x.lease, e = s.Admission.reserveKeyCosted(ctx, authority, reservationEstimate, overall, s.costReservation(x, authority)); e != nil {
+		if x.lease, e = s.Admission.reserveKeyCosted(ctx, authority, x.clientSurface(), reservationEstimate, overall, s.costReservation(x, authority)); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return

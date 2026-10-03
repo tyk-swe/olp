@@ -321,7 +321,7 @@ func TestPreparedEstimateTakesTheLargerRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	x := &execution{parsed: source}
-	admitted, demand := x.preparedEstimate("gpt-4o", x.summarize(rewritten), nil)
+	admitted, demand := x.preparedEstimate("gpt-4o", x.summarize(rewritten))
 	// The source is eight tokens and ten for the reply; the rewritten request
 	// adds an image.
 	if want := (admittedEstimate{reserve: 8 + estimate.ImageTokens + 10, input: 8 + estimate.ImageTokens, reply: 10, provenance: estimate.ProvenanceCalibrated, family: estimate.FamilyOpenAIO200k}); admitted != want {
@@ -333,35 +333,88 @@ func TestPreparedEstimateTakesTheLargerRequest(t *testing.T) {
 	// The other way round, the caller's request is the larger and the tokenizer
 	// alone counted it, so its provenance stands.
 	x = &execution{parsed: rewritten}
-	admitted, _ = x.preparedEstimate("gpt-4o", x.summarize(source), nil)
+	admitted, _ = x.preparedEstimate("gpt-4o", x.summarize(source))
 	if want := (admittedEstimate{reserve: 8 + estimate.ImageTokens + 10, input: 8 + estimate.ImageTokens, reply: 10, provenance: estimate.ProvenanceCalibrated, family: estimate.FamilyOpenAIO200k}); admitted != want {
 		t.Fatalf("admitted %+v, want %+v", admitted, want)
 	}
 }
 
-// TestBedrockToolCatalogueIsCounted keeps the whole tool schema of a Bedrock
-// request in its reservation and in the input it records, though it lies outside
-// the field the walker reads.
-func TestBedrockToolCatalogueIsCounted(t *testing.T) {
-	source, err := openai.Parse(openai.FamilyChat, []byte(`{"model":"team-chat","max_tokens":10,"messages":[{"role":"user","content":"hello"}]}`))
-	if err != nil {
+// TestBedrockToolCatalogueIsCountedOnce holds the tools a request is sent to a
+// Bedrock provider with to one count. Bedrock Converse keeps its tool catalogue
+// in toolConfig, which the walker reads as it reads the tools of every other
+// dialect, so the request the provider is sent holds the catalogue as the
+// caller's request does, and the estimate is the larger of the two: neither
+// counts the catalogue twice.
+func TestBedrockToolCatalogueIsCountedOnce(t *testing.T) {
+	const (
+		model = "us.anthropic.claude-sonnet-4-5"
+		chat  = `{"model":"team-chat","max_tokens":10,"messages":[{"role":"user","content":"hello"}]`
+		tools = `,"tools":[{"type":"function","function":{"name":"get_weather","description":"Weather in a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}`
+	)
+	bedrock := runtime.Provider{ID: "bedrock", RevisionID: "bedrock-revision", Kind: "bedrock", AuthMode: "static", ProfileID: "bedrock-converse", ProfileRevision: connectors.ProfileRevision}
+	compatible := runtime.Provider{ID: "compatible", RevisionID: "compatible-revision", Kind: "openai_compatible", ProfileID: "compatible-chat", ProfileRevision: "1"}
+	prepare := func(provider runtime.Provider, body string) (preparedProvider, *openai.Request) {
+		t.Helper()
+		parsed, err := openai.Parse(openai.FamilyChat, []byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		x := &execution{parsed: parsed, request: request{release: &runtime.Release{Snapshot: &runtime.Snapshot{Providers: map[string]runtime.Provider{provider.ID: provider}}}}}
+		prepared, err := x.preparedProvider(&provider, model)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return prepared, parsed
+	}
+
+	plainBedrock, _ := prepare(bedrock, chat+`}`)
+	withBedrock, source := prepare(bedrock, chat+tools)
+	withCompatible, _ := prepare(compatible, chat+tools)
+	if withBedrock.invocation.Wire != openai.FamilyBedrock || !strings.Contains(string(withBedrock.invocation.Prepared.Document().Bytes()), `"toolConfig"`) {
+		t.Fatalf("the provider was not sent a Bedrock request with a tool catalogue: %s", withBedrock.invocation.Prepared.Document().Bytes())
+	}
+
+	// What the two requests the Bedrock provider may be sent hold, each counted
+	// as the model counts it.
+	counter := estimate.ForModel(model)
+	sourceInput := estimate.Walk(source).Estimate(counter, nil).Input
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(withBedrock.invocation.Prepared.Document().Bytes(), &fields); err != nil {
 		t.Fatal(err)
 	}
-	x := &execution{parsed: source}
-	catalogue := json.RawMessage(`{ "tools": [ {"toolSpec": {"name": "get_weather"}} ] }`)
-	plain, _ := x.preparedEstimate("us.anthropic.claude-sonnet-4-5", x.summarize(source), nil)
-	with, _ := x.preparedEstimate("us.anthropic.claude-sonnet-4-5", x.summarize(source), catalogue)
-	// {"tools":[{"toolSpec":{"name":"get_weather"}}]} is 47 characters.
-	if with.reserve != plain.reserve+12 || with.input != plain.input+12 || with.provenance != estimate.ProvenanceHeuristic {
-		t.Fatalf("with a catalogue %+v, without %+v", with, plain)
+	sentInput := estimate.Walk(openai.NewEnvelope(openai.FamilyBedrock, "team-chat", false, fields)).Estimate(counter, nil).Input
+	catalogue, _ := counter.Count(estimate.SchemaText(fields["toolConfig"]))
+	if catalogue < 10 {
+		t.Fatalf("the catalogue is %d tokens: the case no longer has a catalogue worth counting", catalogue)
 	}
-	// A model with a tokenizer counts the schema text exactly, and the model reads
-	// a tool schema in a rendering of its own, so the count is calibrated, as it
-	// is for every other tool catalogue.
-	plain, _ = x.preparedEstimate("gpt-4o", x.summarize(source), nil)
-	with, _ = x.preparedEstimate("gpt-4o", x.summarize(source), catalogue)
-	if plain.provenance != estimate.ProvenanceTokenizer || with.provenance != estimate.ProvenanceCalibrated || with.input <= plain.input {
-		t.Fatalf("a tokenizer family with a catalogue %+v, without %+v", with, plain)
+
+	if want := max(sourceInput, sentInput); withBedrock.admitted.input != want {
+		t.Errorf("input %d, want the larger of the caller's request (%d) and the Bedrock request (%d)", withBedrock.admitted.input, sourceInput, sentInput)
+	}
+	// The catalogue is in the count, and in it once.
+	if withBedrock.admitted.input < plainBedrock.admitted.input+catalogue {
+		t.Errorf("input %d does not hold the %d tokens of the catalogue beside the %d of the request without it", withBedrock.admitted.input, catalogue, plainBedrock.admitted.input)
+	}
+	if limit := sourceInput + catalogue; withBedrock.admitted.input >= limit {
+		t.Errorf("input %d counts the catalogue twice: the caller's request holds it already, so the count stays under %d", withBedrock.admitted.input, limit)
+	}
+	// Whatever wire the tools travel in, a request is about as large.
+	if gap := withBedrock.admitted.input - withCompatible.admitted.input; gap < -catalogue/2 || gap > catalogue/2 {
+		t.Errorf("a Bedrock provider is admitted for %d input tokens and an OpenAI-wire one for %d", withBedrock.admitted.input, withCompatible.admitted.input)
+	}
+	if withBedrock.admitted.reserve != withBedrock.admitted.input+10 {
+		t.Errorf("reserve %d, want the input and the ten tokens of reply", withBedrock.admitted.reserve)
+	}
+	// A model with a tokenizer reads a tool schema in a rendering of its own, so
+	// its count is calibrated, as it is for every other tool catalogue; one
+	// without says it is the heuristic.
+	if withBedrock.admitted.provenance != estimate.ProvenanceHeuristic {
+		t.Errorf("provenance %s, want heuristic for a Claude model", withBedrock.admitted.provenance)
+	}
+	var x execution
+	x.parsed = source
+	if admitted, _ := x.preparedEstimate("gpt-4o", x.summarize(openai.NewEnvelope(openai.FamilyBedrock, "team-chat", false, fields))); admitted.provenance != estimate.ProvenanceCalibrated {
+		t.Errorf("provenance %s, want calibrated for a tokenizer family", admitted.provenance)
 	}
 }
 
@@ -396,6 +449,41 @@ func TestContextWindowIsWeighedByTheTargetsTokenizer(t *testing.T) {
 	env := h.sink.last(t)
 	if len(env.Attempts) != 1 || env.Attempts[0].ModelFamily != "anthropic" || env.Attempts[0].EstimatedInputTokens != 100 || env.Attempts[0].EstimateProvenance != "heuristic" {
 		t.Fatalf("attempts %+v", env.Attempts)
+	}
+}
+
+// TestAttemptsRecordTheSchemaOfAStructuredOutputInTheirEstimate sends a request
+// whose reply must follow a schema, which a model reads as prompt text. The
+// attempt records the tokens of the messages and of the schema, and says they are
+// calibrated: an estimate that left the schema out would still have called the
+// count exact.
+func TestAttemptsRecordTheSchemaOfAStructuredOutputInTheirEstimate(t *testing.T) {
+	h := newHarness(t, Config{})
+	routeEstimateTargets(h, estimateTarget{"a", "gpt-4o", 1})
+	declareParams(h, "gpt-4o", []string{"response_format"})
+	h.mock.set("a", completion("gpt-4o", answerText))
+	schema := `{"type":"object","properties":{"city":{"type":"string","description":"The city the weather is asked for"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["city","unit"],"additionalProperties":false}`
+
+	resp, body := h.chat(fullKey, nil, `,"max_tokens":16`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d body %v", resp.StatusCode, body)
+	}
+	plain := h.sink.last(t).Attempts[0]
+	if plain.EstimateProvenance != "tokenizer" {
+		t.Fatalf("a request of plain text records %q, want tokenizer", plain.EstimateProvenance)
+	}
+
+	resp, body = h.chat(fullKey, nil, `,"max_tokens":16,"response_format":{"type":"json_schema","json_schema":{"name":"weather","schema":`+schema+`}}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d body %v", resp.StatusCode, body)
+	}
+	attempt := h.sink.last(t).Attempts[0]
+	tokens, _ := estimate.ForModel("gpt-4o").Count(estimate.SchemaText(json.RawMessage(schema)))
+	if want := plain.EstimatedInputTokens + tokens; attempt.EstimatedInputTokens != want || tokens < 20 {
+		t.Errorf("the attempt records %d input tokens, want the %d of the messages and the %d of the schema", attempt.EstimatedInputTokens, plain.EstimatedInputTokens, tokens)
+	}
+	if attempt.EstimateProvenance != "calibrated" {
+		t.Errorf("the attempt records %q for a prompt with a schema in it, want calibrated", attempt.EstimateProvenance)
 	}
 }
 
@@ -684,7 +772,7 @@ func TestTranslatedPreparedTargetsCountTheSameTextOnce(t *testing.T) {
 			counted := map[estimate.Family]int{}
 			x := &execution{parsed: source, request: request{counted: func(f estimate.Family) { mu.Lock(); counted[f]++; mu.Unlock() }}}
 			for range 2 {
-				admitted, _ := x.preparedEstimate("gpt-4o", x.summarize(chat), nil)
+				admitted, _ := x.preparedEstimate("gpt-4o", x.summarize(chat))
 				// "Be brief." is three tokens and "hello there" two; "system" and
 				// "user" are one each, two messages are six and the reply three.
 				if admitted.input != 3+2+1+1+6+3 || admitted.provenance != estimate.ProvenanceTokenizer || admitted.family != estimate.FamilyOpenAIO200k {

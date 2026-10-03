@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -258,6 +259,32 @@ func mediaValkey(t *testing.T) (*coordination.Client, string) {
 		}
 	})
 	return client, namespace
+}
+
+// mediaSettleInMinute waits out an imminent minute boundary, on Valkey's own
+// clock, which is the only one the limiter's fixed windows consult, so that a
+// test that spans several calls counts them in one window.
+func mediaSettleInMinute(t *testing.T, client *coordination.Client, minimum time.Duration) {
+	t.Helper()
+	now := func() int64 {
+		reply, err := client.Do(t.Context(), "TIME")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parts, ok := reply.([]any)
+		if !ok || len(parts) != 2 {
+			t.Fatalf("TIME = %#v", reply)
+		}
+		text, _ := parts[0].(string)
+		seconds, err := strconv.ParseInt(text, 10, 64)
+		if err != nil {
+			t.Fatalf("TIME seconds: %v", err)
+		}
+		return seconds
+	}
+	if remaining := time.Duration(60-now()%60) * time.Second; remaining < minimum {
+		time.Sleep(remaining + 50*time.Millisecond)
+	}
 }
 
 func TestIntegrationMediaKeySettlementChargesDispatchedRequests(t *testing.T) {

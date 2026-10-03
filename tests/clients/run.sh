@@ -116,7 +116,11 @@ if (( ${#runnable[@]} > 0 )); then
     echo "client packages are missing; run 'pnpm install --frozen-lockfile' in the repository" >&2
     exit 1
   fi
+  # The canonical path: a suite compares the directories it is given with the
+  # ones its clients report, which are real paths, so a TMPDIR that is a symlink
+  # or holds a `..` must not reach it as given.
   scratch=$(mktemp -d)
+  scratch=$(cd -- "$scratch" && pwd -P)
 fi
 metadata=$scratch/harness.json
 fixture_log=$scratch/clientfixture.log

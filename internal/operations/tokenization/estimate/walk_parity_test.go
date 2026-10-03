@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"strings"
 	"testing"
 
@@ -325,9 +326,21 @@ func sameBound(a, b *int64) bool {
 	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
+// walkerReadsMore are the members of a request the walker reads and the old walker
+// did not: the schema of a structured output, a model's reasoning and thinking, a
+// document block, and Bedrock's tool catalogue. A request that has one is charged
+// more than it was, so the requests generated here, which are compared with the
+// old walker, must have none; TestWalkerReadsTheStructuredOutputsReasoningAndDocumentsOfEveryDialect
+// holds what they cost.
+var walkerReadsMore = []string{
+	"response_format", `"text":{"format"`, "output_config", "output_format", "outputConfig", "toolConfig",
+	"responseSchema", "responseJsonSchema", `"reasoning"`, `"thinking"`, `"redacted_thinking"`, `"document"`, `"summary"`,
+}
+
 // TestWalkerMatchesTheLegacyHeuristic holds every family without a tokenizer to
-// the estimate the gateway charged before the walker moved: for the same request
-// and provider defaults, the same input, reply bound, candidates and total.
+// the estimate the gateway charged before the walker moved, for every shape the
+// old walker read: for the same request and provider defaults, the same input,
+// reply bound, candidates and total.
 func TestWalkerMatchesTheLegacyHeuristic(t *testing.T) {
 	cases := 400
 	if testing.Short() {
@@ -352,6 +365,9 @@ func TestWalkerMatchesTheLegacyHeuristic(t *testing.T) {
 				// One walk answers every provider's defaults.
 				for j := range 3 {
 					defaults := g.defaults()
+					if body, _ := json.Marshal([]any{fields, defaults}); slices.ContainsFunc(walkerReadsMore, func(member string) bool { return strings.Contains(string(body), member) }) {
+						t.Fatalf("case %d/%d has a member the old walker did not read, so it cannot be held to it: %s", i, j, body)
+					}
 					input, output, candidates := legacyEstimateParts(parsed, defaults)
 					want := legacyEstimateTokensFromParts(parsed, input, output, candidates)
 					for _, c := range counters {

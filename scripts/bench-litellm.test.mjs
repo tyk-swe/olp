@@ -39,7 +39,15 @@ const s1 = {
   timeout_seconds: 30,
   expected_concurrency: 20
 };
-const s3 = { ...s1, rate_rps: 3000, stream_share: 0.5, prompt_tokens: [50000, 75000, 100000], cost_budget: true };
+const s3 = {
+  ...s1,
+  rate_rps: 3000,
+  stream_share: 0.5,
+  prompt_tokens: [50000, 75000, 100000],
+  upstream_models: ['gpt-4o-bench'],
+  baseline_model: 'gpt-4o-bench',
+  cost_budget: true
+};
 const s4 = { ...s1, upstream_models: ['bench-primary', 'bench-secondary'], baseline_model: 'bench-secondary', failover: true };
 const s5 = { ...s1, dialect: 'anthropic', stream_share: 1, surface_path: '/anthropic', model_surfaces: ['openai', 'anthropic'] };
 
@@ -79,6 +87,8 @@ test('only a scenario with a cost budget gives its key one', () => {
 
 test('the mock is configured as the scenario suite configures it', () => {
   assert.deepEqual(mockSpec(s1, false), { default: s1.mock_behavior, models: { 'bench-chat': {} } });
+  // S3's upstream model is named as an OpenAI model, which OLP counts exactly.
+  assert.deepEqual(mockSpec(s3, false).models, { 'gpt-4o-bench': {} });
   // Only a failover route's first model fails, and only when armed.
   assert.deepEqual(mockSpec(s4, false).models, { 'bench-primary': {}, 'bench-secondary': {} });
   assert.deepEqual(mockSpec(s4, true).models, { 'bench-primary': { status: 503 }, 'bench-secondary': {} });

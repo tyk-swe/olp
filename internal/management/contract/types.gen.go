@@ -1438,7 +1438,7 @@ type ApiKeyDetailResponse struct {
 	ProjectName       nullable.Nullable[string]             `json:"project_name"`
 	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
 
-	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). Provider identity is exposed only with this opt-in; defaults to false.
+	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.
 	ResponseMetadata bool                         `json:"response_metadata"`
 	RevokedAt        nullable.Nullable[time.Time] `json:"revoked_at,omitempty"`
 	RotatedAt        nullable.Nullable[time.Time] `json:"rotated_at,omitempty"`
@@ -1981,7 +1981,7 @@ type CreateApiKeyRequest struct {
 	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
 	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
 
-	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). Provider identity is exposed only with this opt-in; defaults to false.
+	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.
 	ResponseMetadata *bool                    `json:"response_metadata,omitempty"`
 	Scopes           *[]string                `json:"scopes,omitempty"`
 	TokensPerMinute  nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`
@@ -4736,7 +4736,7 @@ type UpdateApiKeyRequest struct {
 	Name              *string                               `json:"name,omitempty"`
 	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
 
-	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). Provider identity is exposed only with this opt-in; defaults to false.
+	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.
 	ResponseMetadata *bool                    `json:"response_metadata,omitempty"`
 	Scopes           *[]string                `json:"scopes,omitempty"`
 	TokensPerMinute  nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`

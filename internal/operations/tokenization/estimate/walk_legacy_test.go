@@ -4,7 +4,8 @@ package estimate
 // before it moved into this package, verbatim apart from the names. It is the
 // reference TestWalkerMatchesTheLegacyHeuristic holds the walker to: for every
 // family without a tokenizer the estimate must stay what the gateway always
-// charged, bit for bit.
+// charged, bit for bit, for every shape this walker read. The walker reads a few
+// more (walkerReadsMore), which the generated requests do not have.
 
 import (
 	"bytes"

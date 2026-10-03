@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 // nextEnvelope waits for the terminal envelope of the request that has just been
@@ -167,5 +170,64 @@ func TestIntegrationVideoResponsesStateTheirAttempts(t *testing.T) {
 	resp, _, env = call(http.MethodDelete, job, "", nil)
 	if resp.StatusCode != http.StatusOK || len(env.Attempts) != 0 || len(metadata(resp)) != 0 {
 		t.Fatalf("repeat delete: status %d, %d attempts, metadata %v", resp.StatusCode, len(env.Attempts), metadata(resp))
+	}
+}
+
+// TestIntegrationVideoJobCallsAreAdmittedForAKeyWithATokenLimit proves a key with
+// a requests and a tokens limit that can create a job can read it back: a job
+// call carries no prompt, and used to reserve nothing, which a token limit refuses
+// as invalid, and the gateway answered as it does an outage, for ever. Every call
+// carries the allowance of the key's window, counting down.
+func TestIntegrationVideoJobCallsAreAdmittedForAKeyWithATokenLimit(t *testing.T) {
+	f := seedMediaFixture(t, "none", false)
+	client, namespace := mediaValkey(t)
+	limiter, err := limits.New(client, namespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.gateway.Admission = NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, f.log)
+	authority := f.rt.keys[f.bearer]
+	authority.LookupID = strings.ReplaceAll(uuid.NewString(), "-", "")
+	requests, tokens := int64(100), int64(1_000_000)
+	authority.Policy.RequestsPerMinute, authority.Policy.TokensPerMinute = &requests, &tokens
+	f.rt.keys[f.bearer] = authority
+
+	call := func(method, path, contentType string, body io.Reader) (*http.Response, map[string]any) {
+		t.Helper()
+		resp := f.call(t, method, path, contentType, body)
+		var out map[string]any
+		if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+			out = decodeJSON(t, resp)
+		} else {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		return resp, out
+	}
+	// The counts below are those of one fixed minute.
+	mediaSettleInMinute(t, client, 10*time.Second)
+	resp, created := call(http.MethodPost, "/v1/videos", videoCreateContentType, strings.NewReader(videoCreateBody))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create: status %d body %v", resp.StatusCode, created)
+	}
+	job := "/v1/videos/" + created["id"].(string)
+	f.upstream.getStatus.Store("completed")
+	for i, tc := range []struct{ name, method, path string }{
+		{"list", http.MethodGet, "/v1/videos?limit=5"},
+		{"get", http.MethodGet, job},
+		{"content", http.MethodGet, job + "/content"},
+		{"delete", http.MethodDelete, job},
+	} {
+		resp, body := call(tc.method, tc.path, "", nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status %d body %v", tc.name, resp.StatusCode, body)
+		}
+		// The create was the first request of the window.
+		if got, want := resp.Header.Get("X-Ratelimit-Remaining-Requests"), strconv.Itoa(98-i); got != want {
+			t.Errorf("%s: remaining requests = %q, want %s (headers %v)", tc.name, got, want, resp.Header)
+		}
+		if resp.Header.Get("X-Ratelimit-Limit-Requests") != "100" || resp.Header.Get("X-Ratelimit-Limit-Tokens") != "1000000" || resp.Header.Get("X-Ratelimit-Remaining-Tokens") == "" {
+			t.Errorf("%s: the allowance of the key is missing from %v", tc.name, resp.Header)
+		}
 	}
 }

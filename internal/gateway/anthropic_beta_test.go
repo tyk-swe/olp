@@ -3,7 +3,9 @@ package gateway
 import (
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -297,10 +299,20 @@ func TestTransformedRoutesRefuseAnAnthropicBetaForAnyTargetThatTakesIt(t *testin
 	}
 }
 
+// publishing is a connector that publishes a list of Anthropic betas of its own.
+func publishing(cfg connectors.Config, betas string) connectors.Config {
+	cfg.SemanticHeaders = map[string]string{"Anthropic-Beta": betas}
+	return cfg
+}
+
 // What forwardAnthropicBeta decides, by the request's dialect, the dialect it
-// is sent in, and the provider it is sent to.
+// is sent in, and the provider it is sent to, and what the upstream then
+// receives once the provider hosts the request, as the provider publishes its
+// own betas.
 func TestForwardAnthropicBetaNeedsTheCallersOwnAnthropicRequestAndAProviderThatTakesIt(t *testing.T) {
 	anthropicProvider := connectors.Config{Kind: "anthropic"}
+	messages := profiledConnector("anthropic", "anthropic-messages")
+	vertex := profiledConnector("vertex_ai", "vertex-anthropic")
 	for _, tc := range []struct {
 		name         string
 		source, wire openai.Family
@@ -311,7 +323,8 @@ func TestForwardAnthropicBetaNeedsTheCallersOwnAnthropicRequestAndAProviderThatT
 		{"the callers Messages request to an Anthropic provider", openai.FamilyAnthropic, openai.FamilyAnthropic, anthropicProvider, []string{"a-2025-01-01"}, "a-2025-01-01"},
 		{"the callers count_tokens request", openai.FamilyAnthropicCount, openai.FamilyAnthropicCount, anthropicProvider, []string{"a-2025-01-01"}, "a-2025-01-01"},
 		{"a beta per line", openai.FamilyAnthropic, openai.FamilyAnthropic, anthropicProvider, []string{"a-2025-01-01", "b-2025-02-02"}, "a-2025-01-01,b-2025-02-02"},
-		{"Claude on Vertex AI", openai.FamilyAnthropic, openai.FamilyAnthropic, profiledConnector("vertex_ai", "vertex-anthropic"), []string{"a-2025-01-01"}, "a-2025-01-01"},
+		{"the Anthropic Messages profile", openai.FamilyAnthropic, openai.FamilyAnthropic, messages, []string{"a-2025-01-01"}, "a-2025-01-01"},
+		{"Claude on Vertex AI", openai.FamilyAnthropic, openai.FamilyAnthropic, vertex, []string{"a-2025-01-01"}, "a-2025-01-01"},
 		{"Claude on Bedrock InvokeModel", openai.FamilyAnthropic, openai.FamilyAnthropic, profiledConnector("bedrock", "bedrock-anthropic-invoke"), []string{"a-2025-01-01"}, ""},
 		{"a Messages request sent to OpenAI", openai.FamilyAnthropic, openai.FamilyChat, connectors.Config{Kind: "openai"}, []string{"a-2025-01-01"}, ""},
 		{"a Messages request sent to Gemini", openai.FamilyAnthropic, openai.FamilyGemini, connectors.Config{Kind: "gemini"}, []string{"a-2025-01-01"}, ""},
@@ -323,19 +336,122 @@ func TestForwardAnthropicBetaNeedsTheCallersOwnAnthropicRequestAndAProviderThatT
 		{"a header that is not a valid value", openai.FamilyAnthropic, openai.FamilyAnthropic, anthropicProvider, []string{"a\r\nInjected: 1"}, ""},
 		{"no header", openai.FamilyAnthropic, openai.FamilyAnthropic, anthropicProvider, nil, ""},
 		{"an empty header", openai.FamilyAnthropic, openai.FamilyAnthropic, anthropicProvider, []string{""}, ""},
+		// A provider that publishes betas sends them with the caller's.
+		{"no header to a provider that publishes betas", openai.FamilyAnthropic, openai.FamilyAnthropic, publishing(messages, "operator-1"), nil, "operator-1"},
+		{"a header to a provider that publishes betas", openai.FamilyAnthropic, openai.FamilyAnthropic, publishing(messages, "operator-1"), []string{"caller-2"}, "operator-1,caller-2"},
+		{"a beta per line to a provider that publishes betas", openai.FamilyAnthropic, openai.FamilyAnthropic, publishing(vertex, "operator-1"), []string{"caller-2", "caller-3"}, "operator-1,caller-2,caller-3"},
+		{"betas the provider publishes too", openai.FamilyAnthropic, openai.FamilyAnthropic, publishing(messages, "a-1, b-2"), []string{"b-2,c-3,a-1"}, "a-1,b-2,c-3"},
+		{"a published name in another spelling", openai.FamilyAnthropic, openai.FamilyAnthropic, func() connectors.Config {
+			cfg := messages
+			cfg.SemanticHeaders = map[string]string{"anthropic-beta": "operator-1"}
+			return cfg
+		}(), []string{"caller-2"}, "operator-1,caller-2"},
+		{"a header to a provider that publishes an empty list", openai.FamilyAnthropic, openai.FamilyAnthropic, publishing(messages, ""), []string{"caller-2"}, "caller-2"},
+		{"a header that is not forwarded to a provider that publishes betas", openai.FamilyChat, openai.FamilyChat, publishing(messages, "operator-1"), []string{"caller-2"}, "operator-1"},
+		{"a list too long once the provider's betas join it", openai.FamilyAnthropic, openai.FamilyAnthropic, publishing(messages, "operator-1"), []string{strings.Repeat("a", maxAnthropicBeta-5)}, "operator-1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			x := &execution{parsed: &openai.Request{Family: tc.source}, semanticHeaders: semanticHeaders(http.Header{"Anthropic-Beta": tc.beta})}
-			header := http.Header{}
-			forwardAnthropicBeta(header, x, tc.wire, tc.cfg)
+			published := maps.Clone(tc.cfg.SemanticHeaders)
+			req := httptest.NewRequest(http.MethodPost, "https://upstream.example/v1/messages", nil)
+			cfg := forwardAnthropicBeta(req.Header, x, tc.wire, tc.cfg)
+			if profile, err := cfg.Profile(); err == nil && cfg.AuthMode == "" {
+				cfg.AuthMode = profile.Authentication[0]
+			}
+			// The upstream receives what hosting leaves: the provider's published
+			// headers are applied to the request as it is hosted.
+			if err := cfg.ApplySemantic(req); err != nil {
+				t.Fatal(err)
+			}
 			if tc.want == "" {
-				if _, present := header["Anthropic-Beta"]; present {
-					t.Fatalf("Anthropic-Beta %q was sent", header["Anthropic-Beta"])
+				if _, present := req.Header["Anthropic-Beta"]; present {
+					t.Fatalf("Anthropic-Beta %q was sent", req.Header["Anthropic-Beta"])
 				}
-			} else if lines := header.Values("Anthropic-Beta"); len(lines) != 1 || lines[0] != tc.want {
+			} else if lines := req.Header.Values("Anthropic-Beta"); len(lines) != 1 || lines[0] != tc.want {
 				t.Fatalf("Anthropic-Beta %q was sent, want %q", lines, tc.want)
 			}
+			// The connector the caller handed in still publishes what it did.
+			if !maps.Equal(tc.cfg.SemanticHeaders, published) {
+				t.Fatalf("the provider's published headers were changed: %v, were %v", tc.cfg.SemanticHeaders, published)
+			}
 		})
+	}
+}
+
+// anthropicPublishingHarness serves provider "a" as the Anthropic Messages
+// profile behind the transformed route, with the Anthropic-Beta header published
+// among its semantic headers, as an operator sends a beta with every request.
+func anthropicPublishingHarness(t *testing.T, betas string) *harness {
+	t.Helper()
+	h := anthropicTransformedHarness(t)
+	provider := providerByName(h, "a")
+	provider.ProfileID, provider.ProfileRevision = "anthropic-messages", connectors.ProfileRevision
+	provider.SemanticHeaders = map[string]string{"Anthropic-Beta": betas}
+	h.rt.release.Snapshot.Providers[provider.ID] = provider
+	return h
+}
+
+// A provider that publishes Anthropic-Beta sends it with the caller's own list,
+// which the fields of the caller's request need: replacing the caller's betas
+// would send the upstream the beta fields of the body without their header.
+func TestTransformedRoutesSendTheCallersAnthropicBetaWithThePublishedOnes(t *testing.T) {
+	const published = "operator-feature-1"
+	body := `{"model":"` + routeSlug + `","max_tokens":16,"messages":[{"role":"user","content":"hi"}],"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}}`
+	for _, tc := range []struct {
+		name, path, body, caller, want string
+	}{
+		{"no header", messagesPath, body, "", published},
+		{"a beta of the callers", messagesPath, body, "context-management-2025-06-27", published + ",context-management-2025-06-27"},
+		{"betas the provider publishes too", messagesPath, body, "caller-feature-2," + published, published + ",caller-feature-2"},
+		{"a streaming request", messagesPath, strings.Replace(body, `"max_tokens":16`, `"max_tokens":16,"stream":true`, 1), "caller-feature-2", published + ",caller-feature-2"},
+		{"count_tokens", countPath, `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hi"}]}`, "token-counting-2024-11-01", published + ",token-counting-2024-11-01"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := anthropicPublishingHarness(t, published)
+			log := recordAnthropic(h)
+			headers := map[string]string{"Anthropic-Version": "2023-06-01"}
+			if tc.caller != "" {
+				headers["Anthropic-Beta"] = tc.caller
+			}
+			resp := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(tc.body), headers)
+			raw, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status=%d body=%s", resp.StatusCode, raw)
+			}
+			got := log.last(t)
+			if len(got.BetaLines) != 1 || got.Beta != tc.want {
+				t.Fatalf("the upstream received the Anthropic-Beta lines %q, want one line of %q", got.BetaLines, tc.want)
+			}
+			if tc.path == messagesPath && !strings.Contains(string(got.Body), `"context_management"`) {
+				t.Fatalf("the native field did not arrive: %s", got.Body)
+			}
+		})
+	}
+}
+
+// The list a provider is sent is held to the bound of a strict route's profile
+// binding, so one that the provider's own betas push past it is refused before
+// any provider is called, as a list that is too long alone is.
+func TestTransformedRoutesRefuseAnAnthropicBetaThatIsTooLongWithThePublishedOnes(t *testing.T) {
+	const published = "operator-feature-1"
+	body := `{"model":"` + routeSlug + `","max_tokens":16,"messages":[{"role":"user","content":"hi"}],"context_management":{}}`
+	h := anthropicPublishingHarness(t, published)
+	log := recordAnthropic(h)
+	// The caller's list fits alone and not beside the provider's.
+	caller := strings.Repeat("a", maxAnthropicBeta-len(published))
+	resp := h.do(t.Context(), http.MethodPost, messagesPath, fullKey, []byte(body), map[string]string{"Anthropic-Version": "2023-06-01", "Anthropic-Beta": caller})
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(raw), `"anthropic-beta"`) || h.mock.count("a") != 0 {
+		t.Fatalf("status=%d body=%s dispatches=%d", resp.StatusCode, raw, h.mock.count("a"))
+	}
+	// One that fits beside it is sent whole, up to the bound.
+	caller = strings.Repeat("a", maxAnthropicBeta-len(published)-1)
+	resp = h.do(t.Context(), http.MethodPost, messagesPath, fullKey, []byte(body), map[string]string{"Anthropic-Version": "2023-06-01", "Anthropic-Beta": caller})
+	resp.Body.Close()
+	if got := log.last(t).Beta; resp.StatusCode != http.StatusOK || got != published+","+caller || len(got) != maxAnthropicBeta {
+		t.Fatalf("status=%d, the upstream received an Anthropic-Beta of %d bytes", resp.StatusCode, len(got))
 	}
 }
 

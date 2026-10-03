@@ -232,7 +232,7 @@ responses.
 | --- | --- |
 | `X-OLP-Attempts` | The attempts the request had made when the response was committed, counting one a connection or credential quota refused locally. `2` after a failover. |
 | `X-OLP-Route-Revision` | The `revision_id` of the route revision that served the request, the identifier `GET /api/v1/routes/{route_id}/revisions/{revision_id}` takes. A call on a retained resource reports the route's current revision, not the one that created the resource, and a video job read, download, delete or list, which is answered from the jobs' own records, reports none. |
-| `X-OLP-Provider` | The vendor of the provider that served the request, as its configuration names it. A provider with no vendor, as a plugin provider has none, is not named. Callers address routes, not upstreams, so this is the one way a response names one. |
+| `X-OLP-Provider` | The vendor of the provider that served the request, as its configuration names it. A provider with no vendor, as a plugin provider has none, is not named. Callers address routes, not upstreams, so this is the one place the gateway itself names an upstream, and only for a key that opts in. The message of an upstream rejection is relayed as the upstream wrote it, with credential values redacted, and can name its vendor or model whatever the key's policy. |
 | `X-OLP-Cost` | The cost of a unary response in the installation currency, as a plain decimal such as `0.000064`. |
 
 A stream records its serving attempt before its first frame is committed, so
@@ -387,19 +387,30 @@ never fit. The windows each response leaves the key with are reported in its
 ### How the prompt is estimated
 
 The request is walked once into its text and its media parts: message content,
-tool calls and their results, the names and arguments a call travels with, and
-every tool schema, in any of the client dialects. Each inline image costs a flat
-1,000 tokens and each audio or file part 2,000, whatever the bytes the part
-carries. The same walk serves every target. It keeps the first 36 KiB of the
-text and only the size of the rest, which is all a count reads, so a request of
-megabytes is not held twice while its upstream answers. What the text costs
-depends on the model that will read it, and the gateway counts it for the
-upstream model of each target, once for each family, however many attempts,
-credential slots or translated targets use that family. A route that fails over
-from an OpenAI model to a Claude model counts the prompt twice, once for each
-family, and a request in the Anthropic dialect sent to an OpenAI target is
-counted by OpenAI's tokenizer, because the family follows the target model and
-not the client's dialect.
+tool calls and their results, the names and arguments a call travels with, every
+tool schema, the schema a structured output must follow (a chat
+`response_format`, a Responses `text.format`, Anthropic's
+`output_config.format`, Gemini's response schema, Bedrock's `outputConfig`), the
+tool catalogue of a Bedrock request, a Responses reasoning summary and Anthropic
+thinking text, in any of the client dialects. Each inline image costs a flat
+1,000 tokens and each audio, file or document part 2,000, whatever the bytes the
+part carries; a document given as text is counted by its text. Some of a prompt
+is not read as text: encrypted reasoning (a Responses `encrypted_content`,
+Anthropic `redacted_thinking`) and, in the Anthropic and Gemini dialects, the
+arguments of a tool call and the response of a function response, which are
+counted only where they hold text under a key the walker knows (`text`,
+`content`, `parts`, `input`, `output`). Those leave a prompt under-counted,
+which the reservation's reconciliation against the reported usage corrects after
+the attempt, and which the estimate says by being `calibrated`. The same walk
+serves every target. It keeps the first 36 KiB of the text and only the size of
+the rest, which is all a count reads, so a request of megabytes is not held
+twice while its upstream answers. What the text costs depends on the model that
+will read it, and the gateway counts it for the upstream model of each target,
+once for each family, however many attempts, credential slots or translated
+targets use that family. A route that fails over from an OpenAI model to a
+Claude model counts the prompt twice, once for each family, and a request in the
+Anthropic dialect sent to an OpenAI target is counted by OpenAI's tokenizer,
+because the family follows the target model and not the client's dialect.
 
 | Family | Models | Counted by | Provenance |
 | --- | --- | --- | --- |
@@ -410,44 +421,52 @@ not the client's dialect.
 | `other` | everything the registry does not recognize | four characters per token | `heuristic` |
 
 The OpenAI encodings are in the binary, and their counts match OpenAI's own
-`tiktoken` token for token. A model name decides the family by OpenAI's own
-rules (an exact name or a prefix, with a provider path, a `ft:` prefix or a
-`:` variant removed); a name that does not say, such as an Azure deployment
-name, is never assumed to be an OpenAI model, because a wrong tokenizer
-miscounts without saying so. OpenAI chat models also read each message's role,
-three tokens of framing around each message, one more for a name, and three that
-prime the reply; these are the figures of the OpenAI Cookbook, and an OpenAI
-count includes them. A request in another dialect is framed by what that dialect
-calls a message: each entry of the Anthropic, Bedrock or Gemini conversation,
-and each system prompt, and the instructions of a Responses request. The other
-families charge text only, four characters per
+`tiktoken` token for token on the text of the checked-in fixtures, which are
+generated by `tiktoken` itself. The encoder reads the letter, number and space
+classes of its split patterns from Go's Unicode tables, which are newer than the
+ones the engine behind `tiktoken` was built with, so a character assigned since
+(the newest CJK ideographs, for one) can split a piece differently and cost a
+token more or less; a Go upgrade moves the tables with it. A model name decides
+the family by OpenAI's own rules (an exact name or a prefix, with a provider
+path, a `ft:` prefix or a `:` variant removed); a name that does not say, such
+as an Azure deployment name, is never assumed to be an OpenAI model, because a
+wrong tokenizer miscounts without saying so. OpenAI chat models also read each
+message's role, three tokens of framing around each message, one more for a
+name, and three that prime the reply; these are the figures of the OpenAI
+Cookbook, and an OpenAI count includes them. A request in another dialect is
+framed by what that dialect calls a message: each entry of the Anthropic,
+Bedrock or Gemini conversation, and each system prompt, and the instructions of
+a Responses request. The other families charge text only, four characters per
 token with every field rounded up, and that charge is scaled by a per-family
 factor that is 1 until the [reference catalog](roadmap/m02-provider-catalog.md)
 carries measured ones.
 
 Each estimate carries its provenance. `tokenizer` is an exact count of the text
-and of the message framing OpenAI documents, for a prompt that is nothing else.
-`calibrated` is a count that is partly a ratio or a guess. A prompt past 32 KiB
-of text is counted exactly up to that point and the rest is charged at the
-tokens per byte the exact part measured, which keeps a 100,000-token prompt from
-costing milliseconds of CPU on every request; the ratio is within a quarter of a
-percent for a prompt of one kind of text, and can be tens of percent off when
-the first 32 KiB is unlike the rest, such as a short instruction ahead of a long
-document in another script. A count that charged an image or media part at a
-flat rate is calibrated, because the flat rate is a guess next to an exact count
-of the text, and so is the count of a request with a tool catalogue or tool
-calls, which a model reads in a rendering of its own that no provider documents.
-`heuristic` is the four-characters rule. It is also the count of a long prompt
-whose tail came after less than 4 KiB of exact text, too little to measure a
-ratio from, and is charged at four bytes to a token. Requests that reach an upstream through a native
-operation contract (the embeddings, rerank, classification and token-counting
-endpoints of a strict route), and Bedrock invoke, Gemini interaction creation
-and JSON media requests (speech and image generation), are estimated from the
-size of their documents, four bytes to a token, and are always `heuristic`.
-Stored-response lifecycle calls, realtime sessions, job polls, multipart media
-uploads (image edits and variations, transcription and translation) and video
-creation read no prompt, or reserve a flat charge, and record no estimate; their
-attempts still record the family of their model.
+and of the message framing OpenAI documents, for a prompt that is nothing else:
+a prompt with any member the count cannot read as the model does, or leaves out,
+is never `tokenizer`. `calibrated` is a count that is partly a ratio or a guess.
+A prompt past 32 KiB of text is counted exactly up to that point and the rest is
+charged at the tokens per byte the exact part measured, which keeps a
+100,000-token prompt from costing milliseconds of CPU on every request; the
+ratio is within a quarter of a percent for a prompt of one kind of text, and can
+be tens of percent off when the first 32 KiB is unlike the rest, such as a short
+instruction ahead of a long document in another script. A count that charged an
+image, document or media part at a flat rate is calibrated, because the flat
+rate is a guess next to an exact count of the text, and so is the count of a
+request with a tool catalogue, tool calls, a structured-output schema or
+reasoning, which a model reads in a rendering of its own that no provider
+documents, or with encrypted content that no count reads. `heuristic` is the
+four-characters rule. It is also the count of a long prompt whose tail came
+after less than 4 KiB of exact text, too little to measure a ratio from, and is
+charged at four bytes to a token. Requests that reach an upstream through a
+native operation contract (the embeddings, rerank, classification and
+token-counting endpoints of a strict route), and Bedrock invoke, Gemini
+interaction creation and JSON media requests (speech and image generation), are
+estimated from the size of their documents, four bytes to a token, and are
+always `heuristic`. Stored-response lifecycle calls, realtime sessions, job
+polls, multipart media uploads (image edits and variations, transcription and
+translation) and video creation read no prompt, or reserve a flat charge, and
+record no estimate; their attempts still record the family of their model.
 
 Planning uses the same counts. A target whose context window cannot hold the
 estimate is excluded before any provider is called, and each target is weighed
@@ -491,6 +510,18 @@ left that cannot hold the request's estimate beside what is spent and in flight,
 and its message says which it was. Missing, malformed, or
 wrong-window snapshots return `503 distributed_limits_unavailable` until
 [authoritative initialization](operations.md#spend-budget-reconciliation) completes.
+
+That wait is by design: a budget is enforced against the spend PostgreSQL has
+confirmed, and the gateway never invents a zero for a key whose spend it does not
+know. Only the worker plane's reconciliation pass, which runs every minute, and the
+accounting of a request that has finished, install the snapshot of a window. So a
+key created with a cost budget, a budget added to a key that had none, and a
+budgeted key whose UTC day or month has just rolled over, refuse requests with that
+503 until the next pass, which is up to a minute and which the gateway cannot
+shorten. A client sees an ordinary retryable 503. A provisioning script or a
+benchmark that creates a key and sends traffic at once waits for the first pass,
+which the worker logs as `reconciled cost budgets`. A deployment without a running
+worker never installs one.
 
 ### Cost reservation
 

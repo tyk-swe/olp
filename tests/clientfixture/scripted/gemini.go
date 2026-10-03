@@ -3,7 +3,9 @@ package scripted
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -182,9 +184,78 @@ func functionResponseText(response any) string {
 	return compact(rawOf(response))
 }
 
+// geminiSchemaMembers are the members of Gemini's Schema, the OpenAPI subset its
+// parameters and responseSchema fields take. Gemini refuses a request whose schema
+// has any other, as it does one that names a field it does not have, while
+// parametersJsonSchema and responseJsonSchema take JSON Schema as it is.
+var geminiSchemaMembers = map[string]bool{
+	"type": true, "format": true, "title": true, "description": true, "nullable": true, "enum": true,
+	"maxItems": true, "minItems": true, "properties": true, "required": true,
+	"minProperties": true, "maxProperties": true, "minLength": true, "maxLength": true,
+	"pattern": true, "example": true, "anyOf": true, "propertyOrdering": true, "default": true,
+	"items": true, "minimum": true, "maximum": true,
+}
+
+// geminiSchemaProblem is what Gemini says of a member of a schema in an
+// OpenAPI-subset field that is not in it, or empty when every member is.
+func geminiSchemaProblem(raw json.RawMessage, at string) string {
+	var schema map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &schema) != nil {
+		return ""
+	}
+	for _, name := range slices.Sorted(maps.Keys(schema)) {
+		if !geminiSchemaMembers[name] {
+			return fmt.Sprintf("Invalid JSON payload received. Unknown name %q at '%s': Cannot find field.", name, at)
+		}
+		value := schema[name]
+		var problem string
+		switch name {
+		case "items":
+			problem = geminiSchemaProblem(value, at+".items")
+		case "anyOf":
+			var branches []json.RawMessage
+			_ = json.Unmarshal(value, &branches)
+			for i, branch := range branches {
+				if problem = geminiSchemaProblem(branch, fmt.Sprintf("%s.any_of[%d]", at, i)); problem != "" {
+					break
+				}
+			}
+		case "properties":
+			var properties map[string]json.RawMessage
+			_ = json.Unmarshal(value, &properties)
+			for _, property := range slices.Sorted(maps.Keys(properties)) {
+				if problem = geminiSchemaProblem(properties[property], fmt.Sprintf("%s.properties[%q].value", at, property)); problem != "" {
+					break
+				}
+			}
+		}
+		if problem != "" {
+			return problem
+		}
+	}
+	return ""
+}
+
+// schemaProblem is the first schema of the request, in an OpenAPI-subset field,
+// that Gemini would refuse.
+func (r *geminiRequest) schemaProblem() string {
+	for i, tool := range r.Tools {
+		for j, d := range tool.FunctionDeclarations {
+			if problem := geminiSchemaProblem(d.Parameters, fmt.Sprintf("tools[%d].function_declarations[%d].parameters", i, j)); problem != "" {
+				return problem
+			}
+		}
+	}
+	return geminiSchemaProblem(r.GenerationConfig.ResponseSchema, "generation_config.response_schema")
+}
+
 func (f *Fixture) generateContent(x *request, stream bool) {
 	var req geminiRequest
 	if !x.decode(&req) {
+		return
+	}
+	if problem := req.schemaProblem(); problem != "" {
+		x.fail(http.StatusBadRequest, "invalid_argument", problem)
 		return
 	}
 	if len(req.Contents) == 0 {
@@ -297,6 +368,10 @@ func (f *Fixture) countGeminiTokens(x *request, _ bool) {
 	}
 	if req.GenerateContentRequest != nil {
 		req = *req.GenerateContentRequest
+	}
+	if problem := req.schemaProblem(); problem != "" {
+		x.fail(http.StatusBadRequest, "invalid_argument", problem)
+		return
 	}
 	if len(req.Contents) == 0 {
 		x.fail(http.StatusBadRequest, "invalid_argument", "contents is not specified")

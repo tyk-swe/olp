@@ -75,7 +75,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), overall)
 	defer cancel()
 	var e *Error
-	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.estimate, overall); e != nil {
+	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, overall); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}
@@ -426,7 +426,9 @@ func (s *Server) admitVideoRequest(parent context.Context, x *execution, authori
 	x.budgetGroupID = authority.BudgetGroupID
 	ctx, cancel := context.WithTimeout(parent, ttl)
 	var e *Error
-	x.lease, e = s.Admission.reserveKey(ctx, authority, 0, ttl)
+	// A job call carries no prompt, and reserves what any other call on a resource
+	// does: a key with a token limit refuses a reservation of nothing.
+	x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), resourceEstimate, ttl)
 	if e != nil {
 		cancel()
 		return nil, nil, e

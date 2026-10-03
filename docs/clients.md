@@ -345,9 +345,13 @@ The suite found these while it was built; each is how the gateway behaves today.
   the `anthropic-messages` profile forwards the header too. The header goes
   only to a provider that takes it: an Anthropic provider, or one whose profile
   declares `Anthropic-Beta`, as the Vertex AI hosting of Claude does. Bedrock
-  InvokeModel declares none. A route with such a target refuses a header it
-  cannot forward, one longer than 2048 bytes or not a valid header value, before
-  any provider is called.
+  InvokeModel declares none. A provider that publishes betas of its own in its
+  semantic headers is sent them and the caller's, each beta once, so the fields
+  of the caller's request keep their headers; a strict route refuses a caller's
+  list that differs from the published one with `semantic_header_conflict`. A
+  route with such a target refuses a header it cannot forward, one longer than
+  2048 bytes (alone or joined with a provider's published betas) or not a valid
+  header value, before any provider is called.
 - The Anthropic SDKs, and Claude Code with them, add `?beta=true` to `messages`
   and `count_tokens` calls. The query selects no behavior, so a strict route
   consumes it and the upstream never sees it; any other query setting still has
@@ -396,7 +400,12 @@ The suite found these while it was built; each is how the gateway behaves today.
   `eager_input_streaming`. It reads the JSON Schema fields `parametersJsonSchema`
   and `responseJsonSchema` that current Google SDKs send, and gives other vendors
   the lower-case type names of JSON Schema where Gemini's own dialect spells them
-  in capitals, with the schema's members in the order the client wrote them.
+  in capitals, with the schema's members in the order the client wrote them. In
+  the other direction a schema an OpenAI or Anthropic client wrote (`$schema`,
+  `additionalProperties`, `$ref` and the like) reaches a Gemini provider in
+  `parametersJsonSchema` or `responseJsonSchema`, which take JSON Schema as it is,
+  where Gemini's `parameters` and `responseSchema` refuse members outside their
+  OpenAPI subset; a schema within the subset goes in those, as before.
 - Anthropic requires a token limit that OpenAI and Gemini clients do not always
   send, such as the OpenAI Agents SDK. The gateway refuses to invent one, naming
   `max_output_tokens`, so such a client sets a limit itself or the Anthropic

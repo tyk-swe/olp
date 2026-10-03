@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -156,7 +157,7 @@ func BenchmarkAdmission(b *testing.B) {
 			var operations int64
 			b.ReportAllocs()
 			for b.Loop() {
-				lease, e := admission.reserveKeyCosted(ctx, tc.authority, benchEstimate, 30*time.Second, tc.hold)
+				lease, e := admission.reserveKeyCosted(ctx, tc.authority, "openai", benchEstimate, 30*time.Second, tc.hold)
 				if e != nil {
 					b.Fatal(e)
 				}
@@ -219,9 +220,9 @@ func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
 		runtime.Attempt{Price: costPrice()})
 	priced.request.id, priced.request.minted = uuid.NewString(), true
 
-	for name, run := range map[string]func(){
+	runs := map[string]func(){
 		"key admission": func() {
-			lease, e := admission.reserveKey(ctx, free, benchEstimate, time.Minute)
+			lease, e := admission.reserveKey(ctx, free, "openai", benchEstimate, time.Minute)
 			if lease != nil || e != nil {
 				t.Fatalf("a key that limits nothing was given %v, %v", lease, e)
 			}
@@ -229,7 +230,7 @@ func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
 		},
 		"key admission with no limiter": func() {
 			var none *Admission
-			if lease, e := none.reserveKey(ctx, free, benchEstimate, time.Minute); lease != nil || e != nil {
+			if lease, e := none.reserveKey(ctx, free, "openai", benchEstimate, time.Minute); lease != nil || e != nil {
 				t.Fatalf("a key that limits nothing was given %v, %v", lease, e)
 			}
 		},
@@ -248,7 +249,61 @@ func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
 			}
 			reservation.settle(ctx, true, nil)
 		},
+	}
+	// An Anthropic request that sent no Anthropic-Beta has nothing to check or to
+	// forward, whichever provider it goes to: the lookup of what a provider
+	// declares is for a request that has a header to place.
+	for _, target := range []struct {
+		name          string
+		kind, profile string
+	}{
+		{"an automatic Anthropic provider", "anthropic", ""},
+		{"an automatic OpenAI provider", "openai", ""},
+		{"the Anthropic Messages profile", "anthropic", "anthropic-messages"},
+		{"Claude on Vertex AI", "vertex_ai", "vertex-anthropic"},
 	} {
+		provider := runtime.Provider{ID: uuid.NewString(), Kind: target.kind, ProfileID: target.profile}
+		if target.profile != "" {
+			provider.ProfileRevision = connectors.ProfileRevision
+		}
+		cfg := provider.Connector()
+		sending := func(header http.Header) *execution {
+			header.Set("Anthropic-Version", "2023-06-01")
+			return &execution{
+				parsed: &openai.Request{Family: openai.FamilyAnthropic}, semanticHeaders: semanticHeaders(header),
+				route:              &runtime.Route{Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed}, Targets: []runtime.Target{{ProviderID: provider.ID}}},
+				historicalSnapshot: &runtime.Snapshot{Providers: map[string]runtime.Provider{provider.ID: provider}},
+			}
+		}
+		x, header := sending(http.Header{}), http.Header{}
+		runs["anthropic-beta check, "+target.name] = func() {
+			if e := x.checkAnthropicBeta(); e != nil {
+				t.Fatalf("a request with no Anthropic-Beta was refused: %v", e)
+			}
+		}
+		runs["anthropic-beta forwarding, "+target.name] = func() {
+			if forwardAnthropicBeta(header, x, openai.FamilyAnthropic, cfg).SemanticHeaders != nil || len(header) != 0 {
+				t.Fatalf("a request with no Anthropic-Beta was sent one: %v", header)
+			}
+		}
+		// A request that did send one looks up what every target of its route
+		// declares, and a lookup that copied the profile of each would allocate for
+		// every request that sends a beta, whichever header it sent.
+		sent := sending(http.Header{"Anthropic-Beta": {"context-management-2025-06-27"}})
+		runs["anthropic-beta check of a header, "+target.name] = func() {
+			if e := sent.checkAnthropicBeta(); e != nil {
+				t.Fatalf("a request with a valid Anthropic-Beta was refused: %v", e)
+			}
+		}
+		// The zero is the check's, and not that of one that never runs: a header it
+		// cannot forward is refused wherever the provider takes it.
+		tooLong := sending(http.Header{"Anthropic-Beta": {strings.Repeat("a", maxAnthropicBeta+1)}})
+		if refused := tooLong.checkAnthropicBeta() != nil; refused != takesAnthropicBeta(cfg) {
+			t.Errorf("%s: a header that is too long was refused: %v, the provider takes it: %v", target.name, refused, takesAnthropicBeta(cfg))
+		}
+	}
+
+	for name, run := range runs {
 		before := client.calls.Load()
 		if got := testing.AllocsPerRun(200, run); got != 0 {
 			t.Errorf("%s: %v allocations, want none", name, got)
@@ -264,7 +319,7 @@ func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
 	admission = newAdmission(t, client)
 	before := client.calls.Load()
 	reserve := func() {
-		lease, e := admission.reserveKey(ctx, limited, benchEstimate, time.Minute)
+		lease, e := admission.reserveKey(ctx, limited, "openai", benchEstimate, time.Minute)
 		if lease == nil || e != nil {
 			t.Fatalf("a key limited to 600 requests a minute was given %v, %v", lease, e)
 		}

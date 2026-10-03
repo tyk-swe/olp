@@ -154,8 +154,9 @@ A scenario runs this sequence in one session, and fails if any step does:
 3. Run the load straight at the mock: the baseline.
 4. Run the same load, at the same rate and with the same prompts, through the
    gateway, watching its CPU and memory.
-5. Wait for request metadata to land in PostgreSQL, count it, and shut the
-   gateway down cleanly (a process that cannot is a failure).
+5. Wait for request metadata to land in PostgreSQL, for as long as it keeps
+   arriving, count it, and shut the gateway down cleanly (a process that cannot
+   is a failure).
 6. Write `.local/bench/<scenario>.json` and the two raw load reports under
    `.local/bench/raw/`.
 
@@ -167,7 +168,7 @@ The settings are environment variables, all optional.
 | `OLP_BENCH_DURATION`, `OLP_BENCH_WARMUP` | The measured period (default 60s) and the warmup before it (10s). S6 opens its streams over the two and then holds them for as long as the measured period. |
 | `OLP_BENCH_GATEWAY_CPUS`, `OLP_BENCH_MOCK_CPUS`, `OLP_BENCH_LOADGEN_CPUS` | Pin the process to CPUs, as `taskset` lists them (`0-1`, `2,4-5`). The gateway's vCPUs are the CPUs it may run on, read back from `/proc` as proof the pin took, and are what RPS per vCPU divides by. |
 | `OLP_BENCH_ENFORCE` | `1` fails the test on a missed target. See below. |
-| `OLP_BENCH_DRAIN` | How long to wait for request metadata to land (90s). |
+| `OLP_BENCH_DRAIN` | How long the wait for request metadata may go without any arriving before it gives up (90s). The wait lasts as long as metadata keeps landing. |
 | `OLP_BENCH_LATE_AFTER` | When a send counts as late for the generator's validity check (5ms). |
 | `OLP_BENCH_S6_OUTPUT_TOKENS`, `OLP_BENCH_S6_READ_BPS` | The length of S6's completions and the pace of its readers. |
 | `OLP_BENCH_OUT` | Where results go (`.local/bench`); a relative path is relative to the repository root. |
@@ -231,7 +232,16 @@ first; the rest of this section says what each field means.
   many have a request row in PostgreSQL once the pipeline has drained, which
   is how many *events delivered*. The usage report's own count, the gateway's
   epoch counters and the count after shutdown are beside it as cross-checks.
-  Valkey's health and the gateway's own dropped and abandoned counters come from
+  The wait for the events lasts as long as they keep arriving, and `drain`
+  records how long it took, how many events were still to arrive when the load
+  ended and the pace they arrived at. One pipeline consumer persists an event at a
+  time, so at the rates of S1 to S3 the events outlast the load by minutes: a
+  half-rate S1 run on a development machine (8 vCPUs, otherwise idle) delivered
+  its 12,500 events in about 86 seconds from the start of the load, 61 of them
+  after it ended, which is about 150 events a second, and the full runs, which
+  produce 70,000 to 210,000 events, take many times that. A run whose events arrive late has them all delivered and says how
+  late; one whose events stop arriving is `settled: false`. Valkey's health and
+  the gateway's own dropped and abandoned counters come from
   a metrics snapshot that the gateway refreshes every fifteen seconds, so they
   are read from one taken after the run ended (`metrics_stale` says when none
   appeared in time, which leaves the target unchecked), and the totals the
@@ -310,12 +320,18 @@ how to read the table and the record to fill in for a published run are in
   targets are separate providers because the circuit is per provider: on one
   provider both targets would be skipped.
 - **The gateway's limits are raised for the load.** Its defaults (1,024
-  connections, 256 requests in flight, 64 connections to a provider's host, 16
-  of them idle) protect a small deployment and would shed S2's 1,300 streams.
-  The benchmark sizes them to each scenario's expected concurrency and records
-  them in the result (`gateway.derived_limits`). A provider takes at most 4,096
-  connections to a host, so S6 spreads its streams over as many providers as
-  that needs, as an operator would.
+  connections and 256 requests in flight) protect a small deployment and would
+  shed S2's 1,300 streams. A provider's pool is a limit too, and it has two
+  defaults. A provider with no `options.network` and no profile shares the
+  gateway's transport, which caps the connections to a host at none and keeps 16
+  idle; any `options.network` field, even a timeout alone, or a profile gives it
+  a pool of its own for each credential slot, capped at 64 connections to the
+  host, 16 of them idle, and a request past the cap waits in the pool without an
+  error. The benchmark always sets `options.network`, so it measures that pool,
+  sized to each scenario's expected concurrency and recorded in the result
+  (`gateway.derived_limits`), and never the shared transport. A provider takes at
+  most 4,096 connections to a host, so S6 spreads its streams over as many
+  providers as that needs, as an operator would.
 - **S3's key has a cost budget, so it is not servable for up to a minute.** The
   gateway refuses a budget key whose spend Valkey does not know yet, and the
   worker plane installs it once a minute. The scenario waits for that pass.
@@ -351,5 +367,10 @@ how to read the table and the record to fill in for a published run are in
 - **The mock listens on loopback.** A full-rate run puts the generator, the
   gateway and the mock on one host, which the CPU pins keep apart; the roadmap
   also allows a separate host for the mock.
-- **A 100K-token prompt is about 520 KB**, which the gateway's `(len+3)/4`
-  heuristic estimates at about 130K tokens.
+- **A 100K-token prompt is about 520 KB**, which the four-characters rule
+  estimates at about 130K tokens. S3's upstream model is named as an OpenAI model
+  (`gpt-4o-bench`), so the gateway counts the first 32 KiB of a prompt's text with
+  its exact `o200k_base` encoder and charges the rest at the tokens per byte it
+  measured there, which is the work of admission that S3 exists to include. The
+  other scenarios' models, which the gateway cannot name a family for, are charged
+  by the rule, and their prompts are short.

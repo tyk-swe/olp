@@ -18,6 +18,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -592,6 +593,27 @@ func TestMetadataHeadersAppearOnlyWhenTheKeyOptsIn(t *testing.T) {
 	}
 }
 
+// The headers are the one place the gateway itself names a provider, and a key
+// that did not opt in gets none. What an upstream says of itself is not the
+// gateway's to scrub: the message of an upstream rejection is relayed with
+// credential values redacted, whatever the key's policy, and the documentation
+// says so.
+func TestAnUpstreamRejectionIsRelayedWhateverTheKeysPolicy(t *testing.T) {
+	f := newHeaderFixture(t)
+	f.mock.set("a", status(http.StatusBadRequest, `{"error":{"message":"vendor-a rejected the request: model gpt-upstream-secret is overloaded","type":"invalid_request_error"}}`))
+	for _, opted := range []bool{false, true} {
+		resp, body := f.send("openai", f.key(access.KeyPolicy{ResponseMetadata: opted}), false)
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), `"upstream_rejected"`) ||
+			!strings.Contains(string(body), "vendor-a rejected the request: model gpt-upstream-secret is overloaded") {
+			t.Fatalf("opted in %v: status %d body %s, want the upstream's message relayed", opted, resp.StatusCode, body)
+		}
+		// Metadata belongs to the successful responses of a key that opted in.
+		if got := metadataOf(resp); len(got) != 0 {
+			t.Fatalf("opted in %v: the rejection carries %v", opted, got)
+		}
+	}
+}
+
 func TestMetadataStatesTheAttemptsAFailoverMade(t *testing.T) {
 	f := newHeaderFixture(t)
 	route := f.rt.release.Snapshot.Routes[routeSlug]
@@ -817,6 +839,145 @@ func TestOnlyTheKeysReservationAsksForTheAllowance(t *testing.T) {
 			}
 			if seen["key"] != 1 || seen["connection"] != 1 || seen["credential"] != 1 {
 				t.Fatalf("reservations by scope = %v, want one of the key, the connection and the credential", seen)
+			}
+		})
+	}
+}
+
+// keyAsks is what the key's own reservations asked of the limiter: whether each
+// stated the allowance. The reservations of a provider's connection and
+// credential are the ones of other rate keys.
+func (w *window) keyAsks() []bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var asks []bool
+	for rateKey, asked := range w.asked {
+		if strings.Contains(rateKey, "{lookup_") {
+			asks = append(asks, asked...)
+		}
+	}
+	return asks
+}
+
+// TestTheAllowanceIsAskedForOnlyWhereItIsReported holds the key's reservation to
+// asking the rate script for its allowance when the surface the caller speaks has
+// headers to carry it, which are the OpenAI and Anthropic surfaces', and not
+// otherwise: a reply that states one costs a request a dozen allocations to build,
+// and a request on the Gemini, Bedrock or native surface would discard it.
+func TestTheAllowanceIsAskedForOnlyWhereItIsReported(t *testing.T) {
+	policy := access.KeyPolicy{RequestsPerMinute: perMinute(5), TokensPerMinute: perMinute(100_000)}
+	authority := access.Authority{ID: uuid.NewString(), LookupID: "lookup_allowance", Policy: policy}
+	t.Run("at admission", func(t *testing.T) {
+		for _, surface := range []string{"openai", "anthropic", "gemini", "bedrock", "native"} {
+			w := &window{}
+			limiter, err := limits.New(w, "olp:test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			admission := NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, quiet)
+			lease, e := admission.reserveKey(t.Context(), authority, surface, 10, time.Minute)
+			if e != nil || lease == nil {
+				t.Fatalf("%s: lease %v, error %v", surface, lease, e)
+			}
+			want := rateHeadersOf(surface) != nil
+			if asks := w.keyAsks(); len(asks) != 1 || asks[0] != want {
+				t.Errorf("%s: the key's reservation asked for the allowance %v, want %v", surface, asks, want)
+			}
+			if got := lease.RateState().Limited(); got != want {
+				t.Errorf("%s: the lease holds an allowance = %v, want %v", surface, got, want)
+			}
+		}
+	})
+	t.Run("a rejection", func(t *testing.T) {
+		for _, surface := range []string{"openai", "gemini"} {
+			w := &window{}
+			limiter, err := limits.New(w, "olp:test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			admission := NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, quiet)
+			for range 5 {
+				if _, e := admission.reserveKey(t.Context(), authority, surface, 10, time.Minute); e != nil {
+					t.Fatalf("%s: %v", surface, e)
+				}
+			}
+			_, e := admission.reserveKey(t.Context(), authority, surface, 10, time.Minute)
+			if e == nil || e.Status != http.StatusTooManyRequests {
+				t.Fatalf("%s: the sixth request was admitted: %v", surface, e)
+			}
+			if got := e.rate.Limited(); got != (rateHeadersOf(surface) != nil) {
+				t.Errorf("%s: the rejection holds an allowance = %v", surface, got)
+			}
+		}
+	})
+	t.Run("through the gateway", func(t *testing.T) {
+		f := newHeaderFixture(t)
+		for _, tc := range []struct {
+			surface string
+			stream  bool
+		}{{"openai", false}, {"openai", true}, {"anthropic", false}, {"anthropic", true}, {"gemini", false}, {"gemini", true}} {
+			f.window.mu.Lock()
+			f.window.asked = nil
+			f.window.mu.Unlock()
+			resp, body := f.send(tc.surface, f.key(policy), tc.stream)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("%s stream=%v: status %d %s", tc.surface, tc.stream, resp.StatusCode, body)
+			}
+			want := tc.surface != "gemini"
+			if asks := f.window.keyAsks(); len(asks) != 1 || asks[0] != want {
+				t.Errorf("%s stream=%v: the key's reservation asked for the allowance %v, want %v", tc.surface, tc.stream, asks, want)
+			}
+			// What was asked is what the response says.
+			prefix := map[string]string{"openai": "x-ratelimit-", "anthropic": "anthropic-ratelimit-"}[tc.surface]
+			if tc.surface == "gemini" {
+				wantHeaders(t, resp, "x-ratelimit-", nil)
+				wantHeaders(t, resp, "anthropic-ratelimit-", nil)
+			} else if got := metadataOfPrefix(resp, prefix); len(got) != 6 {
+				t.Errorf("%s stream=%v: %d %s headers, want 6: %v", tc.surface, tc.stream, len(got), prefix, got)
+			}
+		}
+	})
+}
+
+// metadataOfPrefix is the headers of a response that start with a prefix.
+func metadataOfPrefix(resp *http.Response, prefix string) map[string]string {
+	got := map[string]string{}
+	for name, values := range resp.Header {
+		if strings.HasPrefix(strings.ToLower(name), prefix) {
+			got[name] = strings.Join(values, ",")
+		}
+	}
+	return got
+}
+
+// A job call on a video has no prompt, and reserves what a call on any other
+// resource does. A key with a token limit refuses a reservation of nothing, as
+// invalid, and the refusal read as an outage, so such a key could create a job and
+// never read it back, list its jobs, download or delete one.
+func TestVideoJobCallsAreAdmittedForAKeyWithATokenLimit(t *testing.T) {
+	policy := access.KeyPolicy{RequestsPerMinute: perMinute(10), TokensPerMinute: perMinute(1_000_000)}
+	for _, family := range []openai.Family{openai.FamilyVideoList, openai.FamilyVideoGet, openai.FamilyVideoContent, openai.FamilyVideoDelete} {
+		t.Run(string(family), func(t *testing.T) {
+			w := &window{}
+			limiter, err := limits.New(w, "olp:test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			s := &Server{Admission: NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, quiet), log: quiet}
+			x := &execution{family: family}
+			_, complete, e := s.admitVideoRequest(t.Context(), x, admissionAuthority(policy))
+			if e != nil {
+				t.Fatalf("a job call was refused for a key with a token limit: %+v", e)
+			}
+			defer complete()
+			if got := w.lastReserved(); got != resourceEstimate {
+				t.Errorf("the call reserved %d tokens, want the %d of a call on a resource", got, resourceEstimate)
+			}
+			// The call reports the key's allowance as every other response does.
+			header := http.Header{}
+			x.responseHeaders(header, false)
+			if header.Get("X-Ratelimit-Limit-Requests") != "10" || header.Get("X-Ratelimit-Limit-Tokens") != "1000000" || header.Get("X-Ratelimit-Remaining-Requests") != "9" {
+				t.Errorf("the response carries %v, want the allowance of the key", header)
 			}
 		})
 	}

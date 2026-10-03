@@ -151,8 +151,9 @@ before users notice.
   `X-OLP-Attempts` (attempts made), `X-OLP-Route-Revision` (the serving route
   revision), `X-OLP-Cost` (the priced cost of a unary response, in the
   installation currency) and `X-OLP-Provider` (the vendor that served the
-  request). Provider identity stays hidden unless the key opts in, preserving
-  the rule that callers address routes, not upstreams.
+  request). The headers name the provider only for a key that opts in,
+  preserving the rule that callers address routes, not upstreams; an upstream's
+  own error message is relayed after credential redaction and is not scrubbed.
 - Headers are written before the body. Streaming responses cannot carry cost,
   which remains available through the request history API.
 

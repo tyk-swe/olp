@@ -116,8 +116,11 @@ with `PATCH /api/v1/api-keys/{id}`, or in the console key form to opt the key
 into the `X-OLP-Attempts`, `X-OLP-Route-Revision`, `X-OLP-Provider` and
 `X-OLP-Cost` response headers described in
 [gateway](gateway.md#gateway-metadata). Callers address routes, not upstreams, so
-provider identity is exposed only to keys that opt in. Rotation keeps the
-setting, and a change takes effect on each gateway's next authority refresh.
+the gateway names the provider that served a request only to keys that opt in. It
+does not scrub what an upstream says of itself: the message of an upstream
+rejection is relayed with credential values redacted, whatever the policy, and
+may name the vendor or the model. Rotation keeps the setting, and a change takes
+effect on each gateway's next authority refresh.
 
 The remaining-allowance headers need no opt-in. A key with a requests-per-minute
 or tokens-per-minute limit receives the

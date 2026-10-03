@@ -150,10 +150,12 @@ func (c *console) signIn(bootstrapToken string) {
 }
 
 // networkTuning is a provider's connection pool, which an operator sizes for
-// the traffic the provider carries. A provider opens at most 64 connections to
-// its host unless told otherwise, keeps 16 of them idle, and accepts at most
-// 4,096 of either: a gateway serving a thousand streams at once needs the
-// limits raised, and more than 4,096 needs more than one provider.
+// the traffic the provider carries. A provider that sets any network option, as
+// every benchmark provider does, opens at most 64 connections to its host unless
+// told otherwise, keeps 16 of them idle, and accepts at most 4,096 of either (a
+// provider that sets none shares the gateway's transport, which caps none): a
+// gateway serving a thousand streams at once needs the limits raised, and more
+// than 4,096 needs more than one provider.
 type networkTuning struct {
 	MaxIdleConns        int `json:"max_idle_conns"`
 	MaxIdleConnsPerHost int `json:"max_idle_conns_per_host"`

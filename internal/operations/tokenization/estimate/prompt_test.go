@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -219,6 +220,30 @@ func TestOnlyAnExactReadingOfTheRequestIsATokenizerCount(t *testing.T) {
 		{"anthropic tool use", openai.FamilyAnthropic, `{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"t","name":"f","input":{"city":"Paris"}}]}]}`, ProvenanceCalibrated},
 		{"gemini function call", openai.FamilyGemini, `{"contents":[{"role":"model","parts":[{"functionCall":{"name":"f","args":{"city":"Paris"}}}]}]}`, ProvenanceCalibrated},
 		{"gemini function response", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"functionResponse":{"name":"f","response":{"output":"22C"}}}]}]}`, ProvenanceCalibrated},
+
+		// What a model reads that is neither plain text nor a part with a flat
+		// charge: a schema its reply must follow, its own reasoning, a document.
+		{"chat structured output", openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema","json_schema":{"name":"o","schema":{"type":"object"}}}}`, ProvenanceCalibrated},
+		{"chat json mode", openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_object"}}`, ProvenanceTokenizer},
+		{"responses structured output", openai.FamilyResponses, `{"model":"m","input":"hi","text":{"format":{"type":"json_schema","name":"o","schema":{"type":"object"}}}}`, ProvenanceCalibrated},
+		{"responses plain text format", openai.FamilyResponses, `{"model":"m","input":"hi","text":{"format":{"type":"text"}}}`, ProvenanceTokenizer},
+		{"responses reasoning item", openai.FamilyResponses, `{"model":"m","input":[{"type":"reasoning","id":"r","summary":[{"type":"summary_text","text":"thought"}],"encrypted_content":"AAAA"}]}`, ProvenanceCalibrated},
+		{"responses reasoning item without a summary", openai.FamilyResponses, `{"model":"m","input":[{"type":"reasoning","id":"r","summary":[],"encrypted_content":"AAAA"}]}`, ProvenanceCalibrated},
+		{"anthropic structured output", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":"hi"}],"output_config":{"format":{"type":"json_schema","schema":{"type":"object"}}}}`, ProvenanceCalibrated},
+		{"anthropic output format", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":"hi"}],"output_format":{"type":"json_schema","schema":{"type":"object"}}}`, ProvenanceCalibrated},
+		{"anthropic effort", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":"hi"}],"output_config":{"effort":"high"}}`, ProvenanceTokenizer},
+		{"anthropic thinking", openai.FamilyAnthropic, `{"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"hmm","signature":"s"}]}]}`, ProvenanceCalibrated},
+		{"anthropic redacted thinking", openai.FamilyAnthropic, `{"messages":[{"role":"assistant","content":[{"type":"redacted_thinking","data":"AAAA"}]}]}`, ProvenanceCalibrated},
+		{"anthropic pdf document", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"AAAA"}}]}]}`, ProvenanceCalibrated},
+		{"anthropic text document", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"text","media_type":"text/plain","data":"the text"}}]}]}`, ProvenanceCalibrated},
+		{"anthropic document of text blocks", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"content","content":[{"type":"text","text":"the text"}]}}]}]}`, ProvenanceCalibrated},
+		{"gemini response schema", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json","responseSchema":{"type":"OBJECT"}}}`, ProvenanceCalibrated},
+		{"gemini response json schema", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json","responseJsonSchema":{"type":"object"}}}`, ProvenanceCalibrated},
+		{"gemini json mode", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json","maxOutputTokens":9}}`, ProvenanceTokenizer},
+		{"gemini count response schema", openai.FamilyGeminiCount, `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseSchema":{"type":"OBJECT"}}}}`, ProvenanceCalibrated},
+		{"gemini count tools", openai.FamilyGeminiCount, `{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"tools":[{"functionDeclarations":[{"name":"f"}]}]}}`, ProvenanceCalibrated},
+		{"bedrock tool catalogue", openai.FamilyBedrock, `{"messages":[{"role":"user","content":[{"text":"hi"}]}],"toolConfig":{"tools":[{"toolSpec":{"name":"f","inputSchema":{"json":{"type":"object"}}}}]}}`, ProvenanceCalibrated},
+		{"bedrock structured output", openai.FamilyBedrock, `{"messages":[{"role":"user","content":[{"text":"hi"}]}],"outputConfig":{"textFormat":{"type":"json_schema","structure":{"jsonSchema":{"name":"o","schema":"{\"type\":\"object\"}"}}}}}`, ProvenanceCalibrated},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var request *openai.Request
@@ -651,6 +676,253 @@ func TestWalkerReadsEveryDialectPrompt(t *testing.T) {
 			e := Walk(native(t, tc.family, tc.body)).Estimate(Counter{}, nil)
 			if e.Input != max(tc.want, 1) {
 				t.Fatalf("input %d, want %d", e.Input, tc.want)
+			}
+		})
+	}
+}
+
+// TestWalkerReadsTheStructuredOutputsReasoningAndDocumentsOfEveryDialect holds
+// what the walker charges for the members of a prompt a model reads that are not
+// messages: the schema a reply must follow, a model's own reasoning, and a
+// document. A request that carried one used to be charged for its messages alone,
+// as if the member were not there.
+func TestWalkerReadsTheStructuredOutputsReasoningAndDocumentsOfEveryDialect(t *testing.T) {
+	const schema = `{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`
+	schemaTokens := HeuristicTokens(schema)
+	for _, tc := range []struct {
+		name   string
+		family openai.Family
+		body   string
+		want   int64 // heuristic tokens
+	}{
+		{"chat response format", openai.FamilyChat,
+			`{"model":"m","messages":[{"role":"user","content":"abcd"}],"response_format":{"type":"json_schema","json_schema":{"name":"o","schema":` + schema + `}}}`,
+			1 + schemaTokens},
+		{"chat json mode", openai.FamilyChat,
+			`{"model":"m","messages":[{"role":"user","content":"abcd"}],"response_format":{"type":"json_object"}}`, 1},
+		{"responses text format", openai.FamilyResponses,
+			`{"model":"m","input":"abcd","text":{"format":{"type":"json_schema","name":"o","schema":` + schema + `}}}`,
+			1 + schemaTokens},
+		{"responses reasoning summary", openai.FamilyResponses,
+			`{"model":"m","input":[{"type":"reasoning","id":"r","summary":[{"type":"summary_text","text":"abcdefgh"},{"type":"summary_text","text":"abcd"}],"encrypted_content":"` + strings.Repeat("A", 4000) + `"}]}`,
+			2 + 1},
+		{"responses reasoning text", openai.FamilyResponses,
+			`{"model":"m","input":[{"type":"reasoning","id":"r","summary":[],"content":[{"type":"reasoning_text","text":"abcdefgh"}]}]}`, 2},
+		{"anthropic output format", openai.FamilyAnthropic,
+			`{"messages":[{"role":"user","content":"abcd"}],"output_config":{"effort":"high","format":{"type":"json_schema","schema":` + schema + `}}}`,
+			1 + schemaTokens},
+		{"anthropic legacy output format", openai.FamilyAnthropic,
+			`{"messages":[{"role":"user","content":"abcd"}],"output_format":{"type":"json_schema","schema":` + schema + `}}`,
+			1 + schemaTokens},
+		{"anthropic thinking", openai.FamilyAnthropic,
+			`{"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"abcdefgh","signature":"` + strings.Repeat("s", 400) + `"},{"type":"redacted_thinking","data":"` + strings.Repeat("A", 400) + `"}]}]}`, 2},
+		{"anthropic pdf document", openai.FamilyAnthropic,
+			`{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` + strings.Repeat("A", 20_000) + `"}}]}]}`, MediaTokens},
+		{"anthropic document by url", openai.FamilyAnthropic,
+			`{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"url","url":"https://example.com/a.pdf"}}]}]}`, MediaTokens},
+		{"anthropic text document", openai.FamilyAnthropic,
+			`{"messages":[{"role":"user","content":[{"type":"document","title":"t","source":{"type":"text","media_type":"text/plain","data":"abcdefgh"}}]}]}`, 2},
+		{"anthropic document of content blocks", openai.FamilyAnthropic,
+			`{"messages":[{"role":"user","content":[{"type":"document","source":{"type":"content","content":[{"type":"text","text":"abcd"},{"type":"image","source":{"type":"base64","data":"AAAA"}}]}}]}]}`,
+			1 + ImageTokens},
+		{"gemini response schema", openai.FamilyGemini,
+			`{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"generationConfig":{"maxOutputTokens":9,"responseSchema":` + schema + `}}`, 1 + schemaTokens},
+		{"gemini response json schema", openai.FamilyGemini,
+			`{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"generationConfig":{"responseJsonSchema":` + schema + `}}`, 1 + schemaTokens},
+		{"gemini count of a request with a schema and tools", openai.FamilyGeminiCount,
+			`{"generateContentRequest":{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"generationConfig":{"responseSchema":` + schema + `},"tools":[{"functionDeclarations":[{"name":"f","parameters":` + schema + `}]}]}}`,
+			1 + schemaTokens + HeuristicTokens(`[{"functionDeclarations":[{"name":"f","parameters":`+schema+`}]}]`)},
+		{"bedrock tool catalogue", openai.FamilyBedrock,
+			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}],"toolConfig":{"tools":[{"toolSpec":{"name":"f","inputSchema":{"json":` + schema + `}}}]}}`,
+			1 + HeuristicTokens(`{"tools":[{"toolSpec":{"name":"f","inputSchema":{"json":`+schema+`}}}]}`)},
+		{"bedrock structured output", openai.FamilyBedrock,
+			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}],"outputConfig":{"textFormat":{"type":"json_schema","structure":{"jsonSchema":{"name":"o","schema":` + strconv.Quote(schema) + `}}}}}`,
+			1 + schemaTokens},
+		// Gemini's toolConfig only chooses among the tools the request holds.
+		{"gemini tool config", openai.FamilyGemini,
+			`{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"toolConfig":{"functionCallingConfig":{"mode":"ANY","allowedFunctionNames":["get_weather"]}}}`, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var request *openai.Request
+			if tc.family == openai.FamilyChat || tc.family == openai.FamilyResponses {
+				request = mustParse(t, tc.family, tc.body)
+			} else {
+				request = native(t, tc.family, tc.body)
+			}
+			if e := Walk(request).Estimate(Counter{}, nil); e.Input != max(tc.want, 1) {
+				t.Fatalf("input %d, want %d", e.Input, tc.want)
+			}
+		})
+	}
+}
+
+// A member a request does not carry costs a walk nothing, whatever the dialect
+// looks for: nearly every request has no structured output, no reasoning and no
+// document, and a feature a request does not use allocates nothing for it.
+func TestWalkingMembersThatAreNotThereAllocatesNothing(t *testing.T) {
+	absent := func(string) json.RawMessage { return nil }
+	for _, family := range walkerFamilies {
+		var in input
+		w := walker{&in}
+		if got := testing.AllocsPerRun(100, func() {
+			w.structured(family, absent)
+			w.reasoning(nil)
+			w.document(nil)
+			w.dialect(nil)
+			w.generationConfig(nil)
+		}); got != 0 {
+			t.Errorf("%s: looking for what is not there allocates %v times", family, got)
+		}
+		if got := testing.AllocsPerRun(100, func() { walkInput(&in, family, absent) }); got != 0 {
+			t.Errorf("%s: walking a request with no members allocates %v times", family, got)
+		}
+	}
+}
+
+// A provider that defaults the schema of a structured output, or a Bedrock
+// tool catalogue, supplies prompt text the caller left out, as one that defaults
+// the tools does, and the member the caller sent is not added to.
+func TestDefaultedStructuredOutputsAndCataloguesAreCounted(t *testing.T) {
+	const schema = `{"type":"object","properties":{"city":{"type":"string"}}}`
+	for _, tc := range []struct {
+		name      string
+		family    openai.Family
+		body, own string // the request, and the same request with a member of its own
+		defaults  map[string]json.RawMessage
+	}{
+		{"chat", openai.FamilyChat,
+			`{"model":"m","messages":[{"role":"user","content":"abcd"}]}`,
+			`{"model":"m","messages":[{"role":"user","content":"abcd"}],"response_format":{"type":"text"}}`,
+			map[string]json.RawMessage{"response_format": json.RawMessage(`{"type":"json_schema","json_schema":{"name":"o","schema":` + schema + `}}`)}},
+		{"responses", openai.FamilyResponses,
+			`{"model":"m","input":"abcd"}`,
+			`{"model":"m","input":"abcd","text":{"format":{"type":"text"}}}`,
+			map[string]json.RawMessage{"text": json.RawMessage(`{"format":{"type":"json_schema","name":"o","schema":` + schema + `}}`)}},
+		{"anthropic output config", openai.FamilyAnthropic,
+			`{"messages":[{"role":"user","content":"abcd"}]}`,
+			`{"messages":[{"role":"user","content":"abcd"}],"output_config":{"effort":"high"}}`,
+			map[string]json.RawMessage{"output_config": json.RawMessage(`{"format":{"type":"json_schema","schema":` + schema + `}}`)}},
+		{"anthropic output format", openai.FamilyAnthropic,
+			`{"messages":[{"role":"user","content":"abcd"}]}`,
+			`{"messages":[{"role":"user","content":"abcd"}],"output_format":{"type":"text"}}`,
+			map[string]json.RawMessage{"output_format": json.RawMessage(`{"type":"json_schema","schema":` + schema + `}`)}},
+		// The encoder merges a default generation config into the caller's, so a
+		// caller's own response schema is what shields the provider's.
+		{"gemini", openai.FamilyGemini,
+			`{"contents":[{"role":"user","parts":[{"text":"abcd"}]}]}`,
+			`{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"generationConfig":{"maxOutputTokens":9,"responseSchema":{"type":"OBJECT"}}}`,
+			map[string]json.RawMessage{"generationConfig": json.RawMessage(`{"responseSchema":` + schema + `}`)}},
+		{"bedrock tool catalogue", openai.FamilyBedrock,
+			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}]}`,
+			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}],"toolConfig":{}}`,
+			map[string]json.RawMessage{"toolConfig": json.RawMessage(`{"tools":[{"toolSpec":{"name":"f","inputSchema":{"json":` + schema + `}}}]}`)}},
+		{"bedrock structured output", openai.FamilyBedrock,
+			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}]}`,
+			`{"messages":[{"role":"user","content":[{"text":"abcd"}]}],"outputConfig":{}}`,
+			map[string]json.RawMessage{"outputConfig": json.RawMessage(`{"textFormat":{"type":"json_schema","structure":{"jsonSchema":{"name":"o","schema":` + strconv.Quote(schema) + `}}}}`)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			walk := func(body string) *Prompt {
+				if tc.family == openai.FamilyChat || tc.family == openai.FamilyResponses {
+					return Walk(mustParse(t, tc.family, body))
+				}
+				return Walk(native(t, tc.family, body))
+			}
+			request := walk(tc.body)
+			plain, with := request.Estimate(Counter{}, nil), request.Estimate(Counter{}, tc.defaults)
+			if added := with.Input - plain.Input; added < HeuristicTokens(schema) {
+				t.Fatalf("a default that supplies a schema adds %d tokens to the %d of the request, which is less than the schema", added, plain.Input)
+			}
+			own := walk(tc.own)
+			if got, want := own.Estimate(Counter{}, tc.defaults).Input, own.Estimate(Counter{}, nil).Input; got != want {
+				t.Fatalf("a default was counted beside the member the caller sent: %d, want %d", got, want)
+			}
+		})
+	}
+}
+
+// A default generation config is merged into the one the caller sent member by
+// member, as the encoder does, so a caller that sent only a bound to its output
+// still has the provider's response schema sent, and counted. The count is that
+// of the request the provider is sent.
+func TestDefaultedGenerationConfigIsMergedIntoTheCallers(t *testing.T) {
+	const (
+		schema = `{"type":"object","properties":{"city":{"type":"string"}}}`
+		other  = `{"type":"object","properties":{"country":{"type":"string"},"population":{"type":"integer"}}}`
+		prefix = `{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"generationConfig":`
+	)
+	for _, tc := range []struct {
+		name, config, defaults string
+		sent                   string // the generation config the provider is sent
+	}{
+		{"a caller that sent a bound", `{"maxOutputTokens":9}`, `{"responseMimeType":"application/json","responseSchema":` + schema + `}`,
+			`{"maxOutputTokens":9,"responseMimeType":"application/json","responseSchema":` + schema + `}`},
+		{"a caller that sent no config", ``, `{"responseSchema":` + schema + `}`, `{"responseSchema":` + schema + `}`},
+		{"a caller that sent an empty config", `{}`, `{"responseJsonSchema":` + schema + `}`, `{"responseJsonSchema":` + schema + `}`},
+		{"a caller's own schema", `{"responseSchema":{"type":"OBJECT"}}`, `{"responseSchema":` + other + `}`, `{"responseSchema":{"type":"OBJECT"}}`},
+		{"a schema in the other field", `{"responseJsonSchema":` + schema + `}`, `{"responseSchema":` + other + `}`,
+			`{"responseJsonSchema":` + schema + `,"responseSchema":` + other + `}`},
+		{"a schema named with an escape", `{"maxOutputTokens":9}`, `{"responseSch\u0065ma":` + schema + `}`, `{"maxOutputTokens":9,"responseSchema":` + schema + `}`},
+		{"a caller that opted out of the config", `null`, `{"responseSchema":` + schema + `}`, `null`},
+		{"a config that is not an object", `"none"`, `{"responseSchema":` + schema + `}`, `"none"`},
+		{"a default that holds no schema", `{"maxOutputTokens":9}`, `{"temperature":0.2,"topK":4}`, `{"maxOutputTokens":9,"temperature":0.2,"topK":4}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, sent := `{"contents":[{"role":"user","parts":[{"text":"abcd"}]}]`, prefix+tc.sent+`}`
+			if tc.config != "" {
+				body += `,"generationConfig":` + tc.config
+			}
+			request := Walk(native(t, openai.FamilyGemini, body+`}`))
+			defaults := map[string]json.RawMessage{"generationConfig": json.RawMessage(tc.defaults)}
+			got := request.Estimate(ForModel("gpt-4o"), defaults)
+			want := Walk(native(t, openai.FamilyGemini, sent)).Estimate(ForModel("gpt-4o"), nil)
+			if got.Input != want.Input || got.Provenance != want.Provenance {
+				t.Fatalf("the estimate is %d tokens, %s; the request the provider is sent is %d, %s", got.Input, got.Provenance, want.Input, want.Provenance)
+			}
+		})
+	}
+}
+
+// A provider that defaults only what is not prompt text, which is nearly every
+// default of a field the walker reads a part of, costs a request no walk.
+func TestDefaultsThatHoldNoPromptTextAreNotWalked(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		family   openai.Family
+		body     string
+		defaults string
+	}{
+		{"gemini bounds", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"abcd"}]}],"generationConfig":{"maxOutputTokens":9}}`,
+			`{"generationConfig":{"maxOutputTokens":512,"temperature":0.2,"responseMimeType":"application/json"}}`},
+		{"gemini sampling of a request with no config", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"abcd"}]}]}`,
+			`{"generationConfig":{"temperature":0.2}}`},
+		{"gemini function calling mode", openai.FamilyGemini, `{"contents":[{"role":"user","parts":[{"text":"abcd"}]}]}`,
+			`{"toolConfig":{"functionCallingConfig":{"mode":"ANY"}},"generationConfig":{"temperature":0.2}}`},
+		{"anthropic effort", openai.FamilyAnthropic, `{"messages":[{"role":"user","content":"abcd"}]}`,
+			`{"output_config":{"effort":"high"},"max_tokens":512}`},
+		{"chat json mode", openai.FamilyChat, `{"model":"m","messages":[{"role":"user","content":"abcd"}]}`,
+			`{"response_format":{"type":"json_object"}}`},
+		{"responses plain text", openai.FamilyResponses, `{"model":"m","input":"abcd"}`,
+			`{"text":{"verbosity":"low"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var request *openai.Request
+			if tc.family == openai.FamilyChat || tc.family == openai.FamilyResponses {
+				request = mustParse(t, tc.family, tc.body)
+			} else {
+				request = native(t, tc.family, tc.body)
+			}
+			var defaults map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(tc.defaults), &defaults); err != nil {
+				t.Fatal(err)
+			}
+			prompt := Walk(request)
+			if got := testing.AllocsPerRun(100, func() {
+				if in, ok := prompt.defaulted(defaults); ok {
+					t.Fatalf("defaults that hold no prompt text supplied %+v", in)
+				}
+			}); got != 0 {
+				t.Errorf("looking at defaults that hold no prompt text allocates %v times", got)
 			}
 		})
 	}

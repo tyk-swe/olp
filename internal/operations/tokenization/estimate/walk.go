@@ -166,7 +166,26 @@ type walker struct {
 
 // promptFields are the fields of a request that walkInput reads, in any
 // dialect.
-var promptFields = []string{"messages", "input", "instructions", "system", "contents", "systemInstruction", "generateContentRequest", "tools"}
+var promptFields = []string{
+	"messages", "input", "instructions", "system", "contents", "systemInstruction", "generateContentRequest", "tools",
+	"toolConfig", "response_format", "text", "output_config", "output_format", "generationConfig", "outputConfig",
+}
+
+// promptMembers are the members the walker reads of the fields of promptFields
+// that it reads only part of. An object that names none of them has no prompt
+// text, whatever else it sets.
+var promptMembers = map[string][]string{
+	"generationConfig": responseSchemas,
+	"response_format":  {"json_schema"},
+	"text":             {"format"},
+	"output_config":    {"format"},
+	"output_format":    {"schema"},
+	"outputConfig":     {"textFormat"},
+}
+
+// responseSchemas are the members of a Gemini generation config that carry the
+// schema a reply must follow.
+var responseSchemas = []string{"responseSchema", "responseJsonSchema"}
 
 // walkInput reads the prompt fields of a request of the given family, asking
 // field for each one by name.
@@ -188,9 +207,51 @@ func walkInput(in *input, family openai.Family, field func(string) json.RawMessa
 		w.dialectSystem(field("systemInstruction"))
 		w.dialectRequest(field("generateContentRequest"))
 		w.schema(field("tools"))
+		if family.Surface() == "bedrock" {
+			// Converse holds its tool catalogue beside the conversation, where
+			// the other dialects hold it in tools; Gemini's toolConfig only
+			// chooses among the tools it already holds.
+			w.schema(field("toolConfig"))
+		}
+		w.structured(family, field)
 		return
 	}
 	w.tools(field("tools"))
+	w.structured(family, field)
+}
+
+// structured walks the schema a request asks the reply to follow: a model reads
+// it as prompt text, as it reads a tool's. Each dialect has its own place for
+// one, and a request without one costs nothing to look.
+func (w walker) structured(family openai.Family, field func(string) json.RawMessage) {
+	switch family {
+	case openai.FamilyChat:
+		w.schema(jsonObject(jsonObject(field("response_format"))["json_schema"])["schema"])
+	case openai.FamilyResponses, openai.FamilyInputTokens:
+		w.schema(jsonObject(jsonObject(field("text"))["format"])["schema"])
+	}
+	switch family.Surface() {
+	case "anthropic":
+		w.schema(jsonObject(jsonObject(field("output_config"))["format"])["schema"])
+		w.schema(jsonObject(field("output_format"))["schema"])
+	case "gemini":
+		w.generationConfig(field("generationConfig"))
+	case "bedrock":
+		// Converse names the schema as a string of JSON, which is its text.
+		schema := jsonObject(jsonObject(jsonObject(jsonObject(field("outputConfig"))["textFormat"])["structure"])["jsonSchema"])["schema"]
+		if !w.toolText(schema) {
+			w.schema(schema)
+		}
+	}
+}
+
+// generationConfig walks the response schema of a Gemini request, in either of
+// the fields that carry one.
+func (w walker) generationConfig(raw json.RawMessage) {
+	config := jsonObject(raw)
+	for _, member := range responseSchemas {
+		w.schema(config[member])
+	}
 }
 
 // text adds a JSON string as one segment, reporting whether the value was a
@@ -232,6 +293,9 @@ func (w walker) items(raw json.RawMessage) {
 			continue
 		}
 		w.message(item)
+		if string(item["type"]) == `"reasoning"` {
+			w.reasoning(item)
+		}
 		// A responses tool result carries what it returned in `output`.
 		w.content(item["content"])
 		w.content(item["output"])
@@ -251,6 +315,18 @@ func (w walker) items(raw json.RawMessage) {
 			w.toolText(call["arguments"])
 		}
 	}
+}
+
+// reasoning walks what a reasoning item of a responses conversation says that a
+// model reads again: the summary it wrote. Its reasoning text is a content part,
+// read with the item's content. What else it carries, the encrypted content, is
+// the rest of the reasoning in a form no count reads, and is charged nothing, so
+// the count is a guess.
+func (w walker) reasoning(item map[string]json.RawMessage) {
+	for _, raw := range jsonArray(item["summary"]) {
+		w.toolText(jsonObject(raw)["text"])
+	}
+	w.in.approx = true
 }
 
 // message records the framing of one message: it exists, it has a role, and
@@ -400,6 +476,8 @@ func (w walker) dialectSystem(raw json.RawMessage) {
 func (w walker) dialectRequest(raw json.RawMessage) {
 	w.dialect(raw)
 	inner := jsonObject(raw)
+	w.schema(inner["tools"])
+	w.generationConfig(inner["generationConfig"])
 	for _, raw := range jsonArray(inner["contents"]) {
 		if item := jsonObject(raw); item != nil {
 			w.in.messages++
@@ -417,7 +495,7 @@ func (w walker) dialectRequest(raw json.RawMessage) {
 // dialect charges native content the same text and media units as OpenAI's.
 // Blob bytes are never mistaken for text tokens.
 func (w walker) dialect(raw json.RawMessage) {
-	if w.text(raw) {
+	if len(raw) == 0 || w.text(raw) {
 		return
 	}
 	var items []json.RawMessage
@@ -435,6 +513,20 @@ func (w walker) dialect(raw json.RawMessage) {
 		w.in.addMedia(ImageTokens)
 		return
 	}
+	switch string(f["type"]) {
+	case `"thinking"`:
+		// The text the model reasoned in, which it reads again in a tool loop.
+		w.toolText(f["thinking"])
+		w.in.approx = true
+		return
+	case `"redacted_thinking"`:
+		// Its reasoning, encrypted: nothing a count can read.
+		w.in.approx = true
+		return
+	case `"document"`:
+		w.document(f)
+		return
+	}
 	// A tool call or its result, whichever keys carry its text.
 	if kind := string(f["type"]); kind == `"tool_use"` || kind == `"tool_result"` {
 		w.in.approx = true
@@ -448,6 +540,23 @@ func (w walker) dialect(raw json.RawMessage) {
 			w.dialect(value)
 		}
 	}
+}
+
+// document walks an Anthropic document block: the text of one given as text, or
+// as content blocks, and for any other source, a PDF or a file as base64 or a
+// URL, the flat charge of a media part, whatever the bytes it carries.
+func (w walker) document(block map[string]json.RawMessage) {
+	source := jsonObject(block["source"])
+	switch string(source["type"]) {
+	case `"text"`:
+		w.toolText(source["data"])
+	case `"content"`:
+		w.dialect(source["content"])
+	default:
+		w.in.addMedia(MediaTokens)
+		return
+	}
+	w.in.approx = true
 }
 
 // outputBounds reads how much reply a request allows: the bound it named for
@@ -508,8 +617,13 @@ func fieldOf(request *openai.Request, defaults map[string]json.RawMessage, name 
 
 // textOf reads a JSON string, reporting whether the value was one.
 func textOf(raw json.RawMessage) (string, bool) {
+	// What is not there is answered before the variable that would hold it is
+	// declared: one that is decoded into is allocated whether or not it is.
+	if len(raw) == 0 {
+		return "", false
+	}
 	var text string
-	if len(raw) == 0 || json.Unmarshal(raw, &text) != nil {
+	if json.Unmarshal(raw, &text) != nil {
 		return "", false
 	}
 	return text, true
@@ -518,16 +632,22 @@ func textOf(raw json.RawMessage) (string, bool) {
 // jsonArray and jsonObject decode a value of the shape the estimate expects,
 // and nothing at all for any other shape.
 func jsonArray(raw json.RawMessage) []json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
 	var items []json.RawMessage
-	if len(raw) == 0 || json.Unmarshal(raw, &items) != nil {
+	if json.Unmarshal(raw, &items) != nil {
 		return nil
 	}
 	return items
 }
 
 func jsonObject(raw json.RawMessage) map[string]json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
 	var fields map[string]json.RawMessage
-	if len(raw) == 0 || json.Unmarshal(raw, &fields) != nil {
+	if json.Unmarshal(raw, &fields) != nil {
 		return nil
 	}
 	return fields
@@ -535,8 +655,11 @@ func jsonObject(raw json.RawMessage) map[string]json.RawMessage {
 
 // integerValue distinguishes null from an explicit integer.
 func integerValue(raw json.RawMessage) (int64, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
 	var value *int64
-	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil || value == nil {
+	if json.Unmarshal(raw, &value) != nil || value == nil {
 		return 0, false
 	}
 	return *value, true

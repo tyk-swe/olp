@@ -139,8 +139,13 @@ hands it the caller's own request: on a strict route through the
 `anthropic-messages` profile, and on a transformed route to a provider that
 takes it, an Anthropic provider or one whose profile declares the header, as the
 Vertex AI hosting of Claude does. A request translated from another dialect
-carries none, and neither does Bedrock InvokeModel. A header longer than 2048
-bytes, or not a valid header value, is refused wherever it could be forwarded. The
+carries none, and neither does Bedrock InvokeModel. A provider whose profile
+publishes `Anthropic-Beta` among its semantic headers is sent its own betas and
+the caller's, each once, since the caller's fields need theirs; a strict route
+refuses a caller's list that differs from the published one with
+`semantic_header_conflict`, because its profile binds one value. A header not a
+valid header value, longer than 2048 bytes, or longer than that once joined with
+a provider's published betas, is refused wherever it could be forwarded. The
 Anthropic SDKs add `?beta=true` to the beta namespace's calls; a strict route
 consumes it, since it selects no behavior, and refuses any other query setting
 the profile does not declare. See
@@ -257,6 +262,18 @@ rather than guessed. These checks live in the
 [connector capability rules](../internal/connectors/capabilities.go) enforce
 unary token counting and refuse asynchronous generation. Preserved counting
 requests are validated after model rewriting as well.
+
+Gemini takes a schema in two kinds of field. `parameters` and `responseSchema`
+take an OpenAPI subset and refuse any member outside it, which OpenAI and
+Anthropic clients routinely send (`$schema`, `additionalProperties`, `$ref`,
+`const`, `oneOf`, a `type` that is a list, an `enum` of anything but strings);
+`parametersJsonSchema` and `responseJsonSchema` take JSON Schema as it is, as
+Google's own SDKs send it. A translated request puts a tool or response schema
+in the subset field when every member of it is in the subset, so such a schema
+reaches Gemini as it always did, and in the JSON Schema field when any is not,
+so the schema reaches the model whole and is never rewritten or trimmed. The other direction rewrites only what
+the two dialects spell differently: a Gemini schema's capital type names
+(`OBJECT`, `STRING`) become the lower-case names of JSON Schema.
 
 Gemini reports a `STOP` finish reason even when a candidate contains only
 function calls. The gateway corrects that to a tool-call finish reason so agent

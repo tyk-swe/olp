@@ -292,7 +292,7 @@ func encodeGeminiGeneration(c *Generation, model string, count bool) (Object, er
 				return nil, e
 			}
 			config["responseMimeType"] = raw("application/json")
-			config["responseSchema"] = schema["schema"]
+			config[geminiSchemaField(schema["schema"], "responseSchema", "responseJsonSchema")] = schema["schema"]
 		default:
 			return nil, unsupported("response_format")
 		}
@@ -305,7 +305,7 @@ func encodeGeminiGeneration(c *Generation, model string, count bool) (Object, er
 		for _, t := range c.Tools {
 			tool := Object{"name": raw(t.Name), "description": raw(t.Description)}
 			if present(t.Schema) {
-				tool["parameters"] = t.Schema
+				tool[geminiSchemaField(t.Schema, "parameters", "parametersJsonSchema")] = t.Schema
 			}
 			tools = append(tools, tool)
 		}

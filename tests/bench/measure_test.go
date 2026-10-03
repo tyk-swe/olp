@@ -385,37 +385,78 @@ type drainResult struct {
 	Settled bool    `json:"settled"`
 	Seconds float64 `json:"waited_seconds"`
 	Reason  string  `json:"reason"`
+	// Backlog is how many events were still to arrive when the load ended, and
+	// EventsPerSecond the pace they arrived at while the wait lasted: the rate
+	// the metadata pipeline ingests at when it has nothing else to do. A
+	// pipeline that ingests more slowly than the load produces events is late,
+	// not lossy, and these say by how much.
+	Backlog         int64   `json:"backlog_events"`
+	EventsPerSecond float64 `json:"events_per_second"`
 }
 
-// awaitDrain waits, with the process alive, for metadata to reach PostgreSQL.
-// The gateway's pipeline gauges come from a snapshot refreshed every fifteen
-// seconds, so a quiet gauge counts only when its snapshot was taken after the
-// last delivery.
-func awaitDrain(t *testing.T, g *gatewayProcess, db *dbHandle, keyID string, want int64, limit time.Duration) (drainResult, int64) {
+// drainProgress follows delivery during the wait for request metadata. The wait
+// is over when delivery stops, not at a fixed time: one pipeline consumer
+// persists an event at a time, so at the rates of S1 to S3 the events outlast
+// the load by minutes, and a wait that ended at a fixed time would score every
+// event still queued as missing, a run that was late as one that lost events.
+type drainProgress struct {
+	start, lastChange time.Time
+	delivered         int64
+	stall             time.Duration
+}
+
+func newDrainProgress(now time.Time, delivered int64, stall time.Duration) *drainProgress {
+	return &drainProgress{start: now, lastChange: now, delivered: delivered, stall: stall}
+}
+
+// observe records how many events have been delivered at now.
+func (p *drainProgress) observe(now time.Time, delivered int64) {
+	if delivered != p.delivered {
+		p.delivered, p.lastChange = delivered, now
+	}
+}
+
+// stalled says nothing has been delivered for the stall.
+func (p *drainProgress) stalled(now time.Time) bool { return now.Sub(p.lastChange) > p.stall }
+
+// awaitDrain waits, with the process alive, for metadata to reach PostgreSQL, for
+// as long as it keeps arriving: it gives up when stall passes with nothing new
+// delivered. The gateway's pipeline gauges come from a snapshot refreshed every
+// fifteen seconds, so a quiet gauge counts only when its snapshot was taken after
+// the last delivery.
+func awaitDrain(t *testing.T, g *gatewayProcess, db *dbHandle, keyID string, want int64, stall time.Duration) (drainResult, int64) {
 	t.Helper()
+	first, err := db.delivered(t.Context(), keyID)
+	if err != nil {
+		t.Fatalf("count delivered request metadata: %v", err)
+	}
 	start := time.Now()
-	deadline := start.Add(limit)
-	var delivered int64
-	lastChange := start
+	progress := newDrainProgress(start, first, stall)
+	result := func(settled bool, reason string) (drainResult, int64) {
+		waited := time.Since(start).Seconds()
+		out := drainResult{Settled: settled, Seconds: waited, Reason: reason, Backlog: max(0, want-first)}
+		if waited > 0 {
+			out.EventsPerSecond = float64(progress.delivered-first) / waited
+		}
+		return out, progress.delivered
+	}
 	for {
 		n, err := db.delivered(t.Context(), keyID)
 		if err != nil {
 			t.Fatalf("count delivered request metadata: %v", err)
 		}
-		if n != delivered {
-			delivered, lastChange = n, time.Now()
-		}
-		if delivered >= want {
-			return drainResult{Settled: true, Seconds: time.Since(start).Seconds(), Reason: "every admitted request has metadata"}, delivered
+		progress.observe(time.Now(), n)
+		if progress.delivered >= want {
+			return result(true, "every admitted request has metadata")
 		}
 		if m, err := g.tryScrape(); err == nil {
 			quiet := m[seriesEventsPending] == 0 && m[seriesConsumerLag] == 0 && m[seriesConsumerPending] == 0
-			if quiet && snapshotAfter(m, time.Now(), lastChange) {
-				return drainResult{Settled: true, Seconds: time.Since(start).Seconds(), Reason: "the metadata pipeline went quiet with requests still missing"}, delivered
+			if quiet && snapshotAfter(m, time.Now(), progress.lastChange) {
+				return result(true, "the metadata pipeline went quiet with requests still missing")
 			}
 		}
-		if time.Now().After(deadline) {
-			return drainResult{Seconds: time.Since(start).Seconds(), Reason: fmt.Sprintf("still %d short after %s", want-delivered, limit)}, delivered
+		if progress.stalled(time.Now()) {
+			return result(false, fmt.Sprintf("still %d short, and nothing arrived for %s", want-progress.delivered, stall))
 		}
 		time.Sleep(500 * time.Millisecond)
 	}

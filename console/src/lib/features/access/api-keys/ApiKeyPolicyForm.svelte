@@ -278,8 +278,8 @@
       >
       <p class="section-help">
         Adds X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost
-        to inference responses. Provider identity is exposed only with this
-        opt-in.
+        to inference responses. The gateway names the serving provider only with
+        this opt-in; an upstream's own error message is relayed as it is.
       </p>
     </fieldset>
     <fieldset class="checks routes">

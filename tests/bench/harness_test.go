@@ -8,13 +8,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/tests/bench/loadgen"
 )
 
@@ -255,6 +258,99 @@ func TestHarnessPinsAndRestoresTheLoadGenerator(t *testing.T) {
 	}
 	if after.CPUsAllowed != before.CPUsAllowed {
 		t.Errorf("the mask was %s before and %s after the scenario: the next one would inherit it", before.CPUsAllowed, after.CPUsAllowed)
+	}
+}
+
+// TestHarnessS3IsTheScenarioOfTheExactTokenizer holds S3 to the model the gateway
+// counts a prompt of 50K to 100K tokens for with its exact encoder. The other
+// scenarios' models are of no family the gateway can name and are charged four
+// characters to a token, so a scenario that kept one of those would leave the
+// estimator out of the measurement it exists to include.
+func TestHarnessS3IsTheScenarioOfTheExactTokenizer(t *testing.T) {
+	p := s3.plan(settings{Scale: 1, Duration: time.Minute, Warmup: time.Second})
+	if len(p.Models) != 1 || p.Baseline != p.Models[0] {
+		t.Fatalf("S3 has one upstream model, which its baseline calls too: %+v", p)
+	}
+	if family := estimate.FamilyOf(p.Models[0]); family != estimate.FamilyOpenAIO200k {
+		t.Errorf("S3's upstream model %q is of the %q family: the gateway would not tokenize its prompts", p.Models[0], family)
+	}
+}
+
+// deployments is the model each deployment of a LiteLLM configuration calls, by
+// the name a client asks for, in the order the file lists them.
+func deployments(t *testing.T, file string) map[string][]string {
+	t.Helper()
+	config, err := os.ReadFile(filepath.Join("..", "..", "deploy", "litellm", file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string][]string{}
+	for _, m := range regexp.MustCompile(`(?m)^  - model_name: (\S+)\n    litellm_params:\n      model: openai/(\S+)$`).FindAllStringSubmatch(string(config), -1) {
+		out[m[1]] = append(out[m[1]], m[2])
+	}
+	return out
+}
+
+// TestHarnessLiteLLMCallsTheUpstreamModelsOfTheScenarios holds the comparison to
+// a like-for-like upstream: the mock is configured with the models a scenario
+// names, and LiteLLM's deployments have to call those same ones, or its requests
+// are answered by the mock's default and the two sides measure different work.
+func TestHarnessLiteLLMCallsTheUpstreamModelsOfTheScenarios(t *testing.T) {
+	s := settings{Scale: 1, Duration: time.Minute, Warmup: time.Second, S6Tokens: defaultS6Tokens, S6BPS: defaultS6BPS}
+	for _, file := range []string{"production.yaml", "high-throughput.yaml"} {
+		got := deployments(t, file)
+		for group, scenarios := range map[string][]scenario{
+			"bench-route":    {s1, s2, s5},
+			"bench-priced":   {s3},
+			"bench-failover": {s4},
+		} {
+			for _, sc := range scenarios {
+				if want := sc.plan(s).Models; !slices.Equal(got[group], want) {
+					t.Errorf("%s: deployments %s call %v, and %s names %v", file, group, got[group], sc.ID, want)
+				}
+			}
+		}
+	}
+}
+
+// TestHarnessWaitsForMetadataForAsLongAsItArrives holds the wait for request
+// metadata to the pace of the pipeline: one consumer persists an event at a time,
+// so events that arrive steadily for ten minutes after the load are late, not
+// lost, and a wait that ended at a fixed time would score them missing. It ends
+// when nothing has arrived for the stall.
+func TestHarnessWaitsForMetadataForAsLongAsItArrives(t *testing.T) {
+	const stall = 90 * time.Second
+	start := time.Unix(1_800_000_000, 0)
+	p := newDrainProgress(start, 100, stall)
+	// A hundred and fifty events a second, for ten minutes: each observation sees
+	// more than the one before.
+	now, delivered := start, int64(100)
+	for range 600 {
+		now, delivered = now.Add(time.Second), delivered+150
+		p.observe(now, delivered)
+		if p.stalled(now) {
+			t.Fatalf("the wait gave up after %s of steady delivery", now.Sub(start))
+		}
+	}
+	if p.delivered != delivered {
+		t.Errorf("progress records %d delivered, want %d", p.delivered, delivered)
+	}
+	// An observation of the same count is not progress, so the stall runs from the
+	// last time the count moved.
+	last := now
+	for _, silence := range []time.Duration{time.Second, stall - time.Second, stall} {
+		p.observe(last.Add(silence), delivered)
+		if p.stalled(last.Add(silence)) {
+			t.Errorf("the wait gave up after %s of silence, before the stall of %s", silence, stall)
+		}
+	}
+	if !p.stalled(last.Add(stall + time.Second)) {
+		t.Errorf("the wait did not give up after %s of silence", stall+time.Second)
+	}
+	// A delivery ends the silence.
+	p.observe(last.Add(stall+2*time.Second), delivered+1)
+	if p.stalled(last.Add(stall + 3*time.Second)) {
+		t.Error("the wait gave up just after an event arrived")
 	}
 }
 

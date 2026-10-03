@@ -1,7 +1,9 @@
 package estimate
 
 import (
+	"bytes"
 	"encoding/json"
+	"maps"
 	"slices"
 	"sync"
 
@@ -159,13 +161,14 @@ func (e Estimate) Reply() int64 {
 
 // Estimate prices the request for the counter of the model it is sent to. A
 // provider's defaults complete what the request left out: its reply bound,
-// its candidates, and the text of an input field the caller omitted.
+// its candidates, and the text of an input field the caller omitted, or of a
+// member its generation config left out.
 func (p *Prompt) Estimate(c Counter, defaults map[string]json.RawMessage) Estimate {
 	count := p.Input(c)
 	e := Estimate{Input: count.Tokens, Provenance: count.Provenance, Family: c.Family(), Candidates: 1, generation: p.generation}
-	if extra := p.defaulted(defaults); extra != nil {
+	if extra, ok := p.defaulted(defaults); ok {
 		// The reply is primed once, by whichever input has the first message.
-		more := c.count(extra, p.in.messages > 0)
+		more := c.count(&extra, p.in.messages > 0)
 		e.Input = addBounded(e.Input, more.Tokens)
 		e.Provenance = Weaker(e.Provenance, more.Provenance)
 	}
@@ -178,24 +181,66 @@ func (p *Prompt) Estimate(c Counter, defaults map[string]json.RawMessage) Estima
 }
 
 // defaulted walks the prompt fields a provider's defaults supply because the
-// caller left them out. Almost no default does, so it is nil almost always.
-func (p *Prompt) defaulted(defaults map[string]json.RawMessage) *input {
+// caller left them out. Almost no default does, so it is none almost always.
+func (p *Prompt) defaulted(defaults map[string]json.RawMessage) (in input, ok bool) {
 	// A request that named nothing has no prompt, whatever a provider defaults.
 	// Nearly every provider's defaults are bounds and sampling, which are not.
-	if p.request == nil || !slices.ContainsFunc(promptFields, func(name string) bool { return len(defaults[name]) > 0 }) {
-		return nil
+	if p.request == nil || !slices.ContainsFunc(promptFields, func(name string) bool { return mayHoldPrompt(name, defaults[name]) }) {
+		return input{}, false
 	}
-	var in input
 	walkInput(&in, p.request.Family, func(name string) json.RawMessage {
-		if len(p.request.Field(name)) > 0 {
+		fallback := defaults[name]
+		if !mayHoldPrompt(name, fallback) {
 			return nil
 		}
-		return defaults[name]
+		own := p.request.Field(name)
+		if name == "generationConfig" {
+			return unsetMembers(own, fallback)
+		}
+		if len(own) > 0 {
+			return nil
+		}
+		return fallback
 	})
-	if in.empty() {
+	return in, !in.empty()
+}
+
+// mayHoldPrompt is false for a default that cannot supply the prompt field it
+// names: one that is absent, or an object that has none of the members the
+// walker reads of that field, such as the sampling a generation config usually
+// holds. A name can be written without spelling it out only through a \u
+// escape, so a default that has one is walked, as is any that merely mentions a
+// member.
+func mayHoldPrompt(name string, raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	members, partial := promptMembers[name]
+	if !partial || bytes.Contains(raw, []byte(`\u`)) {
+		return true
+	}
+	return slices.ContainsFunc(members, func(member string) bool { return bytes.Contains(raw, []byte(member)) })
+}
+
+// unsetMembers is what a provider's default object adds to the object the caller
+// sent, which the encoder merges it into member by member, and in which the
+// caller's own members win. Nothing is merged into a value that is null or is not
+// an object.
+func unsetMembers(own, fallback json.RawMessage) json.RawMessage {
+	if len(own) == 0 {
+		return fallback
+	}
+	sent := jsonObject(own)
+	if sent == nil {
 		return nil
 	}
-	return &in
+	unset := jsonObject(fallback)
+	maps.DeleteFunc(unset, func(name string, _ json.RawMessage) bool { _, ok := sent[name]; return ok })
+	if len(unset) == 0 {
+		return nil
+	}
+	merged, _ := json.Marshal(unset)
+	return merged
 }
 
 // Weaker is the provenance of two counts taken together: the less trustworthy.

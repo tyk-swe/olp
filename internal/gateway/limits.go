@@ -147,7 +147,9 @@ func retryHint(dimension limits.Dimension, retryAfter time.Duration) time.Durati
 // keyRequest describes the API key budgets as one admission decision. It is the
 // one reservation whose allowance the caller is told, in the rate-limit headers,
 // so it is the one that asks the rate script to state it: the quotas of a
-// provider are not the caller's, and are answered with the decision alone.
+// provider are not the caller's, and are answered with the decision alone. The
+// surface the caller speaks may have no such headers, and then admission clears
+// the request for the allowance, which nothing would write.
 func keyRequest(authority access.Authority, estimate int64, ttl time.Duration) limits.Request {
 	policy := authority.Policy
 	return limits.Request{
@@ -181,9 +183,11 @@ func groupRequest(authority access.Authority, ttl time.Duration) *limits.Request
 
 // reserveKey admits one request against the API key budgets. A nil lease with
 // a nil error admits the request without one: either the key bounds nothing,
-// or the limiter is unreachable and the installation chose to fail open.
-func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, estimate int64, ttl time.Duration) (*limits.Lease, *Error) {
-	return a.reserveKeyCosted(ctx, authority, estimate, ttl, costReservation{})
+// or the limiter is unreachable and the installation chose to fail open. The
+// surface is the one the caller speaks, whose headers report the key's allowance
+// if it has any.
+func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration) (*limits.Lease, *Error) {
+	return a.reserveKeyCosted(ctx, authority, surface, estimate, ttl, costReservation{})
 }
 
 // reserveKeyCosted admits one request against the API key budgets and, for a
@@ -192,7 +196,7 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 // group's budget is taken first, since it is shared; its lease is attached to the
 // key's, so the one handle the request keeps finishes both. A budget that
 // refuses the request after the group's was taken gives the group's back.
-func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Authority, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
+func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
 	var group *limits.Lease
 	if request := groupRequest(authority, ttl); request != nil {
 		if !a.ready() {
@@ -212,6 +216,11 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Autho
 		group = lease
 	}
 	request := keyRequest(authority, estimate, ttl)
+	// The allowance is stated for a response that will report it. A surface
+	// whose SDKs read no rate-limit headers, Gemini, Bedrock and the native
+	// operations, would be answered an allowance nothing writes, and the reply
+	// costs the request about a dozen allocations to build.
+	request.ReportRate = rateHeadersOf(surface) != nil
 	if !request.HasHardLimits() {
 		// Nothing to enforce, so nothing to store: a key without hard limits
 		// reaches Valkey only for the group it belongs to.

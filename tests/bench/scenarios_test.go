@@ -96,6 +96,10 @@ const (
 	// The prompt sizes of S3, in equal shares: LiteLLM's high-throughput
 	// benchmark.
 	tokens50k, tokens75k, tokens100k = 50_000, 75_000, 100_000
+	// The upstream model of S3. OpenAI's naming puts it in the o200k family, so
+	// admission counts a prompt with the exact encoder. The mock matches it by
+	// name, and deploy/litellm calls the same one.
+	s3Model = "gpt-4o-bench"
 )
 
 // rule is a mock behavior with the given timing and completion length.
@@ -145,7 +149,11 @@ var (
 	}
 	// S3: LiteLLM's high-throughput benchmark. The prompts are what makes it
 	// heavy: 50K to 100K tokens is 260 to 520 KB a request, tokenized for
-	// admission and reserved against a budget.
+	// admission and reserved against a budget. They are tokenized only for a
+	// model whose tokenizer the gateway has, so S3's upstream model is named as
+	// an OpenAI model is: the other scenarios' models are of the family the
+	// gateway cannot name, and are charged four characters to a token, which is
+	// the exact encoder's work left out of the measurement.
 	s3 = scenario{
 		ID: "S3", Title: "50K, 75K and 100K-token prompts in equal shares, 50% streaming, max_tokens 16, key with a cost budget, 3,000 RPS",
 		Why: "LiteLLM's high-throughput benchmark, including admission token estimation and budget reservation",
@@ -153,6 +161,7 @@ var (
 			p := base(s, 3000, rule(upstreamTTFT, 2, 16), 16)
 			p.StreamShare = 0.5
 			p.PromptTokens = []int{tokens50k, tokens75k, tokens100k}
+			p.Models, p.Baseline = []string{s3Model}, s3Model
 			p.Budget = true
 			return p
 		},

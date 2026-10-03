@@ -642,7 +642,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		}
 	}
 	if contract == nil {
-		forwardAnthropicBeta(req.Header, x, wire, cfg)
+		cfg = forwardAnthropicBeta(req.Header, x, wire, cfg)
 	}
 	if err := s.applySlotCredential(actx, x, req, cfg, slot, body); err != nil {
 		switch {

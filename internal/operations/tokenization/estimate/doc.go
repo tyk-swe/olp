@@ -10,9 +10,14 @@
 // OpenAI families whose tokenizers OpenAI publishes, o200k_base (GPT-4o,
 // GPT-4.1, GPT-5, the o-series) and cl100k_base (GPT-4, GPT-3.5 Turbo,
 // text-embedding-3), are counted exactly by an in-repository byte-pair
-// encoder. The one exception is a single unbroken piece of more than 256 KiB,
-// which the encoder merges in chunks and so counts approximately, and which a
-// Meter, reading at most ExactBytes and a window past them, never meets. Every
+// encoder. There are two exceptions. One is a single unbroken piece of more than
+// 256 KiB, which the encoder merges in chunks and so counts approximately, and
+// which a Meter, reading at most ExactBytes and a window past them, never meets.
+// The other is a character assigned in a Unicode version newer than the one
+// tiktoken's pattern engine reads: the scanners take their letter, number and
+// space classes from Go's unicode tables, so a piece holding such a character
+// can split differently, and cost a token more or less, than it does there. The
+// oracle fixtures hold no such character, and a Go upgrade moves the tables. Every
 // other model, including every name the registry does not recognize, uses the
 // heuristic of four characters per token times a per-family factor, which is 1
 // until the reference catalog supplies measured ones. No name defaults to an
@@ -43,15 +48,27 @@
 // allows, and what a provider's defaults supply, to give what admission
 // reserves, what the planner weighs a context window by, and what an attempt
 // records. For a family without a tokenizer it is the estimate the gateway
-// charged before any family had one, bit for bit; the legacy copy of the old
-// walker in walk_legacy_test.go holds it to that over generated requests.
+// charged before any family had one, bit for bit, for every shape the old walker
+// read; the legacy copy of the old walker in walk_legacy_test.go holds it to that
+// over generated requests. The walker reads a few shapes the old one did not: the
+// schema of a structured output in each dialect, a Responses reasoning summary,
+// Anthropic thinking and document blocks, and Bedrock's tool catalogue.
 //
-// A tokenizer count is exact only for the text. The flat charge for an image is
-// a guess, and a model reads a tool schema or a tool call in a rendering of its
-// own that no provider documents, so a request that has one is calibrated, not
+// A tokenizer count is exact only for the text. The flat charge for an image or
+// a document is a guess, and a model reads a tool schema, a tool call, the
+// schema of a structured output and its own reasoning in a rendering of its own
+// that no provider documents, so a request that has one is calibrated, not
 // tokenizer, and the framing of the other dialects, which no provider
 // documents, follows what each calls a message. Heuristic families are not
 // framed.
+//
+// Some members of a prompt are not read as text at all: encrypted and redacted
+// reasoning, and the arguments of an Anthropic tool_use or a Gemini
+// functionCall and the response of a functionResponse, which are read only where
+// they hold text under a key the walker knows. A request that has one
+// is marked approximate and so is calibrated, but its count leaves them out:
+// the old walker did, and the equality with it above is what keeps the charge of
+// a family without a tokenizer from moving until the reference catalog does.
 //
 // A Prompt holds the text of its request only as far as a counter reads it, the
 // first ExactBytes and a window past them, and for the rest how many bytes

@@ -50,7 +50,8 @@ type settings struct {
 	// roadmap's full rates.
 	Scale float64
 	// Duration is the measured period of a run, Warmup precedes it at the same
-	// rate, and Drain is how long to wait for request metadata to land.
+	// rate, and Drain is how long the wait for request metadata may go with
+	// none arriving before it gives up.
 	Duration, Warmup, Drain time.Duration
 	// LateAfter is when a send counts as late; see loadgen.Config.
 	LateAfter time.Duration

@@ -163,7 +163,7 @@
             ]
           },
           "response_metadata": {
-            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). Provider identity is exposed only with this opt-in; defaults to false.",
+            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.",
             "type": "boolean"
           },
           "revoked_at": {
@@ -1954,7 +1954,7 @@
             ]
           },
           "response_metadata": {
-            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). Provider identity is exposed only with this opt-in; defaults to false.",
+            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.",
             "type": "boolean"
           },
           "scopes": {
@@ -10215,7 +10215,7 @@
             ]
           },
           "response_metadata": {
-            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). Provider identity is exposed only with this opt-in; defaults to false.",
+            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.",
             "type": "boolean"
           },
           "scopes": {

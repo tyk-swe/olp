@@ -229,6 +229,43 @@ func (c Config) Profile() (Profile, error) {
 	return cloneProfile(p), nil
 }
 
+// DeclaresSemanticHeader reports whether the connector's profile lists name
+// among the semantic headers it carries. It reads the profile in place, where
+// Profile copies it, so a request can ask it of every target.
+func (c Config) DeclaresSemanticHeader(name string) bool {
+	if c.ProfileID == "" {
+		return false
+	}
+	p, err := c.profile()
+	return err == nil && slices.ContainsFunc(p.SemanticHeaders, func(declared string) bool { return strings.EqualFold(declared, name) })
+}
+
+// SemanticHeader is the value the provider publishes for a semantic header,
+// whichever way its name is spelled.
+func (c Config) SemanticHeader(name string) (string, bool) {
+	for published, value := range c.SemanticHeaders {
+		if strings.EqualFold(published, name) {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+// WithSemanticHeader is the connector publishing value for a semantic header in
+// place of any value it published for it. The semantic headers are copied, so
+// the connector it was called on is unchanged.
+func (c Config) WithSemanticHeader(name, value string) Config {
+	published := make(map[string]string, len(c.SemanticHeaders)+1)
+	for existing, v := range c.SemanticHeaders {
+		if !strings.EqualFold(existing, name) {
+			published[existing] = v
+		}
+	}
+	published[textproto.CanonicalMIMEHeaderKey(name)] = value
+	c.SemanticHeaders = published
+	return c
+}
+
 func (c Config) Hosting() string {
 	if p, err := c.profile(); err == nil {
 		return p.Hosting

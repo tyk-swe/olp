@@ -341,7 +341,10 @@ breaks compatibility fails the pull request that proposes it. `make check`
 covers what needs no client: the scripted upstream's unit tests under
 `go test ./...`, `gofmt` of the fixture and Go SDK suite, and
 `scripts/check-clients-doc.test.mjs`, which keeps
-[client compatibility](../docs/clients.md) equal to the pinned manifests. Root
+[client compatibility](../docs/clients.md) equal to the pinned manifests, and
+`scripts/clients-run.test.mjs`, which runs the harness suite under a `TMPDIR`
+that is a symlink with a `..` in it (about fifteen seconds; it is skipped, and
+says why, where the toolchain or the client packages are missing). Root
 `go vet ./...` does not reach the Go SDK module, so `run.sh` vets it.
 
 A gateway incompatibility a client exposes is fixed in the gateway with a Go

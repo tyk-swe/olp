@@ -3,6 +3,7 @@ package protocols
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -385,5 +386,180 @@ func TestGeminiStructuredOutputKeepsThePropertyOrderOfTheClient(t *testing.T) {
 	title, priority, score := bytes.Index(data, []byte(`"title"`)), bytes.Index(data, []byte(`"priority"`)), bytes.Index(data, []byte(`"score"`))
 	if title < 0 || priority < title || score < priority {
 		t.Fatalf("the properties were reordered: %s", data)
+	}
+}
+
+// Gemini's parameters and responseSchema fields take an OpenAPI subset and
+// refuse a member outside it, as OpenAI and Anthropic clients routinely send:
+// $schema, additionalProperties, $ref. Their schemas reach Gemini in the fields
+// that take JSON Schema as it is, which Google's own SDKs send them in, and a
+// schema in the subset goes where it always did.
+func TestGeminiSchemasGoInTheFieldThatTakesThem(t *testing.T) {
+	const (
+		subset = `{"type":"object","properties":{"city":{"type":"string","description":"a city"},"days":{"type":"integer","minimum":1},` +
+			`"unit":{"type":"string","enum":["c","f"],"nullable":true},"tags":{"type":"array","items":{"type":"string"},"minItems":1},` +
+			`"either":{"anyOf":[{"type":"string"},{"type":"integer"}]}},"required":["city"],"propertyOrdering":["city","days"]}`
+		draft07 = `{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false}`
+	)
+	for _, tc := range []struct {
+		name, schema string
+		inSubset     bool
+	}{
+		{"a schema in the subset", subset, true},
+		{"an empty schema", `{}`, true},
+		{"a property named like a keyword", `{"type":"object","properties":{"additionalProperties":{"type":"string"},"$ref":{"type":"string"}}}`, true},
+		{"$schema", draft07, false},
+		{"additionalProperties at the root", `{"type":"object","properties":{},"additionalProperties":false}`, false},
+		{"additionalProperties in a property", `{"type":"object","properties":{"a":{"type":"object","additionalProperties":{"type":"string"}}}}`, false},
+		{"additionalProperties in an item", `{"type":"array","items":{"type":"object","additionalProperties":false}}`, false},
+		{"additionalProperties in a branch", `{"anyOf":[{"type":"string"},{"type":"object","additionalProperties":false}]}`, false},
+		{"$ref and $defs", `{"type":"object","properties":{"a":{"$ref":"#/$defs/a"}},"$defs":{"a":{"type":"string"}}}`, false},
+		{"const", `{"type":"string","const":"x"}`, false},
+		{"oneOf", `{"oneOf":[{"type":"string"},{"type":"integer"}]}`, false},
+		{"a type that is a list", `{"type":["string","null"]}`, false},
+		{"an enum of strings", `{"type":"string","enum":["a","b"]}`, true},
+		{"an enum of numbers", `{"type":"integer","enum":[1,2,3]}`, false},
+		{"an enum of numbers in a property", `{"type":"object","properties":{"n":{"type":"integer","enum":[1,2,3]}}}`, false},
+		{"an enum of numbers in an item", `{"type":"array","items":{"type":"number","enum":[0.5,1.5]}}`, false},
+		{"an enum of strings and a number", `{"enum":["a",2]}`, false},
+		{"an enum of strings and null", `{"type":"string","enum":["a",null]}`, false},
+		{"an enum of booleans", `{"type":"boolean","enum":[true]}`, false},
+		{"an enum that is not a list", `{"type":"string","enum":"a"}`, false},
+		{"a schema that is not an object", `true`, false},
+		{"a list of items", `{"type":"array","items":[{"type":"string"}]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := inGeminiSchema(json.RawMessage(tc.schema)); got != tc.inSubset {
+				t.Fatalf("inGeminiSchema(%s) = %v, want %v", tc.schema, got, tc.inSubset)
+			}
+			wantTool, wantFormat := "parameters", "responseSchema"
+			if !tc.inSubset {
+				wantTool, wantFormat = "parametersJsonSchema", "responseJsonSchema"
+			}
+			if tc.schema == "true" {
+				return // not a schema an OpenAI request can carry
+			}
+			chat := `{"model":"route","max_tokens":32,"messages":[{"role":"user","content":"x"}],` +
+				`"response_format":{"type":"json_schema","json_schema":{"name":"out","schema":` + tc.schema + `}},` +
+				`"tools":[{"type":"function","function":{"name":"f","description":"d","parameters":` + tc.schema + `}}]}`
+			r, err := Parse(openai.FamilyChat, []byte(chat), "route")
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, _, err := Encode(r, "gemini", "gemini", "wire-model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out struct {
+				GenerationConfig map[string]json.RawMessage `json:"generationConfig"`
+				Tools            []struct {
+					FunctionDeclarations []map[string]json.RawMessage `json:"functionDeclarations"`
+				} `json:"tools"`
+			}
+			if err := json.Unmarshal(encoded, &out); err != nil || len(out.Tools) != 1 || len(out.Tools[0].FunctionDeclarations) != 1 {
+				t.Fatalf("the tool was lost: %s (%v)", encoded, err)
+			}
+			declaration := out.Tools[0].FunctionDeclarations[0]
+			// The schema arrives whole, in one field and not the other.
+			for field, in := range map[string]map[string]json.RawMessage{
+				"parameters": declaration, "parametersJsonSchema": declaration,
+				"responseSchema": out.GenerationConfig, "responseJsonSchema": out.GenerationConfig,
+			} {
+				wanted := field == wantTool || field == wantFormat
+				if got, present := in[field]; present != wanted || present && !jsonEqual(t, got, tc.schema) {
+					t.Fatalf("%s = %s (present %v, want %v) in %s", field, got, present, wanted, encoded)
+				}
+			}
+		})
+	}
+}
+
+func jsonEqual(t *testing.T, a json.RawMessage, b string) bool {
+	t.Helper()
+	var x, y any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal([]byte(b), &y) != nil {
+		t.Fatalf("not JSON: %s %s", a, b)
+	}
+	return reflect.DeepEqual(x, y)
+}
+
+// A Gemini client's JSON Schema reaches a Gemini provider in the same fields
+// it sent it in, and its OpenAPI-subset schema in the same ones, so a route to
+// Gemini does not turn one dialect of schema into the other.
+func TestGeminiSchemasKeepTheirFieldsOnAGeminiRoute(t *testing.T) {
+	const jsonSchema = `{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false}`
+	const openAPI = `{"type":"OBJECT","properties":{"city":{"type":"STRING"}},"required":["city"]}`
+	for _, tc := range []struct {
+		name, tool, format string
+	}{
+		{"JSON Schema", `"parametersJsonSchema":` + jsonSchema, `"responseJsonSchema":` + jsonSchema},
+		{"OpenAPI subset", `"parameters":` + openAPI, `"responseSchema":` + openAPI},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := `{"contents":[{"role":"user","parts":[{"text":"x"}]}],"generationConfig":{"responseMimeType":"application/json",` + tc.format + `},` +
+				`"tools":[{"functionDeclarations":[{"name":"f",` + tc.tool + `}]}]}`
+			r, err := Parse(openai.FamilyGemini, []byte(request), "route")
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, _, err := Encode(r, "gemini", "gemini", "wire-model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out map[string]any
+			if err := json.Unmarshal(encoded, &out); err != nil {
+				t.Fatal(err)
+			}
+			declaration, _ := at(out, "tools", 0, "functionDeclarations", 0).(map[string]any)
+			config, _ := out["generationConfig"].(map[string]any)
+			wantTool, wantFormat := "parameters", "responseSchema"
+			if strings.Contains(tc.name, "JSON") {
+				wantTool, wantFormat = "parametersJsonSchema", "responseJsonSchema"
+			}
+			for field, in := range map[string]map[string]any{wantTool: declaration, wantFormat: config} {
+				if _, ok := in[field]; !ok {
+					t.Fatalf("%s is missing from %s", field, encoded)
+				}
+			}
+			for _, field := range []string{"parameters", "parametersJsonSchema"} {
+				if _, ok := declaration[field]; ok != (field == wantTool) {
+					t.Fatalf("%s present = %v in %s", field, ok, encoded)
+				}
+			}
+		})
+	}
+}
+
+// A schema with no capital type names keeps its bytes without being read, as
+// nearly every client's does, and one that has any is rewritten however its
+// name is written.
+func TestGeminiSchemaTypesAreOnlyReadWhenTheyNameCapitals(t *testing.T) {
+	plain := json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"OBJECT and STRING in words"},"kind":{"type":"string","enum":["a","b"]}},"required":["title"]}`)
+	if got := testing.AllocsPerRun(100, func() { jsonSchemaTypes(plain) }); got != 0 {
+		t.Errorf("a schema with no capital type names was read: %v allocations", got)
+	}
+	if got := jsonSchemaTypes(plain); &got[0] != &plain[0] || len(got) != len(plain) {
+		t.Errorf("a schema with no capital type names was copied")
+	}
+	type lowering struct{ name, schema, want string }
+	cases := []lowering{
+		{"a capital name", `{"type":"OBJECT"}`, `{"type":"object"}`},
+		{"a name in a nested schema", `{"type":"object","properties":{"a":{"type":"ARRAY","items":{"type":"NULL"}}}}`, `{"type":"object","properties":{"a":{"type":"array","items":{"type":"null"}}}}`},
+		// A name written through an escape is lowered like any other, and the
+		// escapes that are left in the schema are kept as they were written.
+		{"a name written with an escape", `{"type":"\u004fBJECT"}`, `{"type":"object"}`},
+		{"a name beside a description with an escape", `{"type":"\u0053TRING","description":"caf\u00e9"}`, `{"type":"string","description":"caf\u00e9"}`},
+		{"a member written with an escape", `{"t\u0079pe":"\u0041RRAY","items":{"type":"\u004eULL"}}`, `{"t\u0079pe":"array","items":{"type":"null"}}`},
+		{"an escape that is not a type name", `{"type":"string","description":"caf\u00e9"}`, `{"type":"string","description":"caf\u00e9"}`},
+	}
+	// Each of Gemini's type names is lowered when it is the only one the schema
+	// has to give it away.
+	for _, name := range []string{"STRING", "NUMBER", "INTEGER", "BOOLEAN", "ARRAY", "OBJECT", "NULL"} {
+		cases = append(cases, lowering{"the name " + name, `{"type":"` + name + `"}`, `{"type":"` + strings.ToLower(name) + `"}`})
+	}
+	for _, tc := range cases {
+		if got := jsonSchemaTypes(json.RawMessage(tc.schema)); string(got) != tc.want {
+			t.Errorf("%s: jsonSchemaTypes(%s) = %s, want %s", tc.name, tc.schema, got, tc.want)
+		}
 	}
 }

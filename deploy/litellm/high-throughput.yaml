@@ -10,11 +10,12 @@ model_list:
       model: openai/bench-chat
       api_base: os.environ/BENCH_MOCK_API_BASE
       api_key: sk-bench-upstream
-  # S3: the same deployment with the prices OLP's scenario sets, which give the
-  # key's budget something to accrue (USD 2 and 4 per million tokens).
+  # S3: a deployment of the model OLP's scenario names as an OpenAI model, so
+  # that its prompts are tokenized, with the prices OLP's scenario sets, which
+  # give the key's budget something to accrue (USD 2 and 4 per million tokens).
   - model_name: bench-priced
     litellm_params:
-      model: openai/bench-chat
+      model: openai/gpt-4o-bench
       api_base: os.environ/BENCH_MOCK_API_BASE
       api_key: sk-bench-upstream
       input_cost_per_token: 0.000002

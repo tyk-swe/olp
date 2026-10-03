@@ -1,8 +1,6 @@
 package gateway
 
 import (
-	"encoding/json"
-
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -112,7 +110,7 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 		decisions, err := plan.CheckInput()
 		effective := x.summarize(plan.EffectiveRequest())
 		prepared := preparedProvider{plan: plan, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()}, parameters: effective.parameters, policyDecisions: decisions}
-		prepared.admitted, prepared.demand = x.preparedEstimate(model, effective, nil)
+		prepared.admitted, prepared.demand = x.preparedEstimate(model, effective)
 		if err != nil {
 			return prepared, err
 		}
@@ -170,14 +168,8 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 		}
 	}
 	effective := x.summarize(native)
-	// Bedrock's native tool catalogue is outside the OpenAI tools field. Its
-	// whole schema still contributes to the same conservative token reservation.
-	var catalogue json.RawMessage
-	if invocation.Wire == openai.FamilyBedrock {
-		catalogue = native.Field("toolConfig")
-	}
 	prepared := preparedProvider{invocation: invocation, parameters: effective.parameters, policyDecisions: decisions}
-	prepared.admitted, prepared.demand = x.preparedEstimate(model, effective, catalogue)
+	prepared.admitted, prepared.demand = x.preparedEstimate(model, effective)
 	if x.preparedProviders == nil {
 		x.preparedProviders = map[string]preparedProvider{}
 	}
@@ -192,7 +184,7 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 // attempt records is the larger input with the less trustworthy provenance of
 // the two counts. When the provider's request reads the same as the caller's,
 // which it usually does, the family is counted once for both.
-func (x *execution) preparedEstimate(model string, effective requestSummary, catalogue json.RawMessage) (admittedEstimate, *runtime.TokenDemand) {
+func (x *execution) preparedEstimate(model string, effective requestSummary) (admittedEstimate, *runtime.TokenDemand) {
 	source := x.summarizeSource()
 	effective.prompt.Follow(source.prompt)
 	counter := estimate.ForModel(model)
@@ -203,13 +195,6 @@ func (x *execution) preparedEstimate(model string, effective requestSummary, cat
 		reply:      max(from.Reply(), to.Reply()),
 		provenance: estimate.Weaker(from.Provenance, to.Provenance),
 		family:     to.Family,
-	}
-	if text := estimate.SchemaText(catalogue); text != "" {
-		tokens, provenance := counter.Count(text)
-		admitted.reserve, admitted.input = addBounded(admitted.reserve, tokens), addBounded(admitted.input, tokens)
-		// The text of a tool schema is counted as text, and the model reads it in
-		// a rendering of its own, as the walker holds of every tool catalogue.
-		admitted.provenance = estimate.Weaker(admitted.provenance, estimate.Weaker(provenance, estimate.ProvenanceCalibrated))
 	}
 	return admitted, demandOf(to)
 }

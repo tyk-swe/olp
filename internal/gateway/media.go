@@ -206,7 +206,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execu
 	ctx, cancel := context.WithTimeout(ctx, overall)
 	defer cancel()
 	var e *Error
-	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.estimate, overall); e != nil {
+	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, overall); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}

@@ -152,7 +152,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	sized := int64(len(body)) / 4
 	x.estimate, x.sizedInput = max(resourceEstimate, sized), &sized
-	x.lease, e = s.Admission.reserveKey(ctx, authority, x.estimate, time.Duration(route.OverallTimeout)*time.Millisecond)
+	x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, time.Duration(route.OverallTimeout)*time.Millisecond)
 	if e != nil {
 		fail(e)
 		return

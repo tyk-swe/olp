@@ -272,12 +272,12 @@ func TestAdmissionWithoutLimiter(t *testing.T) {
 	budgeted := admissionAuthority(access.KeyPolicy{DailyCostLimit: &cost})
 
 	for _, a := range []*Admission{nil, NewAdmission(nil, func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))} {
-		lease, e := a.reserveKey(context.Background(), unlimited, 10, time.Second)
+		lease, e := a.reserveKey(context.Background(), unlimited, "openai", 10, time.Second)
 		if lease != nil || e != nil {
 			t.Fatalf("key without hard limits: lease %v error %v", lease, e)
 		}
 		for _, authority := range []access.Authority{throttled, budgeted} {
-			if _, e := a.reserveKey(context.Background(), authority, 10, time.Second); e == nil || e.Code != "distributed_limits_unavailable" {
+			if _, e := a.reserveKey(context.Background(), authority, "openai", 10, time.Second); e == nil || e.Code != "distributed_limits_unavailable" {
 				t.Fatalf("limited key admitted without a limiter: %v", e)
 			}
 		}
@@ -290,7 +290,7 @@ func TestAdmissionWithoutLimiter(t *testing.T) {
 func TestAdmissionFailsOpenOnlyForServiceOutages(t *testing.T) {
 	open := NewAdmission(nil, func() limits.OutagePolicy { return limits.FailOpen }, slog.New(slog.DiscardHandler))
 	rpm := int64(10)
-	if _, e := open.reserveKey(context.Background(), admissionAuthority(access.KeyPolicy{RequestsPerMinute: &rpm}), 10, time.Second); e == nil {
+	if _, e := open.reserveKey(context.Background(), admissionAuthority(access.KeyPolicy{RequestsPerMinute: &rpm}), "openai", 10, time.Second); e == nil {
 		t.Fatal("no configured limiter is not an eligible fail-open outage")
 	}
 	for _, cause := range []error{

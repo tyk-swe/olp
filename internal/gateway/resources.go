@@ -313,7 +313,7 @@ func (s *Server) stateDeadline(ctx context.Context, route *runtime.Route) (conte
 
 func (s *Server) reserveState(ctx context.Context, x *execution, authority access.Authority, overall time.Duration) *Error {
 	var e *Error
-	x.lease, e = s.Admission.reserveKey(ctx, authority, max(resourceEstimate, x.estimate), overall)
+	x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), max(resourceEstimate, x.estimate), overall)
 	return e
 }
 

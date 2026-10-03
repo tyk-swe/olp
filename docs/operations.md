@@ -78,7 +78,11 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   persists each event once, then acknowledges and deletes it. Events without
   the current wire version, malformed or invalid payloads, and missing
   deliveries become explicit gaps before drainage. An acknowledgement is not an
-  fsync guarantee.
+  fsync guarantee. A consumer persists one event at a time, about 150 a second on
+  a development machine; a request rate above what the workers ingest leaves
+  events queued in the stream, late and not lost, until more workers or a lull
+  catches up, which `olp_request_metadata_consumer_lag_events` shows (see
+  [performance](performance.md)).
 - **Gateway epoch detection:** records an unclean gateway exit as a completeness
   gap after two confirming passes.
 - **Maintenance:** every 60 seconds, uses a detached PostgreSQL session and

@@ -31,13 +31,14 @@ type Provenance string
 const (
 	// ProvenanceTokenizer is an exact count by the model's own tokenizer of a
 	// prompt that is all text and message framing. A prompt with a part the
-	// count cannot see as the model does is calibrated.
+	// count cannot see as the model does, or leaves out, is calibrated.
 	ProvenanceTokenizer Provenance = "tokenizer"
 	// ProvenanceCalibrated is a count that is partly a measured ratio or a
 	// guess: the tail of a prompt past ExactBytes, a family's heuristic times
-	// its factor, or an exact count of text in a prompt that also has images or
-	// media, charged at a flat rate, or tool schemas and tool calls, which a
-	// model reads in a rendering of its own.
+	// its factor, or an exact count of text in a prompt that also has images,
+	// documents or media, charged at a flat rate, tool schemas, tool calls,
+	// structured-output schemas and reasoning, which a model reads in a rendering
+	// of its own, or encrypted content that no count reads.
 	ProvenanceCalibrated Provenance = "calibrated"
 	// ProvenanceHeuristic is the unscaled four-characters-per-token rule. It is
 	// also the count of a prompt whose tail past ExactBytes had too little exact

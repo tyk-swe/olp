@@ -60,8 +60,12 @@ duration=$(seconds "${OLP_BENCH_DURATION:-60s}") && warmup=$(seconds "${OLP_BENC
 }
 # Each scenario applies its load twice and then waits for metadata and shuts
 # down; S3 also waits up to a minute for its budget to be installed, and S6
-# holds its streams for a period as long as the run. The rest is margin.
-per_scenario=$(( 4 * (warmup + duration) + 1800 ))
+# holds its streams for a period as long as the run. The wait for metadata lasts
+# as long as it keeps arriving, and one pipeline consumer persists an event at a
+# time: S3's 3,000 requests a second for the whole run, at a pace as low as fifty
+# events a second, is the longest it can take. The rest is margin.
+drain=$(awk -v scale="${OLP_BENCH_SCALE:-1}" -v seconds=$(( warmup + duration )) 'BEGIN { printf "%d", 3000 * scale * seconds / 50 + 1 }')
+per_scenario=$(( 4 * (warmup + duration) + 1800 + drain ))
 timeout=$(( ${#selected[@]} * per_scenario ))s
 
 # A descriptor limit of 1,024 would stop the benchmark long before S6's ten

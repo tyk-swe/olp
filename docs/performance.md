@@ -283,6 +283,43 @@ comparison's constants for them are marked as published.
 
 ### How each scenario differs
 
+- **Every provider carries a sized pool.** A provider's connection pool caps the
+  requests it can hold in flight, and a provider that sets any `options.network`
+  field, or has a profile, is capped at 64 connections to its host by default,
+  where one that sets none shares the gateway's transport and is capped at none
+  (see [provider connection capacity](deployment.md#provider-connection-capacity)).
+  The benchmark sets the pool of every provider it provisions, to a few times the
+  concurrency the scenario expects, and records it in the result under
+  `gateway.derived_limits`, so S2 and S6 are never queued in a default pool. It
+  also means the scenarios measure the pool a tuned or profiled provider uses,
+  not the shared transport.
+- **Request metadata outlasts the load.** One metadata consumer persists an event
+  at a time, in a PostgreSQL transaction of its own, so at the rates of S1 to S3
+  the events of a run arrive minutes after its load ends: a half-rate S1 run on a
+  development machine (8 vCPUs, otherwise idle) delivered 12,500 events in about
+  86 seconds from the start of the load, about 150 events a second, and a run at
+  full rate produces 70,000 to 210,000. The harness waits for as long as events
+  keep landing and reports how long that took and at what pace (`drain` in the
+  result), so a late event is counted as delivered and a lost one is not. Read
+  `request_metadata_completeness` with the wait beside it: a run whose events
+  arrive late has lost nothing, and one whose events stop arriving is invalid.
+  A deployment sizes the pipeline for its own rate by running more workers, which
+  share the stream.
+- **S3's model is named as an OpenAI model.** Admission counts a prompt with the
+  exact tokenizer only for a model whose family it can name, and the other
+  scenarios' upstream models (`bench-chat` and the failover pair) are of none, so
+  they are charged four characters to a token. S3 calls `gpt-4o-bench` on OLP and
+  on LiteLLM alike, which puts the estimate of a 50K to 100K-token prompt, the
+  first 32 KiB counted exactly and the rest at the measured ratio, in the figures
+  it reports.
+- **S3's key is not servable for the first minute.** A cost budget is enforced
+  against spend PostgreSQL has confirmed, so a key created with one answers
+  `503 distributed_limits_unavailable` until the worker plane's next
+  reconciliation pass, which runs every minute (see
+  [limits and budgets](gateway.md#limits-and-budgets)). The scenario waits for
+  that pass, which the worker logs as `reconciled cost budgets`, before the
+  warmup and does not count the wait; a run against a key that is not yet
+  installed would measure rejections.
 - **S3's budget is real on both sides.** OLP's key has a daily and monthly cost
   limit and its model is priced. LiteLLM's key has a `max_budget` of 1,000,000
   and its model carries the same prices (USD 2 and 4 per million tokens). The
@@ -358,20 +395,31 @@ one stream, on a fixed fixture with no database or network:
 | Path | Benchmark | What an iteration does |
 | --- | --- | --- |
 | Authentication | `internal/runtime` `BenchmarkAuthenticate` | Resolves an API key among a thousand: a valid one, an unknown one and one with the wrong secret |
-| Planning | `internal/runtime` `BenchmarkPlanRequest`, `BenchmarkSelect` | Evaluates and orders the targets of a route of 3 or 20 providers, with and without credential slots |
-| Credential selection | `internal/runtime` `BenchmarkSelectSlots` | Ranks the slots of one provider, 8 or 32 of them |
-| Codecs | `internal/protocols` `BenchmarkParse`, `BenchmarkEncode`, `BenchmarkDecode` | Reads a client's request in each dialect, writes it for an upstream (natively and translated), and reads an upstream's response |
-| Stream relay | `internal/protocols` `BenchmarkStream` | Relays a stream of 64 deltas to the client, natively and translated, through the server-sent-event decoder |
-| Admission | `internal/gateway` `BenchmarkAdmissionUnconfigured` | Admits a request for a key with no limits and an attempt for a target with no quotas |
+| Planning | `internal/runtime` `BenchmarkPlanRequest`, `BenchmarkEligibility` | Weighs the targets of a route against the request and the policies in force, ranks their credential slots and orders the attempts, with and without a price catalogue; checks that a credential version may still serve |
+| Credential selection | `internal/runtime` `BenchmarkSelectSlots` | Ranks the slots of one provider |
+| Codecs | `internal/protocols` `BenchmarkTranslateRequest`, `BenchmarkTranslateResponse` | Reads a client's request in OpenAI Chat, Anthropic or Gemini form and writes it for a target, each dialect to itself and to and from OpenAI Chat; reads an upstream's response and writes it for the caller |
+| Stream relay | `internal/protocols` `BenchmarkTranslateStream`, `internal/gateway` `BenchmarkStreamWriter` | Relays a stream of 64 deltas to the client, natively and translated, through the server-sent-event decoder; writes one frame to the client and renews its write deadline |
+| Admission | `internal/gateway` `BenchmarkAdmission` | Admits a request and settles it for a key with no limits, with request and token limits, with a concurrency limit, with a cost budget and in a budget group, and an attempt for a target with a quota, against a limiter client that keeps no state |
+| Whole request | `internal/gateway` `BenchmarkGateway` | Serves a request from key lookup to the last byte written, with the upstream and the client held in memory: unary, streamed, and an OpenAI stream translated for an Anthropic client |
+| Estimation | `internal/operations/tokenization/estimate` `BenchmarkEstimate`, `BenchmarkMeter`, `BenchmarkHeuristic`, `BenchmarkWalkAgainstLegacy` | Counts a short prompt for each family; counts the bounded part of a long prompt exactly and charges the rest at the measured ratio; walks a request of 30, 4,000 and 100,000 tokens beside the walker it replaced |
+| Cost | `internal/usage` `BenchmarkCostBound`, `BenchmarkPriceCost` | Bounds the cost a request could incur, which admission reserves for a key with a cost budget, and prices the usage of an attempt |
 | Plugin signing | `internal/plugins` `BenchmarkSign` | Runs a plugin's signing hook, interpreted and compiled |
+
+The gate skips four benchmarks of the encoder itself, `BenchmarkLoad`,
+`BenchmarkCount`, `BenchmarkUnbrokenPieces` and `BenchmarkMeterWorstCase`,
+whose input is chosen to be slow rather than to be what a request pays
+([tests](../tests/README.md#microbenchmarks) says why); `BENCH_SKIP` selects
+them.
 
 What they do not cover is the rest of the request: the HTTP server, the
 executor's dispatch to the upstream, usage accounting and the metadata pipeline,
 and the admission checks that reach Valkey, which need services and are measured
-by the scenarios instead. The estimation of admission tokens has no benchmark of
-its own yet. The allocations per request of the whole gateway are measured by
-the scenarios, which see everything a request touches; the gate gates the
-allocations per operation of the paths above.
+by the scenarios instead. The allocations per request of the whole gateway are
+measured by the scenarios, which see everything a request touches; the gate
+gates the allocations per operation of the paths above. A feature that is not
+configured allocates nothing for a request, and `TestUnconfiguredFeaturesAddNoAllocations`
+in `internal/gateway` holds that with `testing.AllocsPerRun` as an ordinary unit
+test, so `make test` does too.
 
 `make bench-gate` (`scripts/bench-gate.sh`) runs every `internal` package that
 declares a benchmark at the pull request's merge base and at the working tree,
@@ -381,9 +429,14 @@ a statistically significant regression above 10% in time or allocations per
 operation. Bytes per operation are reported and never gate. The `bench` job of
 the CI workflow runs the same script on every pull request and keeps its samples
 and report as the `bench-gate` artifact. A sample of every benchmark takes about
-a minute at the default benchtime on a development machine, so CI runs each for
-500 ms (`BENCH_TIME`) to keep ten samples a side, and the second measurement of a
-regression at twice that, inside the job's 45 minutes.
+two minutes at the default benchtime and one at 500 ms on an 8-vCPU machine
+(the packages' benchmarks add up to about 60 seconds at 500 ms, of which the
+estimate package is a half), so CI runs each for 500 ms (`BENCH_TIME`) to keep ten samples a
+side. That is about twenty minutes for the two sides before the trees are
+compiled, and a regression is measured again, alone, with twice the samples. The
+job's timeout is an hour, which leaves room for a slower runner or several
+benchmarks to confirm; if the job nears it, lower `BENCH_COUNT` (at least 6) or
+`BENCH_TIME` rather than raising the timeout.
 
 A benchmark is compared only if the base has it too, so a pull request that adds
 one is not gated by it, and its first comparison is the next pull request's.
