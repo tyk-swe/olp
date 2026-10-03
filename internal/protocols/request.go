@@ -83,8 +83,9 @@ func Parse(family openai.Family, data []byte, model string) (*openai.Request, er
 			if e != nil {
 				return nil, e
 			}
-			if role := str(msg["role"]); role != "user" && role != "assistant" {
-				return nil, requestError("messages.role", "Anthropic messages require user or assistant roles")
+			// A system message between turns is the mid-conversation-system beta.
+			if role := str(msg["role"]); role != "user" && role != "assistant" && role != "system" {
+				return nil, requestError("messages.role", "Anthropic messages require user, assistant or system roles")
 			}
 			if !present(msg["content"]) {
 				return nil, requestError("messages.content", "message content is required")

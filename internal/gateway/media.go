@@ -147,7 +147,7 @@ func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID st
 // and the routing header every route-planned media operation shares.
 func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution, access.Authority, bool) {
 	x := &execution{request: s.begin(w, r), family: openai.FamilyChat, actor: "api_key"}
-	x.semanticHeaders = r.Header.Clone()
+	x.semanticHeaders = semanticHeaders(r.Header)
 	query, queryErr := url.ParseQuery(r.URL.RawQuery)
 	x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
 	if !s.admit(r.Context()) {

@@ -697,7 +697,29 @@ func decodeGeminiEmbedding(body []byte, route, encoding string) (*openai.Complet
 	if err != nil {
 		return nil, err
 	}
-	return nativeEmbeddingsCompletion([][]float64{values}, route, encoding, nil)
+	usage, err := geminiEmbeddingUsage(f)
+	if err != nil {
+		return nil, err
+	}
+	return nativeEmbeddingsCompletion([][]float64{values}, route, encoding, usage)
+}
+
+// geminiEmbeddingUsage is the usage a Gemini embedding response reports in its
+// usageMetadata: the tokens of the prompt. A response that reports none has no
+// usage.
+func geminiEmbeddingUsage(f Object) (*openai.Usage, error) {
+	metadata, e := optionalObject(f["usageMetadata"])
+	if e != nil {
+		return nil, e
+	}
+	if !present(metadata["promptTokenCount"]) {
+		return nil, nil
+	}
+	n, ok := count(metadata["promptTokenCount"])
+	if !ok {
+		return nil, protocolError("invalid embeddings usage")
+	}
+	return &openai.Usage{InputTokens: n, TotalTokens: n}, nil
 }
 
 func decodeGeminiEmbeddingBatch(body []byte, route, encoding string) (*openai.Completion, error) {
@@ -727,7 +749,11 @@ func decodeGeminiEmbeddingBatch(body []byte, route, encoding string) (*openai.Co
 		}
 		values[i] = vector
 	}
-	return nativeEmbeddingsCompletion(values, route, encoding, nil)
+	usage, err := geminiEmbeddingUsage(f)
+	if err != nil {
+		return nil, err
+	}
+	return nativeEmbeddingsCompletion(values, route, encoding, usage)
 }
 
 func decodeVertexEmbeddings(body []byte, route, encoding string) (*openai.Completion, error) {

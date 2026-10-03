@@ -52,7 +52,8 @@ Install Chromium with
 
 `make integration` provisions disposable TLS/authenticated PostgreSQL and
 Valkey, then runs race-enabled process/service/provider/media scenarios,
-official JavaScript SDKs, and Chromium journeys at packaged and Vite origins.
+official JavaScript SDKs, [client and agent qualification](#client-and-agent-qualification),
+and Chromium journeys at packaged and Vite origins.
 Packaged assets run the full feature and hosted-console journeys, followed by
 replacement recovery into an empty database with a separate Valkey service.
 Vite runs shell hydration and focused setup/login, cookie, CSRF mutation,
@@ -297,6 +298,58 @@ CI. Set `OLP_LIVE_PROVIDER` and run
 `go test -tags=liveproviders -count=1 ./internal/connectors`, or dispatch the
 main-branch `live-providers` workflow. Its configuration lists required secrets
 and cloud identity variables. Live calls consume provider quota.
+
+## Client and agent qualification
+
+The SDK smoke suites check the native contracts. Client qualification checks
+the software operators actually deploy: pinned releases of Claude Code, Codex
+CLI and Gemini CLI run headless, the OpenAI Agents SDK, Vercel AI SDK, LangChain
+and LlamaIndex.TS, and the official OpenAI, Anthropic and Google Go SDKs. Each
+runs against a gateway whose upstream is a deterministic scripted fixture, and
+each test asserts both the client's own outcome and the requests the upstream
+recorded, so a client that bypasses OLP, or a gateway that mangles a request,
+fails.
+
+```sh
+pnpm install --frozen-lockfile                       # the npm clients, once
+tests/clients/run.sh                                 # every suite, in table order
+CLIENTS=claude-code,codex tests/clients/run.sh       # only these
+tests/clients/run.sh --list                          # the suite names
+```
+
+The runner needs Go, Node.js 26, `jq` and `curl`, and no containers, database
+or Valkey: it builds `tests/clientfixture`, which hosts the gateway in-process
+with a static runtime, and starts it beside the scripted upstream. The Go SDK
+module downloads its dependencies once, before the isolation below begins. Each
+suite then runs from `env -i` with a private home and XDG tree, telemetry and
+update checks off, and a proxy that refuses everything but loopback, so a
+client that reaches past the gateway fails. A suite that cannot run, runs no
+tests, has a test file that defines none, or skips or leaves a test or a group
+of tests to do fails. A suite may be skipped only by a row of the table in
+`run.sh` with a stated reason, which the summary prints as an open item.
+
+`OLP_CLIENTS_READY_TIMEOUT_SECONDS` (60), `OLP_CLIENTS_SUITE_TIMEOUT_SECONDS`
+(900) and `OLP_CLIENTS_TEST_TIMEOUT_SECONDS` (180) bound the gateway start, a
+suite and a test of a Node suite. The Go SDK suite is one package that the
+toolchain bounds as a whole, so the suite timeout bounds it, and each SDK call
+in it has a deadline of its own. A signal to `run.sh` stops the running suite
+and the clients it started. The full run takes about two minutes on a developer
+machine.
+
+`make integration` runs it after the SDK smoke suites, so a client release that
+breaks compatibility fails the pull request that proposes it. `make check`
+covers what needs no client: the scripted upstream's unit tests under
+`go test ./...`, `gofmt` of the fixture and Go SDK suite, and
+`scripts/check-clients-doc.test.mjs`, which keeps
+[client compatibility](../docs/clients.md) equal to the pinned manifests. Root
+`go vet ./...` does not reach the Go SDK module, so `run.sh` vets it.
+
+A gateway incompatibility a client exposes is fixed in the gateway with a Go
+test beside the code, not patched around in the suite. See the
+[client qualification guide](clients/README.md) for the harness contract,
+the scripted upstream and how to add a suite, and
+[client compatibility](../docs/clients.md) for the pinned releases, each
+client's tested configuration and the open items.
 
 ## Contract and browser coverage
 

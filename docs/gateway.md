@@ -83,7 +83,8 @@ route within that project boundary. The body model, or Gemini URL model, must be
 a published route slug. Model list/get expose only those routes the key may use.
 
 Each request receives an `X-Request-Id` (a client-supplied value is kept when it
-is a safe token), a no-store cache policy, and CORS headers for explicitly
+is a safe token; the Anthropic surface sends the same value as `request-id`,
+which the Anthropic SDKs read), a no-store cache policy, and CORS headers for explicitly
 allowed browser origins (`OLP_GATEWAY_CORS_ALLOWED_ORIGINS`). Responses also carry
 the key's [rate-limit headers](#response-headers) and, for a key that opted in,
 gateway metadata. JSON endpoint

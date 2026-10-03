@@ -336,6 +336,10 @@ func TestCORSExposesEveryHeaderTheGatewayAdds(t *testing.T) {
 		}
 		names := []string{"X-Request-Id", "Retry-After", "X-Should-Retry", "X-OLP-Delivery-Replay",
 			headerAttempts, headerRouteRevision, headerProvider, headerCost}
+		if strings.HasPrefix(path, "/anthropic/") {
+			// The Anthropic SDKs report an error's request id from this header.
+			names = append(names, "Request-Id")
+		}
 		for _, family := range []*rateHeaders{&openAIRateHeaders, &anthropicRateHeaders} {
 			names = append(names, family.limitRequests, family.remainingRequests, family.resetRequests,
 				family.limitTokens, family.remainingTokens, family.resetTokens)

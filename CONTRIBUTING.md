@@ -85,6 +85,12 @@ tiktoken publishes for each file. The pinned tiktoken that generates the
 estimator's oracle fixtures is a test-only Python dependency under
 `tests/fixtures/tokens`.
 
+The client qualification packages in `tests/clients` are exact development
+dependencies, each the newest release that cleared pnpm's release-age gate, and
+their Go module has its own `go.mod`. Advance them with the relevant package
+manager and update [client compatibility](docs/clients.md), which a script test
+keeps equal to the manifests.
+
 TypeScript stays on the newest 6.0 patch. The
 [TypeScript ESLint support range](https://typescript-eslint.io/users/dependency-versions/)
 excludes 7.x, and the Svelte toolchain must support the same compiler. Remove

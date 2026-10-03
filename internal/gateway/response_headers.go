@@ -49,6 +49,9 @@ const exposedHeaders = "X-Request-Id, Retry-After, X-Should-Retry, X-OLP-Deliver
 	"anthropic-ratelimit-requests-limit, anthropic-ratelimit-requests-remaining, anthropic-ratelimit-requests-reset, " +
 	"anthropic-ratelimit-tokens-limit, anthropic-ratelimit-tokens-remaining, anthropic-ratelimit-tokens-reset"
 
+// exposedHeadersAnthropic adds the request id the Anthropic SDKs read.
+const exposedHeadersAnthropic = exposedHeaders + ", Request-Id"
+
 // rateHeaders names where one surface's SDKs read an allowance.
 type rateHeaders struct {
 	limitRequests, remainingRequests, resetRequests string

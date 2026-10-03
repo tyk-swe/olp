@@ -10,6 +10,7 @@ import (
 
 func decodeGeminiGeneration(r *reader) error {
 	c := r.c
+	r.ignoreDefault("safetySettings", "[]")
 	if v := r.take("generateContentRequest"); present(v) {
 		nested, e := object(v)
 		if e != nil {
@@ -31,7 +32,15 @@ func decodeGeminiGeneration(r *reader) error {
 			g.parameter(from, to)
 		}
 		mime := str(g.take("responseMimeType"))
-		schema := g.take("responseSchema")
+		schema := jsonSchemaTypes(g.take("responseSchema"))
+		// responseJsonSchema carries a standard JSON Schema where responseSchema
+		// carries Gemini's OpenAPI subset; the canonical form is JSON Schema.
+		if jsonSchema := g.take("responseJsonSchema"); present(jsonSchema) {
+			if present(schema) {
+				return unsupported("/generationConfig/responseJsonSchema")
+			}
+			schema = jsonSchema
+		}
 		if present(schema) && mime != "application/json" {
 			if mime == "" {
 				return unsupported("responseSchema requires responseMimeType application/json")
@@ -141,7 +150,17 @@ func decodeGeminiGeneration(r *reader) error {
 			if e != nil {
 				return e
 			}
-			c.Tools = append(c.Tools, decodeTool(f))
+			tool := decodeTool(f)
+			tool.Schema = jsonSchemaTypes(tool.Schema)
+			// parametersJsonSchema is the same schema as parameters in standard
+			// JSON Schema; current Google SDKs send it for every tool.
+			if schema := f.take("parametersJsonSchema"); present(schema) {
+				if present(tool.Schema) {
+					return unsupported(fmt.Sprintf("%s/functionDeclarations/%d/parametersJsonSchema", p, j))
+				}
+				tool.Schema = schema
+			}
+			c.Tools = append(c.Tools, tool)
 			f.finish()
 		}
 		t.finish()

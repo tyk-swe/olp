@@ -28,7 +28,7 @@ api: ## Generate Go and TypeScript contracts without compiling the gateway
 	./scripts/api.sh
 
 check: api ## Check formatting, vet, console types/lint, and all local tests
-	@test -z "$$(gofmt -l cmd internal sdk openapi/*.go tests/fixtures/*.go tests/fixtures/fidelity tests/fidelity tests/integration tests/sdkfixture $(wildcard tests/bench tests/clients))" || { gofmt -l cmd internal sdk openapi/*.go tests/fixtures/*.go tests/fixtures/fidelity tests/fidelity tests/integration tests/sdkfixture $(wildcard tests/bench tests/clients); exit 1; }
+	@test -z "$$(gofmt -l cmd internal sdk openapi/*.go tests/fixtures/*.go tests/fixtures/fidelity tests/fidelity tests/integration tests/sdkfixture tests/clientfixture $(wildcard tests/bench tests/clients))" || { gofmt -l cmd internal sdk openapi/*.go tests/fixtures/*.go tests/fixtures/fidelity tests/fidelity tests/integration tests/sdkfixture tests/clientfixture $(wildcard tests/bench tests/clients); exit 1; }
 	go vet ./...
 	@if [ -n "$$(find tests/bench -name '*.go' -print -quit 2>/dev/null)" ]; then go vet -tags=bench ./tests/bench/...; fi
 	pnpm --dir console format:check
@@ -74,5 +74,5 @@ build-go: ## Build the native Go binary from generated contracts
 	CGO_ENABLED=1 go build -mod=readonly -trimpath $(if $(strip $(GO_BUILD_TAGS)),-tags="$(GO_BUILD_TAGS)") -ldflags='$(LDFLAGS)' -o "$(GO_BUILD_OUTPUT)" ./cmd/olp
 
 fmt: ## Format Go and console source
-	gofmt -w cmd internal sdk openapi/*.go tests/fixtures/*.go tests/fixtures/fidelity tests/fidelity tests/integration tests/sdkfixture $(wildcard tests/bench tests/clients)
+	gofmt -w cmd internal sdk openapi/*.go tests/fixtures/*.go tests/fixtures/fidelity tests/fidelity tests/integration tests/sdkfixture tests/clientfixture $(wildcard tests/bench tests/clients)
 	pnpm --dir console format

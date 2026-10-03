@@ -132,6 +132,20 @@ usage are recorded as billing-uncertain.
 | `GET /anthropic/v1/models` | model_list | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
 | `GET /anthropic/v1/models/{id}` | model_get | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
 
+A Messages request may carry `system` messages between turns, as Claude Code
+sends them. The fields of an Anthropic beta travel with the `Anthropic-Beta`
+header, so an Anthropic upstream receives the caller's header when the route
+hands it the caller's own request: on a strict route through the
+`anthropic-messages` profile, and on a transformed route to a provider that
+takes it, an Anthropic provider or one whose profile declares the header, as the
+Vertex AI hosting of Claude does. A request translated from another dialect
+carries none, and neither does Bedrock InvokeModel. A header longer than 2048
+bytes, or not a valid header value, is refused wherever it could be forwarded. The
+Anthropic SDKs add `?beta=true` to the beta namespace's calls; a strict route
+consumes it, since it selects no behavior, and refuses any other query setting
+the profile does not declare. See
+[Client compatibility](clients.md#claude-code).
+
 ### Gemini surface
 
 Gemini endpoints are served under both `/gemini/v1` and `/gemini/v1beta`.
@@ -197,6 +211,12 @@ providers. Cross-protocol requests carrying unsupported extensions are refused;
 unsupported response and stream extensions are dropped. The Anthropic and Gemini
 request fixtures in `tests/fixtures/protocols/` cover preservation of fields
 such as `cache_control`, `metadata`, `topK`, and `safetySettings`.
+
+A system message between turns, which Claude Code sends, is kept in place where
+the target can place it and refused where it cannot: Anthropic, Gemini, and
+Bedrock Converse have one system field ahead of the conversation, so a request
+translated to them with a late system message fails with `unsupported_parameter`
+instead of moving the message to the front.
 
 `tests/fixtures/protocols/selected-operation-families.json` covers every
 operation family and surface. Keep these tables aligned with the

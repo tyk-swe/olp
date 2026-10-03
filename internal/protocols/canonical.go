@@ -1,6 +1,7 @@
 package protocols
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -45,6 +46,22 @@ func (r *reader) finish() {
 		if present(v) {
 			r.c.Extensions = append(r.c.Extensions, r.path+"/"+k)
 		}
+	}
+}
+
+// ignoreDefault removes k when its value, as compact JSON, is value: what the
+// field means when absent. A client that spells the default out, such as
+// `"strict": false` or an empty `include` list, asks the target to preserve
+// nothing, so it is not a source extension.
+func (r *reader) ignoreDefault(k, value string) {
+	v, ok := r.f[k]
+	if !ok {
+		return
+	}
+	// Compare the JSON, not its spelling: `[ ]` is as empty as `[]`.
+	var compact bytes.Buffer
+	if json.Compact(&compact, v) == nil && compact.String() == value {
+		delete(r.f, k)
 	}
 }
 func (r *reader) parameter(from, to string) {

@@ -12,6 +12,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  - package-ecosystem: gomod
+    directory: /tests/clients
+    schedule:
+      interval: weekly
   - package-ecosystem: uv
     directory: /tests/sdk-smoke-python
     schedule:

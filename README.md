@@ -104,6 +104,7 @@ upstream.
 | [Provider plugins](docs/plugins.md) | Installing, approving, and confining operator-installed plugins |
 | [Plugin authoring](docs/plugin-authoring.md) | The Go SDK, reference plugin, and plugin ABI |
 | [Compatibility](docs/compatibility.md) | Endpoints, supported providers, and translation limits |
+| [Client compatibility](docs/clients.md) | Tested coding agents, agent SDKs and frameworks, their pinned releases and configuration |
 | [Deployment](docs/deployment.md) | Database setup, topology, capacity, qualification limits, and edge routing |
 | [Configuration](docs/configuration.md) | Variables, secret files, CLI settings, and configuration promotion |
 | [Access control](docs/access.md) | Identity, projects, management tokens, and account recovery |

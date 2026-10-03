@@ -215,6 +215,10 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	}
 	h := w.Header()
 	h.Set("X-Request-Id", id)
+	if requestSurface(r) == "anthropic" {
+		// The Anthropic SDKs report the request id of an error from this header.
+		h.Set("Request-Id", id)
+	}
 	h.Set("Cache-Control", "no-store")
 	s.cors(w, r)
 	return request{id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
@@ -228,7 +232,11 @@ func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
 	h.Add("Vary", "Origin")
-	h.Set("Access-Control-Expose-Headers", exposedHeaders)
+	expose := exposedHeaders
+	if requestSurface(r) == "anthropic" {
+		expose = exposedHeadersAnthropic
+	}
+	h.Set("Access-Control-Expose-Headers", expose)
 }
 
 func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
@@ -428,7 +436,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			}
 			writeSurfaceError(w, e, x.clientSurface())
 		}
-		x.semanticHeaders = r.Header.Clone()
+		x.semanticHeaders = semanticHeaders(r.Header)
 		query, queryErr := url.ParseQuery(r.URL.RawQuery)
 		x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
 		status := http.StatusInternalServerError
@@ -665,11 +673,12 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 			param := "query"
 			return invalidRequest("invalid_request", "The query must be unambiguous URL-encoded parameters.", &param)
 		}
-		if x.clientSurface() == "gemini" {
-			if e := x.dropQueryKey(); e != nil {
-				return e
-			}
+		if e := x.dropIngressQuery(); e != nil {
+			return e
 		}
+	}
+	if e := x.checkAnthropicBeta(); e != nil {
+		return e
 	}
 	var semantic error
 	var policyDecisions []contentpolicy.Decision

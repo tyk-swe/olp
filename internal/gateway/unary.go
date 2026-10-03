@@ -65,7 +65,11 @@ func (s *Server) selectUnary(x *execution, family openai.Family, dialect string,
 		model = header.Model
 	}
 	route, exists := x.request.release.Snapshot.Routes[model]
-	if !explicit && (!exists || !route.Fidelity.Strict()) {
+	// The native Gemini embedding methods exist only on strict routes, and the
+	// parser that takes any other request cannot read their bodies, so an
+	// unknown or transformed route is refused here with its own error.
+	nativeOnly := family == openai.FamilyGeminiEmbeddings || family == openai.FamilyGeminiEmbeddingsBatch
+	if !explicit && !nativeOnly && (!exists || !route.Fidelity.Strict()) {
 		return false, nil
 	}
 	if !exists {
@@ -138,10 +142,8 @@ func (s *Server) prepareUnary(x *execution) *Error {
 	if x.semanticQueryInvalid {
 		return invalidRequest("invalid_request", "The query is malformed or ambiguous.", nil)
 	}
-	if x.clientSurface() == "gemini" {
-		if e := x.dropQueryKey(); e != nil {
-			return e
-		}
+	if e := x.dropIngressQuery(); e != nil {
+		return e
 	}
 	var incompatible error
 	options := s.selectionOptions(x)

@@ -641,6 +641,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 		}
 	}
+	if contract == nil {
+		forwardAnthropicBeta(req.Header, x, wire, cfg)
+	}
 	if err := s.applySlotCredential(actx, x, req, cfg, slot, body); err != nil {
 		switch {
 		case actx.Err() != nil:

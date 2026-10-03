@@ -24,6 +24,7 @@ func decodeOpenAIGeneration(r *reader, family openai.Family) error {
 			c.Messages = append(c.Messages, m)
 		}
 	} else {
+		r.ignoreDefault("include", "[]")
 		if instructions := r.take("instructions"); present(instructions) {
 			c.Messages = append(c.Messages, Message{Role: "system", Parts: []Part{{Text: str(instructions)}}})
 		}
@@ -56,6 +57,7 @@ func decodeOpenAIGeneration(r *reader, family openai.Family) error {
 					c.Messages = append(c.Messages, Message{Role: "assistant", Calls: []openai.ToolCall{tc}})
 				case "function_call_output":
 					item.take("id")
+					item.ignoreDefault("status", `"completed"`)
 					m := Message{Role: "tool", ToolID: str(item.take("call_id"))}
 					m.Parts, e = decodeParts(item.take("output"), "responses", p+"/output", c)
 					if e != nil {
@@ -101,9 +103,11 @@ func decodeOpenAIGeneration(r *reader, family openai.Family) error {
 			if e != nil {
 				return e
 			}
+			nested.ignoreDefault("strict", "false")
 			c.Tools = append(c.Tools, decodeTool(nested))
 			nested.finish()
 		} else {
+			t.ignoreDefault("strict", "false")
 			c.Tools = append(c.Tools, decodeTool(t))
 		}
 		t.finish()
@@ -255,6 +259,11 @@ func decodeChatMessage(v json.RawMessage, path string, c *Generation) (Message, 
 		return Message{}, e
 	}
 	m := Message{Role: str(r.take("role")), Name: str(r.take("name")), ToolID: str(r.take("tool_call_id"))}
+	if m.Role == "tool" {
+		// A tool message answers the call its tool_call_id names, and a name
+		// repeats that call's tool name, so there is nothing to preserve.
+		m.Name = ""
+	}
 	m.Parts, e = decodeParts(r.take("content"), "chat", path+"/content", c)
 	if e != nil {
 		return m, e
