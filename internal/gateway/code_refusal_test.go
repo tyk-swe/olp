@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +24,80 @@ func (a *codeGrantAuthorizer) AuthorizeCode(ctx context.Context, cfg runtime.Con
 	auth.GrantGeneration = a.calls.Add(1)
 	auth.CredentialID = fmt.Sprintf("credential-%d", auth.GrantGeneration)
 	return auth, err
+}
+
+func TestCodeWebSocketRechecksHandshakeCredentialAfterRotation(t *testing.T) {
+	for _, eligibility := range []runtime.Eligibility{runtime.Revoked, runtime.Lapsed} {
+		for _, completed := range []int{0, 1} {
+			t.Run(fmt.Sprintf("%s/after-%d-generations", eligibility, completed), func(t *testing.T) {
+				h, ledger, server := newCodeForwardHarness(t)
+				authorizer := &codeGrantAuthorizer{}
+				h.gateway.CodeAuthorizer = authorizer
+				var generations atomic.Int64
+				closed := make(chan struct{})
+				h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+					conn, err := websocket.Accept(w, r, nil)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					defer conn.CloseNow()
+					defer close(closed)
+					for {
+						if _, _, err := conn.Read(r.Context()); err != nil {
+							return
+						}
+						generations.Add(1)
+						if err := conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"usage":{"total_tokens":3}}}`)); err != nil {
+							return
+						}
+					}
+				})
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+				conn, _, err := websocket.Dial(ctx, server.URL+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + fullKey}, "Thread-Id": {"rotated"}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer conn.CloseNow()
+				frame := []byte(`{"type":"response.create","model":"native-model"}`)
+				for range completed {
+					if err := conn.Write(ctx, websocket.MessageText, frame); err != nil {
+						t.Fatal(err)
+					}
+					if _, _, err := conn.Read(ctx); err != nil {
+						t.Fatal(err)
+					}
+					ledger.wait(t)
+				}
+				h.rt.mu.Lock()
+				if eligibility == runtime.Revoked {
+					h.rt.revoked["credential-1"] = true
+				} else {
+					h.rt.lapsed = map[string]bool{"credential-1": true}
+				}
+				h.rt.mu.Unlock()
+				if err := conn.Write(ctx, websocket.MessageText, frame); err != nil {
+					t.Fatal(err)
+				}
+				_, _, err = conn.Read(ctx)
+				close, ok := errors.AsType[websocket.CloseError](err)
+				if !ok || close.Code != websocket.StatusPolicyViolation || close.Reason != "code_account_unavailable" {
+					t.Fatalf("ineligible handshake credential dispatched: %v", err)
+				}
+				select {
+				case <-closed:
+				case <-ctx.Done():
+					t.Fatal("upstream socket not closed")
+				}
+				ledger.mu.Lock()
+				defer ledger.mu.Unlock()
+				if authorizer.calls.Load() != int64(completed+2) || generations.Load() != int64(completed) || len(ledger.marks) != completed || len(ledger.aborts) != 1 || !reflect.DeepEqual(ledger.refusals, []string{"code_account_unavailable"}) {
+					t.Fatalf("refused generation dispatched or leaked reservation: calls=%d generations=%d marks=%v aborts=%v refusals=%v", authorizer.calls.Load(), generations.Load(), ledger.marks, ledger.aborts, ledger.refusals)
+				}
+			})
+		}
+	}
 }
 
 func TestCodeAuthenticationRefusalRequestsDispatchedGrantRefreshWithoutReplay(t *testing.T) {
