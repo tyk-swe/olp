@@ -44,16 +44,26 @@ type Account struct {
 
 // Allowance is provider-reported subscription metadata, never a local budget.
 type Allowance struct {
-	Windows           []AllowanceWindow `json:"windows,omitempty"`
-	Credits           *Credits          `json:"credits,omitempty"`
-	RemainingTokens   *int64            `json:"remaining_tokens"`
-	RemainingRequests *int64            `json:"remaining_requests"`
-	RemainingPercent  *float64          `json:"remaining_percent"`
-	ResetsAt          *time.Time        `json:"resets_at"`
-	ObservedAt        time.Time         `json:"observed_at"`
+	Windows            []AllowanceWindow `json:"windows,omitempty"`
+	Credits            *Credits          `json:"credits,omitempty"`
+	RemainingTokens    *int64            `json:"remaining_tokens"`
+	RemainingRequests  *int64            `json:"remaining_requests"`
+	TokenObservation   *CountObservation `json:"token_observation,omitempty"`
+	RequestObservation *CountObservation `json:"request_observation,omitempty"`
+	RemainingPercent   *float64          `json:"remaining_percent"`
+	ResetsAt           *time.Time        `json:"resets_at"`
+	ObservedAt         time.Time         `json:"observed_at"`
 }
 
 func (a Allowance) Validate() error {
+	for _, count := range []struct {
+		remaining   *int64
+		observation *CountObservation
+	}{{a.RemainingTokens, a.TokenObservation}, {a.RemainingRequests, a.RequestObservation}} {
+		if o := count.observation; o != nil && (count.remaining == nil || o.ObservedAt.IsZero() || o.ObservedAt.After(a.ObservedAt)) {
+			return fmt.Errorf("invalid provider count observation")
+		}
+	}
 	for _, n := range []*int64{a.RemainingTokens, a.RemainingRequests} {
 		if n != nil && (*n < 0 || *n > 1<<53-1) {
 			return fmt.Errorf("invalid provider allowance")

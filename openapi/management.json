@@ -12699,6 +12699,12 @@
           "credits": {
             "$ref": "#/components/schemas/CodeCredits"
           },
+          "token_observation": {
+            "$ref": "#/components/schemas/CodeCountObservation"
+          },
+          "request_observation": {
+            "$ref": "#/components/schemas/CodeCountObservation"
+          },
           "remaining_tokens": {
             "type": [
               "integer",
@@ -12741,6 +12747,28 @@
           "remaining_tokens",
           "remaining_requests",
           "remaining_percent",
+          "resets_at",
+          "observed_at"
+        ]
+      },
+      "CodeCountObservation": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Observation and reset of one provider count limit, independent of other counts and percentage windows.",
+        "properties": {
+          "resets_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
           "resets_at",
           "observed_at"
         ]

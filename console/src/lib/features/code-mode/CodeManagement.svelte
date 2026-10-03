@@ -246,30 +246,39 @@
             <dd>{account.provider_id} / {account.credential_id}</dd>
             <dt>Provider-reported allowance</dt>
             <dd>
-              {#if account.allowance?.windows?.length}
-                {#each account.allowance.windows as window (window.limit_id + ':' + window.window)}
+              {#if account.allowance}
+                {#each [{ label: 'Tokens', value: account.allowance.remaining_tokens, observation: account.allowance.token_observation ?? account.allowance }, { label: 'Requests', value: account.allowance.remaining_requests, observation: account.allowance.request_observation ?? account.allowance }] as count (count.label)}
                   <p>
-                    {window.limit_id} / {window.window}: {window.used_percent}%
-                    used · {window.remaining_percent}% remaining<br />
-                    Window: {window.window_minutes == null
-                      ? 'Unknown'
-                      : window.window_minutes + ' minutes'} · Reset {window.resets_at
-                      ? formatDate(window.resets_at)
-                      : 'Unknown'}<br />
-                    Observed {formatDate(window.observed_at)}
+                    {count.label}: {tokenCount(count.value)}
+                    {#if count.value != null}
+                      · Observed {formatDate(count.observation.observed_at)}
+                      · Reset {count.observation.resets_at
+                        ? formatDate(count.observation.resets_at)
+                        : 'Unknown'}
+                    {/if}
                   </p>
                 {/each}
-              {:else if account.allowance}Tokens: {tokenCount(
-                  account.allowance.remaining_tokens
-                )} · Requests: {tokenCount(
-                  account.allowance.remaining_requests
-                )} · Percent: {account.allowance.remaining_percent == null
-                  ? 'Unknown'
-                  : account.allowance.remaining_percent + '%'}<br />Observed {formatDate(
-                  account.allowance.observed_at
-                )} · Reset {account.allowance.resets_at
-                  ? formatDate(account.allowance.resets_at)
-                  : 'Unknown'}{:else}Unknown — no provider observation{/if}
+                {#if account.allowance.windows?.length}
+                  {#each account.allowance.windows as window (window.limit_id + ':' + window.window)}
+                    <p>
+                      {window.limit_id} / {window.window}: {window.used_percent}%
+                      used · {window.remaining_percent}% remaining<br />
+                      Window: {window.window_minutes == null
+                        ? 'Unknown'
+                        : window.window_minutes + ' minutes'} · Reset {window.resets_at
+                        ? formatDate(window.resets_at)
+                        : 'Unknown'}<br />
+                      Observed {formatDate(window.observed_at)}
+                    </p>
+                  {/each}
+                {:else}Percent: {account.allowance.remaining_percent == null
+                    ? 'Unknown'
+                    : account.allowance.remaining_percent + '%'}<br />Observed {formatDate(
+                    account.allowance.observed_at
+                  )} · Reset {account.allowance.resets_at
+                    ? formatDate(account.allowance.resets_at)
+                    : 'Unknown'}{/if}
+              {:else}Unknown — no provider observation{/if}
             </dd>
             {#if account.allowance?.credits}
               <dt>Provider-reported credits</dt>

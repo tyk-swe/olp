@@ -348,7 +348,8 @@ func (s *CodeStore) ObserveHealth(ctx context.Context, accountID, health string)
 		return codemode.Refuse(400, "code_health_invalid")
 	}
 	_, err := s.Pool.Exec(ctx, `UPDATE olp.code_accounts SET health=$2,
-		unavailable_until=CASE WHEN $2 IN ('unavailable','quota_limited') THEN now()+interval '1 minute' END WHERE id=$1`, accountID, health)
+		unavailable_until=CASE WHEN $2 IN ('unavailable','quota_limited') THEN now()+interval '1 minute' END
+		WHERE id=$1 AND ($2<>'healthy' OR unavailable_until IS NULL OR unavailable_until<=now())`, accountID, health)
 	return err
 }
 

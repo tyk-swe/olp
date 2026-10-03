@@ -176,6 +176,15 @@ func TestCodeFoundationRotationAndLiveAuthority(t *testing.T) {
 	if err = f.store.ObserveHealth(t.Context(), f.account, "healthy"); err != nil {
 		t.Fatal(err)
 	}
+	_, err = f.store.Admit(t.Context(), f.input("rotation", "", nil))
+	codeRefusal(t, err, "code_account_unavailable")
+	if codeObservedAccount(t, f).Health != "quota_limited" {
+		t.Fatal("late success cleared the quota cooldown")
+	}
+	f.exec(t, `UPDATE olp.code_accounts SET unavailable_until=now()-interval '1 second' WHERE id=$1`, f.account)
+	if err = f.store.ObserveHealth(t.Context(), f.account, "healthy"); err != nil {
+		t.Fatal(err)
+	}
 	next, err := f.store.Admit(t.Context(), f.input("rotation", "", nil))
 	if err != nil || next.Binding.ID != initial.Binding.ID || next.Account.Principal != initial.Account.Principal {
 		t.Fatal("refresh changed pin", err)

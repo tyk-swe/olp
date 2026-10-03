@@ -488,6 +488,83 @@ it('shows each allowance limit and reset independently with provider credits', a
   );
 });
 
+it('shows exhausted counts beside windows with their own resets and unknown values', async () => {
+  vi.mocked(api.listCodeAccounts).mockResolvedValue({
+    items: [
+      {
+        ...account,
+        eligible: false,
+        allowance: {
+          remaining_tokens: 0,
+          remaining_requests: null,
+          remaining_percent: 80,
+          observed_at: '2026-10-01T10:00:00Z',
+          resets_at: '2026-10-02T11:00:00Z',
+          token_observation: {
+            observed_at: '2026-10-01T09:00:00Z',
+            resets_at: null
+          },
+          windows: [
+            {
+              limit_id: 'codex',
+              window: 'primary',
+              used_percent: 20,
+              remaining_percent: 80,
+              window_minutes: 300,
+              observed_at: '2026-10-01T10:00:00Z',
+              resets_at: '2026-10-02T11:00:00Z'
+            }
+          ]
+        }
+      }
+    ],
+    nextCursor: null
+  });
+  await render();
+  const text = host.textContent?.replace(/\s+/g, ' ');
+  expect(text).toContain(
+    `Tokens: 0 · Observed ${formatDate('2026-10-01T09:00:00Z')} · Reset Unknown`
+  );
+  expect(text).toContain('Requests: Unknown');
+  expect(text).toContain('codex / primary: 20% used · 80% remaining');
+});
+
+it('keeps client setup tied to the active publication after saving a disabled draft', async () => {
+  const load = vi.fn().mockResolvedValue({
+    route_slug: route.slug,
+    base_url: 'https://gateway.example/code/team-code',
+    native_models: ['native-model'],
+    client: 'codex',
+    client_version: '0.160.0',
+    configuration: 'published configuration',
+    qualification_gaps: []
+  });
+  await render(load);
+  await click('Routes');
+  await click('Edit draft');
+  field('code-models', 'unpublished-model');
+  const edited = {
+    ...route,
+    enabled: false,
+    models: ['unpublished-model'],
+    etag: 'new-etag'
+  };
+  vi.mocked(api.saveCodeRoute).mockResolvedValue(edited);
+  vi.mocked(api.listCodeRoutes).mockResolvedValue({
+    items: [edited],
+    nextCursor: null
+  });
+  await submit();
+  expect(api.publishCodeRoute).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('unpublished-model');
+  expect(host.textContent).toContain('Revision 1');
+  await click('Revisions and client setup');
+  expect(load).toHaveBeenCalledWith(edited, expect.any(AbortSignal));
+  expect(
+    host.querySelector<HTMLTextAreaElement>('#code-client-configuration')!.value
+  ).toBe('published configuration');
+});
+
 it('distinguishes upstream rejection statuses from interruptions and unknown consumption', async () => {
   vi.mocked(api.listCodeAttempts).mockResolvedValue({
     items: [

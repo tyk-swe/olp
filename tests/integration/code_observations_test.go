@@ -27,6 +27,77 @@ func codeObservedAccount(t *testing.T, f *codeFixture) codemode.Account {
 	return accounts[0]
 }
 
+func TestCodeObservationPartialCountsKeepIndependentResets(t *testing.T) {
+	for _, exhausted := range []string{"tokens", "requests"} {
+		t.Run(exhausted, func(t *testing.T) {
+			f := newCodeFixture(t)
+			ctx := t.Context()
+			root, err := f.store.BindConnection(ctx, f.route, f.key, codemode.Identity{Conversation: "counts"}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			base := time.Now().UTC().Truncate(time.Microsecond).Add(-time.Minute)
+			future, past := base.Add(time.Hour), base.Add(-time.Hour)
+			zero, positive := int64(0), int64(100)
+			count := func(value *int64, reset *time.Time, at time.Time, other bool) codemode.Allowance {
+				a := codemode.Allowance{ObservedAt: at, ResetsAt: reset}
+				if (exhausted == "tokens") != other {
+					a.RemainingTokens = value
+				} else {
+					a.RemainingRequests = value
+				}
+				return a
+			}
+			observe := func(a codemode.Allowance) {
+				t.Helper()
+				if err := f.store.ObserveAllowance(ctx, f.account, a); err != nil {
+					t.Fatal(err)
+				}
+			}
+			check := func(eligible bool) {
+				t.Helper()
+				if codeObservedAccount(t, f).Eligible != eligible {
+					t.Fatalf("eligibility: want %v", eligible)
+				}
+				permit, err := f.store.Admit(ctx, f.input("counts", "", nil))
+				if !eligible {
+					codeRefusal(t, err, "code_account_unavailable")
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if permit.Binding.ID != root.Binding.ID {
+					t.Fatal("count reset lost pin")
+				}
+				if err := f.store.Abort(ctx, permit.Attempt.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			legacy, _ := json.Marshal(count(&zero, &future, base, false))
+			f.exec(t, `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, f.account, legacy)
+			observe(count(&positive, &past, base.Add(2*time.Second), true))
+			check(false)
+			observe(codemode.Allowance{ObservedAt: base.Add(4 * time.Second), Windows: []codemode.AllowanceWindow{codeObservedWindow("codex", "primary", 100, &past, base.Add(4*time.Second))}})
+			check(false)
+			observe(count(&positive, &past, base.Add(-time.Second), false))
+			check(false)
+			observe(count(&zero, &past, base.Add(time.Second), false))
+			check(true)
+			observe(count(&zero, nil, base.Add(3*time.Second), false))
+			check(false)
+			observe(count(&positive, &past, base.Add(5*time.Second), true))
+			check(false)
+			observe(count(&positive, nil, base.Add(6*time.Second), false))
+			check(true)
+			account := codeObservedAccount(t, f)
+			if account.Allowance.TokenObservation == nil || account.Allowance.RequestObservation == nil || *account.Allowance.RemainingTokens != positive || *account.Allowance.RemainingRequests != positive {
+				t.Fatal("count observations missing from public account")
+			}
+		})
+	}
+}
+
 func TestCodeObservationWindowsMergeAndGateUntilIndependentResets(t *testing.T) {
 	f := newCodeFixture(t)
 	ctx := t.Context()
