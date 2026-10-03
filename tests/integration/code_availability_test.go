@@ -51,3 +51,36 @@ func TestCodeAccountRecoveryRetainsPinAndHonorsAllowanceReset(t *testing.T) {
 		t.Fatalf("temporary outage changed pin: %v", err)
 	}
 }
+
+func TestCodeAccountEligibilityReflectsProviderState(t *testing.T) {
+	f := newCodeFixture(t)
+	root, err := f.store.BindConnection(t.Context(), f.route, f.key, codemode.Identity{Conversation: "provider-state"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !codeObservedAccount(t, f).Eligible {
+		t.Fatal("account with a draft provider is ineligible")
+	}
+	f.exec(t, `UPDATE olp.providers SET state='disabled' WHERE id=$1`, f.provider)
+	if account := codeObservedAccount(t, f); account.Eligible || !account.Enabled || account.GrantState != "current" {
+		t.Fatalf("disabled provider eligibility: %+v", account)
+	}
+	input := map[string]any{"project_id": f.project, "provider_id": f.provider, "credential_id": f.credential, "name": "Fixture subscription", "enabled": true, "models": []string{"native-model"}}
+	updated := f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+f.account, input, etagHeader(f.accountRecord), 200)
+	if updated["eligible"] != false {
+		t.Fatal("account write reports a disabled provider as eligible")
+	}
+	_, err = f.store.Admit(t.Context(), f.input("provider-state", "", nil))
+	codeRefusal(t, err, "code_account_unavailable")
+	f.exec(t, `UPDATE olp.providers SET state='draft' WHERE id=$1`, f.provider)
+	if !codeObservedAccount(t, f).Eligible {
+		t.Fatal("account eligibility did not recover with its provider")
+	}
+	permit, err := f.store.Admit(t.Context(), f.input("provider-state", "", nil))
+	if err != nil || permit.Binding.ID != root.Binding.ID || permit.Account.ID != root.Account.ID {
+		t.Fatalf("provider recovery changed the account pin: %v", err)
+	}
+	if err := f.store.Abort(t.Context(), permit.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+}

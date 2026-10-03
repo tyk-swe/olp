@@ -12,10 +12,8 @@
     Use the inference gateway address when control and gateway run separately.
   </p>
 </div>
-{#key gatewayURL}
-  <CodeModePage
-    {gatewayURL}
-    loadClientConfiguration={(route, signal) =>
-      getCodeClientConfiguration(route, gatewayURL, signal)}
-  />
-{/key}
+<CodeModePage
+  {gatewayURL}
+  loadClientConfiguration={(route, signal) =>
+    getCodeClientConfiguration(route, gatewayURL, signal)}
+/>
