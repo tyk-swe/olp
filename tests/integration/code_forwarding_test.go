@@ -30,7 +30,8 @@ type codeForwardRuntime struct {
 	authority access.Authority
 }
 
-func (r *codeForwardRuntime) Release() *runtime.Release { return r.pinned }
+func (r *codeForwardRuntime) Release() *runtime.Release              { return r.pinned }
+func (r *codeForwardRuntime) Eligibility(string) runtime.Eligibility { return runtime.Eligible }
 func (r *codeForwardRuntime) Authenticate(key string) (access.Authority, error) {
 	if key != "olp-code-fixture" {
 		return access.Authority{}, runtime.ErrInvalidKey
@@ -41,7 +42,7 @@ func (r *codeForwardRuntime) Authenticate(key string) (access.Authority, error) 
 type codeForwardAuthorizer struct{}
 
 func (codeForwardAuthorizer) AuthorizeCode(_ context.Context, _ runtime.Configuration, account codemode.Account) (codemode.Authorization, error) {
-	return codemode.Authorization{Principal: account.Principal, Headers: http.Header{"Authorization": {"Bearer fixture-subscription"}}}, nil
+	return codemode.Authorization{Principal: account.Principal, CredentialID: account.CredentialID, Headers: http.Header{"Authorization": {"Bearer fixture-subscription"}}}, nil
 }
 
 func codeForwardServer(t *testing.T, f *codeFixture, upstream string) (*httptest.Server, *limits.Limiter, string) {

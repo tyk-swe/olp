@@ -215,6 +215,14 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 			// The socket still uses the authorization sent at its handshake,
 			// even if this generation's admission reads a refreshed credential.
 			active.auth = connection.auth
+			if s.Runtime.Eligibility(connection.auth.CredentialID) != runtime.Eligible {
+				refuse(codemode.Refuse(503, "code_account_unavailable"))
+				return
+			}
+			if network := connection.config.Options.Network; network != nil && network.CredentialID != "" && s.Runtime.Eligibility(network.CredentialID) != runtime.Eligible {
+				refuse(codemode.Refuse(503, "code_network_credential_unavailable"))
+				return
+			}
 			if err := active.dispatch(ctx); err != nil {
 				refuse(err)
 				return
