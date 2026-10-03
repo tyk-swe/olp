@@ -41,7 +41,10 @@
 // Walk reads a request once, in any dialect, into a Prompt: its text as
 // segments, its images and media parts as flat charges (ImageTokens and
 // MediaTokens), and the roles and message counts a tokenizer's framing is
-// charged on. A Prompt is counted on demand for a Counter, by Prompt.Estimate,
+// charged on. The request is read from its parsed document, where each value is
+// found by its place and each string lies in the document's own bytes, so a
+// prompt of 400 KB costs the one pass that decodes its escapes and not a scan for
+// each level of the request it is nested in. A Prompt is counted on demand for a Counter, by Prompt.Estimate,
 // and each family is counted once however many models of it ask, so a route
 // whose targets share a family, or a request that is translated for several, is
 // priced without reading its text again. Estimate adds the reply the request
@@ -50,7 +53,9 @@
 // records. For a family without a tokenizer it is the estimate the gateway
 // charged before any family had one, bit for bit, for every shape the old walker
 // read; the legacy copy of the old walker in walk_legacy_test.go holds it to that
-// over generated requests. The walker reads a few shapes the old one did not: the
+// over generated requests, and walk_reference_test.go keeps the walker as it read
+// raw JSON, which the walker that reads the parsed document is held to, field for
+// field, for any request and any provider defaults. The walker reads a few shapes the old one did not: the
 // schema of a structured output in each dialect, a Responses reasoning summary,
 // Anthropic thinking and document blocks, and Bedrock's tool catalogue.
 //

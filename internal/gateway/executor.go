@@ -25,7 +25,6 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -73,6 +72,7 @@ type execution struct {
 	servingSlot          string
 	servingBinding       string
 	preparedProviders    map[string]preparedProvider
+	encoded              map[string]encodedRequest
 	sourceSummary        *requestSummary
 	request              request
 	family               openai.Family
@@ -534,6 +534,7 @@ func (s *Server) rejectedFact(x *execution, a runtime.Attempt, slot runtime.Slot
 func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
 	fact := s.newFact(x, a, slot, ordinal)
 	cfg := provider.Connector()
+	kept := x.takeEncoded()
 	fact.Carried = cfg.CarriedByPlugin()
 	// A plugin that carries the request reports only whether it was sent, so
 	// the attempt must not risk repeating work it may have done.
@@ -602,7 +603,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			}
 		}
 	} else {
-		body, wire, err = providerinvoke.Encode(x.parsed, cfg, a.UpstreamModel, provider.ParameterDefaults)
+		body, wire, err = x.encoding(kept, provider, cfg, a.UpstreamModel)
 	}
 	if err != nil {
 		return fail(classProtocol, nil)

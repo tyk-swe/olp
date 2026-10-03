@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 
 	"golang.org/x/net/http/httpguts"
 
@@ -199,16 +200,16 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 	return parsed, nil
 }
 
-func inspectionAccept(route runtime.Route, parsed *openai.Request, context interaction.Context, demand *simulatedDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) ([]string, *runtime.TokenDemand), map[string]*interactionInspection) {
+func inspectionAccept(route runtime.Route, parsed *openai.Request, context interaction.Context, demand *simulatedDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
 	inspections := map[string]*interactionInspection{}
 	if parsed == nil {
 		return nil, nil, inspections
 	}
 	fidelity := route.Fidelity.Mode
 	effectiveRequests := map[string]*openai.Request{}
-	var effective func(runtime.Provider, runtime.Target) ([]string, *runtime.TokenDemand)
+	var effective func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand)
 	if route.Fidelity.Strict() {
-		effective = func(_ runtime.Provider, target runtime.Target) ([]string, *runtime.TokenDemand) {
+		effective = func(_ runtime.Provider, target runtime.Target) (runtime.Names, *runtime.TokenDemand) {
 			request := effectiveRequests[target.ID]
 			delete(effectiveRequests, target.ID)
 			if request == nil {
@@ -225,7 +226,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 					}
 				}
 			}
-			return protocols.ParameterNames(request), resolved
+			return sync.OnceValue(func() []string { return protocols.ParameterNames(request) }), resolved
 		}
 	}
 	accept := func(provider runtime.Provider, target runtime.Target) error {

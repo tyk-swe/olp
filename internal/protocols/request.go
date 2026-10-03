@@ -19,6 +19,19 @@ import (
 type Object = map[string]json.RawMessage
 
 func object(data []byte) (Object, error) {
+	// What nearly every call is given is one object, which is read in one go. The
+	// decoder, which copies what it reads into a buffer of its own, only says
+	// what is wrong with anything else.
+	var v Object
+	if json.Unmarshal(data, &v) == nil && v != nil {
+		return v, nil
+	}
+	return explainedObject(data)
+}
+
+// explainedObject is object for input that is not one object, and says why it is
+// not.
+func explainedObject(data []byte) (Object, error) {
 	var v Object
 	d := json.NewDecoder(bytes.NewReader(data))
 	if err := d.Decode(&v); err != nil || v == nil {
@@ -39,6 +52,9 @@ func arr(v json.RawMessage) []json.RawMessage {
 func present(v json.RawMessage) bool {
 	return len(v) > 0 && !bytes.Equal(bytes.TrimSpace(v), []byte("null"))
 }
+
+// presentValue is present for a value of a parsed document.
+func presentValue(v oif.Value) bool { return v.Kind() != oif.Absent && v.Kind() != oif.Null }
 func requestError(field, message string) error {
 	return &openai.RequestError{Code: "unsupported_parameter", Param: field, Message: message}
 }
@@ -54,10 +70,13 @@ func Parse(family openai.Family, data []byte, model string) (*openai.Request, er
 	if err != nil {
 		return nil, &openai.RequestError{Code: "invalid_json", Message: "The request body must be unambiguous valid JSON."}
 	}
-	f := doc.Fields()
+	// The members that carry the conversation are read from the document, so
+	// they are not copied into the fields.
+	f := doc.FieldsWithout("messages", "contents", "generateContentRequest")
 	if f == nil {
 		return nil, requestError("", "expected a JSON object")
 	}
+	root := doc.Root()
 	stream := family == openai.FamilyGeminiStream
 	if family.Surface() == "anthropic" {
 		model = str(f["model"])
@@ -66,7 +85,8 @@ func Parse(family openai.Family, data []byte, model string) (*openai.Request, er
 				return nil, requestError("stream", "stream must be a boolean")
 			}
 		}
-		if len(arr(f["messages"])) == 0 {
+		messages := member(root, "messages").Elements()
+		if len(messages) == 0 {
 			return nil, requestError("messages", "messages must be a non-empty array")
 		}
 		if family.Operation() == "generation" {
@@ -78,16 +98,15 @@ func Parse(family openai.Family, data []byte, model string) (*openai.Request, er
 		if err := validateNativeControls(f, false); err != nil {
 			return nil, err
 		}
-		for _, m := range arr(f["messages"]) {
-			msg, e := object(m)
-			if e != nil {
-				return nil, e
+		for _, msg := range messages {
+			if msg.Kind() != oif.Object {
+				return nil, requestError("", "expected a JSON object")
 			}
 			// A system message between turns is the mid-conversation-system beta.
-			if role := str(msg["role"]); role != "user" && role != "assistant" && role != "system" {
+			if role := chars(member(msg, "role")); role != "user" && role != "assistant" && role != "system" {
 				return nil, requestError("messages.role", "Anthropic messages require user, assistant or system roles")
 			}
-			if !present(msg["content"]) {
+			if !presentValue(member(msg, "content")) {
 				return nil, requestError("messages.content", "message content is required")
 			}
 		}
@@ -98,28 +117,34 @@ func Parse(family openai.Family, data []byte, model string) (*openai.Request, er
 		if _, ok := f["stream"]; ok {
 			return nil, requestError("stream", "Gemini streaming is selected by the request path")
 		}
-		content := f
-		if present(f["generateContentRequest"]) {
-			if family != openai.FamilyGeminiCount || present(f["contents"]) {
+		content := root
+		if wrapped := member(root, "generateContentRequest"); presentValue(wrapped) {
+			if family != openai.FamilyGeminiCount || presentValue(member(root, "contents")) {
 				return nil, requestError("generateContentRequest", "countTokens accepts either contents or generateContentRequest")
 			}
-			content, err = object(f["generateContentRequest"])
-			if err != nil {
-				return nil, err
+			if wrapped.Kind() != oif.Object {
+				return nil, requestError("", "expected a JSON object")
 			}
+			content = wrapped
 		}
-		if err := validateNativeControls(content, true); err != nil {
+		// The controls are in the generation config, and nothing else of the
+		// request is read for them.
+		controls := Object{}
+		if config := member(content, "generationConfig"); config.Kind() != oif.Absent {
+			controls["generationConfig"] = config.Bytes()
+		}
+		if err := validateNativeControls(controls, true); err != nil {
 			return nil, err
 		}
-		if len(arr(content["contents"])) == 0 {
+		contents := member(content, "contents").Elements()
+		if len(contents) == 0 {
 			return nil, requestError("contents", "contents must be a non-empty array")
 		}
-		for _, m := range arr(content["contents"]) {
-			msg, e := object(m)
-			if e != nil {
-				return nil, e
+		for _, msg := range contents {
+			if msg.Kind() != oif.Object {
+				return nil, requestError("", "expected a JSON object")
 			}
-			if len(arr(msg["parts"])) == 0 {
+			if len(member(msg, "parts").Elements()) == 0 {
 				return nil, requestError("contents.parts", "content parts must be a non-empty array")
 			}
 		}

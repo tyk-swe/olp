@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -384,7 +385,7 @@ func (s *Server) inspectSimulation(snapshot *runtime.Snapshot, slug string, inpu
 		options.Effective = nil
 	}
 	if parsed != nil {
-		options.Parameters = protocols.ParameterNames(parsed)
+		options.Parameters = sync.OnceValue(func() []string { return protocols.ParameterNames(parsed) })
 	}
 
 	plan, err := runtime.PlanRequest(snapshot, slug, input.Operation, input.Surface, input.Mode, []byte(input.Seed), options)

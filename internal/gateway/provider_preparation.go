@@ -1,6 +1,9 @@
 package gateway
 
 import (
+	"sync"
+
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -17,7 +20,7 @@ type preparedProvider struct {
 	// admitted is what the attempt is admitted under: the larger of the
 	// caller's request and the one this provider is sent.
 	admitted        admittedEstimate
-	parameters      []string
+	parameters      runtime.Names
 	demand          *runtime.TokenDemand
 	plan            *interaction.Plan
 	policyDecisions []contentpolicy.Decision
@@ -41,10 +44,11 @@ type admittedEstimate struct {
 // A summary belongs to one source or one bound destination within an inference
 // request. The same complete walk feeds routing and reservation, and each
 // model family is counted once from it; the canonical parameter names still
-// come from the effective request adapter.
+// come from the effective request adapter, and only when a route policy asks
+// for them, since reading them decodes the whole request.
 type requestSummary struct {
 	request    *openai.Request
-	parameters []string
+	parameters runtime.Names
 	prompt     *estimate.Prompt
 }
 
@@ -53,7 +57,7 @@ func (x *execution) summarize(request *openai.Request) requestSummary {
 	if x.request.counted != nil {
 		prompt.Observe(x.request.counted)
 	}
-	return requestSummary{request: request, parameters: protocols.ParameterNames(request), prompt: prompt}
+	return requestSummary{request: request, parameters: sync.OnceValue(func() []string { return protocols.ParameterNames(request) }), prompt: prompt}
 }
 
 func (x *execution) summarizeSource() requestSummary {
@@ -204,6 +208,63 @@ func (x *execution) preparedEstimate(model string, effective requestSummary) (ad
 // content policy would rewrite.
 func (x *execution) automatic(provider *runtime.Provider) bool {
 	return provider.ProfileID == "" && !x.strict() && (x.route == nil || x.route.ContentPolicy == nil)
+}
+
+// encodedRequest is the body a provider that takes the caller's request as it
+// is would be sent, and the dialect it is in, as made from one document.
+type encodedRequest struct {
+	source oif.Document
+	body   []byte
+	wire   openai.Family
+}
+
+// keptEncodings is how many bodies planning keeps for the attempts, which a route
+// of more targets than that is planned for as it always was: the attempts that
+// come after the first four encode their own.
+const keptEncodings = 4
+
+func encodedKey(provider *runtime.Provider, model string) string {
+	return provider.ID + "/" + provider.RevisionID + "/" + model
+}
+
+// encodes encodes the caller's request for a provider that takes it as it is,
+// which is how planning learns whether the provider can take it at all, and keeps
+// the body. Planning asks it of every target of the route, and the attempt that
+// serves the request is sent the body of its own target, so a request is encoded
+// once for that target and not twice. Only the first attempt is sent a body that
+// planning made, and it drops the rest: an attempt that fails over is the rare
+// one, and a request that is served for an hour must not hold a copy of itself for
+// each target of its route.
+func (x *execution) encodes(provider *runtime.Provider, cfg connectors.Config, model string) error {
+	body, wire, err := providerinvoke.Encode(x.parsed, cfg, model, provider.ParameterDefaults)
+	if err != nil {
+		return err
+	}
+	if len(x.encoded) < keptEncodings {
+		if x.encoded == nil {
+			x.encoded = map[string]encodedRequest{}
+		}
+		x.encoded[encodedKey(provider, model)] = encodedRequest{source: x.parsed.OIF().Document(), body: body, wire: wire}
+	}
+	return nil
+}
+
+// takeEncoded hands the bodies planning kept to the attempt that is about to use
+// them, and keeps none.
+func (x *execution) takeEncoded() map[string]encodedRequest {
+	kept := x.encoded
+	x.encoded = nil
+	return kept
+}
+
+// encoding is the body of the caller's request for one of a provider's models, and
+// the dialect it is in: the one planning made, if it made one of the request as it
+// now is, and one made now if not.
+func (x *execution) encoding(kept map[string]encodedRequest, provider *runtime.Provider, cfg connectors.Config, model string) ([]byte, openai.Family, error) {
+	if request, ok := kept[encodedKey(provider, model)]; ok && request.source == x.parsed.OIF().Document() {
+		return request.body, request.wire, nil
+	}
+	return providerinvoke.Encode(x.parsed, cfg, model, provider.ParameterDefaults)
 }
 
 // attemptEstimate prices the request for an attempt on one of a provider's

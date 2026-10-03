@@ -206,7 +206,7 @@ compiles them and never runs them.
 | Package | Benchmarks |
 | --- | --- |
 | `internal/runtime` | `BenchmarkAuthenticate` (key digest and lookup), `BenchmarkEligibility`, `BenchmarkPlanRequest` and `BenchmarkSelectSlots` (route planning and credential selection) |
-| `internal/gateway` | `BenchmarkAdmission` (limit and budget reservation and settlement against a stateless limiter client), `BenchmarkStreamWriter`, and `BenchmarkGateway`, the whole request path with the upstream and the client held in memory: unary, streamed, and an OpenAI stream translated for an Anthropic client |
+| `internal/gateway` | `BenchmarkAdmission` (limit and budget reservation and settlement against a stateless limiter client), `BenchmarkStreamWriter`, `BenchmarkGateway`, the whole request path with the upstream and the client held in memory: unary, streamed, and an OpenAI stream translated for an Anthropic client, and `BenchmarkGatewayLargePrompt`, the same for the 100,000-token prompts of the high-throughput scenario |
 | `internal/protocols` | `BenchmarkTranslateRequest`, `BenchmarkTranslateResponse` and `BenchmarkTranslateStream` for OpenAI Chat, Anthropic Messages and Gemini: each dialect to itself, as a route to a provider of the caller's own dialect is served, and each of Anthropic and Gemini to and from OpenAI Chat |
 | `internal/operations/tokenization/estimate` | `BenchmarkEstimate` (a short prompt for every family) beside the encoder benchmarks, of which `BenchmarkMeter` and `BenchmarkHeuristic` measure the long prompts admission counts |
 | `internal/usage`, `internal/plugins` | `BenchmarkCostBound` and `BenchmarkPriceCost`; `BenchmarkSign` |

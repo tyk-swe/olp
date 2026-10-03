@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +13,7 @@ import (
 	"net/netip"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -22,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // allowing is a limiter client that grants every reservation and keeps no state,
@@ -417,9 +421,19 @@ type discardSink struct{}
 
 func (discardSink) Terminal(Envelope) {}
 
+// benchLimits is what a benchmark gateway enforces beyond the defaults, which are
+// a body of 64 KiB and a key that limits nothing. A budget gives the key a daily
+// cost limit that the limiter always has room for, and prices the model, so that
+// admission estimates what the request could cost and reserves it, as it does for
+// the key of the high-throughput scenario.
+type benchLimits struct {
+	maxBody int64
+	budget  bool
+}
+
 // benchGateway is a gateway that serves one route through one provider, over
-// the transport, to a key that limits nothing.
-func benchGateway(tb testing.TB, upstream *benchTransport, model string) http.Handler {
+// the transport, to a key that limits what the limits say.
+func benchGateway(tb testing.TB, upstream *benchTransport, model string, limit benchLimits) http.Handler {
 	tb.Helper()
 	credential, version, slot := uuid.NewString(), 1, uuid.NewString()
 	provider := runtime.Provider{
@@ -446,11 +460,21 @@ func benchGateway(tb testing.TB, upstream *benchTransport, model string) http.Ha
 	if err != nil {
 		tb.Fatal(err)
 	}
-	rt := &fakeRuntime{release: release, revoked: map[string]bool{}, keys: map[string]access.Authority{
-		fullKey: {ID: uuid.NewString(), LookupID: "lookup_bench", Policy: access.KeyPolicy{Scopes: []string{"inference"}}},
-	}}
+	key := access.Authority{ID: uuid.NewString(), LookupID: "lookup_bench", Policy: access.KeyPolicy{Scopes: []string{"inference"}}}
+	rt := &fakeRuntime{release: release, revoked: map[string]bool{}, keys: map[string]access.Authority{fullKey: key}}
+	maxBody := cmp.Or(limit.maxBody, 64*1024)
 	policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
-	gw := New(rt, &policy, Config{MaxInFlight: 8, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096}, quiet)
+	gw := New(rt, &policy, Config{MaxInFlight: 8, MaxBodyBytes: maxBody, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096}, quiet)
+	if limit.budget {
+		key.Policy.DailyCostLimit = stringptr("1000000")
+		rt.keys[fullKey] = key
+		input, output := "2.5", "10"
+		rt.inputs = &usage.RoutingInputs{RefreshedAt: time.Now(), Prices: []usage.RoutingPrice{{
+			Price:       usage.Price{ProviderKind: "openai", ProviderID: &provider.ID, Model: model, Operation: "generation", InputPerMillion: &input, OutputPerMillion: &output, Currency: "USD"},
+			EffectiveAt: time.Now().Add(-time.Hour),
+		}}}
+		gw.Admission = newAdmission(tb, newAllowing(0, 0, 0, false))
+	}
 	gw.Sink = discardSink{}
 	gw.client = &http.Client{Transport: upstream}
 	mux := http.NewServeMux()
@@ -529,7 +553,7 @@ func BenchmarkGateway(b *testing.B) {
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			tc.upstream.status = http.StatusOK
-			handler := benchGateway(b, &tc.upstream, "gpt-bench")
+			handler := benchGateway(b, &tc.upstream, "gpt-bench", benchLimits{})
 			body := bytes.NewReader(tc.request)
 			request := httptest.NewRequestWithContext(b.Context(), http.MethodPost, tc.path, body)
 			request.Header.Set("Content-Type", "application/json")
@@ -560,4 +584,124 @@ func BenchmarkGateway(b *testing.B) {
 			b.ReportMetric(float64(writer.flushed), "flushes/op")
 		})
 	}
+}
+
+// benchProse is prompt text of about tokens tokens, four characters to each, the
+// way a document that a caller pastes in is written: lines, quotation marks and a
+// few characters that a JSON string has to escape.
+func benchProse(tokens int) string {
+	const paragraph = "The quarterly report covers revenue, churn and support load across every region.\n" +
+		"Customers wrote: \"the export is slow\" and asked for a refund, a call back, or both.\n"
+	return strings.Repeat(paragraph, tokens*4/len(paragraph)+1)[:tokens*4]
+}
+
+// benchLargeChat is a chat request whose one user message holds prompt, with the
+// system message and reply bound the high-throughput scenario sends.
+func benchLargeChat(b *testing.B, prompt string, stream bool) []byte {
+	b.Helper()
+	text, err := json.Marshal(prompt)
+	if err != nil {
+		b.Fatal(err)
+	}
+	options := ""
+	if stream {
+		options = `,"stream":true,"stream_options":{"include_usage":true}`
+	}
+	return []byte(`{"model":"` + routeSlug + `","max_tokens":16,"messages":[{"role":"system","content":"You are a concise assistant."},{"role":"user","content":` + string(text) + `}]` + options + `}`)
+}
+
+// benchLargeMessages is the same request as an Anthropic client sends it.
+func benchLargeMessages(b *testing.B, prompt string, stream bool) []byte {
+	b.Helper()
+	text, err := json.Marshal(prompt)
+	if err != nil {
+		b.Fatal(err)
+	}
+	options := ""
+	if stream {
+		options = `,"stream":true`
+	}
+	return []byte(`{"model":"` + routeSlug + `","max_tokens":16,"system":"You are a concise assistant.","messages":[{"role":"user","content":` + string(text) + `}]` + options + `}`)
+}
+
+// BenchmarkGatewayLargePrompt is the request path of the high-throughput
+// scenario: a prompt of 100,000 tokens, which is 400 KB, sent by a key with a
+// cost budget to a model that has a tokenizer, so that the walk of the prompt,
+// its count, the price it could cost and the body sent upstream are all paid, and
+// the upstream answers at once. "prose" is text as a caller writes it, with lines
+// and quotation marks to escape. "plain" is words of one token each with nothing
+// to escape, as the benchmark harness's prompt is, though it repeats one word
+// where the harness draws its words from a vocabulary. "anthropic" is the prose
+// sent as an Anthropic client sends it, to the same OpenAI upstream, which is
+// translated on its way.
+//
+//	go test ./internal/gateway -run '^$' -bench BenchmarkGatewayLargePrompt -benchmem
+func BenchmarkGatewayLargePrompt(b *testing.B) {
+	const tokens = 100_000
+	prose := benchProse(tokens)
+	unary := benchTransport{body: []byte(benchChat), header: http.Header{"Content-Type": {"application/json"}}}
+	stream := benchTransport{body: benchChatStream(), header: http.Header{"Content-Type": {"text/event-stream"}}}
+	for _, tc := range []struct {
+		name      string
+		prompt    string
+		stream    bool
+		anthropic bool
+		upstream  benchTransport
+		want      string
+	}{
+		{"prose/unary", prose, false, false, unary, `"object":"chat.completion"`},
+		{"prose/stream", prose, true, false, stream, "[DONE]"},
+		{"plain/unary", strings.Repeat("the ", tokens) + "ping", false, false, unary, `"object":"chat.completion"`},
+		{"plain/stream", strings.Repeat("the ", tokens) + "ping", true, false, stream, "[DONE]"},
+		{"anthropic/unary", prose, false, true, unary, `"type":"message"`},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			tc.upstream.status = http.StatusOK
+			handler := benchGateway(b, &tc.upstream, "gpt-4o-bench", benchLimits{maxBody: 2 << 20, budget: true})
+			path, request := "/v1/chat/completions", benchLargeChat(b, tc.prompt, tc.stream)
+			if tc.anthropic {
+				path, request = "/anthropic/v1/messages", benchLargeMessages(b, tc.prompt, tc.stream)
+			}
+			body := bytes.NewReader(request)
+			r := httptest.NewRequestWithContext(b.Context(), http.MethodPost, path, body)
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Authorization", "Bearer "+fullKey)
+			if tc.anthropic {
+				r.Header.Set("Anthropic-Version", "2023-06-01")
+			}
+			r.ContentLength = int64(len(request))
+			writer := &benchWriter{header: make(http.Header, 16)}
+			serve := func() {
+				body.Reset(request)
+				r.Body = io.NopCloser(body)
+				writer.reset()
+				handler.ServeHTTP(writer, r)
+			}
+			writer.kept = &bytes.Buffer{}
+			serve()
+			if writer.status != http.StatusOK || !strings.Contains(writer.kept.String(), tc.want) {
+				b.Fatalf("status %d, wrote %q, want it to contain %q", writer.status, writer.kept, tc.want)
+			}
+			writer.kept = nil
+			b.ReportAllocs()
+			b.SetBytes(int64(len(request)))
+			start := processCPU()
+			for b.Loop() {
+				serve()
+			}
+			// The wall time of a request leaves out the collector, which runs on
+			// other cores, and a request that allocates less spends less of it.
+			b.ReportMetric(float64(processCPU()-start)/float64(b.N), "cpu-ns/op")
+		})
+	}
+}
+
+// processCPU is the CPU time this process has used, user and system, in
+// nanoseconds.
+func processCPU() int64 {
+	var usage syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &usage); err != nil {
+		return 0
+	}
+	return usage.Utime.Nano() + usage.Stime.Nano()
 }

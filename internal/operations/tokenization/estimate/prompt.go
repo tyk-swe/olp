@@ -61,12 +61,7 @@ type counted struct {
 func Walk(request *openai.Request) *Prompt {
 	p := &Prompt{request: request, generation: request == nil || request.Family.Operation() == openai.OperationGeneration, tally: &tally{}}
 	if request != nil {
-		walkInput(&p.in, request.Family, func(name string) json.RawMessage {
-			if raw := request.Field(name); len(raw) > 0 {
-				return raw
-			}
-			return nil
-		})
+		walkInput(&p.in, request.Family, requestFields(request))
 	}
 	return p
 }
@@ -188,19 +183,19 @@ func (p *Prompt) defaulted(defaults map[string]json.RawMessage) (in input, ok bo
 	if p.request == nil || !slices.ContainsFunc(promptFields, func(name string) bool { return mayHoldPrompt(name, defaults[name]) }) {
 		return input{}, false
 	}
-	walkInput(&in, p.request.Family, func(name string) json.RawMessage {
+	walkInput(&in, p.request.Family, func(name string) node {
 		fallback := defaults[name]
 		if !mayHoldPrompt(name, fallback) {
-			return nil
+			return node{}
 		}
 		own := p.request.Field(name)
 		if name == "generationConfig" {
-			return unsetMembers(own, fallback)
+			return rawNode(unsetMembers(own, fallback))
 		}
 		if len(own) > 0 {
-			return nil
+			return node{}
 		}
-		return fallback
+		return rawNode(fallback)
 	})
 	return in, !in.empty()
 }

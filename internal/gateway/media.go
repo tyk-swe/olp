@@ -269,7 +269,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	// a default or an explicit native null.
 	candidates := make(map[string][]string, len(route.Targets))
 	options := s.selectionOptions(x)
-	options.Parameters = mediaParameterNames(request)
+	options.Parameters = runtime.Listed(mediaParameterNames(request))
 	options.Accept = func(p runtime.Provider, t runtime.Target) error {
 		if !connectorsSupports(p, request.Op, x.mode) {
 			return errors.New("connector capability unavailable")
@@ -307,17 +307,17 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 		}
 		return nil
 	}
-	options.Effective = func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+	options.Effective = func(p runtime.Provider, t runtime.Target) (runtime.Names, *runtime.TokenDemand) {
 		if p.ProfileID == "" {
 			// Automatic providers keep their codec's null/default wire behavior;
 			// only explicit profiles define an exact effective native source.
-			return mediaParameterNames(request), nil
+			return runtime.Listed(mediaParameterNames(request)), nil
 		}
 		parameters, ok := candidates[t.ID]
 		if !ok {
 			return nil, nil
 		}
-		return parameters, nil
+		return runtime.Listed(parameters), nil
 	}
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, options)
 	if err != nil {

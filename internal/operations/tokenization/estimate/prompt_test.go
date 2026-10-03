@@ -506,12 +506,7 @@ func TestFollowCountsRolesAgainstTheBound(t *testing.T) {
 // its text.
 func walkKeeping(request *openai.Request, retain int) *input {
 	in := &input{retain: retain}
-	walkInput(in, request.Family, func(name string) json.RawMessage {
-		if raw := request.Field(name); len(raw) > 0 {
-			return raw
-		}
-		return nil
-	})
+	walkInput(in, request.Family, requestFields(request))
 	return in
 }
 
@@ -760,16 +755,16 @@ func TestWalkerReadsTheStructuredOutputsReasoningAndDocumentsOfEveryDialect(t *t
 // looks for: nearly every request has no structured output, no reasoning and no
 // document, and a feature a request does not use allocates nothing for it.
 func TestWalkingMembersThatAreNotThereAllocatesNothing(t *testing.T) {
-	absent := func(string) json.RawMessage { return nil }
+	absent := func(string) node { return node{} }
 	for _, family := range walkerFamilies {
 		var in input
 		w := walker{&in}
 		if got := testing.AllocsPerRun(100, func() {
 			w.structured(family, absent)
-			w.reasoning(nil)
-			w.document(nil)
-			w.dialect(nil)
-			w.generationConfig(nil)
+			w.reasoning(object{})
+			w.document(object{})
+			w.dialect(node{})
+			w.generationConfig(node{})
 		}); got != 0 {
 			t.Errorf("%s: looking for what is not there allocates %v times", family, got)
 		}
@@ -974,9 +969,9 @@ func TestPromptFieldsNamesEveryFieldTheWalkerReads(t *testing.T) {
 	read := map[string]bool{}
 	for _, family := range walkerFamilies {
 		var in input
-		walkInput(&in, family, func(name string) json.RawMessage {
+		walkInput(&in, family, func(name string) node {
 			read[name] = true
-			return nil
+			return node{}
 		})
 	}
 	for name := range read {

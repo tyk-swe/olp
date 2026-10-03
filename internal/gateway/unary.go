@@ -154,12 +154,12 @@ func (s *Server) prepareUnary(x *execution) *Error {
 		}
 		return err
 	}
-	options.Effective = func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+	options.Effective = func(p runtime.Provider, t runtime.Target) (runtime.Names, *runtime.TokenDemand) {
 		plan, err := x.unaryPlan(&p, t.ProviderModel)
 		if err != nil {
 			return nil, nil
 		}
-		return plan.Parameters(), nil
+		return runtime.Listed(plan.Parameters()), nil
 	}
 	plan, err := runtime.PlanRequest(x.request.release.Snapshot, x.route.Slug, x.operationName(), x.surfaceName(), "unary", x.affinity, options)
 	if err != nil {

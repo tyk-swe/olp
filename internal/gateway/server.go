@@ -29,7 +29,6 @@ import (
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -690,7 +689,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 	options.Demand = func(_ runtime.Provider, t runtime.Target) *runtime.TokenDemand {
 		return x.sourceDemand(t.ProviderModel)
 	}
-	options.Effective = func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+	options.Effective = func(p runtime.Provider, t runtime.Target) (runtime.Names, *runtime.TokenDemand) {
 		if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
 			return source.parameters, x.sourceDemand(t.ProviderModel)
 		}
@@ -728,7 +727,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 				policyDecisions = prepared.policyDecisions
 			}
 		} else {
-			_, _, e = providerinvoke.Encode(x.parsed, cfg, t.ProviderModel, p.ParameterDefaults)
+			e = x.encodes(&p, cfg, t.ProviderModel)
 		}
 		if e != nil {
 			semantic = e

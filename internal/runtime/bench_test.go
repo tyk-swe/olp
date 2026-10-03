@@ -173,7 +173,7 @@ func BenchmarkPlanRequest(b *testing.B) {
 			now := time.Now()
 			options := SelectionOptions{
 				KeyID: uuid.NewString(), Now: now, CheckSlots: true, CredentialEligibility: manager.Eligibility,
-				Parameters:  []string{"temperature", "max_tokens"},
+				Parameters:  Listed([]string{"temperature", "max_tokens"}),
 				TokenDemand: &TokenDemand{EstimatedInputTokens: 4_200, MaxOutputTokens: ptr(int64(512))},
 			}
 			if tc.prices > 0 {

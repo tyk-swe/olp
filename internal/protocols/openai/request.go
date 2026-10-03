@@ -213,12 +213,21 @@ func parseFields(family Family, fields map[string]json.RawMessage) (*Request, er
 	return parseDocument(family, doc)
 }
 func parseDocument(family Family, doc oif.Document) (*Request, error) {
-	fields := doc.Fields()
+	// The members that carry the conversation are read from the document, so
+	// they are not copied into the fields.
+	var read []string
+	switch family {
+	case FamilyChat:
+		read = []string{"messages"}
+	case FamilyResponses, FamilyInputTokens:
+		read = []string{"input"}
+	}
+	fields := doc.FieldsWithout(read...)
 	if fields == nil {
 		return nil, &RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
 	r := NewSourceEnvelope(family, "", false, doc)
-	if err := r.validateFields(fields); err != nil {
+	if err := r.validateFields(fields, doc.Root()); err != nil {
 		return nil, err
 	}
 	r.source = r.source.WithDescriptor(Descriptor(family, r.Stream))
@@ -226,7 +235,12 @@ func parseDocument(family Family, doc oif.Document) (*Request, error) {
 	return r, nil
 }
 
-func (r *Request) validateFields(fields map[string]json.RawMessage) error {
+// validateFields checks the envelope of a request. The document, when there is
+// one, is the parsed form of fields, which the members that carry a conversation
+// are read from in place of the copies in fields: they are the same text, and a
+// prompt of 400 KB is not scanned again for each level of the conversation it is
+// nested in. It is the zero value for fields that are not those of a document.
+func (r *Request) validateFields(fields map[string]json.RawMessage, doc oif.Value) error {
 	family := r.Family
 	r.Stream, r.IncludeUsage = false, false
 	model, ok := stringField(fields, "model")
@@ -245,11 +259,11 @@ func (r *Request) validateFields(fields map[string]json.RawMessage) error {
 	}
 	switch family {
 	case FamilyChat:
-		err = r.validateChat(fields)
+		err = r.validateChat(fields, doc)
 	case FamilyResponses:
-		err = validateResponses(fields)
+		err = validateResponses(fields, doc)
 	case FamilyInputTokens:
-		err = validateResponses(fields)
+		err = validateResponses(fields, doc)
 	case FamilyEmbeddings, FamilyModeration:
 		if raw, ok := fields["input"]; !ok || isNull(raw) {
 			err = invalid("input", "input is required.")
@@ -292,19 +306,9 @@ func (r *Request) validateFields(fields map[string]json.RawMessage) error {
 	return nil
 }
 
-func (r *Request) validateChat(fields map[string]json.RawMessage) error {
-	messages, ok := arrayField(fields, "messages")
-	if !ok || len(messages) == 0 {
-		return &RequestError{Code: "missing_required_parameter", Message: "messages must be a non-empty array.", Param: "messages"}
-	}
-	for i, raw := range messages {
-		message, err := object(raw)
-		if err != nil {
-			return invalid(fmt.Sprintf("messages[%d]", i), "Each message must be an object.")
-		}
-		if role, ok := stringField(message, "role"); !ok || role == "" {
-			return invalid(fmt.Sprintf("messages[%d].role", i), "Each message needs a role.")
-		}
+func (r *Request) validateChat(fields map[string]json.RawMessage, doc oif.Value) error {
+	if err := validateChatMessages(fields, doc); err != nil {
+		return err
 	}
 	_, hasMax := fields["max_tokens"]
 	_, hasMaxCompletion := fields["max_completion_tokens"]
@@ -343,8 +347,49 @@ func (r *Request) validateChat(fields map[string]json.RawMessage) error {
 	return nil
 }
 
-func validateResponses(fields map[string]json.RawMessage) error {
-	if err := ValidateResponsesInput(fields["input"]); err != nil {
+// validateChatMessages checks that messages is a non-empty array of objects that
+// each have a role.
+func validateChatMessages(fields map[string]json.RawMessage, doc oif.Value) error {
+	if doc.Kind() == oif.Object {
+		messages, _ := doc.Lookup("messages")
+		elements := messages.Elements()
+		if len(elements) == 0 {
+			return &RequestError{Code: "missing_required_parameter", Message: "messages must be a non-empty array.", Param: "messages"}
+		}
+		for i, message := range elements {
+			if message.Kind() != oif.Object {
+				return invalid(fmt.Sprintf("messages[%d]", i), "Each message must be an object.")
+			}
+			role, _ := message.Lookup("role")
+			if text, ok := role.Chars(); !ok || text == "" {
+				return invalid(fmt.Sprintf("messages[%d].role", i), "Each message needs a role.")
+			}
+		}
+		return nil
+	}
+	messages, ok := arrayField(fields, "messages")
+	if !ok || len(messages) == 0 {
+		return &RequestError{Code: "missing_required_parameter", Message: "messages must be a non-empty array.", Param: "messages"}
+	}
+	for i, raw := range messages {
+		message, err := object(raw)
+		if err != nil {
+			return invalid(fmt.Sprintf("messages[%d]", i), "Each message must be an object.")
+		}
+		if role, ok := stringField(message, "role"); !ok || role == "" {
+			return invalid(fmt.Sprintf("messages[%d].role", i), "Each message needs a role.")
+		}
+	}
+	return nil
+}
+
+func validateResponses(fields map[string]json.RawMessage, doc oif.Value) error {
+	if doc.Kind() == oif.Object {
+		input, _ := doc.Lookup("input")
+		if err := validateResponsesInputValue(input); err != nil {
+			return err
+		}
+	} else if err := ValidateResponsesInput(fields["input"]); err != nil {
 		return err
 	}
 	if raw, present := fields["previous_response_id"]; present && !isNull(raw) {
@@ -447,6 +492,90 @@ func validateResponseInput(raw json.RawMessage, path string) error {
 		}
 		if err := validateResponseFileReference(part, param); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// validateResponsesInputValue is ValidateResponsesInput for a value of a parsed
+// document, which is read where it lies.
+func validateResponsesInputValue(input oif.Value) error {
+	switch input.Kind() {
+	case oif.Absent, oif.Null:
+		return &RequestError{Code: "missing_required_parameter", Message: "input is required.", Param: "input"}
+	case oif.String:
+		return nil
+	}
+	items := input.Elements()
+	if len(items) == 0 {
+		return invalid("input", "input must be a string or a non-empty array.")
+	}
+	for i, item := range items {
+		if err := validateResponseInputValue(item, fmt.Sprintf("input[%d]", i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateResponseInputValue is validateResponseInput for a value of a parsed
+// document.
+func validateResponseInputValue(item oif.Value, path string) error {
+	if item.Kind() != oif.Object {
+		return invalid(path, "Each input item must be an object.")
+	}
+	kind := memberText(item, "type")
+	_, hasID := item.Lookup("id")
+	if kind == "item_reference" || (kind == "" && hasID) {
+		return &RequestError{Code: "unsupported_stateful_reference", Message: "Input item references are not supported; send the full item inline.", Param: path}
+	}
+	if err := validateResponseFileReferenceValue(item, path); err != nil {
+		return err
+	}
+	var field string
+	switch kind {
+	case "", "message":
+		field = "content"
+	case "function_call_output", "custom_tool_call_output", "computer_call_output":
+		field = "output"
+	default:
+		return nil
+	}
+	content, _ := item.Lookup(field)
+	parts, array := content.Elements(), content.Kind() == oif.Array
+	if !array {
+		// Computer screenshots are a single object; text inputs and tool
+		// results remain opaque strings and are never interpreted as JSON.
+		parts = []oif.Value{content}
+	}
+	for i, part := range parts {
+		if part.Kind() != oif.Object {
+			continue
+		}
+		param := path + "." + field
+		if array {
+			param += fmt.Sprintf("[%d]", i)
+		}
+		if err := validateResponseFileReferenceValue(part, param); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// memberText is a member of an object that is a string, and nothing for any
+// other value.
+func memberText(object oif.Value, name string) string {
+	member, _ := object.Lookup(name)
+	text, _ := member.Chars()
+	return text
+}
+
+func validateResponseFileReferenceValue(part oif.Value, path string) error {
+	switch memberText(part, "type") {
+	case "input_file", "input_image", "computer_screenshot":
+		if fileID, present := part.Lookup("file_id"); present && fileID.Kind() != oif.Null {
+			return &RequestError{Code: "unsupported_stateful_reference", Message: "Provider file IDs are not supported; send file data or a URL instead.", Param: path + ".file_id"}
 		}
 	}
 	return nil
@@ -606,7 +735,7 @@ func (r *Request) encodeFields(upstreamModel string, defaults map[string]json.Ra
 	// reuse that result. Constructors, overlays and defaults still validate.
 	if len(defaults) > 0 || r.validatedFamily != r.Family || r.validatedDocument != r.source.Document() {
 		validation := *r
-		if err := validation.validateFields(out); err != nil {
+		if err := validation.validateFields(out, oif.Value{}); err != nil {
 			return nil, err
 		}
 	}
@@ -698,6 +827,19 @@ func walk(fields map[string]json.RawMessage, prefix string, known shape, paths *
 }
 
 func object(data []byte) (map[string]json.RawMessage, error) {
+	// What nearly every call is given is one object, which is read in one go. The
+	// decoder, which copies what it reads into a buffer of its own, only says
+	// what is wrong with anything else.
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(data, &fields) == nil && fields != nil {
+		return fields, nil
+	}
+	return explainedObject(data)
+}
+
+// explainedObject is object for input that is not one object, and says why it is
+// not.
+func explainedObject(data []byte) (map[string]json.RawMessage, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	var fields map[string]json.RawMessage
 	if err := decoder.Decode(&fields); err != nil || fields == nil {

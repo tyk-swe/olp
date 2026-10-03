@@ -73,7 +73,10 @@ type input struct {
 	approx bool
 }
 
-func (in *input) addText(text string) {
+// addText adds one text. A text that is part of a request's document is a view
+// of it, and a segment that keeps a view would hold the document up, so what is
+// kept of one is copied.
+func (in *input) addText(text string, view bool) {
 	if text == "" {
 		return
 	}
@@ -86,6 +89,9 @@ func (in *input) addText(text string) {
 	}
 	room := retain - in.kept
 	if room >= len(text) {
+		if view {
+			text = strings.Clone(text)
+		}
 		in.text = append(in.text, segment{text: text, heuristic: charge})
 		in.kept += len(text)
 		return
@@ -187,9 +193,19 @@ var promptMembers = map[string][]string{
 // schema a reply must follow.
 var responseSchemas = []string{"responseSchema", "responseJsonSchema"}
 
+// requestFields reads the top-level fields of a request, asking its document for
+// each one by name.
+func requestFields(request *openai.Request) func(string) node {
+	root := request.OIF().Document().Root()
+	return func(name string) node {
+		v, _ := root.Lookup(name)
+		return valueNode(v)
+	}
+}
+
 // walkInput reads the prompt fields of a request of the given family, asking
 // field for each one by name.
-func walkInput(in *input, family openai.Family, field func(string) json.RawMessage) {
+func walkInput(in *input, family openai.Family, field func(string) node) {
 	w := walker{in}
 	switch family {
 	case openai.FamilyChat:
@@ -223,22 +239,22 @@ func walkInput(in *input, family openai.Family, field func(string) json.RawMessa
 // structured walks the schema a request asks the reply to follow: a model reads
 // it as prompt text, as it reads a tool's. Each dialect has its own place for
 // one, and a request without one costs nothing to look.
-func (w walker) structured(family openai.Family, field func(string) json.RawMessage) {
+func (w walker) structured(family openai.Family, field func(string) node) {
 	switch family {
 	case openai.FamilyChat:
-		w.schema(jsonObject(jsonObject(field("response_format"))["json_schema"])["schema"])
+		w.schema(field("response_format").object().get("json_schema").object().get("schema"))
 	case openai.FamilyResponses, openai.FamilyInputTokens:
-		w.schema(jsonObject(jsonObject(field("text"))["format"])["schema"])
+		w.schema(field("text").object().get("format").object().get("schema"))
 	}
 	switch family.Surface() {
 	case "anthropic":
-		w.schema(jsonObject(jsonObject(field("output_config"))["format"])["schema"])
-		w.schema(jsonObject(field("output_format"))["schema"])
+		w.schema(field("output_config").object().get("format").object().get("schema"))
+		w.schema(field("output_format").object().get("schema"))
 	case "gemini":
 		w.generationConfig(field("generationConfig"))
 	case "bedrock":
 		// Converse names the schema as a string of JSON, which is its text.
-		schema := jsonObject(jsonObject(jsonObject(jsonObject(field("outputConfig"))["textFormat"])["structure"])["jsonSchema"])["schema"]
+		schema := field("outputConfig").object().get("textFormat").object().get("structure").object().get("jsonSchema").object().get("schema")
 		if !w.toolText(schema) {
 			w.schema(schema)
 		}
@@ -247,20 +263,20 @@ func (w walker) structured(family openai.Family, field func(string) json.RawMess
 
 // generationConfig walks the response schema of a Gemini request, in either of
 // the fields that carry one.
-func (w walker) generationConfig(raw json.RawMessage) {
-	config := jsonObject(raw)
+func (w walker) generationConfig(n node) {
+	config := n.object()
 	for _, member := range responseSchemas {
-		w.schema(config[member])
+		w.schema(config.get(member))
 	}
 }
 
 // text adds a JSON string as one segment, reporting whether the value was a
 // string. Characters are counted rather than bytes so a multi-byte script is
 // not overcharged.
-func (w walker) text(raw json.RawMessage) bool {
-	text, ok := textOf(raw)
+func (w walker) text(n node) bool {
+	text, view, ok := n.text()
 	if ok {
-		w.in.addText(text)
+		w.in.addText(text, view)
 	}
 	return ok
 }
@@ -268,8 +284,8 @@ func (w walker) text(raw json.RawMessage) bool {
 // toolText adds text that belongs to a tool call or its result. It counts as
 // text, but the model reads it inside a rendering of the call that no provider
 // documents, which the count does not include.
-func (w walker) toolText(raw json.RawMessage) bool {
-	ok := w.text(raw)
+func (w walker) toolText(n node) bool {
+	ok := w.text(n)
 	if ok {
 		w.in.approx = true
 	}
@@ -280,39 +296,39 @@ func (w walker) toolText(raw json.RawMessage) bool {
 // request, or the input of a responses request, which may also be one plain
 // string. A shape this gateway does not recognise is charged nothing rather
 // than guessed at.
-func (w walker) items(raw json.RawMessage) {
-	if w.text(raw) {
+func (w walker) items(n node) {
+	if w.text(n) {
 		// A plain string is what a caller who sent no messages means by one.
 		w.in.messages++
 		w.in.roles = append(w.in.roles, "user")
 		return
 	}
-	for _, raw := range jsonArray(raw) {
-		item := jsonObject(raw)
-		if item == nil {
+	for _, n := range n.elements() {
+		item := n.object()
+		if !item.exists() {
 			continue
 		}
 		w.message(item)
-		if string(item["type"]) == `"reasoning"` {
+		if item.get("type").source() == `"reasoning"` {
 			w.reasoning(item)
 		}
 		// A responses tool result carries what it returned in `output`.
-		w.content(item["content"])
-		w.content(item["output"])
+		w.content(item.get("content"))
+		w.content(item.get("output"))
 		// The identifiers and arguments a message travels with are prompt text
 		// like any other; `call_id` and `arguments` are the responses spelling
 		// of the chat tool-call fields.
-		w.text(item["name"])
+		w.text(item.get("name"))
 		for _, name := range [...]string{"tool_call_id", "call_id", "arguments"} {
-			w.toolText(item[name])
+			w.toolText(item.get(name))
 		}
-		for _, raw := range jsonArray(item["tool_calls"]) {
-			call := jsonObject(raw)
-			if function := jsonObject(call["function"]); function != nil {
+		for _, n := range item.get("tool_calls").elements() {
+			call := n.object()
+			if function := call.get("function").object(); function.exists() {
 				call = function
 			}
-			w.toolText(call["name"])
-			w.toolText(call["arguments"])
+			w.toolText(call.get("name"))
+			w.toolText(call.get("arguments"))
 		}
 	}
 }
@@ -322,29 +338,29 @@ func (w walker) items(raw json.RawMessage) {
 // read with the item's content. What else it carries, the encrypted content, is
 // the rest of the reasoning in a form no count reads, and is charged nothing, so
 // the count is a guess.
-func (w walker) reasoning(item map[string]json.RawMessage) {
-	for _, raw := range jsonArray(item["summary"]) {
-		w.toolText(jsonObject(raw)["text"])
+func (w walker) reasoning(item object) {
+	for _, n := range item.get("summary").elements() {
+		w.toolText(n.object().get("text"))
 	}
 	w.in.approx = true
 }
 
 // message records the framing of one message: it exists, it has a role, and
 // possibly a name.
-func (w walker) message(item map[string]json.RawMessage) {
+func (w walker) message(item object) {
 	w.in.messages++
-	if role, ok := roleOf(item["role"]); ok {
+	if role, ok := roleOf(item.get("role")); ok {
 		w.in.roles = append(w.in.roles, role)
 	}
-	if _, ok := textOf(item["name"]); ok {
+	if _, _, ok := item.get("name").text(); ok {
 		w.in.names++
 	}
 }
 
 // roleOf reads a message role. The usual ones are answered without decoding,
 // since a request carries a role for every message.
-func roleOf(raw json.RawMessage) (string, bool) {
-	switch string(raw) {
+func roleOf(n node) (string, bool) {
+	switch n.source() {
 	case `"user"`:
 		return "user", true
 	case `"assistant"`:
@@ -356,14 +372,15 @@ func roleOf(raw json.RawMessage) (string, bool) {
 	case `"developer"`:
 		return "developer", true
 	}
-	return textOf(raw)
+	text, _, ok := n.text()
+	return text, ok
 }
 
 // instructions walks the instructions of a responses request, which a model
 // reads as a message of their own.
-func (w walker) instructions(raw json.RawMessage) {
-	if text, ok := textOf(raw); ok && text != "" {
-		w.in.addText(text)
+func (w walker) instructions(n node) {
+	if text, view, ok := n.text(); ok && text != "" {
+		w.in.addText(text, view)
 		w.in.messages++
 		w.in.roles = append(w.in.roles, "system")
 	}
@@ -371,50 +388,50 @@ func (w walker) instructions(raw json.RawMessage) {
 
 // content walks one message body: plain text, or the parts a multimodal
 // message carries.
-func (w walker) content(raw json.RawMessage) {
-	if w.text(raw) {
+func (w walker) content(n node) {
+	if w.text(n) {
 		return
 	}
-	for _, raw := range jsonArray(raw) {
-		part := jsonObject(raw)
-		if part == nil {
+	for _, n := range n.elements() {
+		part := n.object()
+		if !part.exists() {
 			// A bare string among the parts is text.
-			w.text(raw)
+			w.text(n)
 			continue
 		}
-		kind, _ := textOf(part["type"])
+		kind, _, _ := part.get("type").text()
 		switch kind {
 		case "image_url", "input_image":
 			w.in.addMedia(ImageTokens)
 		case "input_audio", "input_file", "file":
 			w.in.addMedia(MediaTokens)
 		default:
-			w.text(part["text"])
-			w.text(part["refusal"])
+			w.text(part.get("text"))
+			w.text(part.get("refusal"))
 		}
 	}
 }
 
 // tools walks the tool catalogue a request carries: a schema the model has to
 // read costs what any other prompt text costs.
-func (w walker) tools(raw json.RawMessage) {
-	for _, raw := range jsonArray(raw) {
-		tool := jsonObject(raw)
+func (w walker) tools(n node) {
+	for _, n := range n.elements() {
+		tool := n.object()
 		// Chat nests the definition under `function`; responses holds it flat.
-		if function := jsonObject(tool["function"]); function != nil {
+		if function := tool.get("function").object(); function.exists() {
 			tool = function
 		}
-		w.toolText(tool["name"])
-		w.toolText(tool["description"])
-		w.schema(tool["parameters"])
+		w.toolText(tool.get("name"))
+		w.toolText(tool.get("description"))
+		w.schema(tool.get("parameters"))
 	}
 }
 
 // schema adds a JSON document as the text it is, with whatever formatting the
 // caller happened to send removed.
-func (w walker) schema(raw json.RawMessage) {
-	if text := SchemaText(raw); text != "" {
-		w.in.addText(text)
+func (w walker) schema(n node) {
+	if text := SchemaText(n.bytes()); text != "" {
+		w.in.addText(text, false)
 		w.in.approx = true
 	}
 }
@@ -435,13 +452,13 @@ func SchemaText(raw json.RawMessage) string {
 
 // embedding walks the input of an embeddings request: texts, or the token ids
 // a caller already has, which are one token each.
-func (w walker) embedding(raw json.RawMessage) {
-	if w.text(raw) {
+func (w walker) embedding(n node) {
+	if w.text(n) {
 		return
 	}
-	for _, item := range jsonArray(raw) {
+	for _, item := range n.elements() {
 		var token uint32
-		if json.Unmarshal(item, &token) == nil {
+		if json.Unmarshal(item.bytes(), &token) == nil {
 			w.in.addFlat(1)
 		} else {
 			w.embedding(item)
@@ -451,12 +468,12 @@ func (w walker) embedding(raw json.RawMessage) {
 
 // dialectMessages walks the conversation of a native Anthropic, Gemini or
 // Bedrock request, whose entries are messages in a shape of their own.
-func (w walker) dialectMessages(raw json.RawMessage) {
-	w.dialect(raw)
-	for _, raw := range jsonArray(raw) {
-		if item := jsonObject(raw); item != nil {
+func (w walker) dialectMessages(n node) {
+	w.dialect(n)
+	for _, n := range n.elements() {
+		if item := n.object(); item.exists() {
 			w.in.messages++
-			if role, ok := roleOf(item["role"]); ok {
+			if role, ok := roleOf(item.get("role")); ok {
 				w.in.roles = append(w.in.roles, role)
 			}
 		}
@@ -464,29 +481,29 @@ func (w walker) dialectMessages(raw json.RawMessage) {
 }
 
 // dialectSystem walks a system prompt, which a model reads as a message.
-func (w walker) dialectSystem(raw json.RawMessage) {
-	w.dialect(raw)
-	if len(raw) > 0 && string(raw) != "null" {
+func (w walker) dialectSystem(n node) {
+	w.dialect(n)
+	if n.present() && !n.isNull() {
 		w.in.messages++
 		w.in.roles = append(w.in.roles, "system")
 	}
 }
 
 // dialectRequest walks the request a Gemini count wraps.
-func (w walker) dialectRequest(raw json.RawMessage) {
-	w.dialect(raw)
-	inner := jsonObject(raw)
-	w.schema(inner["tools"])
-	w.generationConfig(inner["generationConfig"])
-	for _, raw := range jsonArray(inner["contents"]) {
-		if item := jsonObject(raw); item != nil {
+func (w walker) dialectRequest(n node) {
+	w.dialect(n)
+	inner := n.object()
+	w.schema(inner.get("tools"))
+	w.generationConfig(inner.get("generationConfig"))
+	for _, n := range inner.get("contents").elements() {
+		if item := n.object(); item.exists() {
 			w.in.messages++
-			if role, ok := roleOf(item["role"]); ok {
+			if role, ok := roleOf(item.get("role")); ok {
 				w.in.roles = append(w.in.roles, role)
 			}
 		}
 	}
-	if raw := inner["systemInstruction"]; len(raw) > 0 && string(raw) != "null" {
+	if n := inner.get("systemInstruction"); n.present() && !n.isNull() {
 		w.in.messages++
 		w.in.roles = append(w.in.roles, "system")
 	}
@@ -494,29 +511,28 @@ func (w walker) dialectRequest(raw json.RawMessage) {
 
 // dialect charges native content the same text and media units as OpenAI's.
 // Blob bytes are never mistaken for text tokens.
-func (w walker) dialect(raw json.RawMessage) {
-	if len(raw) == 0 || w.text(raw) {
+func (w walker) dialect(n node) {
+	if !n.present() || w.text(n) {
 		return
 	}
-	var items []json.RawMessage
-	if json.Unmarshal(raw, &items) == nil {
+	if items, ok := n.array(); ok {
 		for _, item := range items {
 			w.dialect(item)
 		}
 		return
 	}
-	f := jsonObject(raw)
-	if f == nil {
+	f := n.object()
+	if !f.exists() {
 		return
 	}
-	if f["inlineData"] != nil || f["fileData"] != nil || string(f["type"]) == `"image"` {
+	if f.get("inlineData").present() || f.get("fileData").present() || f.get("type").source() == `"image"` {
 		w.in.addMedia(ImageTokens)
 		return
 	}
-	switch string(f["type"]) {
+	switch f.get("type").source() {
 	case `"thinking"`:
 		// The text the model reasoned in, which it reads again in a tool loop.
-		w.toolText(f["thinking"])
+		w.toolText(f.get("thinking"))
 		w.in.approx = true
 		return
 	case `"redacted_thinking"`:
@@ -528,11 +544,11 @@ func (w walker) dialect(raw json.RawMessage) {
 		return
 	}
 	// A tool call or its result, whichever keys carry its text.
-	if kind := string(f["type"]); kind == `"tool_use"` || kind == `"tool_result"` {
+	if kind := f.get("type").source(); kind == `"tool_use"` || kind == `"tool_result"` {
 		w.in.approx = true
 	}
 	for _, key := range [...]string{"text", "content", "parts", "contents", "systemInstruction", "functionResponse", "functionCall", "input", "output"} {
-		if value := f[key]; value != nil {
+		if value := f.get(key); value.present() {
 			switch key {
 			case "functionResponse", "functionCall", "input", "output":
 				w.in.approx = true
@@ -545,13 +561,13 @@ func (w walker) dialect(raw json.RawMessage) {
 // document walks an Anthropic document block: the text of one given as text, or
 // as content blocks, and for any other source, a PDF or a file as base64 or a
 // URL, the flat charge of a media part, whatever the bytes it carries.
-func (w walker) document(block map[string]json.RawMessage) {
-	source := jsonObject(block["source"])
-	switch string(source["type"]) {
+func (w walker) document(block object) {
+	source := block.get("source").object()
+	switch source.get("type").source() {
 	case `"text"`:
-		w.toolText(source["data"])
+		w.toolText(source.get("data"))
 	case `"content"`:
-		w.dialect(source["content"])
+		w.dialect(source.get("content"))
 	default:
 		w.in.addMedia(MediaTokens)
 		return

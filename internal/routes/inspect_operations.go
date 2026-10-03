@@ -63,7 +63,7 @@ func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect,
 	}
 	return nil, &request, nil, nil
 }
-func inspectionUnaryAccept(route runtime.Route, source oif.Request, context interaction.Context, client string, demand *runtime.TokenDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) ([]string, *runtime.TokenDemand), map[string]*interactionInspection) {
+func inspectionUnaryAccept(route runtime.Route, source oif.Request, context interaction.Context, client string, demand *runtime.TokenDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
 	details := map[string]*interactionInspection{}
 	plans := map[string]*operationplan.Plan{}
 	accept := func(provider runtime.Provider, target runtime.Target) error {
@@ -106,17 +106,17 @@ func inspectionUnaryAccept(route runtime.Route, source oif.Request, context inte
 		plans[target.ID] = plan
 		return nil
 	}
-	effective := func(_ runtime.Provider, target runtime.Target) ([]string, *runtime.TokenDemand) {
+	effective := func(_ runtime.Provider, target runtime.Target) (runtime.Names, *runtime.TokenDemand) {
 		plan := plans[target.ID]
 		if plan == nil {
 			return nil, demand
 		}
-		return plan.Parameters(), demand
+		return runtime.Listed(plan.Parameters()), demand
 	}
 	return accept, effective, details
 }
 
-func inspectionMediaAccept(route runtime.Route, source *media.Request, dialect string, context interaction.Context, client string, demand *runtime.TokenDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) ([]string, *runtime.TokenDemand), map[string]*interactionInspection) {
+func inspectionMediaAccept(route runtime.Route, source *media.Request, dialect string, context interaction.Context, client string, demand *runtime.TokenDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
 	details := map[string]*interactionInspection{}
 	parameters := map[string][]string{}
 	accept := func(provider runtime.Provider, target runtime.Target) error {
@@ -170,8 +170,8 @@ func inspectionMediaAccept(route runtime.Route, source *media.Request, dialect s
 		result.Status = "admitted"
 		return nil
 	}
-	effective := func(_ runtime.Provider, target runtime.Target) ([]string, *runtime.TokenDemand) {
-		return parameters[target.ID], demand
+	effective := func(_ runtime.Provider, target runtime.Target) (runtime.Names, *runtime.TokenDemand) {
+		return runtime.Listed(parameters[target.ID]), demand
 	}
 	return accept, effective, details
 }

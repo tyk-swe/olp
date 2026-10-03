@@ -17,10 +17,25 @@ type TokenDemand struct {
 	MaxOutputTokens      *int64
 }
 
+// Names are the names of the controls a request uses. A policy that requires
+// parameters reads them and no other does, so they are a function: for a large
+// request, listing them means decoding all of it.
+type Names func() []string
+
+// Listed is the Names of a list that is already at hand.
+func Listed(names []string) Names { return func() []string { return names } }
+
+func (n Names) list() []string {
+	if n == nil {
+		return nil
+	}
+	return n()
+}
+
 type SelectionOptions struct {
 	KeyID       string
 	Preferences *Preferences
-	Parameters  []string
+	Parameters  Names
 	Inputs      *usage.RoutingInputs
 	TokenDemand *TokenDemand
 	// Demand, when set, supplies the token demand of each target in place of
@@ -36,7 +51,7 @@ type SelectionOptions struct {
 	// are ineligible.
 	UnconfinedPlugins bool
 	Accept            func(Provider, Target) error
-	Effective         func(Provider, Target) ([]string, *TokenDemand)
+	Effective         func(Provider, Target) (Names, *TokenDemand)
 }
 type Decision struct {
 	Incompatibility       *Incompatibility    `json:"incompatibility,omitempty"`
@@ -399,7 +414,7 @@ func saturatingSum(a, b int64) int64 {
 	return a + b
 }
 
-func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price *usage.RoutingPrice, parameters []string) string {
+func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price *usage.RoutingPrice, parameters Names) string {
 	for _, c := range policy.Constraints {
 		if c.Only != nil && !anySelector(c.Only, p) {
 			return "provider_not_allowed"
@@ -419,13 +434,15 @@ func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price
 		if required(c.RequireZeroDataRetention) && (m.ZeroDataRetention == nil || !*m.ZeroDataRetention || m.Source == nil || m.ObservedAt == nil) {
 			return "zero_data_retention_required"
 		}
-		if required(c.RequireParameters) && len(parameters) > 0 {
-			if m.SupportedParameters == nil {
-				return "parameters_unknown"
-			}
-			for _, name := range parameters {
-				if !slices.Contains(*m.SupportedParameters, name) {
-					return "parameter_not_supported"
+		if required(c.RequireParameters) {
+			if names := parameters.list(); len(names) > 0 {
+				if m.SupportedParameters == nil {
+					return "parameters_unknown"
+				}
+				for _, name := range names {
+					if !slices.Contains(*m.SupportedParameters, name) {
+						return "parameter_not_supported"
+					}
 				}
 			}
 		}
