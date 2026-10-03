@@ -28,6 +28,8 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | OpenAI, Anthropic, Gemini, Bedrock codecs and cross-dialect translation | `internal/protocols/` |
 | Immutable runtime publication, activation, authority refresh, credential source, strict contract compilation | `internal/runtime/` |
 | Distributed reservations, rates, concurrency, cost budgets | `internal/limits/` |
+| Admission token estimates: tokenizers, the request walker, per-family counters | `internal/operations/tokenization/estimate/` |
+| Cost reservation at admission; rate-limit and gateway metadata response headers | `internal/gateway/cost_reservation.go`, `response_headers.go` |
 | Accounting, pricing, request history, ingestion, retention, notification delivery | `internal/usage/` and `console/src/lib/features/usage/` |
 | Playground execution state, request composition, routing inspection | `console/src/lib/features/inference/playground/` |
 | Uploads, durable media jobs, reconciliation | `internal/media/` and `console/src/lib/features/media/` |

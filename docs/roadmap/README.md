@@ -57,7 +57,9 @@ The [parity matrix](parity.md) is exhaustive. The largest gaps are provider and
 media breadth, a model catalog, response caching, a guardrail ecosystem,
 observability integrations, an MCP and agent gateway, end-user budgets,
 enterprise identity (SAML, SCIM, workload JWTs), cost management for
-chargeback, and published performance evidence.
+chargeback, and published performance evidence: the [M1](m01-measured-advantage.md)
+benchmark harness and regression gate exist, but no full-rate results are
+published yet.
 
 ## How OLP wins
 
@@ -82,7 +84,7 @@ parallel.
 
 | ID | Milestone | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- |
-| M1 | [Measured advantage](m01-measured-advantage.md) | Published, regression-gated overhead and client compatibility; accurate admission token estimates; standard response metadata. | None | Planned |
+| M1 | [Measured advantage](m01-measured-advantage.md) | Published, regression-gated overhead and client compatibility; accurate admission token estimates; standard response metadata. | None | In progress |
 | M2 | [Provider and catalog breadth](m02-provider-catalog.md) | LiteLLM's production provider families reachable through certified tiers; media providers; a signed reference catalog of model facts and prices. | None | Planned |
 | M3 | [Adaptive routing and resilience](m03-routing-resilience.md) | Cross-route fallbacks, capacity-aware selection, priority admission, supply-side budgets, active and fleet-shared health, shadow traffic, explainable request selectors. | M1 | Planned |
 | M4 | [Tenancy, identity and budgets](m04-tenancy-identity.md) | End users, a budget hierarchy with flexible windows, limit templates, route groups, workload JWTs, SAML, SCIM, MFA, organizations and caller-supplied credentials. | None | Planned |
@@ -125,7 +127,8 @@ recomputed whenever a milestone closes:
 | Authorization coverage | Management operations exercised by the authorization and isolation sweeps (must stay 100%). |
 
 At the 0.1.0 baseline the matrix has 149 rows: 14 `Ahead`, 33 `Parity`, 30
-`Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 47 of 147 (32%).
+`Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 47 of 147 (32%). Rows
+that an in-progress milestone has since moved are not recounted until it closes.
 
 ## Definition of done
 

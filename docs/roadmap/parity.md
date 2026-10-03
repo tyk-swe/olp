@@ -4,7 +4,8 @@ This matrix compares every released capability of the LiteLLM AI Gateway with
 OLP and is the authoritative parity scope of the [roadmap](README.md). The
 milestones also add OLP-original capabilities, which have no row here. The
 LiteLLM column links its documentation as reviewed on 2026-10-01; the OLP
-column describes this repository at 0.1.0.
+column describes this repository at 0.1.0, updated for what a milestone in
+progress has delivered so far ([M1](m01-measured-advantage.md#delivered)).
 
 | Status | Meaning |
 | --- | --- |
@@ -22,10 +23,10 @@ of [M3](m03-routing-resilience.md).
 | Capability | LiteLLM | OLP today | Status | Milestone |
 | --- | --- | --- | --- | --- |
 | OpenAI Chat Completions | [/chat/completions](https://docs.litellm.ai/docs/completion) | Native and translated for every connector kind | `Parity` | |
-| OpenAI Responses | [/responses](https://docs.litellm.ai/docs/response_api), bridged to chat providers | Native, translated, and stored responses for OpenAI and Azure | `Parity` | |
+| OpenAI Responses | [/responses](https://docs.litellm.ai/docs/response_api), bridged to chat providers | Native, translated, and stored responses for OpenAI and Azure; Codex CLI and the OpenAI Agents SDK are [qualified](../clients.md) | `Parity` | |
 | Responses compaction and Conversations | [/responses/compact](https://docs.litellm.ai/docs/response_api_compact) | Neither | `Gap` | M9.5 |
-| Anthropic Messages and token counting | [/v1/messages](https://docs.litellm.ai/docs/anthropic_unified/), [count_tokens](https://docs.litellm.ai/docs/anthropic_count_tokens) | Native and translated | `Parity` | |
-| Gemini generation, counting and embeddings | [/generateContent](https://docs.litellm.ai/docs/generateContent) | Native and translated generation and counting; `embedContent` and `batchEmbedContents` on strict routes to Gemini targets | `Parity` | |
+| Anthropic Messages and token counting | [/v1/messages](https://docs.litellm.ai/docs/anthropic_unified/), [count_tokens](https://docs.litellm.ai/docs/anthropic_count_tokens) | Native and translated; Claude Code is [qualified](../clients.md) | `Parity` | |
+| Gemini generation, counting and embeddings | [/generateContent](https://docs.litellm.ai/docs/generateContent) | Native and translated generation and counting; `embedContent` and `batchEmbedContents` on strict routes to Gemini targets; Gemini CLI is [qualified](../clients.md) | `Parity` | |
 | Gemini Interactions | [/interactions](https://docs.litellm.ai/docs/interactions) | Native `gemini-interactions` profile | `Parity` | |
 | Bedrock Converse and InvokeModel | [/converse](https://docs.litellm.ai/docs/bedrock_converse), [/invoke](https://docs.litellm.ai/docs/bedrock_invoke) | Native Bedrock surface | `Parity` | |
 | Certified native fidelity | Translation with optional [drop_params](https://docs.litellm.ai/docs/completion/drop_params) | Strict routes compile an interaction contract per target and refuse lossy translation | `Ahead` | |
@@ -78,7 +79,7 @@ of [M3](m03-routing-resilience.md).
 | Rate-limit-aware and least-busy routing | [Routing strategies](https://docs.litellm.ai/docs/routing) | Not available | `Gap` | M3.2 |
 | Retries with per-error policy | [Reliability](https://docs.litellm.ai/docs/proxy/reliability) | Failover across targets and slots; no same-target backoff policy | `Partial` | M3.9 |
 | Cross-model fallbacks | [Fallbacks](https://docs.litellm.ai/docs/proxy/reliability), including context-window and content-policy fallbacks | Failover inside a route, including context-window rejections | `Partial` | M3.1 |
-| Context-window pre-checks | Pre-call checks | Model facts exclude targets whose context cannot fit the estimate | `Parity` | |
+| Context-window pre-checks | Pre-call checks | Model facts exclude targets whose context cannot fit the estimate, counted for each target's model family | `Parity` | |
 | Cooldowns shared across replicas | Redis-backed cooldowns | Shared credential and slot cooldowns in Valkey; per-gateway circuits | `Partial` | M3.5 |
 | Timeouts | [Timeouts](https://docs.litellm.ai/docs/proxy/timeout) | Route deadline, target timeouts, first-byte and idle bounds | `Parity` | |
 | Priority request queue | [Request prioritization](https://docs.litellm.ai/docs/scheduler) (beta) | A full admission pool answers 503 | `Gap` | M3.3 |
@@ -127,23 +128,23 @@ of [M3](m03-routing-resilience.md).
 
 | Capability | LiteLLM | OLP today | Status | Milestone |
 | --- | --- | --- | --- | --- |
-| Key request, token and concurrency limits | [Rate limits](https://docs.litellm.ai/docs/proxy/users) | Requests and tokens per minute, concurrency | `Parity` | |
-| Key budgets with reset periods | [Budgets](https://docs.litellm.ai/docs/proxy/users) | Daily and monthly UTC windows | `Partial` | M4.2 |
+| Key request, token and concurrency limits | [Rate limits](https://docs.litellm.ai/docs/proxy/users) | Requests and tokens per minute, concurrency; the OpenAI and Anthropic surfaces return the remaining allowance in [response headers](../gateway.md#rate-limit-headers) | `Parity` | |
+| Key budgets with reset periods | [Budgets](https://docs.litellm.ai/docs/proxy/users) | Daily and monthly UTC windows; admission also reserves the request's estimated cost ([cost reservation](../gateway.md#cost-reservation)) | `Partial` | M4.2 |
 | Budget reset time zone | [Reset and time zone](https://docs.litellm.ai/docs/proxy/budget_reset_and_tz) | UTC only | `Gap` | M4.2 |
-| User and team budgets | [Team budgets](https://docs.litellm.ai/docs/proxy/team_budgets) | Shared budget groups; no project budget | `Partial` | M4.2 |
+| User and team budgets | [Team budgets](https://docs.litellm.ai/docs/proxy/team_budgets) | Shared budget groups, with the same cost reservation; no project budget | `Partial` | M4.2 |
 | Per-model limits on a key | [Model-specific budgets](https://docs.litellm.ai/docs/proxy/users) | Not available | `Gap` | M4.2 |
 | Tag budgets | [Enterprise](https://docs.litellm.ai/docs/proxy/tag_budgets) | Not available | `Gap` | M4.2 |
 | Budget and limit tiers | [Enterprise](https://docs.litellm.ai/docs/proxy/rate_limit_tiers) | Not available | `Gap` | M4.2 |
 | Temporary budget increases | [Enterprise](https://docs.litellm.ai/docs/proxy/temporary_budget_increase) | Not available | `Gap` | M4.2 |
 | Soft budget alerts | [Alerting](https://docs.litellm.ai/docs/proxy/alerting) | `budget.threshold` notification rules | `Parity` | |
-| Distributed enforcement | Redis counters | Valkey scripts on the server clock, PostgreSQL spend authority, reconciliation, fail-closed cost budgets | `Ahead` | |
+| Distributed enforcement | Redis counters | Valkey scripts on the server clock, PostgreSQL spend authority, reconciliation, fail-closed cost budgets, estimate-based cost reservation | `Ahead` | |
 | Deployment rate limits | Deployment `rpm` and `tpm` | Connection and slot request, token and concurrency quotas | `Parity` | |
 
 ## Cost and pricing
 
 | Capability | LiteLLM | OLP today | Status | Milestone |
 | --- | --- | --- | --- | --- |
-| Per-request cost | [Cost tracking](https://docs.litellm.ai/docs/proxy/cost_tracking) | Attempt-level cost from pinned pricing revisions; unpriced work stays visible | `Parity` | |
+| Per-request cost | [Cost tracking](https://docs.litellm.ai/docs/proxy/cost_tracking) | Attempt-level cost from pinned pricing revisions; unpriced work stays visible; a unary response states its cost in `X-OLP-Cost` for a key that [opts in](../access.md#key-response-metadata) | `Parity` | |
 | Accounting completeness evidence | No equivalent documented | Completeness reports, gateway epochs and explicit gaps | `Ahead` | |
 | Spend by key, team, tag and model | [Cost tracking](https://docs.litellm.ai/docs/proxy/cost_tracking) | Usage summary, breakdown and time series with attribution filters | `Parity` | |
 | Spend reports | [Spend reports](https://docs.litellm.ai/docs/proxy/cost_tracking) and scheduled reports | Usage API and console | `Partial` | M5.5 |
@@ -223,6 +224,6 @@ of [M3](m03-routing-resilience.md).
 
 | Capability | LiteLLM | OLP today | Status | Milestone |
 | --- | --- | --- | --- | --- |
-| Published overhead | [Benchmarks](https://docs.litellm.ai/docs/benchmarks): 8 ms P95 at 1k RPS; 3,000 RPS large-prompt profile | Unmeasured | `Gap` | M1.1 |
-| Compiled data plane | [Rust gateway](https://docs.litellm.ai/docs/proxy/rust_gateway) (beta, per model) | Go data plane on every path | `Partial` | M1.1 |
-| Accurate token counting | Rust token counting in the [high-throughput profile](https://docs.litellm.ai/docs/proxy/high_throughput) | Four-characters-per-token estimate | `Gap` | M1.2 |
+| Published overhead | [Benchmarks](https://docs.litellm.ai/docs/benchmarks): 8 ms P95 at 1k RPS; 3,000 RPS large-prompt profile | The benchmark harness, LiteLLM comparison and CI regression gate are built and smoke-tested at reduced rates; no full-rate results are published ([performance](../performance.md#status-of-the-numbers)) | `Partial` | M1.1 |
+| Compiled data plane | [Rust gateway](https://docs.litellm.ai/docs/proxy/rust_gateway) (beta, per model) | Go data plane on every path, with hot-path benchmarks gated in CI; overhead measured at reduced rates only | `Partial` | M1.1 |
+| Accurate token counting | Rust token counting in the [high-throughput profile](https://docs.litellm.ai/docs/proxy/high_throughput) | Exact in-repository counts for the OpenAI `o200k_base` and `cl100k_base` encodings, bounded for long prompts; Anthropic, Gemini and other families use the four-characters-per-token heuristic until per-family factors ship ([estimates](../gateway.md#how-the-prompt-is-estimated)) | `Partial` | M2.4 |

@@ -484,7 +484,10 @@ scenarios, which measure the whole gateway.
   so a change to a hot path adds or extends the benchmark for it. Admission is
   held to this directly: a test asserts that admitting a key with no limits and a
   target with no quotas allocates nothing and, with no limiter at all, reaches
-  for none.
+  for none. The one exception is the shared cooldown: a gateway that has a
+  limiter reads it before every attempt, whatever the key and the target limit,
+  which costs an unconfigured key one Valkey round trip an attempt. The test
+  does not cover that read ([tests](../tests/README.md#microbenchmarks)).
 - A configured feature declares its own budget in its milestone: the added
   latency, CPU per request or memory it may cost, in the scenario it affects.
   The pull request that ships it records the scenario's result before and after.
