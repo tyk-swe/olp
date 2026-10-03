@@ -201,7 +201,7 @@ func TestCodeAuthDeviceEnrollmentRefreshRotationAndPrincipalLapse(t *testing.T) 
 	authorizer := &providers.CodeAuthorizer{Pool: h.Pool, Credentials: h.Runtime, Plugins: worker.Plugins}
 	h.refresh()
 	auth, err := authorizer.AuthorizeCode(t.Context(), cfg, account)
-	if err != nil || auth.Principal != principal || auth.Headers.Get("ChatGPT-Account-ID") != "fixture-account" || len(auth.Headers) != 2 {
+	if err != nil || auth.Principal != principal || auth.CredentialID != credentialID || auth.GrantGeneration != 1 || auth.Headers.Get("ChatGPT-Account-ID") != "fixture-account" || len(auth.Headers) != 2 {
 		t.Fatalf("enrolled authorization: %v", err)
 	}
 	before := auth.Headers.Get("Authorization")
@@ -216,7 +216,21 @@ func TestCodeAuthDeviceEnrollmentRefreshRotationAndPrincipalLapse(t *testing.T) 
 	if pass(t, worker) {
 		t.Fatal("worker refreshed before the observed token expiry required it")
 	}
-	dueNow(t, h, credentialID)
+	if h.Runtime.GrantGeneration(credentialID) != 0 {
+		t.Fatal("code-only credential unexpectedly belongs to the ordinary grant poll")
+	}
+	h.Runtime.CredentialRefused(auth.CredentialID, auth.GrantGeneration)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		grant := readGrant(t, h, credentialID)
+		if grant.refresh != nil && !grant.refresh.After(time.Now()) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("authentication refusal did not request early code-only grant refresh")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if !pass(t, worker) {
 		t.Fatal("due refresh did not run")
 	}
@@ -230,7 +244,7 @@ func TestCodeAuthDeviceEnrollmentRefreshRotationAndPrincipalLapse(t *testing.T) 
 	}
 	h.refresh()
 	auth, err = authorizer.AuthorizeCode(t.Context(), cfg, account)
-	if err != nil || auth.Principal != principal || auth.Headers.Get("Authorization") == before {
+	if err != nil || auth.Principal != principal || auth.GrantGeneration != 2 || auth.Headers.Get("Authorization") == before {
 		t.Fatalf("refreshed authorization: %v", err)
 	}
 

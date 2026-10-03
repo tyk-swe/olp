@@ -7,9 +7,11 @@
   import CodeModePage from '../CodeModePage.svelte';
   let {
     client,
+    gatewayURL,
     loadClientConfiguration
   }: {
     client: QueryClient;
+    gatewayURL: string;
     loadClientConfiguration?: ComponentProps<
       typeof CodeModePage
     >['loadClientConfiguration'];
@@ -17,5 +19,5 @@
 </script>
 
 <QueryClientProvider {client}
-  ><CodeModePage {loadClientConfiguration} /></QueryClientProvider
+  ><CodeModePage {gatewayURL} {loadClientConfiguration} /></QueryClientProvider
 >

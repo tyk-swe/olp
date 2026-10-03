@@ -229,11 +229,12 @@ async function settle() {
 async function render(
   loadClientConfiguration?: ComponentProps<
     typeof CodeModeProbe
-  >['loadClientConfiguration']
+  >['loadClientConfiguration'],
+  gatewayURL = 'https://olp.example'
 ) {
   component = mount(CodeModeProbe, {
     target: host,
-    props: { client, loadClientConfiguration }
+    props: { client, gatewayURL, loadClientConfiguration }
   });
   flushSync();
   await settle();
@@ -419,6 +420,39 @@ it('renders only adapter-generated client configuration and its qualification ga
     'Fixture gap: no real subscription tested'
   );
   expect(host.textContent).toContain('Provider connections are frozen');
+});
+
+it('reloads client configuration for a changed public gateway with a fresh cache', async () => {
+  const configuration = (gatewayURL: string) => ({
+    route_slug: route.slug,
+    base_url: `${gatewayURL}/code/${route.slug}`,
+    native_models: route.models,
+    client: 'fixture-client',
+    client_version: 'fixture-release',
+    configuration: `base_url = "${gatewayURL}/code/${route.slug}"`,
+    qualification_gaps: []
+  });
+  const first = vi
+    .fn()
+    .mockResolvedValue(configuration('https://first.example'));
+  await render(first, 'https://first.example');
+  await click('Routes');
+  await click('Revisions and client setup');
+  expect(first).toHaveBeenCalledOnce();
+  await unmount(component!);
+  component = undefined;
+
+  const second = vi
+    .fn()
+    .mockResolvedValue(configuration('https://second.example'));
+  await render(second, 'https://second.example');
+  await click('Routes');
+  await click('Revisions and client setup');
+  expect(second).toHaveBeenCalledOnce();
+  expect(
+    host.querySelector<HTMLTextAreaElement>('#code-client-configuration')!.value
+  ).toBe(configuration('https://second.example').configuration);
+  expect(host.textContent).not.toContain('https://first.example');
 });
 
 it('shows each allowance limit and reset independently with provider credits', async () => {

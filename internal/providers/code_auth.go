@@ -43,7 +43,13 @@ func (a *CodeAuthorizer) AuthorizeCode(ctx context.Context, cfg runtime.Configur
 	if err != nil || generation < 1 {
 		return codemode.Authorization{}, codemode.Refuse(503, "code_credential_unavailable")
 	}
-	return authorizeCodex(secret, account.Principal, time.Now())
+	auth, err := authorizeCodex(secret, account.Principal, time.Now())
+	if err != nil {
+		return codemode.Authorization{}, err
+	}
+	auth.CredentialID = account.CredentialID
+	auth.GrantGeneration = generation
+	return auth, nil
 }
 
 func codeConfiguration(c runtime.Configuration) bool {

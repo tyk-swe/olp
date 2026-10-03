@@ -343,6 +343,9 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 		outcome.Kind = "rejected"
 	}
 	a.outcome(ctx, outcome)
+	if status == http.StatusUnauthorized {
+		a.server.Runtime.CredentialRefused(a.auth.CredentialID, a.auth.GrantGeneration)
+	}
 	switch {
 	case status == 429:
 		a.health(ctx, "quota_limited")

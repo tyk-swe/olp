@@ -12,10 +12,13 @@ import (
 
 const BasePath = "/code/"
 
-// Authorization contains only the qualified adapter's upstream auth headers.
+// Authorization contains the qualified adapter's upstream auth headers and the
+// credential generation that supplied them, for generation-safe early refresh.
 type Authorization struct {
-	Headers   http.Header
-	Principal string
+	Headers         http.Header
+	Principal       string
+	CredentialID    string
+	GrantGeneration int64
 }
 
 type Refusal struct {
