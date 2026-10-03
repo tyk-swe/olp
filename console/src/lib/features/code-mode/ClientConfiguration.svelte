@@ -7,9 +7,11 @@
 
   let {
     route,
+    gatewayURL,
     load
   }: {
     route: CodeRoute;
+    gatewayURL: string;
     load: (
       route: CodeRoute,
       signal?: AbortSignal
@@ -17,7 +19,7 @@
   } = $props();
   let copied = $state('');
   const configuration = createQuery(() => ({
-    queryKey: codeKeys.configuration(route.id, route.revision_id),
+    queryKey: codeKeys.configuration(route.id, route.revision_id, gatewayURL),
     queryFn: ({ signal }) => load(route, signal)
   }));
 </script>

@@ -8,8 +8,10 @@
   import CodeDiagnostics from './CodeDiagnostics.svelte';
 
   let {
+    gatewayURL,
     loadClientConfiguration
   }: {
+    gatewayURL: string;
     loadClientConfiguration?: (
       route: CodeRoute,
       signal?: AbortSignal
@@ -108,6 +110,7 @@
             {projectId}
             kind={tab}
             {allowed}
+            {gatewayURL}
             {loadClientConfiguration}
           />
         {:else}<CodeDiagnostics {projectId} kind={tab} {allowed} />{/if}

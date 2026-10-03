@@ -30,11 +30,13 @@
     projectId,
     kind,
     allowed,
+    gatewayURL,
     loadClientConfiguration
   }: {
     projectId: string;
     kind: 'accounts' | 'pools' | 'routes' | 'budgets';
     allowed: boolean;
+    gatewayURL: string;
     loadClientConfiguration?: (
       route: CodeRoute,
       signal?: AbortSignal
@@ -372,6 +374,7 @@
             <RouteRevisions id={route.id} />
             {#if loadClientConfiguration && route.published_at}<ClientConfiguration
                 {route}
+                {gatewayURL}
                 load={loadClientConfiguration}
               />
             {:else if !route.published_at}<p>

@@ -133,7 +133,11 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 		return
 	}
 	defer client.CloseNow()
-	client.SetReadLimit(codexwire.MaxBody)
+	limit := int64(codexwire.MaxBody)
+	if s.cfg.MaxBodyBytes > 0 {
+		limit = min(limit, s.cfg.MaxBodyBytes)
+	}
+	client.SetReadLimit(limit)
 	ctx, cancel := context.WithTimeout(r.Context(), time.Hour)
 	defer cancel()
 	clientMessages := codeRead(ctx, client)
@@ -208,6 +212,9 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 			}
 			identity = observation.Operation.Identity
 			account = active.permit.Account.ID
+			// The socket still uses the authorization sent at its handshake,
+			// even if this generation's admission reads a refreshed credential.
+			active.auth = connection.auth
 			if err := active.dispatch(ctx); err != nil {
 				refuse(err)
 				return

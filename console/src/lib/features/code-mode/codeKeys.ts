@@ -8,6 +8,6 @@ export const codeKeys = {
   inventory: (project: string) => [...root, 'inventory', project] as const,
   revisions: (id: string, cursor?: string) =>
     [...root, 'revisions', id, cursor ?? ''] as const,
-  configuration: (id: string, revision: string) =>
-    [...root, 'configuration', id, revision] as const
+  configuration: (id: string, revision: string, gatewayURL: string) =>
+    [...root, 'configuration', id, revision, gatewayURL] as const
 };
