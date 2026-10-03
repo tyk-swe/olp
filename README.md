@@ -110,6 +110,7 @@ upstream.
 | [Security architecture](docs/security.md) | Trust boundaries, authorization, secrets, egress, and response headers |
 | [Gateway execution](docs/gateway.md) | Admission, attempts, content policies, and durable media |
 | [Operations](docs/operations.md) | Monitoring, spend reconciliation, backups, key rotation, and versions |
+| [Performance](docs/performance.md) | Benchmark method, scenarios and targets, the LiteLLM comparison, regression gates, and how to reproduce them |
 | [Roadmap](docs/roadmap/README.md) | Milestones to LiteLLM feature parity and beyond, with the parity matrix |
 | [Contributing](CONTRIBUTING.md) | Setup, tests, architecture, and releases |
 

@@ -97,6 +97,29 @@ against the backend before reuse, and renewed through the UI after revocation.
 Setup, authentication, admission retry, invitation and provider/route onboarding
 journeys continue to exercise their real UI flows.
 
+## Benchmarks
+
+`make bench` runs the gateway benchmark scenarios of
+[the M1 roadmap](../docs/roadmap/m01-measured-advantage.md) against a disposable
+PostgreSQL and Valkey, a deterministic mock upstream and a real `olp all`
+process, and writes one result per scenario to `.local/bench/`. The suites under
+`tests/bench/` carry the `bench` build tag, so `make test-go` and
+`make integration` do not run them. The harness's own tests, which need no
+services, are what `make test-bench` runs; `make test` and `make check` include
+it, so CI runs them with `-race`, and only the scenarios are left to
+`make bench`. Like the integration suites, the scenarios fail, rather than skip,
+when the services they need are not configured. Use `BENCH_SCENARIOS=S1,S2` and
+`OLP_BENCH_SCALE=0.05` for a smoke run; its numbers are not reference numbers.
+The [benchmark guide](bench/README.md) has the scenarios, the settings and how
+to read a result, and `scripts/bench-compare.sh` runs the same scenarios against
+LiteLLM; see the [performance guide](../docs/performance.md).
+
+The hot paths have `testing.B` benchmarks beside the code
+(in `internal/runtime`, `internal/protocols`, `internal/gateway` and
+`internal/plugins`), which `make bench-gate` compares with the merge base and CI runs on every
+pull request. They are ordinary test files, so `make test-go` compiles them and
+runs none of them.
+
 ## Suite ownership
 
 Go unit tests own algorithms and protocol fixtures; internal service tests own

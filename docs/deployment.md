@@ -168,8 +168,10 @@ processes and ingestion in workers, with database CPU/I/O headroom for both.
 Successful mock suites qualify their tested behavior, not a production SLO,
 live-provider certification, invoice accuracy, or disaster-recovery RPO.
 Validate capacity and failure behavior on the actual deployment; use the
-[testing guide](../tests/README.md) for qualification scope and
-[backup and restore](operations.md#backup-and-restore) for recovery requirements.
+[testing guide](../tests/README.md) for qualification scope,
+[performance](performance.md) for how added latency and CPU per request are
+measured, and [backup and restore](operations.md#backup-and-restore) for
+recovery requirements.
 
 ### Tracing
 

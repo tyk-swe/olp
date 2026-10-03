@@ -21,7 +21,8 @@ type Handler struct {
 
 // LiveMetrics renders the series that must reflect the process at request
 // time rather than at the last refresh: authority age, the desired runtime
-// generation, HTTP admission, and the trace-drop counter.
+// generation, HTTP admission, the trace-drop counter, and the Go runtime's
+// allocation counters.
 type LiveMetrics struct {
 	// AuthorityAge is the age of the current authority read; nil renders +Inf.
 	AuthorityAge func() *float64
@@ -71,7 +72,7 @@ func (h *Handler) ready(w http.ResponseWriter, r *http.Request) {
 
 // metrics serves the cached exposition plus the series that must reflect the
 // process at request time: snapshot freshness, authority age, desired
-// generation, admission, and trace drops.
+// generation, admission, trace drops, and allocation counters.
 func (h *Handler) metrics(w http.ResponseWriter, _ *http.Request) {
 	now := time.Now()
 	readiness := h.cache.Readiness()
@@ -132,6 +133,7 @@ func (h *Handler) metrics(w http.ResponseWriter, _ *http.Request) {
 	body.WriteString("# HELP olp_trace_export_dropped_total Spans dropped before successful OTLP export.\n" +
 		"# TYPE olp_trace_export_dropped_total counter\n")
 	fmt.Fprintf(&body, "olp_trace_export_dropped_total %d\n", telemetry.ExportDroppedTotal())
+	writeAllocationMetrics(&body)
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	attachFreshness(w, metrics.LastSuccess, metricsFresh, now)
 	w.WriteHeader(http.StatusOK)

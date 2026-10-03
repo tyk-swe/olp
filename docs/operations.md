@@ -596,8 +596,10 @@ No sampled attempts means no success/latency series, not measured 100% success.
 `olp_observability_metrics_snapshot_fresh`; a refresh exceeding four seconds
 retains the last successful snapshot and exposes its age. Do not interpret stale
 data as current health. Investigate database latency before increasing
-cardinality. Process-local admission and trace-drop counters may be summed
-across replicas; retain each counter's reset semantics when using `rate`.
+cardinality. Process-local admission, trace-drop and Go allocation counters
+(`go_memstats_mallocs_total` and `go_memstats_alloc_bytes_total`, read live from
+the runtime) may be summed across replicas; retain each counter's reset
+semantics when using `rate`.
 
 Compare `olp_runtime_desired_generation` with `olp_runtime_generation` on each
 gateway. A gap identifies a pending/rejected observed generation. Check

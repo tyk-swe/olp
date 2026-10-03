@@ -12,12 +12,16 @@ unqualified.
 | `make setup` | Download modules, install the pnpm workspace, generate contracts |
 | `make dev` | Start PostgreSQL, Valkey, Go on 8082/private 9092, and Vite on 5173 |
 | `make check` | Generate contracts; check formatting, vet, ESLint, types, and local tests |
-| `make test` | Go, console unit/component, and script suites without containers |
+| `make test` | Go, benchmark harness, console unit/component, and script suites without containers |
 | `make test-go` | Go unit and protocol suites |
+| `make test-bench` | The benchmark harness's own tests, which need no services |
 | `make test-console` | Console unit and component suites |
 | `make test-scripts` | Automation script tests |
 | `make test-race` | Uncached Go tests with race detection, also required in CI |
 | `make integration` | Disposable services, race/process/recovery/SDK/Chromium suites |
+| `make bench` | Gateway benchmark scenarios against a mock upstream, in [docs/performance.md](docs/performance.md) |
+| `make bench-compare` | The same scenarios against OLP and the pinned LiteLLM release |
+| `make bench-gate` | Hot-path `testing.B` benchmarks against the merge base, as the CI `bench` job runs them |
 | `make api` | Generate Go and TypeScript types without building the gateway |
 | `make build` | Versioned `.local/bin/olp` plus separate `console/build` assets |
 | `make fmt` | Format Go and console source |

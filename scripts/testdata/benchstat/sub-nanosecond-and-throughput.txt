@@ -1,0 +1,32 @@
+goos: linux
+goarch: amd64
+pkg: github.com/tyk-swe/olp/internal/codec
+cpu: Test CPU
+        │     base     │                 head                  │
+        │    sec/op    │    sec/op     vs base                 │
+Noop-8    0.4012n ± 1%   0.9059n ± 2%  +125.80% (p=0.000 n=10)
+Copy-8     906.9n ± 2%   1998.6n ± 2%  +120.37% (p=0.000 n=10)
+Big-8       2.518 ± 1%     2.505 ± 2%         ~ (p=0.218 n=10)
+geomean    9.712µ         16.55µ        +70.44%
+
+        │      base      │                 head                  │
+        │      B/op      │     B/op      vs base                 │
+Noop-8      0.000 ± 0%       0.000 ± 0%       ~ (p=1.000 n=10) ¹
+Copy-8      0.000 ± 0%       0.000 ± 0%       ~ (p=1.000 n=10) ¹
+Big-8     3.260Gi ± 0%     3.260Gi ± 0%       ~ (p=1.000 n=10) ¹
+geomean                ²                 +0.00%                ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+        │     base     │                head                 │
+        │  allocs/op   │ allocs/op   vs base                 │
+Noop-8    0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+Copy-8    0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+Big-8     7.000 ± 0%     7.000 ± 0%       ~ (p=1.000 n=10) ¹
+geomean              ²               +0.00%                ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+       │     base     │                 head                 │
+       │     B/s      │     B/s       vs base                │
+Copy-8   4.196Gi ± 2%   1.860Gi ± 2%  -55.68% (p=0.000 n=10)

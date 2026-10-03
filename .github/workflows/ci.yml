@@ -48,6 +48,33 @@ jobs:
         with:
           services: false
       - run: ./scripts/check-dependencies.sh
+  bench:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+        with:
+          services: false
+      - run: ./scripts/bench-gate.sh "origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          # One sample of every benchmark takes about a minute at the default
+          # benchtime, and the job takes ten of them on each side, with a
+          # regression measured again at twice that, so each runs for half a
+          # second to stay well inside the timeout.
+          BENCH_TIME: 500ms
+          # A pull request that means to remove or rename a benchmark says so.
+          BENCH_ALLOW_REMOVED: ${{ contains(github.event.pull_request.labels.*.name, 'allow-removed-benchmarks') && '1' || '0' }}
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: bench-gate
+          path: .local/bench/gate
+          if-no-files-found: ignore
   native:
     strategy:
       fail-fast: false

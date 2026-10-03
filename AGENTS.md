@@ -21,12 +21,16 @@ the repository root:
 | `make setup` | Install workspace dependencies and generate API contracts. |
 | `make dev` | Start PostgreSQL, Valkey, Go, and Vite at http://127.0.0.1:5173. |
 | `make check` | Generate contracts; check formatting, vet, ESLint, types, and local tests. |
-| `make test` | Run Go, console unit/component, and script tests without containers. |
+| `make test` | Run Go, benchmark harness, console unit/component, and script tests without containers. |
 | `make test-go` | Run Go unit and protocol tests. |
+| `make test-bench` | Run the benchmark harness's own tests, which need no services. |
 | `make test-console` | Run console unit and component tests. |
 | `make test-scripts` | Run automation script tests. |
 | `make test-race` | Run uncached Go tests with race detection. |
 | `make integration` | Run disposable-service, recovery, SDK, and Chromium suites. |
+| `make bench` | Run the gateway benchmark scenarios against a mock upstream ([performance guide](docs/performance.md)). |
+| `make bench-compare` | Run the scenarios against OLP and the pinned LiteLLM release. |
+| `make bench-gate` | Compare hot-path `testing.B` benchmarks with the merge base, as CI does. |
 | `make api` | Generate Go and TypeScript types from the checked-in OpenAPI contract. |
 | `make build` | Build the release binary and static console. |
 | `make fmt` | Format Go and console source. |

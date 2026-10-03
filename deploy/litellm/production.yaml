@@ -1,0 +1,64 @@
+# LiteLLM configuration for the gateway benchmark (docs/performance.md): the
+# settings its production guide documents, https://docs.litellm.ai/docs/proxy/prod,
+# in front of the benchmark's mock upstream. S1, S2, S4 and S5 run on it; S3
+# runs on high-throughput.yaml. Keep the model_list of the two files identical.
+#
+# Response caching is deliberately off: the load generator sends identical
+# prompts, and a cache would answer them without calling the upstream.
+model_list:
+  # S1, S2 and S5: one deployment.
+  - model_name: bench-route
+    litellm_params:
+      model: openai/bench-chat
+      api_base: os.environ/BENCH_MOCK_API_BASE
+      api_key: sk-bench-upstream
+  # S3: the same deployment with the prices OLP's scenario sets, which give the
+  # key's budget something to accrue (USD 2 and 4 per million tokens).
+  - model_name: bench-priced
+    litellm_params:
+      model: openai/bench-chat
+      api_base: os.environ/BENCH_MOCK_API_BASE
+      api_key: sk-bench-upstream
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000004
+  # S4: the first deployment always fails and the second succeeds.
+  - model_name: bench-failover
+    litellm_params:
+      model: openai/bench-primary
+      api_base: os.environ/BENCH_MOCK_API_BASE
+      api_key: sk-bench-upstream
+      order: 1
+  - model_name: bench-failover
+    litellm_params:
+      model: openai/bench-secondary
+      api_base: os.environ/BENCH_MOCK_API_BASE
+      api_key: sk-bench-upstream
+      order: 2
+
+router_settings:
+  # The default, which LiteLLM recommends for high-traffic deployments.
+  routing_strategy: simple-shuffle
+  # One more attempt, as the benchmark's failover route allows OLP two, and a
+  # deployment cooled down for thirty seconds after five failures, as OLP's
+  # circuit opens after five consecutive failures for thirty seconds. LiteLLM's
+  # own defaults are three failures and five seconds.
+  num_retries: 1
+  allowed_fails: 5
+  cooldown_time: 30
+  redis_host: os.environ/REDIS_HOST
+  redis_port: os.environ/REDIS_PORT
+  redis_password: os.environ/REDIS_PASSWORD
+
+general_settings:
+  # Spend is written every sixty seconds, and above about 1,000 requests per
+  # second through Redis, which every scenario reaches or exceeds.
+  proxy_batch_write_at: 60
+  use_redis_transaction_buffer: true
+  disable_error_logs: true
+  # Clients connect directly.
+  trusted_proxy_ranges: []
+
+litellm_settings:
+  request_timeout: 600
+  set_verbose: false
+  json_logs: true

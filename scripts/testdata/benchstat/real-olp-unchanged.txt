@@ -1,0 +1,27 @@
+goos: linux
+goarch: amd64
+pkg: github.com/tyk-swe/olp/internal/plugins
+cpu: Intel Core Processor (Haswell, no TSX)
+                         │     base     │                head                 │
+                         │    sec/op    │    sec/op      vs base              │
+Sign/interpreted/1KiB-8    12.89m ± 22%   11.56m ± 178%       ~ (p=1.000 n=6)
+Sign/interpreted/16KiB-8   88.99m ± 25%   88.80m ±  38%       ~ (p=0.699 n=6)
+Sign/compiled/1KiB-8       1.502m ± 75%   1.395m ±  20%       ~ (p=0.485 n=6)
+Sign/compiled/16KiB-8      7.709m ± 72%   7.206m ±  54%       ~ (p=0.485 n=6)
+geomean                    10.74m         10.08m         -6.10%
+
+                         │     base      │                head                 │
+                         │     B/op      │     B/op       vs base              │
+Sign/interpreted/1KiB-8    50.65Ki ±  1%   50.66Ki ±  5%       ~ (p=0.818 n=6)
+Sign/interpreted/16KiB-8   125.8Ki ±  2%   125.4Ki ±  2%       ~ (p=0.589 n=6)
+Sign/compiled/1KiB-8       98.09Ki ± 42%   97.28Ki ±  7%       ~ (p=0.937 n=6)
+Sign/compiled/16KiB-8      395.2Ki ± 23%   395.0Ki ± 36%       ~ (p=0.699 n=6)
+geomean                    125.4Ki         125.0Ki        -0.30%
+
+                         │    base     │               head                │
+                         │  allocs/op  │  allocs/op   vs base              │
+Sign/interpreted/1KiB-8    1.595k ± 1%   1.600k ± 2%       ~ (p=0.128 n=6)
+Sign/interpreted/16KiB-8   1.790k ± 0%   1.790k ± 2%       ~ (p=0.667 n=6)
+Sign/compiled/1KiB-8        103.0 ± 1%    103.0 ± 0%       ~ (p=1.000 n=6)
+Sign/compiled/16KiB-8       109.5 ± 2%    109.0 ± 2%       ~ (p=1.000 n=6)
+geomean                     423.5         423.5       -0.02%

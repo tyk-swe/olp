@@ -58,10 +58,10 @@ func StartProcess(t testing.TB, binary, mode string, env map[string]string) *Pro
 	go func() { p.result = p.cmd.Wait(); log.Close(); close(p.done) }()
 	t.Cleanup(func() {
 		if err := p.Stop(8 * time.Second); err != nil {
-			t.Errorf("process shutdown: %v\n%s", err, p.Log())
+			t.Errorf("process shutdown: %v\n%s", err, p.dump())
 		}
 		if t.Failed() {
-			t.Log(p.Log())
+			t.Log(p.dump())
 		}
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -105,15 +105,32 @@ func StartProcess(t testing.TB, binary, mode string, env map[string]string) *Pro
 		}
 		select {
 		case <-p.done:
-			t.Fatalf("process exited before liveness: %v\n%s", p.result, p.Log())
+			t.Fatalf("process exited before liveness: %v\n%s", p.result, p.dump())
 		case <-ctx.Done():
-			t.Fatalf("process startup timed out\n%s", p.Log())
+			t.Fatalf("process startup timed out\n%s", p.dump())
 		case <-ticker.C:
 		}
 	}
 }
 
 func (p *Process) Log() string { data, _ := os.ReadFile(p.logPath); return string(data) }
+
+// maxDump bounds the log a failing test prints. A process that served a load
+// test writes a line for every request, and a failure should not bury the
+// report under hundreds of megabytes of them.
+const maxDump = 1 << 20
+
+// dump is the log for a failure report: all of it, or its last megabyte.
+func (p *Process) dump() string {
+	log := p.Log()
+	if len(log) <= maxDump {
+		return log
+	}
+	return fmt.Sprintf("[the first %d bytes of the process log are omitted]\n%s", len(log)-maxDump, log[len(log)-maxDump:])
+}
+
+// Pid is the operating system process identifier, for tests that read /proc.
+func (p *Process) Pid() int { return p.cmd.Process.Pid }
 
 // Kill terminates the process the way a lost machine does, without giving it
 // the chance to drain, and waits for it to be reaped. A process stopped this
