@@ -745,8 +745,9 @@ func TestHarnessJudgesValidity(t *testing.T) {
 	held := s1Result(1, 1)
 	held.Streams = &streamsResult{TargetConcurrency: 10000, PeakInFlight: 10000, Reached: 1, PeakAdmitted: 40, GatewayReached: 0.004}
 	judgeValidity(held)
-	if held.Validity.Valid || !strings.Contains(strings.Join(held.Validity.Problems, "\n"), envS6Tokens) {
-		t.Errorf("a gateway that held 40 of 10,000 streams was valid: %+v", held.Validity)
+	problems := strings.Join(held.Validity.Problems, "\n")
+	if held.Validity.Valid || !strings.Contains(problems, envS6Tokens) || !strings.Contains(problems, envDuration) {
+		t.Errorf("a gateway that held 40 of 10,000 streams was valid, or did not say what to change: %+v", held.Validity)
 	}
 }
 

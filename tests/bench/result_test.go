@@ -403,7 +403,15 @@ func judgeValidity(r *result) {
 			problem("the generator held %d of the %d streams open at once", st.PeakInFlight, st.TargetConcurrency)
 		}
 		if st.GatewayReached < 0.9 {
-			problem("the gateway held %.0f of the %d streams at once, so the responses fit in socket buffers instead of meeting the slow readers: raise %s", st.PeakAdmitted, st.TargetConcurrency, envS6Tokens)
+			// Two causes leave the gateway holding fewer streams than were open:
+			// a response that fits in the socket buffers is written whole, and
+			// the gateway ends a stream whose writes have been blocked for thirty
+			// seconds, so the first streams are gone before the last opens when
+			// the warmup and the measured period, over which S6 opens them, last
+			// longer than that.
+			problem("the gateway held %.0f of the %d streams at once, because their responses fit in socket buffers instead of meeting the slow readers (raise %s), "+
+				"or because it ended the first streams, thirty seconds after their writes blocked, before the last opened (open them over less than that: shorten %s and %s)",
+				st.PeakAdmitted, st.TargetConcurrency, envS6Tokens, envWarmup, envDuration)
 		}
 	}
 	if f := r.Failover; r.Plan.Failover {

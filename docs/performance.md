@@ -11,13 +11,15 @@ harness lives in [`tests/bench/`](../tests/bench/README.md).
 **No reference results are published yet.** The harness is built and has been
 smoke-tested, but the full-rate runs on reference hardware have not been made,
 so no target below has been judged. The only measurements in this guide are from
-a reduced-scale smoke run on a shared, busy 8 vCPU development machine
-([Smoke run](#smoke-run)), of OLP and of LiteLLM. They show that the harness
-works and what its output looks like. They are not reference numbers, they say
-nothing about whether a target is met, and they must not be quoted as the
-performance of either. LiteLLM's published figures appear as LiteLLM publishes
-them, with links; the smoke run is the only place this repository measures
-LiteLLM, and it is not a reference run.
+a reduced-rate smoke run on a shared 8 vCPU development virtual machine
+([Smoke run](#smoke-run)): OLP's scenarios S1 to S6 at 30% of the roadmap's
+rates or less, and one scenario of the LiteLLM comparison at 5%, to show that
+the script runs. They show that the harness works and what its output looks
+like. They are not reference numbers, they are not comparable with LiteLLM's
+published figures, they say nothing about whether a target is met, and they must
+not be quoted as the performance of either gateway. LiteLLM's published figures
+appear as LiteLLM publishes them, with links; the smoke run is the only place
+this repository measures LiteLLM, and it is not a reference run.
 
 Reference results will be published under
 [Reference results](#reference-results) when they exist, with the
@@ -113,7 +115,10 @@ load runs. Everything else is a smoke run.
 | S6 | Slow-reader streams held open | 10,000 streams |
 
 S6 is OLP only: no target compares it, and its socket buffers at full scale need
-more TCP memory than most single hosts have. The
+more TCP memory than most single hosts have. Its streams must also all open
+within the thirty seconds after which the gateway ends a stream whose writes are
+blocked, which the default 70 seconds of warmup and measured period do not allow
+([Smoke run](#s6-held-streams)). The
 [scenario guide](../tests/bench/README.md#scenarios) has each scenario's mock
 behavior, how the gateway is sized for it and what to know when reading it.
 
@@ -200,8 +205,8 @@ run them, rather than the development compose file's.
 
 The other variables, such as the drain period and S6's, are in the
 [scenario guide](../tests/bench/README.md#scenarios). A smoke run is the same
-command with `OLP_BENCH_SCALE=0.02`, `OLP_BENCH_DURATION=8s` and
-`OLP_BENCH_WARMUP=3s`.
+command with a smaller `OLP_BENCH_SCALE`; [Smoke run](#smoke-run) records the
+settings of one, and the shortened warmup and period that S6 needs.
 
 ### Where results land
 
@@ -513,49 +518,199 @@ None yet.
 
 ## Smoke run
 
-**These are reduced-scale, non-reference numbers from a shared 8 vCPU machine.**
-They are what `make bench-compare` printed, copied unedited, to show the shape
-of its output and that the harness runs end to end. No target was judged, and
-nothing here says how OLP or LiteLLM perform.
+**These are reduced-rate, non-reference numbers from a shared 8 vCPU virtual
+machine.** They are not reference results: the machine is a shared development
+VM without pinned reference hardware, the rates are 1% to 30% of the roadmap's,
+and the services are the development compose file's. They are not comparable
+with LiteLLM's published figures, which come from a different test on a
+different deployment. **No roadmap target has been judged**: every target that
+needs full scale or a comparison is `not_checked` or `needs_comparison` in the
+results, and this guide does not judge them. The figures below are copied
+from the result files that `scripts/bench.sh` wrote under `.local/` (rounded to
+two decimals, and to one for requests per CPU second and memory), to show what
+the harness produces and that it runs end to end on this tree.
 
 | | |
 | --- | --- |
-| Run | 2026-10-02, `make bench-compare` with `OLP_BENCH_SCALE=0.02`, `OLP_BENCH_DURATION=8s` and `OLP_BENCH_WARMUP=3s`: 20 requests per second (60 for S3), measured for 8 seconds after 3 of warmup |
-| Pins | Gateway CPUs 2-3 (so LiteLLM ran two workers), mock upstream CPU 6, load generator CPU 7 |
-| Host | Intel Core Processor (Haswell, no TSX), 8 vCPU virtual machine with 22.9 GiB, kernel 7.0.0-34-generic, shared with other processes: the load average at the start of the runs was between 4.1 and 14.8 |
-| OLP | `olp 0.1.0`, binary SHA-256 `c67e84576c1d42642852f24465966ebfef42da0872c7cbb60a27903f3f7afe8f` |
-| LiteLLM | `ghcr.io/berriai/litellm:v1.103.2@sha256:f63fb81b831b170ec16851e23c36ac5bf52ef106b271406429524a2ed730bbfd`, `production` profile for S1, S2, S4 and S5 and `high-throughput` for S3 |
-| Services | The development compose file's PostgreSQL 18 and Valkey 9 |
-| Harness | An earlier revision than this guide describes: it counted the throughput from every request that eventually succeeded and the CPU cost from every request sent, and did not yet make a failing run or a negative added latency invalid. The raw reports of every run below record no failed request, in the warmup or the measured period, and no negative added latency beyond jitter, so only `rps/vCPU` was counted differently |
+| Run | 2026-10-03, 22:16 to 23:04 UTC, by a coding agent session, one scenario to a `scripts/bench.sh` invocation |
+| Commit | `9ef71679`, on a clean tree. The commit that records these numbers also changes the wording of S6's validity message and the README's S6 notes, which alters no measurement |
+| Host | KVM guest with 8 vCPUs (`nproc` 8), Intel Core Processor (Haswell, no TSX), 22.9 GiB and no swap, kernel 7.0.0-34-generic, Go 1.27.1, Node.js 26.8.2, Docker 29.8.2 with Compose 5.5.1. The guest exposes no CPU frequency governor. `net.ipv4.tcp_mem` is 279588 372786 559176 pages and the descriptor limit 524,288 |
+| Machine state | Before every run: no benchmark, `olp`, mock, load generator, LiteLLM or `go test` process, no container and no Docker volume. The machine was not idle: a host PostgreSQL 18, a Valkey server, the Docker daemon and some developer tooling sessions (editors, coding agents) ran beside the runs. A 3-second `vmstat` before S3 and every run after it showed 97 to 99% idle across the 8 CPUs; it was not taken before S1, S2, S4 and S5. The one-minute load average at the check was 0.73 before S1 and 1.39, 2.85 and 1.62 before S2, S4 and S5, which ran back to back and so include the scenario before. From S3 on, the script waited for it to fall below 0.8 first, and it read 0.49 to 0.79. The load the harness read when each test started, after the services and the build, is in the first table |
+| CPU pinning | Gateway CPUs 0-1, mock upstream 2-3, load generator 4-5, so the gateway had 2 vCPUs (read back from `/proc`) and `pins_disjoint` is true in every result. CPUs 6-7 were left free. The PostgreSQL and Valkey containers were not pinned, nor were the harness's other processes |
+| OLP | `olp 0.1.0` from `make build-go`, SHA-256 `ccebd834a24195f6c6f11823db8f5d8ad4c09f453672b428022657d14f4f9430`, for every run |
+| Mock upstream | Two builds of the same source. `go build -mod=readonly -trimpath -tags bench -o .local/bin/mockupstream ./tests/bench/cmd/mockupstream` (dynamically linked, SHA-256 `4b40fa6b12ef755d24f23dee602c80f40087454486b439b38b509c0943308db5`) served S1 to S5, the valid S6 run and the first default-settings S6 run. `scripts/bench-compare.sh` then replaced that file with its own static build (`CGO_ENABLED=0`, SHA-256 `fb9fed965c3bfd99d8c3b0e2732e5352657795f1cd32bfe7b0af048c2f654f5c`), which served the comparison, the two higher-rate points and the second default-settings S6 run. The results record the `olp` hash and not the mock's |
+| Services | `scripts/bench.sh`'s default (`BENCH_SERVICES=compose`): `postgres:18` (image ID `sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722`) and `valkey/valkey:9` (`sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd`, `appendonly yes`), with the development compose file's settings |
+| Gateway limits | Derived by the scenarios and recorded in each result under `gateway.derived_limits`; for example 1,032 requests in flight and a pool of 512 connections for S1, and 1,624 and 664 for S6 |
 
-| scenario | gateway | p50 ms | p95 ms | p99 ms | ttft p95 ms | rps/vCPU | req/cpu-s | cpu ms/req | peak MiB | errors % | valid |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| S1 | OLP | 2.91 | 6.21 | 11.20 | - | 10.0 | 193.5 | 5.17 | 177 | 0.000 | yes |
-| S1 | LiteLLM | 15.12 | 24.83 | 35.22 | - | 10.0 | 44.3 | 22.55 | 1500 | 0.000 | yes |
-| S2 | OLP | 3.07 | 7.17 | 8.19 | 5.44 | 10.0 | 75.9 | 13.18 | 178 | 0.000 | yes |
-| S2 | LiteLLM | 223.23 | 610.30 | 671.74 | 536.50 | 10.0 | 10.9 | 92.15 | 1538 | 0.000 | NO |
-| S3 | OLP | 537.98 | 968.74 | 1130.56 | 1011.54 | 30.0 | 42.6 | 23.49 | 179 | 0.000 | NO |
-| S3 | LiteLLM | 5801.31 | 8818.34 | 9669.02 | 9036.88 | 30.0 | 19.7 | 50.87 | 2577 | 0.000 | NO |
-| S4 | OLP | 2.85 | 4.78 | 3.20 | - | 10.0 | 168.8 | 5.92 | 176 | 0.000 | yes |
-| S4 | LiteLLM | 14.11 | 24.77 | 37.14 | - | 10.0 | 44.1 | 22.67 | 1501 | 0.000 | NO |
-| S5 | OLP | 2.05 | 3.07 | 1.02 | 0.69 | 10.0 | 63.6 | 15.72 | 177 | 0.000 | NO |
-| S5 | LiteLLM | 37.89 | 164.86 | 260.10 | 115.81 | 10.0 | 19.2 | 51.98 | 1481 | 0.000 | yes |
+Each scenario was run once with these settings, S6 apart (below), from the
+repository root, after `make build-go` and the mock's build above had made the
+binaries:
 
-`valid` is `NO` where the load generator sent more than 1% of a run's requests
-more than 5 ms late, which on a busy machine it did: S2 (LiteLLM, 4 of 160
-requests), S3 (OLP's baseline, 11 of 480, and LiteLLM, 24 of 480), S4 (LiteLLM,
-2 of 160) and S5 (OLP's baseline, 2 of 160). The baselines of the two sessions
-differed at p99 in S1 and S3. Every target was `not_checked`, because the runs
-were at scale 0.02, with the reasons the targets table of `compare.md` gives;
-three targets that OLP's own scenario judges alone, request-metadata loss for S1
-to S3, were `met`.
+```sh
+export OLP_TEST_BINARY=$PWD/.local/bin/olp OLP_BENCH_MOCK_BINARY=$PWD/.local/bin/mockupstream
+export OLP_BENCH_GATEWAY_CPUS=0-1 OLP_BENCH_MOCK_CPUS=2-3 OLP_BENCH_LOADGEN_CPUS=4-5
 
-Three things about reading it. Added latency is a difference of percentiles, so
-it can be erratic: in S4 and S5 OLP's p99 is below its p95. CPU per request is
-net of idle but, at 20 to 60 requests per second, may still contain work that
-does not grow with the request rate, which a full-rate run spreads over many
-more requests. And LiteLLM's container logs, kept under
-`.local/bench/litellm/raw/`, held only start-up lines in these runs and, for S3,
-PgBouncer's connection messages, with no per-request errors that would have cost
-it CPU. S4's attempts per request were 1.0227 for OLP, from its attempt records,
-and 1.0545 for LiteLLM, from the mock's counters.
+# S1, S2, S4 and S5, one invocation each: 100 requests per second,
+# the default 10 s of warmup and 60 s measured
+OLP_BENCH_SCALE=0.1 BENCH_SCENARIOS=S1 scripts/bench.sh
+
+# S3: 30 requests per second
+OLP_BENCH_SCALE=0.01 BENCH_SCENARIOS=S3 scripts/bench.sh
+
+# S6: 150 streams, opened over 18 s
+OLP_BENCH_SCALE=0.015 OLP_BENCH_WARMUP=3s OLP_BENCH_DURATION=15s BENCH_SCENARIOS=S6 scripts/bench.sh
+
+# Two further points at higher rates, with OLP_BENCH_OUT=.local/bench-extra
+OLP_BENCH_SCALE=0.3 BENCH_SCENARIOS=S1 scripts/bench.sh    # 300 requests per second
+OLP_BENCH_SCALE=0.03 BENCH_SCENARIOS=S3 scripts/bench.sh   # 90 requests per second
+```
+
+Partway through, `scripts/bench-compare.sh` rebuilt the mock upstream in place
+(see the table above), so the last three invocations ran against the static
+build and the earlier ones against the dynamic one.
+
+The scale was chosen at the start (0.1, and the smaller S3 and S6 below) and not
+searched for, so these are not the highest rates the gateway holds: in S1 to S5
+it used between 0.36 and 1.23 of its 2 CPUs, on average over each run. Every
+run below was valid at the first attempt, so no rate was lowered, apart from
+S6, whose default settings did not give a valid run at 150 streams
+([S6](#s6-held-streams)).
+
+### S1 to S5
+
+Added latency is the difference of percentiles between the same load straight at
+the mock and through the gateway, for all requests (`added_latency_ms.all`); the
+time to first token is for the streaming scenarios. The sustained rate is what
+finished in the measured period, 60 seconds after 10 of warmup. `load` is the
+one-minute load average the harness read at the start of the test.
+
+| Scenario | Scale | Target rps | Sustained rps | Valid | Added p50 / p95 / p99 ms | TTFT overhead p50 / p95 / p99 ms | Load |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| S1 | 0.1 | 100 | 100 | yes | 1.65 / 2.83 / 5.89 | - | 1.77 |
+| S2 | 0.1 | 100 | 100 | yes | 3.07 / 9.22 / 20.48 | 2.88 / 8.85 / 20.29 | 2.85 |
+| S3 | 0.01 | 30 | 30 | yes | 5.95 / 11.04 / 13.63 | 5.02 / 9.76 / 13.04 | 1.73 |
+| S4 | 0.1 | 100 | 100 | yes | 1.52 / 2.48 / 3.36 | - | 1.62 |
+| S5 | 0.1 | 100 | 100.05 | yes | 5.12 / 26.62 / 40.96 | 4.53 / 25.46 / 38.38 | 2.49 |
+| S1 | 0.3 | 300 | 300 | yes | 1.38 / 2.03 / 4.59 | - | 2.32 |
+| S3 | 0.03 | 90 | 90.03 | yes | 8.32 / 20.58 / 27.65 | 6.62 / 17.46 / 24.30 | 2.28 |
+
+The offered rate was 99.998% or more of the target in every run, and none of
+these seven runs had a failed request, a dropped one or a negative added
+latency. The last two rows are the higher-rate points.
+
+| Scenario | Target rps | Gateway CPUs used (of 2) | Requests per CPU second | CPU ms per request | RSS before / peak / after MiB | Errors % | Metadata delivered | Wait for metadata after the load | Allocations per request: objects / KiB |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| S1 | 100 | 0.43 | 232.7 | 4.30 | 185.7 / 188.7 / 69.7 | 0 | 7000 of 7000 | 0.0 s | 1,063 / 86.0 |
+| S2 | 100 | 0.98 | 100.2 | 9.98 | 182.2 / 182.4 / 93.9 | 0 | 7000 of 7000 | 5.0 s | 5,518 / 479.6 |
+| S3 | 30 | 0.36 | 83.9 | 11.91 | 185.7 / 185.9 / 72.8 | 0 | 2100 of 2100 | 0.0 s | 1,883 / 3,394.1 |
+| S4 | 100 | 0.42 | 242.0 | 4.13 | 186.0 / 188.5 / 69.3 | 0 | 7000 of 7000 | 0.0 s | 1,151 / 93.5 |
+| S5 | 100 | 1.23 | 80.1 | 12.49 | 185.5 / 189.1 / 88.0 | 0 | 7000 of 7000 | 16.6 s | 10,283 / 1,019.9 |
+| S1 | 300 | 0.64 | 470.1 | 2.13 | 185.0 / 187.6 / 71.6 | 0 | 21000 of 21000 | 68.7 s | 844 / 69.3 |
+| S3 | 90 | 0.91 | 99.4 | 10.06 | 186.2 / 186.2 / 80.5 | 0 | 6300 of 6300 | 4.6 s | 1,797 / 3,384.2 |
+
+CPU per request, requests per CPU second and allocations are over the whole run,
+warmup included, and the requests the gateway answered successfully; the
+gateway's CPU is net of what it spends idle. Metadata delivered is events in
+PostgreSQL against requests admitted, after the harness waited for them to stop
+arriving; in every run the pipeline had delivered all of them, none were dropped
+or abandoned, Valkey was healthy and `request-metadata-lost` was `met`. The wait
+shows how far behind the load the one consumer was: in the runs that had more
+than a few events to wait for, it persisted 116 to 164 events a second, and at
+300 requests per second, a rate above that, 11,288 events were still to arrive
+when the load ended.
+
+What else the results record: S3's key accrued a cost with no unpriced attempt,
+so the run did the budget work it exists for; S4's route made 7,000 attempts on
+the second target and 7 on the first, the five failures that open its circuit
+and the probes after it, with 1.001 attempts per request; S5's upstream calls were all OpenAI Chat
+Completions (7,000 of them), as the guide describes.
+
+### S6, held streams
+
+S6 holds streams open against readers that take 8 KiB a second, so its figures
+are not those of the other scenarios: no stream finishes, and the generator
+cancels them at the end.
+
+| Settings | Streams the generator held | Streams the gateway held at once | Valid |
+| --- | --- | --- | --- |
+| Defaults: 10 s warmup and 60 s measured, streams opened over 70 s | 150 | 66 | NO, twice |
+| `OLP_BENCH_WARMUP=3s OLP_BENCH_DURATION=15s`, streams opened over 18 s | 150 | 150 | yes |
+
+At the default settings the gateway ended every stream at 30.2 to 30.5 seconds
+(150 of 150 `client_cancelled` records with that duration in the gateway's log
+of the second run), which is the 30-second write deadline of
+[`responseWriteTimeout`](../internal/gateway/server.go), so only the streams of
+the last 30 seconds were open at once: 66 of 150 in both runs, where the
+harness's message said to raise the length of the completions. Streams opened
+over 70 seconds and ended after 30 are never all open at once, whatever their
+number, as long as their writes block soon after they open, as these did. The
+message now names both causes. At 18 seconds all 150 were open together from
+the opening of the last until the gateway ended the first, 12 seconds later,
+and the generator canceled the rest at 33 seconds. 150 is the most streams run
+here: a larger count was not tried.
+
+| Measure | Value (valid run) |
+| --- | --- |
+| Streams | 150 target, 150 held by the generator, 150 by the gateway at its peak (sampled each second) |
+| Response size | 7,091,188 bytes (40,000 tokens) at 8,192 bytes a second |
+| Gateway CPU | 273.27 ms for each stream held, net of idle; 1.25 CPUs on average over the 32.9-second run |
+| TTFT overhead p50 / p95 / p99 | 632.86 / 1,290.88 / 1,574.11 ms |
+| Gateway RSS before / peak / after | 184.6 / 188.3 / 108.6 MiB; growth 25.7 KiB for each stream held |
+| Kernel TCP memory (`/proc/net/sockstat`, every 2 s) | Peak 174,729 pages, about 683 MiB at 4 KiB a page, in the gateway's run, and 92,184 pages in the baseline against the mock; `net.ipv4.tcp_mem`'s pressure threshold is 372,786 pages |
+| Errors | 0 failed streams; the 125 streams of the measured period were still open when the generator canceled them at the end, which the error rate leaves out (`error_rate.gateway_canceled_at_end`), so the success rate does not apply |
+| Allocations per stream held | 665,136 objects and 56.7 MiB, over the whole run and net of idle |
+| Metadata | 150 of 150 delivered |
+
+At 273 CPU milliseconds each, the 150 streams cost about 41 CPU seconds, which
+would be 2.3 CPUs if all of it fell in the 18 seconds the streams were opened
+over: more than the gateway's two, and the time to first token grew with it. That
+was not checked beyond the arithmetic. The default settings' first run, with
+streams opened over 70 seconds, spent 304.71 ms for each stream and added 2.22,
+2.90 and 11.23 ms of time to first token at p50, p95 and p99.
+
+### The comparison script
+
+`scripts/bench-compare.sh` was run for S1 on this tree, to confirm that it still
+works, in a result directory of its own, with the same pins (LiteLLM's two
+workers on CPUs 0-1) and these settings:
+
+```sh
+OLP_BENCH_SCALE=0.05 OLP_BENCH_DURATION=10s OLP_BENCH_WARMUP=3s BENCH_SCENARIOS=S1 \
+  OLP_BENCH_GATEWAY_CPUS=0-1 OLP_BENCH_MOCK_CPUS=2-3 OLP_BENCH_LOADGEN_CPUS=4-5 \
+  OLP_BENCH_OUT=.local/bench-compare scripts/bench-compare.sh
+```
+
+It ran to the end and wrote `compare.json` and `compare.md`. The table is copied
+only as proof of that: each load was 500 requests over 10 seconds, so its p99 is
+five samples, and the script judged no target (four were `not_checked` at scale
+0.05, and `request-metadata-lost` was `met`). The baselines of the two sessions
+differed by 0, -0.06 and -0.16 ms at p50, p95 and p99.
+
+| Scenario | Gateway | p50 ms | p95 ms | p99 ms | rps/vCPU | req/cpu-s | cpu ms/req | peak MiB | errors % | Valid |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| S1 | OLP | 1.49 | 4.66 | 5.79 | 25.0 | 214.1 | 4.67 | 188 | 0.000 | yes |
+| S1 | LiteLLM | 12.53 | 25.14 | 29.66 | 25.1 | 56.1 | 17.84 | 1566 | 0.000 | yes |
+
+LiteLLM ran as `ghcr.io/berriai/litellm:v1.103.2@sha256:f63fb81b831b170ec16851e23c36ac5bf52ef106b271406429524a2ed730bbfd`
+in the `production` profile. Its memory is the cgroup's, which is not the same
+measurement as OLP's resident set ([reading a comparison](#reading-a-comparison)).
+The earlier smoke run of S2 to S5 against LiteLLM, made on a busier machine with
+an earlier revision of the harness, has been removed with this one: it is in the
+history of this file, and was not made on this tree.
+
+### Reading these figures
+
+- **Added latency is a difference of percentiles**, and at 100 requests per
+  second the p99 of a 60-second period rests on 60 requests. The tails of S2 and
+  S5 (p95 of 9.22 and 26.62 ms) are larger than those of the unary scenarios; S5
+  used 1.23 of the gateway's 2 CPUs on average. They were not investigated, and
+  nothing here says whether they come from the gateway, the machine or the
+  harness.
+- **CPU per request depends on the rate.** S1 cost 4.30 ms at 100 requests per
+  second and 2.13 ms at 300, and S3 11.91 ms at 30 and 10.06 at 90, so a figure
+  measured at a smoke rate is not the figure at full rate, and requests per CPU
+  second here are not what a CPU carries at the roadmap's rates.
+- **Allocations** are read from counters that trail by the objects of the
+  processors' cached spans, so at these rates they are indicative.
+- **The machine is shared**, and another tenant of the host or of the VM can
+  move any one of these figures; each was measured once.
