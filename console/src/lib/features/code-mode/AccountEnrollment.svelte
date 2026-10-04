@@ -13,7 +13,7 @@
     type GrantEnrollmentCompletion
   } from '$lib/features/providers/api/grants';
   import GrantEnrollmentPanel from '$lib/features/providers/GrantEnrollmentPanel.svelte';
-  import { errorMessage, unanswered } from '$lib/api/http';
+  import { ApiProblem, errorMessage } from '$lib/api/http';
 
   let {
     providerId,
@@ -84,7 +84,13 @@
       if (!enrollment) return;
       const result = await pollGrantEnrollment(enrollment).catch(
         (e: unknown) => {
-          if (!unanswered(e)) enrollment = null;
+          if (
+            e instanceof ApiProblem &&
+            e.problem.status >= 400 &&
+            e.problem.status < 500 &&
+            ![408, 429].includes(e.problem.status)
+          )
+            enrollment = null;
           throw e;
         }
       );

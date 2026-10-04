@@ -809,6 +809,60 @@ it.each([
   expect(host.querySelector('[role="alert"]')).toBeNull();
 });
 
+it.each([408, 429, 500, 502, 503, 504])(
+  'retains device authorization after HTTP %s and completes on retry',
+  async (status) => {
+    vi.mocked(startGrantEnrollment).mockResolvedValue({
+      id: 'device-enrollment',
+      provider_id: provider.id,
+      slot_id: 'slot',
+      device: {
+        verification_url: 'https://login.example/device',
+        user_code: 'WDJB-MJHT',
+        interval: 5
+      },
+      expires_at: '2026-10-02T23:00:00Z'
+    });
+    vi.mocked(pollGrantEnrollment)
+      .mockRejectedValueOnce(
+        new ApiProblem({ status, title: 'Please try again.' })
+      )
+      .mockResolvedValueOnce({
+        status: 'completed',
+        completion: {
+          provider_id: provider.id,
+          credential_id: account.credential_id,
+          credential_version: 1,
+          etag: account.etag,
+          principal: account.principal
+        }
+      });
+    await render();
+    await click('Create account');
+    field('code-provider', provider.id);
+    await settle();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    button('Enroll subscription account').click();
+    await vi.advanceTimersByTimeAsync(5000);
+    flushSync();
+    expect(pollGrantEnrollment).toHaveBeenCalledOnce();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'Please try again.'
+    );
+
+    await vi.advanceTimersByTimeAsync(5000);
+    flushSync();
+    expect(pollGrantEnrollment).toHaveBeenCalledTimes(2);
+    expect(startGrantEnrollment).toHaveBeenCalledOnce();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(
+      host.querySelector<HTMLSelectElement>('#code-credential')!.value
+    ).toBe(account.credential_id);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(pollGrantEnrollment).toHaveBeenCalledTimes(2);
+  }
+);
+
 it('retains explicit pool memberships and makes ownership immutable', async () => {
   await render();
   await click('Pools');
