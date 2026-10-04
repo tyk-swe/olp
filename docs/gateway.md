@@ -648,14 +648,20 @@ provider or credential slot has a token budget. Their future consumption cannot
 be bounded at admission. Request-rate and concurrency controls remain supported.
 Live sessions recheck key budgets during their normal authority refresh.
 
-Cost-budget admission checks PostgreSQL for ingestion losses overlapping the
-current UTC month and returns `cost_accounting_incomplete` while any remain.
+Cost-budget admission checks PostgreSQL for raw or hourly ingestion losses
+overlapping the current UTC month and for unclosed gateway epochs whose
+checkpoints are older than 60 seconds and returns `cost_accounting_incomplete` while any remain.
 Because a lost event cannot identify its owner reliably, the guard conservatively
 applies to every cost-budgeted key and group. Unbudgeted traffic remains available.
 This adds one database lookup per cost-budgeted admission and fails closed when
 that lookup is unavailable. The local emitter blocks admission immediately after
 a drop; a bounded synchronous gap write shares the loss with other replicas, with
 normal epoch checkpoints as recovery if that write fails. An in-flight request or
-a replica racing that gap write can still finish; a failed write followed by a
-process crash relies on unclean-epoch detection. This guard does not reconstruct
-lost usage. It expires naturally when the budget month no longer overlaps a gap.
+a replica racing that gap write can still finish. Startup durably registers a
+gateway epoch before listeners bind. If a drop checkpoint fails and that gateway
+crashes, the admission query itself refuses its stale unclosed epoch, even when
+no recovery worker is running; it need not wait for unclean-epoch detection.
+This is a heartbeat-age check, not an unconditional wall-clock guarantee. This guard does not reconstruct
+lost usage. Gap quarantine expires naturally when the budget month no longer overlaps its
+raw or hourly evidence. Stale epochs require a resumed healthy heartbeat or
+worker recovery to turn their uncertainty into dated gap evidence.
