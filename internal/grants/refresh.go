@@ -180,13 +180,20 @@ func (r *Refresher) refresh(ctx context.Context, conn *pgx.Conn, credentialID st
 // query over the grant's credential version c: one that pins the plugin build
 // that enrolled the grant and selects the version in one of its credential
 // slots, the provider's active revision before its draft. It is NULL when no
-// configuration uses the grant, which is then retired.
+// configuration or retained resource uses the grant, which is then retired.
 const using = `coalesce(
 	(SELECT r.configuration FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id
 		WHERE p.id=c.provider_id AND r.configuration->>'profile_revision'=c.plugin_digest
 		AND r.slots @> jsonb_build_array(jsonb_build_object('credential_id',c.id))),
 	(SELECT p.configuration FROM olp.providers p WHERE p.id=c.provider_id AND p.configuration->>'profile_revision'=c.plugin_digest
-		AND EXISTS (SELECT 1 FROM olp.provider_slots s WHERE s.provider_id=p.id AND s.credential_id=c.id)))`
+		AND EXISTS (SELECT 1 FROM olp.provider_slots s WHERE s.provider_id=p.id AND s.credential_id=c.id)),
+	(SELECT r.configuration FROM olp.provider_resources x
+		JOIN olp.provider_revisions r ON r.id=x.provider_revision_id AND r.provider_id=x.provider_id
+		WHERE x.provider_id=c.provider_id AND x.credential_id=c.id
+		AND (x.expires_at IS NULL OR x.expires_at>now())
+		AND r.configuration->>'profile_revision'=c.plugin_digest
+		AND r.slots @> jsonb_build_array(jsonb_build_object('id',x.slot_id,'credential_id',c.id))
+		ORDER BY x.created_at DESC,x.id DESC LIMIT 1))`
 
 // dueCondition is what makes a grant g, over its credential version c, due: it
 // holds a refresh token, its credential version is not revoked, and it is
