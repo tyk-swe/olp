@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -103,6 +104,11 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 	if target == nil {
 		return nil, nil, pinUnavailable()
 	}
+	if use == retainedNewWork {
+		if e := restrictRetainedWork(x.request.release.Snapshot, authority.ID, provider, route, slot, *target, operation); e != nil {
+			return nil, nil, e
+		}
+	}
 	attempt := runtime.Attempt{
 		TargetID:           target.ID,
 		ProviderID:         provider.ID,
@@ -182,4 +188,60 @@ func (s *Server) authorizeDurable(ctx context.Context, x *execution, authority a
 	}
 	_, _, e := s.admitDurable(ctx, x, authority, r, doc, operation, use)
 	return e
+}
+
+// Historical protocol and credential identity do not grant historical authority
+// to start fresh inference. Intersect that contract with the installed release.
+func restrictRetainedWork(current *runtime.Snapshot, keyID string, provider *runtime.Provider, route *runtime.Route, slot *runtime.Slot, target runtime.Target, operation string) *Error {
+	live, ok := current.Providers[provider.ID]
+	if !ok || !live.Enabled {
+		return pinUnavailable()
+	}
+	liveRoute, ok := current.Routes[route.Slug]
+	if !ok || !slices.Contains(liveRoute.Operations, operation) {
+		return pinUnavailable()
+	}
+	foundTarget := false
+	for _, candidate := range liveRoute.Targets {
+		if candidate.ProviderID == target.ProviderID && candidate.ProviderModel == target.ProviderModel {
+			foundTarget = true
+			break
+		}
+	}
+	if !foundTarget {
+		return pinUnavailable()
+	}
+	var liveSlot *runtime.Slot
+	for _, candidate := range live.Slots {
+		if candidate.ID == slot.ID {
+			liveSlot = &candidate
+			break
+		}
+	}
+	if liveSlot == nil || !liveSlot.Allows(target.ProviderModel, route.Slug, keyID) || !slot.Allows(target.ProviderModel, route.Slug, keyID) {
+		return pinUnavailable()
+	}
+	slot.RequestsPerMinute = tighterRetainedLimit(slot.RequestsPerMinute, liveSlot.RequestsPerMinute)
+	slot.TokensPerMinute = tighterRetainedLimit(slot.TokensPerMinute, liveSlot.TokensPerMinute)
+	slot.MaxConcurrency = tighterRetainedLimit(slot.MaxConcurrency, liveSlot.MaxConcurrency)
+	if live.Limits != nil {
+		prior := runtime.Limits{}
+		if provider.Limits != nil {
+			prior = *provider.Limits
+		}
+		provider.Limits = &runtime.Limits{
+			RequestsPerMinute: tighterRetainedLimit(prior.RequestsPerMinute, live.Limits.RequestsPerMinute),
+			TokensPerMinute:   tighterRetainedLimit(prior.TokensPerMinute, live.Limits.TokensPerMinute),
+			MaxConcurrency:    tighterRetainedLimit(prior.MaxConcurrency, live.Limits.MaxConcurrency),
+		}
+	}
+	route.ContentPolicy = liveRoute.ContentPolicy
+	return nil
+}
+
+func tighterRetainedLimit(old, current *int64) *int64 {
+	if old == nil || current != nil && *current < *old {
+		return current
+	}
+	return old
 }

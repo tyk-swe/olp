@@ -59,6 +59,11 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 			return invalidRequest("policy_conflict", "The native invocation retains provider state but this API key does not permit it.", &param)
 		}
 	}
+	if !authority.Policy.AllowProviderState && (parsed.Field("store") == nil || bytes.Equal(bytes.TrimSpace(parsed.Field("store")), []byte("null"))) {
+		// Transformed requests can make the provider's default explicit. Strict
+		// requests were refused above because this would alter native semantics.
+		parsed.SetField("store", json.RawMessage(`false`))
+	}
 	if previous == "" && !background && !store {
 		return nil
 	}
@@ -441,6 +446,14 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	}
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
+	}
+	if method == http.MethodPost && res.Kind == resources.KindStrictResponse {
+		current, present := x.request.release.Snapshot.Routes[res.RouteSlug]
+		if !present || retainedContract(true, current.Fidelity, retainedRetrieval) != nil {
+			// Cancellation remains available for cleanup, but cannot return content
+			// that the same resource's retrieval guard forbids.
+			out, _ = json.Marshal(map[string]string{"id": res.ID, "object": "response", "status": nativeStatus})
+		}
 	}
 	s.writeStateJSON(w, x, out)
 	return nil

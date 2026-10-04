@@ -466,7 +466,10 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 	// Stored provider fields are upstream identifiers, whatever their
 	// spelling. Output and error files are first seen here, so they get a
 	// mapping on demand.
-	for _, name := range []string{"output_file_id", "error_file_id"} {
+	for _, name := range []string{"input_file_id", "output_file_id", "error_file_id"} {
+		if name == "input_file_id" && batchLocalInput(res) != "" {
+			continue
+		}
 		raw, ok := obj[name]
 		if !ok {
 			continue

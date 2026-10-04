@@ -145,6 +145,20 @@ func TestActiveContinuationKeepsCompatibleHistoricalRevisionAcrossRestart(t *tes
 	if status != 200 || !bytes.Contains(final, []byte("Both tools completed.")) || historicalCalls.Load() != 2 || replacementCalls.Load() != probeCalls {
 		t.Fatalf("historical route changed: %d old=%d new=%d probe=%d %s", status, historicalCalls.Load(), replacementCalls.Load(), probeCalls, final)
 	}
+	// A compatible protocol revision does not preserve permission to start
+	// another turn after the owner removes this key from the active slot.
+	slots = h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, 200)
+	slotID := slots["items"].([]any)[0].(map[string]any)["id"].(string)
+	h.want(owner, "PUT", providerPath+"/credential-slots/"+slotID, map[string]any{"slot": map[string]any{"name": "default", "enabled": true, "allowed_api_keys": []string{uuid.NewString()}}}, withMatch(slots, idem(uuid.NewString())), 200)
+	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
+	h.want(owner, "POST", providerPath+"/activate", nil, withMatch(detail, idem(uuid.NewString())), 200)
+	h.refresh()
+	restrictedHeaders := continuationHeaders()
+	restrictedHeaders["X-OLP-Continuation-Handle"] = handle
+	status, restricted, _ := h.gatewayRaw("POST", "/v1/chat/completions", key, bytes.NewReader(nextBody), restrictedHeaders)
+	if status != http.StatusConflict || historicalCalls.Load() != 2 || replacementCalls.Load() != probeCalls {
+		t.Fatalf("current slot restrictions bypassed: %d old=%d new=%d %s", status, historicalCalls.Load(), replacementCalls.Load(), restricted)
+	}
 	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
 	h.want(owner, "POST", providerPath+"/credentials/"+historicalCredential+"/revoke", nil, withMatch(detail, idem(uuid.NewString())), 200)
 	h.refresh()
