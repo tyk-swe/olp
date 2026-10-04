@@ -958,9 +958,10 @@ func (le *Lease) Refund(ctx context.Context) error {
 	}))
 }
 
-// Reconcile settles the token reservation against the tokens actually used. It
-// is a no-op without a token budget, and the script ignores a window that has
-// already rolled over.
+// Reconcile increases the token reservation when observed usage exceeds it.
+// Provider usage is untrusted and cannot refund the local admission estimate.
+// Refund remains available for work that was never dispatched. The script
+// ignores a window that has already rolled over.
 func (le *Lease) Reconcile(ctx context.Context, actualTokens int64) error {
 	if le == nil {
 		return nil
@@ -972,10 +973,7 @@ func (le *Lease) Reconcile(ctx context.Context, actualTokens int64) error {
 	if actualTokens < 0 || actualTokens > maxLuaInteger {
 		return errors.Join(err, &InvalidRequestError{Reason: "actual tokens must be a non-negative Lua-safe integer"})
 	}
-	adjustment := actualTokens - le.reservedTokens
-	if adjustment == 0 {
-		return err
-	}
+	adjustment := max(int64(0), actualTokens-le.reservedTokens)
 	return errors.Join(err, cleanup(ctx, func(ctx context.Context) error {
 		_, err := le.limiter.eval(ctx, reconcileLimitsScript, []string{le.rateKey},
 			strconv.FormatInt(le.windowID, 10), strconv.FormatInt(adjustment, 10), le.id)

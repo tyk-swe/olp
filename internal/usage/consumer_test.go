@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -167,5 +168,15 @@ func TestConsumerReadsTheServersAnswersAboutItsGroup(t *testing.T) {
 				t.Fatalf("groupLost = %v, want %v", run.groupLost, test.lost)
 			}
 		})
+	}
+}
+
+func TestFutureMetadataVersionRemainsPending(t *testing.T) {
+	r := &consumerRun{log: slog.Default()}
+	// No database or stream client is configured: unsupported versions must not
+	// record a permanent gap, acknowledge, or delete the only accounting evidence.
+	completed, duplicate, retry := r.processEntry(t.Context(), StreamEntry{ID: "1-0", Payload: []byte(`{"version":2}`)})
+	if completed || duplicate || !retry {
+		t.Fatalf("future version retired: %v %v %v", completed, duplicate, retry)
 	}
 }

@@ -1334,6 +1334,10 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = route
+	if e := s.unboundedPinLimits(authority, p); e != nil {
+		s.stateFail(x, w, e, x.family)
+		return
+	}
 	if x.strict() {
 		if fileKind != resources.KindStrictFile || fileContract == nil || !authority.Policy.AllowProviderState || !s.Resources.Encrypted() {
 			s.stateFail(x, w, invalidRequest("resource_affinity", "Strict batches require a file uploaded under the same strict route and state-enabled key.", strPtr("input_file_id")), x.family)

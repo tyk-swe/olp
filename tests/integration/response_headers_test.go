@@ -421,7 +421,7 @@ func TestResponseHeadersMatchTheKeysValkeyWindow(t *testing.T) {
 				}
 				// Every request reserves the same estimate, on top of what the
 				// earlier ones were settled at.
-				if estimate := tokens - 10*(n-1); n == 1 {
+				if estimate := tokens - reserved*(n-1); n == 1 {
 					reserved = estimate
 				} else if estimate != reserved {
 					t.Fatalf("request %d reserved %d tokens, the first reserved %d", n, estimate, reserved)
@@ -430,10 +430,10 @@ func TestResponseHeadersMatchTheKeysValkeyWindow(t *testing.T) {
 					t.Fatalf("request %d: headers %v", n, resp.Header)
 				}
 				rhDrain(t, resp)
-				// The reservation is replaced by the 10 tokens the upstream reported.
+				// Low provider usage cannot refund the conservative reservation.
 				glEventually(t, "the reservation to be reconciled", func() bool {
 					_, settled := rhWindow(t, f, rateKey)
-					return settled == 10*n
+					return settled == reserved*n
 				})
 			}
 			// A unary response states the same window.
@@ -446,7 +446,7 @@ func TestResponseHeadersMatchTheKeysValkeyWindow(t *testing.T) {
 			if got := rhInt(t, resp.Header, remainingRequests); got != requestLimit-4 {
 				t.Fatalf("unary: %s = %d, want %d", remainingRequests, got, requestLimit-4)
 			}
-			if got, want := rhInt(t, resp.Header, remainingTokens), int64(tokenLimit)-30-reserved; got != want {
+			if got, want := rhInt(t, resp.Header, remainingTokens), int64(tokenLimit)-4*reserved; got != want {
 				t.Fatalf("unary: %s = %d, want %d: three settled requests and this one's reservation", remainingTokens, got, want)
 			}
 		})

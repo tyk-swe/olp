@@ -174,6 +174,11 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		x.failure, status = e, e.Status
 		return
 	}
+	if e := unboundedWorkLimits(x.authority, nil, nil); e != nil {
+		client.Close(websocket.StatusPolicyViolation, "unbounded work cannot enforce budgets")
+		x.failure, status = e, e.Status
+		return
+	}
 	x.estimate = resourceEstimate
 	if e := s.reserveState(ctx, x, x.authority, geminiLiveSession); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "admission refused")
@@ -193,6 +198,11 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	})
 	if e != nil {
 		client.Close(websocket.StatusPolicyViolation, "provider unavailable")
+		x.failure, status = e, e.Status
+		return
+	}
+	if e := s.unboundedPinLimits(x.authority, p); e != nil {
+		client.Close(websocket.StatusPolicyViolation, "unbounded work cannot enforce budgets")
 		x.failure, status = e, e.Status
 		return
 	}
@@ -478,7 +488,7 @@ loop:
 			break loop
 		case <-reauth.C:
 			authority, err := s.Runtime.Authenticate(token)
-			if err != nil || authority.ID != x.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || s.pinEligibility(p) != runtime.Eligible {
+			if err != nil || s.unboundedPinLimits(authority, p) != nil || authority.ID != x.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || s.pinEligibility(p) != runtime.Eligible {
 				first.err = errGeminiLiveAuthority
 				client.Close(websocket.StatusPolicyViolation, "authority revoked")
 				break loop

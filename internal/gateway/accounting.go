@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"time"
@@ -12,13 +13,15 @@ import (
 
 // AccountingSink hands every terminal request to the usage pipeline as the
 // content-free event the accounting tables are built from. Emitting is a
-// bounded handoff: it never blocks the request that produced it, and an event
-// the pipeline could not store is dropped here rather than poisoning the
-// stream for every request behind it.
+// bounded handoff. A rejected event checkpoints loss with a bounded database
+// write so replicas cannot continue treating incomplete spend as authoritative.
 type AccountingSink struct {
-	Emitter *usage.Emitter
-	Log     *slog.Logger
-	Next    Sink
+	// RecordLoss persists loss evidence before the handler completes. Local
+	// emitter counters still fail admission closed if this write is unavailable.
+	RecordLoss func(context.Context, string) error
+	Emitter    *usage.Emitter
+	Log        *slog.Logger
+	Next       Sink
 }
 
 // Terminal records one finished request.
@@ -35,11 +38,24 @@ func (a *AccountingSink) Terminal(e Envelope) {
 	}
 	if _, err := usage.Validate(event); err != nil {
 		a.Emitter.Drop()
+		a.recordLoss(e.RequestID)
 		a.logger().Warn("usage event dropped", "request_id", e.RequestID, "error", err.Error())
 		return
 	}
 	if err := a.Emitter.Emit(*event); err != nil {
+		a.recordLoss(e.RequestID)
 		a.logger().Warn("usage event not queued", "request_id", e.RequestID, "error", err.Error())
+	}
+}
+
+func (a *AccountingSink) recordLoss(requestID string) {
+	if a.RecordLoss == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := a.RecordLoss(ctx, requestID); err != nil {
+		a.logger().Error("accounting loss checkpoint failed", "request_id", requestID, "error", err)
 	}
 }
 

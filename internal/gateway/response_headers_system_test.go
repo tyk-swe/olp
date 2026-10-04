@@ -311,7 +311,7 @@ func TestOpenAIRateLimitHeadersCountDownTheKeysWindow(t *testing.T) {
 		}
 		// The tokens the window holds are what earlier requests settled at and
 		// what this one reserved: the headers state exactly that.
-		remaining := 100_000 - headerFixtureTokens*(n-1) - f.window.lastReserved()
+		remaining := 100_000 - f.window.lastReserved()*n
 		wantHeaders(t, resp, "x-ratelimit-", map[string]string{
 			"X-Ratelimit-Limit-Requests":     "5",
 			"X-Ratelimit-Remaining-Requests": strconv.FormatInt(5-n, 10),
@@ -455,7 +455,7 @@ func TestRateLimitedRequestsCarryTheWindowWithTheRetryHint(t *testing.T) {
 		"X-Ratelimit-Remaining-Requests": "0",
 		"X-Ratelimit-Reset-Requests":     resp.Header.Get("X-Ratelimit-Reset-Requests"),
 		"X-Ratelimit-Limit-Tokens":       "100000",
-		"X-Ratelimit-Remaining-Tokens":   strconv.FormatInt(100_000-headerFixtureTokens, 10),
+		"X-Ratelimit-Remaining-Tokens":   strconv.FormatInt(100_000-reserved, 10),
 		"X-Ratelimit-Reset-Tokens":       resp.Header.Get("X-Ratelimit-Reset-Tokens"),
 	})
 	if reserved <= headerFixtureTokens {
@@ -475,7 +475,7 @@ func TestRateLimitedRequestsCarryTheWindowWithTheRetryHint(t *testing.T) {
 		"Anthropic-Ratelimit-Requests-Remaining": "0",
 		"Anthropic-Ratelimit-Requests-Reset":     time.UnixMilli((minute + 1) * 60_000).UTC().Format(time.RFC3339),
 		"Anthropic-Ratelimit-Tokens-Limit":       "100000",
-		"Anthropic-Ratelimit-Tokens-Remaining":   strconv.FormatInt(100_000-headerFixtureTokens, 10),
+		"Anthropic-Ratelimit-Tokens-Remaining":   strconv.FormatInt(100_000-reserved, 10),
 		"Anthropic-Ratelimit-Tokens-Reset":       time.UnixMilli((minute + 1) * 60_000).UTC().Format(time.RFC3339),
 	})
 
@@ -512,7 +512,7 @@ func TestTokenLimitedRequestsStateTheTokensTheWindowHolds(t *testing.T) {
 	}
 	wantHeaders(t, resp, "x-ratelimit-", map[string]string{
 		"X-Ratelimit-Limit-Tokens":     strconv.FormatInt(limit, 10),
-		"X-Ratelimit-Remaining-Tokens": strconv.FormatInt(limit-headerFixtureTokens, 10),
+		"X-Ratelimit-Remaining-Tokens": strconv.FormatInt(limit-reserved, 10),
 		"X-Ratelimit-Reset-Tokens":     resp.Header.Get("X-Ratelimit-Reset-Tokens"),
 	})
 }

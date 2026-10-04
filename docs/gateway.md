@@ -492,8 +492,11 @@ attempt's first-byte or idle timeout does not bound a stream's total lifetime. A
 rejected slot refunds the connection reservation it already took, the attempt is
 recorded as a rate-limit failure with its `Retry-After`, and failover continues
 to the next target. When a request ends, a reservation that dispatched nothing
-is refunded in full; otherwise the token reservation is reconciled against the
-usage the upstream reported, the concurrency lease is released, and the cost
+is refunded in full; otherwise the token reservation is a conservative floor.
+Reported usage can increase it but cannot refund it, because upstream metering
+is untrusted. This also means legitimate completions shorter than the reserved
+output allowance retain that allowance for the current minute. The concurrency
+lease is released, and the cost
 reservation becomes the cost incurred. Settlement ignores client cancellation, so
 a caller that hangs up still returns its slot.
 
@@ -636,3 +639,23 @@ A terminal stream event, retrieval, or cancellation carrying final usage settles
 that record once, including when several replicas poll concurrently. Until final
 usage is observed, the record remains pending; clients must poll responses that
 finish after their creation connection closes.
+
+### Unbounded work and incomplete accounting
+
+Batch submissions and Gemini Live sessions are rejected with `unbounded_work_budget`
+when the key or its budget group has a token or cost budget, or the selected
+provider or credential slot has a token budget. Their future consumption cannot
+be bounded at admission. Request-rate and concurrency controls remain supported.
+Live sessions recheck key budgets during their normal authority refresh.
+
+Cost-budget admission checks PostgreSQL for ingestion losses overlapping the
+current UTC month and returns `cost_accounting_incomplete` while any remain.
+Because a lost event cannot identify its owner reliably, the guard conservatively
+applies to every cost-budgeted key and group. Unbudgeted traffic remains available.
+This adds one database lookup per cost-budgeted admission and fails closed when
+that lookup is unavailable. The local emitter blocks admission immediately after
+a drop; a bounded synchronous gap write shares the loss with other replicas, with
+normal epoch checkpoints as recovery if that write fails. An in-flight request or
+a replica racing that gap write can still finish; a failed write followed by a
+process crash relies on unclean-epoch detection. This guard does not reconstruct
+lost usage. It expires naturally when the budget month no longer overlaps a gap.

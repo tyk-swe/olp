@@ -156,6 +156,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 	}
 	var emitter *usage.Emitter
+	var gatewayInstance string
 	var rt *runtime.Manager
 	var gw *gateway.Server
 	var mediaService *media.Service
@@ -281,7 +282,14 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			// than serving it unmetered, and keeps logging its metadata.
 			if limiter != nil {
 				emitter = usage.NewEmitter(metadataBuffer)
-				gw.Sink = &gateway.AccountingSink{Emitter: emitter, Log: log, Next: gw.Sink}
+				gatewayInstance = usage.GatewayInstance()
+				gw.Admission.CostAccountingReady = func(ctx context.Context) error {
+					return usage.CheckBudgetAccounting(ctx, pool, emitter)
+				}
+				gw.Sink = &gateway.AccountingSink{Emitter: emitter, Log: log, Next: gw.Sink,
+					RecordLoss: func(ctx context.Context, requestID string) error {
+						return usage.RecordBudgetLoss(ctx, pool, emitter, gatewayInstance, lossCounters)
+					}}
 			}
 			gw.Register(public)
 		}
@@ -340,7 +348,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	var delivered sync.WaitGroup
 	var writerDone chan struct{}
 	if emitter != nil {
-		stream, instance := usage.StreamName(prefix), usage.GatewayInstance()
+		stream, instance := usage.StreamName(prefix), gatewayInstance
 		// Register before listeners bind: even a crash before the first tick
 		// must leave an epoch that recovery can detect.
 		if _, err := usage.CheckpointEpoch(startup, pool, instance, emitter.Snapshot(), false); err != nil {

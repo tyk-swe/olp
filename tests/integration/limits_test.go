@@ -512,7 +512,7 @@ func TestLimitsRejectionsConsumeNothing(t *testing.T) {
 	}
 }
 
-func TestLimitsTokenReconciliationMatchesActualUsage(t *testing.T) {
+func TestLimitsTokenReconciliationKeepsReservationFloor(t *testing.T) {
 	c := limClient(t)
 	namespace := limNamespace(t, c, "reconcile")
 	limiter := limLimiter(t, c, namespace)
@@ -529,7 +529,7 @@ func TestLimitsTokenReconciliationMatchesActualUsage(t *testing.T) {
 			t.Fatalf("Reconcile: %v", err)
 		}
 	}
-	limWantCounters(t, c, rateKey, 1, 3)
+	limWantCounters(t, c, rateKey, 1, 8)
 
 	request.RequestedTokens = 4
 	second := limReserve(t, limiter, request)
@@ -538,7 +538,7 @@ func TestLimitsTokenReconciliationMatchesActualUsage(t *testing.T) {
 			t.Fatalf("Reconcile: %v", err)
 		}
 	}
-	limWantCounters(t, c, rateKey, 2, 10)
+	limWantCounters(t, c, rateKey, 2, 15)
 }
 
 func TestLimitsTokenReconciliationDoesNotTouchANewWindow(t *testing.T) {
