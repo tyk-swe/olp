@@ -59,11 +59,6 @@ func (s *Server) responsesStateGate(ctx context.Context, x *execution, authority
 			return invalidRequest("policy_conflict", "The native invocation retains provider state but this API key does not permit it.", &param)
 		}
 	}
-	if !authority.Policy.AllowProviderState && (parsed.Field("store") == nil || bytes.Equal(bytes.TrimSpace(parsed.Field("store")), []byte("null"))) {
-		// Transformed requests can make the provider's default explicit. Strict
-		// requests were refused above because this would alter native semantics.
-		parsed.SetField("store", json.RawMessage(`false`))
-	}
 	if previous == "" && !background && !store {
 		return nil
 	}

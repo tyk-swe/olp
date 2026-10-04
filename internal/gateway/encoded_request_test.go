@@ -114,3 +114,41 @@ func TestPlanningKeepsAFewBodiesAtMost(t *testing.T) {
 		t.Fatalf("planning kept %d bodies, want %d", len(kept), keptEncodings)
 	}
 }
+
+func TestRetentionPolicyAppliesToNativeDestinationAcrossEncodingPaths(t *testing.T) {
+	for _, kind := range []string{"openai", "anthropic", "gemini", "vertex_ai", "bedrock"} {
+		t.Run(kind, func(t *testing.T) {
+			parsed, err := openai.Parse(openai.FamilyResponses, []byte(`{"model":"team-chat","input":"private prompt","max_output_tokens":32}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider := &runtime.Provider{ID: kind, Kind: kind}
+			x := &execution{parsed: parsed}
+			if err := x.encodes(provider, provider.Connector(), "model"); err != nil {
+				t.Fatal(err)
+			}
+			kept := x.takeEncoded()
+			// The first target reuses planning; later failover targets encode on demand.
+			for _, cache := range []map[string]encodedRequest{kept, nil} {
+				body, wire, err := x.encoding(cache, provider, provider.Connector(), "model")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(body, &fields); err != nil {
+					t.Fatal(err)
+				}
+				if wire == openai.FamilyResponses {
+					if string(fields["store"]) != "false" {
+						t.Fatalf("native destination retained state: %s", body)
+					}
+				} else if fields["store"] != nil {
+					t.Fatalf("stateless destination received unsupported store: %s", body)
+				}
+			}
+			if parsed.Field("store") != nil {
+				t.Fatal("destination policy mutated source request")
+			}
+		})
+	}
+}
