@@ -7,6 +7,9 @@
 {{- fail "networkPolicy requires at least one edge peer (networkPolicy.edge.namespaceLabels or networkPolicy.edge.cidrs)" -}}
 {{- end -}}
 {{- if $egress.restricted -}}
+{{- if and $egress.dns.enabled (empty $egress.dns.cidrs) -}}
+{{- fail "networkPolicy.egress.dns.cidrs is required when restricted egress and DNS are enabled" -}}
+{{- end -}}
 {{- if empty $egress.postgresql.cidrs -}}
 {{- fail "networkPolicy.egress.postgresql.cidrs is required when networkPolicy.egress.restricted is true" -}}
 {{- end -}}
