@@ -19,7 +19,8 @@ import { listProviderCredentials } from '$lib/features/providers/api/credentials
 import { listProviderKinds } from '$lib/features/providers/api/models';
 import {
   startGrantEnrollment,
-  continueGrantEnrollment
+  continueGrantEnrollment,
+  pollGrantEnrollment
 } from '$lib/features/providers/api/grants';
 import { pluginSpec } from '$lib/features/providers/test/pluginFixtures';
 import * as api from '$lib/api/code-mode';
@@ -215,6 +216,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   if (component) await unmount(component);
+  vi.useRealTimers();
   component = undefined;
   client.clear();
   host.remove();
@@ -690,6 +692,75 @@ it('reuses grant enrollment and associates the observed credential without reque
     undefined
   );
 });
+
+it.each(['automatic', 'manual'])(
+  'continues device polling after %s recovery from a transient error',
+  async (recovery) => {
+    vi.mocked(startGrantEnrollment).mockResolvedValue({
+      id: 'device-enrollment',
+      provider_id: provider.id,
+      slot_id: 'slot',
+      device: {
+        verification_url: 'https://login.example/device',
+        user_code: 'WDJB-MJHT',
+        interval: 5
+      },
+      expires_at: '2026-10-02T23:00:00Z'
+    });
+    vi.mocked(pollGrantEnrollment)
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({ status: 'pending', interval: 10 })
+      .mockResolvedValueOnce({
+        status: 'completed',
+        completion: {
+          provider_id: provider.id,
+          credential_id: account.credential_id,
+          credential_version: 1,
+          etag: account.etag,
+          principal: account.principal
+        }
+      });
+    await render();
+    await click('Create account');
+    field('code-provider', provider.id);
+    await settle();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    button('Enroll subscription account').click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    await vi.advanceTimersByTimeAsync(5000);
+    flushSync();
+    expect(pollGrantEnrollment).toHaveBeenCalledOnce();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'Failed to fetch'
+    );
+    expect(button('Check authorization again').disabled).toBe(false);
+
+    if (recovery === 'manual') {
+      button('Check authorization again').click();
+      await vi.advanceTimersByTimeAsync(0);
+    } else {
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(pollGrantEnrollment).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1);
+    }
+    flushSync();
+    expect(pollGrantEnrollment).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(host.textContent).not.toContain('Check authorization again');
+
+    await vi.advanceTimersByTimeAsync(recovery === 'manual' ? 5000 : 10000);
+    flushSync();
+    expect(pollGrantEnrollment).toHaveBeenCalledTimes(3);
+    expect(
+      host.querySelector<HTMLSelectElement>('#code-credential')!.value
+    ).toBe(account.credential_id);
+    expect(host.textContent).toContain('Enrollment did not test inference');
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(pollGrantEnrollment).toHaveBeenCalledTimes(3);
+  }
+);
 
 it('retains explicit pool memberships and makes ownership immutable', async () => {
   await render();

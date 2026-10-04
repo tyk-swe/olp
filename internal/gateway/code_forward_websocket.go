@@ -228,7 +228,10 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 				return
 			}
 			if err := codeWrite(ctx, upstream, message.kind, message.body); err != nil {
-				active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
+				if ctx.Err() == nil {
+					active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
+					active.health(ctx, "unavailable")
+				}
 				return
 			}
 			generationTimer = time.NewTimer(codeGenerationTimeout)
@@ -240,6 +243,7 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 			if message.err != nil {
 				if active != nil && ctx.Err() == nil {
 					active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
+					active.health(ctx, "unavailable")
 				}
 				codeClosePeer(client, message.err)
 				return

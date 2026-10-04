@@ -91,7 +91,9 @@
         enrollment = null;
       }
     });
-    return interval;
+    return enrollment
+      ? (interval ?? enrollment.device?.interval ?? null)
+      : null;
   }
 </script>
 
