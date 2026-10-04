@@ -315,7 +315,21 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 		}
 		targets = append(targets, runtime.PublishedTarget{ID: id, ProviderModelID: modelID, ProviderID: providerID, ProviderName: providerName, ProviderModel: providerModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int64(t.TimeoutMS), Position: i})
 	}
+	if err := reserveOrdinarySlug(ctx, q, in.Slug); err != nil {
+		return nil, err
+	}
 	return targets, nil
+}
+
+func reserveOrdinarySlug(ctx context.Context, q access.Queryer, slug string) error {
+	var conflict bool
+	if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_routes WHERE slug=$1)`, slug).Scan(&conflict); err != nil {
+		return err
+	}
+	if conflict {
+		return access.Invalid("slug", "This slug belongs to a code route.")
+	}
+	return nil
 }
 
 func (s *Server) drafts(r *http.Request, p access.Principal) (access.Reply, error) {

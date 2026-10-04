@@ -51,7 +51,8 @@ type fakeRuntime struct {
 	// lapsed holds the credential versions whose grants lapsed.
 	lapsed map[string]bool
 	// refused records the credential versions the upstream refused.
-	refused []string
+	refused            []string
+	refusedGenerations []int64
 }
 
 func (f *fakeRuntime) Release() *runtime.Release { f.mu.Lock(); defer f.mu.Unlock(); return f.release }
@@ -111,10 +112,11 @@ func (f *fakeRuntime) NetworkSecret(ctx context.Context, release *runtime.Releas
 
 func (f *fakeRuntime) GrantGeneration(string) int64 { return 0 }
 
-func (f *fakeRuntime) CredentialRefused(id string, _ int64) {
+func (f *fakeRuntime) CredentialRefused(id string, generation int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.refused = append(f.refused, id)
+	f.refusedGenerations = append(f.refusedGenerations, generation)
 }
 
 func (f *fakeRuntime) refusals() []string {

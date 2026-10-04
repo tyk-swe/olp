@@ -13,6 +13,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/codemode"
+
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
@@ -157,6 +159,8 @@ type Route struct {
 
 // Snapshot is the complete immutable serving configuration.
 type Snapshot struct {
+	CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
+	CodeConnections    map[string]Configuration  `json:"code_connections,omitempty"`
 	interactions       map[string]map[string]*interaction.Template
 	operations         map[string]map[string]*operationplan.Template
 	media              map[string]map[string]*mediacontract.Template
@@ -174,11 +178,13 @@ type Snapshot struct {
 // configuration yields the same digest.
 func (s *Snapshot) Digest() (string, error) {
 	encoded, err := json.Marshal(struct {
-		Providers          map[string]Provider `json:"providers"`
-		Routes             map[string]Route    `json:"routes"`
-		InstallationPolicy *Policy             `json:"installation_policy,omitempty"`
-		KeyPolicies        map[string]*Policy  `json:"key_policies,omitempty"`
-	}{s.Providers, s.Routes, s.InstallationPolicy, s.KeyPolicies})
+		CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
+		CodeConnections    map[string]Configuration  `json:"code_connections,omitempty"`
+		Providers          map[string]Provider       `json:"providers"`
+		Routes             map[string]Route          `json:"routes"`
+		InstallationPolicy *Policy                   `json:"installation_policy,omitempty"`
+		KeyPolicies        map[string]*Policy        `json:"key_policies,omitempty"`
+	}{s.CodeRoutes, s.CodeConnections, s.Providers, s.Routes, s.InstallationPolicy, s.KeyPolicies})
 	if err != nil {
 		return "", err
 	}
@@ -199,6 +205,9 @@ func (p *Provider) Supports(model, operation, surface, mode string) bool {
 // Validate rejects snapshots that could not serve safely: dangling references,
 // non-positive budgets, malformed identifiers.
 func (s *Snapshot) Validate() error {
+	if err := s.validateCodeMode(); err != nil {
+		return err
+	}
 	s.interactions = make(map[string]map[string]*interaction.Template)
 	s.operations = make(map[string]map[string]*operationplan.Template)
 	s.media = make(map[string]map[string]*mediacontract.Template)

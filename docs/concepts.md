@@ -7,7 +7,7 @@ privacy. See [compatibility](compatibility.md) for supported operations and
 
 ## Routes and slugs
 
-Generation requests name a published route slug in the `model` field or native
+Ordinary generation requests name a published route slug in the `model` field or native
 URL path. File uploads use `X-OLP-Route`; retained-resource operations resolve
 the route through their stored mapping. Callers never select an upstream
 provider/model directly. Operators can change that mapping without changing the
@@ -37,6 +37,10 @@ only routes without one. Scope and route allowlists further restrict access.
 provider models. Configured but unpublished models are not discoverable.
 
 ## Providers: drafts, revisions, certification
+
+This lifecycle describes ordinary inference. Code mode uses enrolled account
+identity and immutable code-route publication without synthetic inference
+probes; see [code mode](features/code-mode.md).
 
 Provider edits remain drafts until activation publishes an immutable revision:
 connection settings, enabled models, certified capabilities, and exact
@@ -155,7 +159,33 @@ Only `{rule_id, phase, action, outcome}` decisions persist, without matched
 text, offsets, patterns, or replacement strings. Unsupported surfaces refuse a
 policy rather than bypassing it.
 
+## Code accounts and conversation trees
+
+A code route selects its pool through `/code/{slug}` while the request keeps a
+native model name. Personal pools restrict keys to their owner's issuer;
+shared pools require explicit key assignments. The first generation atomically
+pins a whole conversation tree to one account. Children, resumes, compaction and
+reconnects retain that account across replicas and restarts. Revocation,
+retirement or an unavailable account refuses the conversation rather than
+switching it. Refresh may replace credentials for the same observed principal.
+
+Each generation, including messages on an existing WebSocket, requires current
+authority. Code mode never replays inference and never uses synthetic inference
+for lifecycle management. Exact client/version/operation/transport evidence is
+tracked separately from ordinary provider certification.
+
+Reported subscription usage is a token ledger. Optional hard budgets reserve a
+proven bound in every applicable daily/monthly UTC window; unknown bounds refuse
+only budgeted operations. Missing final usage remains durable uncertainty.
+Cached and reasoning token counts are subsets, not additional charges. Account
+allowance comes from provider observations and is not a local budget or monetary
+spending limit. See the [operator guide](features/code-mode.md) and current
+[qualification gaps](qualification/code-mode.md).
+
 ## Request lifecycle
+
+The sequence below describes ordinary inference; code-mode generations use the
+separate admission and forwarding boundary above.
 
 1. Authenticate and check scope, project, route access, and expiry. Pin runtime
    configuration and enforce admission limits before calling a provider.

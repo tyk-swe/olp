@@ -50,6 +50,16 @@ func TestCredentialRefusalUsesTheDispatchedGrantGeneration(t *testing.T) {
 	}
 }
 
+func TestCredentialRefusalWithoutAGrantRequestsNoRefresh(t *testing.T) {
+	m := credentialManager(t, time.Now())
+	// A static credential has generation zero. No pool is configured, so an
+	// unnecessary refresh request would panic in the background.
+	m.CredentialRefused(uuid.NewString(), 0)
+	if len(m.refreshRequested) != 0 {
+		t.Fatal("static credential requested grant refresh")
+	}
+}
+
 // Ending the cooldowns of refreshed grants runs apart from the poll that
 // found them refreshed, which a slow shared store must not hold up: one
 // notifier at a time tells GrantRefreshed of every refreshed grant, including

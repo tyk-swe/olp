@@ -10,11 +10,15 @@ export default defineConfig({
         '/api/',
         '/v1/',
         '/native/',
+        '/code/',
         '/anthropic/',
         '/gemini/',
         '/v1beta/',
         '/bedrock/'
-      ].map((prefix) => [prefix, { target, changeOrigin: false }])
+      ].map((prefix) => [
+        prefix,
+        { target, changeOrigin: false, ws: prefix === '/code/' }
+      ])
     )
   },
   build: {

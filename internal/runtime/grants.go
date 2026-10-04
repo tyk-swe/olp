@@ -178,22 +178,24 @@ func ReadGrantGenerations(ctx context.Context, q access.Queryer, credentials []s
 
 // CredentialRefused tells the manager that the upstream refused a credential
 // version's secret of the dispatched generation. It asks workers to refresh
-// its grant early, once per access token served; the request runs apart from
-// the caller. Stale generations and versions that may no longer serve, such
-// as one whose grant lapsed, are not refreshed.
+// its grant early; the request runs apart from the caller. Credentials outside
+// the release's grant poll, including code-only credentials, carry generations
+// read with their secrets from the database. RequestRefresh checks those
+// generations against the database too. Stale generations and versions that
+// may no longer serve, such as one whose grant lapsed, are not refreshed.
 func (m *Manager) CredentialRefused(credentialID string, generation int64) {
 	if m.Eligibility(credentialID) != Eligible {
 		return
 	}
 	m.mu.Lock()
 	grant, ok := m.grants[credentialID]
-	if !ok || generation != grant.generation {
+	if generation < 1 || ok && generation != grant.generation {
 		m.mu.Unlock()
 		return
 	}
-	requested := m.refreshRequested[credentialID] == grant.generation
+	requested := m.refreshRequested[credentialID] == generation
 	if !requested {
-		m.refreshRequested[credentialID] = grant.generation
+		m.refreshRequested[credentialID] = generation
 	}
 	m.mu.Unlock()
 	if requested {
@@ -202,11 +204,11 @@ func (m *Manager) CredentialRefused(credentialID string, generation int64) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), PollInterval)
 		defer cancel()
-		if err := RequestRefresh(ctx, m.pool, credentialID, grant.generation); err != nil {
+		if err := RequestRefresh(ctx, m.pool, credentialID, generation); err != nil {
 			m.log.Warn("grant refresh not requested", "credential_id", credentialID, "error", err)
 			// A later refusal asks again.
 			m.mu.Lock()
-			if m.refreshRequested[credentialID] == grant.generation {
+			if m.refreshRequested[credentialID] == generation {
 				delete(m.refreshRequested, credentialID)
 			}
 			m.mu.Unlock()
