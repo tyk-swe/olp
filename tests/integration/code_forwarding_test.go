@@ -269,14 +269,13 @@ func TestCodeForwardingWebSocketRechecksLivePool(t *testing.T) {
 	}
 }
 
-func TestCodeForwardingWebSocketTransportFailureAppliesAccountCooldown(t *testing.T) {
-	for _, origin := range []string{"upstream", "client"} {
+func TestCodeForwardingWebSocketUnavailableCloseAppliesAccountCooldown(t *testing.T) {
+	for _, origin := range []string{"unavailable", "disconnect", "client"} {
 		t.Run(origin, func(t *testing.T) {
 			f := newCodeFixture(t)
 			var calls atomic.Int64
 			started := make(chan struct{})
 			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls.Add(1)
 				conn, err := websocket.Accept(w, r, nil)
 				if err != nil {
 					t.Error(err)
@@ -287,9 +286,16 @@ func TestCodeForwardingWebSocketTransportFailureAppliesAccountCooldown(t *testin
 					t.Error(err)
 					return
 				}
+				if calls.Add(1) != 1 {
+					_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"resp_ws","usage":{"total_tokens":3,"input_tokens":1,"output_tokens":2}}}`))
+					return
+				}
 				close(started)
-				if origin == "client" {
+				switch origin {
+				case "client":
 					_, _, _ = conn.Read(r.Context())
+				case "unavailable":
+					_ = conn.Close(websocket.StatusTryAgainLater, "controlled unavailable")
 				}
 			}))
 			defer up.Close()
@@ -313,7 +319,7 @@ func TestCodeForwardingWebSocketTransportFailureAppliesAccountCooldown(t *testin
 			if origin == "client" {
 				_ = conn.CloseNow()
 			} else if _, _, err := conn.Read(ctx); err == nil {
-				t.Fatal("upstream disconnect was not relayed")
+				t.Fatal("upstream close was not relayed")
 			}
 			codeForwardAwait(t, f, "uncertain", 1)
 			var health string
@@ -321,14 +327,46 @@ func TestCodeForwardingWebSocketTransportFailureAppliesAccountCooldown(t *testin
 			if err := f.h.Pool.QueryRow(ctx, `SELECT health,unavailable_until FROM olp.code_accounts WHERE id=$1`, f.account).Scan(&health, &until); err != nil {
 				t.Fatal(err)
 			}
-			if origin == "client" {
-				if health != "unknown" || until != nil {
-					t.Fatalf("client cancellation cooled down the account: health=%s until=%v", health, until)
+			if origin == "unavailable" {
+				if health != "unavailable" || until == nil || time.Until(*until) < 45*time.Second || time.Until(*until) > time.Minute {
+					t.Fatalf("one-minute unavailable cooldown missing: health=%s until=%v", health, until)
+				}
+				var outcome, outcomeOrigin string
+				if err := f.h.Pool.QueryRow(ctx, `SELECT outcome,outcome_origin FROM olp.code_attempts`).Scan(&outcome, &outcomeOrigin); err != nil {
+					t.Fatal(err)
+				}
+				if outcome != "transport_error" || outcomeOrigin != "gateway" {
+					t.Fatalf("transport outcome changed: %s/%s", outcomeOrigin, outcome)
+				}
+				retry, response, err := websocket.Dial(ctx, server.URL+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: headers})
+				if retry != nil {
+					retry.CloseNow()
+				}
+				if err == nil || response == nil || response.StatusCode != http.StatusServiceUnavailable {
+					t.Fatalf("reconnect bypassed cooldown: response=%v err=%v", response, err)
+				}
+				// The rate lease releases just after the attempt records
+				// uncertain, so a new conversation can still meet 429 for a beat;
+				// poll through it until the account gate answers.
+				deadline := time.Now().Add(5 * time.Second)
+				status, body := codeForwardRequest(t, server, "new-conversation", "")
+				for status == http.StatusTooManyRequests && time.Now().Before(deadline) {
+					time.Sleep(10 * time.Millisecond)
+					status, body = codeForwardRequest(t, server, "new-conversation", "")
+				}
+				if status != http.StatusServiceUnavailable {
+					t.Fatalf("new conversation bypassed cooldown: %d %s", status, body)
+				}
+				if calls.Load() != 1 {
+					t.Fatal("cooled-down account was dispatched again")
 				}
 				return
 			}
-			if health != "unavailable" || until == nil || time.Until(*until) < 45*time.Second || time.Until(*until) > time.Minute {
-				t.Fatalf("one-minute transport cooldown missing: health=%s until=%v", health, until)
+			if health != "unknown" || until != nil {
+				t.Fatalf("%s cooled down the account: health=%s until=%v", origin, health, until)
+			}
+			if origin == "client" {
+				return
 			}
 			var outcome, outcomeOrigin string
 			if err := f.h.Pool.QueryRow(ctx, `SELECT outcome,outcome_origin FROM olp.code_attempts`).Scan(&outcome, &outcomeOrigin); err != nil {
@@ -337,18 +375,20 @@ func TestCodeForwardingWebSocketTransportFailureAppliesAccountCooldown(t *testin
 			if outcome != "transport_error" || outcomeOrigin != "gateway" {
 				t.Fatalf("transport outcome changed: %s/%s", outcomeOrigin, outcome)
 			}
-			retry, response, err := websocket.Dial(ctx, server.URL+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: headers})
-			if retry != nil {
-				retry.CloseNow()
+			retry, _, err := websocket.Dial(ctx, server.URL+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: headers})
+			if err != nil {
+				t.Fatalf("transport noise refused reconnect: %v", err)
 			}
-			if err == nil || response == nil || response.StatusCode != http.StatusServiceUnavailable {
-				t.Fatalf("reconnect bypassed cooldown: response=%v err=%v", response, err)
+			defer retry.CloseNow()
+			if err := retry.Write(ctx, websocket.MessageText, []byte(`{"type":"response.create","model":"native-model","input":"private"}`)); err != nil {
+				t.Fatal(err)
 			}
-			if status, body := codeForwardRequest(t, server, "new-conversation", ""); status != http.StatusServiceUnavailable {
-				t.Fatalf("new conversation bypassed cooldown: %d %s", status, body)
+			if _, _, err := retry.Read(ctx); err != nil {
+				t.Fatalf("recovery generation did not return: %v", err)
 			}
-			if calls.Load() != 1 {
-				t.Fatal("cooled-down account was dispatched again")
+			codeForwardAwait(t, f, "settled", 1)
+			if calls.Load() != 2 {
+				t.Fatalf("recovery did not dispatch: calls=%d", calls.Load())
 			}
 		})
 	}

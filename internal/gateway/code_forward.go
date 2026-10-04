@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codexwire"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -128,7 +130,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		attempt.transportFailed(ctx)
+		attempt.transportFailed(ctx, err)
 		refuse(codemode.Refuse(502, "code_upstream_unavailable"))
 		return
 	}
@@ -333,13 +335,26 @@ func (a *codeAttempt) outcome(ctx context.Context, outcome codemode.Outcome) {
 	}
 }
 
-// transportFailed records a gateway transport failure, which also cools the
-// account down. A canceled or expired request is not the account's failure.
-func (a *codeAttempt) transportFailed(ctx context.Context) {
-	if ctx.Err() == nil {
-		a.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
+// transportFailed records a gateway transport failure. Only an upstream close
+// that signals the peer's own failure or unavailability cools the account;
+// transport noise, like a canceled or expired request, is not the account's
+// failure and cannot prove unavailability.
+func (a *codeAttempt) transportFailed(ctx context.Context, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+	a.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
+	if codeUnavailableClose(err) {
 		a.health(ctx, "unavailable")
 	}
+}
+
+// codeUnavailableClose reports whether err is an upstream WebSocket close whose
+// code signals the peer's own failure (internal error, restart, try-again or
+// bad gateway) rather than transport noise.
+func codeUnavailableClose(err error) bool {
+	code := websocket.CloseStatus(err)
+	return code >= websocket.StatusInternalError && code <= websocket.StatusBadGateway
 }
 
 func (a *codeAttempt) allowance(ctx context.Context, allowance codemode.Allowance) {

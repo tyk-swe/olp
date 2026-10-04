@@ -217,7 +217,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				return
 			}
 			if err := codeWrite(ctx, upstream, message.kind, message.body); err != nil {
-				active.transportFailed(ctx)
+				active.transportFailed(ctx, err)
 				return
 			}
 			generationTimer = time.NewTimer(codeGenerationTimeout)
@@ -228,7 +228,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 			}
 			if message.err != nil {
 				if active != nil {
-					active.transportFailed(ctx)
+					active.transportFailed(ctx, message.err)
 				}
 				codeClosePeer(client, message.err)
 				return
