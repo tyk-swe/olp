@@ -3,7 +3,7 @@
 import json
 import os
 
-from openai import OpenAI
+from openai import OpenAI, __version__
 
 origin = os.environ['OLP_DURABLE_BASE']
 route = os.environ['OLP_DURABLE_ROUTE']
@@ -30,4 +30,4 @@ with OpenAI(base_url=f'{origin}/v1', api_key=key, max_retries=0, timeout=15.0) a
     assert b'"custom_id":"first"' in output.content
     assert b'"custom_id":"second"' in errors.content
 
-print('openai-python-3.8.0: strict durable batch lifecycle and partial files passed')
+print(f'openai-python-{__version__}: strict durable batch lifecycle and partial files passed')
