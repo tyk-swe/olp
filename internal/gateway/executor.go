@@ -73,6 +73,7 @@ type execution struct {
 	servingBinding       string
 	preparedProviders    map[string]preparedProvider
 	encoded              map[string]encodedRequest
+	effectiveOutputs     map[string]effectiveOutput
 	sourceSummary        *requestSummary
 	request              request
 	family               openai.Family

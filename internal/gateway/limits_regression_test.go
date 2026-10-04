@@ -66,8 +66,8 @@ func TestKeyEstimateCoversEveryCandidate(t *testing.T) {
 		parsed: parsed,
 		request: request{release: &runtime.Release{Snapshot: &runtime.Snapshot{
 			Providers: map[string]runtime.Provider{
-				"a": {ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage("10")}},
-				"b": {ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage("100")}},
+				"a": {ID: "a", ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage("10")}},
+				"b": {ID: "b", ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage("100")}},
 			},
 		}}},
 		attempts: []runtime.Attempt{{ProviderID: "a"}, {ProviderID: "b"}},

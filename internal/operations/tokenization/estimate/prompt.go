@@ -171,7 +171,7 @@ func (p *Prompt) Estimate(c Counter, defaults map[string]json.RawMessage) Estima
 		e.Input = max(e.Input, 1)
 		return e
 	}
-	e.Output, e.Candidates = outputBounds(p.request, defaults)
+	e.Output, e.Candidates = OutputBounds(p.request, defaults)
 	return e
 }
 

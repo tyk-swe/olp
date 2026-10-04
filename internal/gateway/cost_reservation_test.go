@@ -2,12 +2,14 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -29,7 +31,7 @@ func costPrice() *usage.RoutingPrice {
 // something to walk.
 func costExecution(t *testing.T, body string, family openai.Family, budget int, attempts ...runtime.Attempt) *execution {
 	t.Helper()
-	request, err := openai.Parse(family, []byte(body))
+	request, err := protocols.Parse(family, []byte(body), "team-chat")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,6 +143,84 @@ func TestCostReservationIsTheMostAnAttemptCouldCost(t *testing.T) {
 				t.Fatalf("a request that reserves nothing names %q", hold.requestID)
 			}
 		})
+	}
+}
+
+func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
+	const chat = `"model":"team-chat","messages":[{"role":"user","content":"hello"}]`
+	const gemini = `"contents":[{"role":"user","parts":[{"text":"hello"}]}]`
+	for _, tc := range []struct {
+		name       string
+		family     openai.Family
+		body       string
+		output     int64
+		candidates int64
+		reply      int64
+		cost       string
+	}{
+		{"translated defaults", openai.FamilyChat, `{` + chat + `}`, 32768, 4, 131072, "1.310722"},
+		{"translated sampling", openai.FamilyChat, `{` + chat + `,"temperature":0.2}`, 32768, 4, 131072, "1.310722"},
+		{"native sampling", openai.FamilyGemini, `{` + gemini + `,"generationConfig":{"temperature":0.2}}`, 32768, 4, 131072, "1.310722"},
+		{"translated output override", openai.FamilyChat, `{` + chat + `,"max_tokens":16}`, 16, 4, 64, "0.000642"},
+		{"translated candidate override", openai.FamilyChat, `{` + chat + `,"n":2}`, 32768, 2, 65536, "0.655362"},
+		{"translated both overrides", openai.FamilyChat, `{` + chat + `,"max_tokens":16,"n":2}`, 16, 2, 32, "0.000322"},
+		{"native output override", openai.FamilyGemini, `{` + gemini + `,"generationConfig":{"maxOutputTokens":16}}`, 16, 4, 64, "0.000642"},
+		{"native candidate override", openai.FamilyGemini, `{` + gemini + `,"generationConfig":{"candidateCount":2}}`, 32768, 2, 65536, "0.655362"},
+		{"native null output", openai.FamilyGemini, `{` + gemini + `,"generationConfig":{"maxOutputTokens":null}}`, 0, 4, 16384, "0.163842"},
+		{"native null config", openai.FamilyGemini, `{` + gemini + `,"generationConfig":null}`, 0, 0, 4096, "0.040962"},
+	} {
+		for _, preparation := range []string{"unplanned", "planned", "body not kept"} {
+			t.Run(tc.name+"/"+preparation, func(t *testing.T) {
+				x := costExecution(t, tc.body, tc.family, 1, runtime.Attempt{UpstreamModel: "gemini-2.5-flash", Price: costPrice()})
+				x.request.id, x.request.minted = uuid.NewString(), true
+				attempt := x.attempts[0]
+				provider := x.snapshot().Providers[attempt.ProviderID]
+				provider.Kind = "gemini"
+				provider.ParameterDefaults = protocols.Object{"generationConfig": json.RawMessage(`{"maxOutputTokens":32768,"candidateCount":4}`)}
+				x.snapshot().Providers[provider.ID] = provider
+				if preparation == "body not kept" {
+					for range keptEncodings {
+						other := provider
+						other.ID = uuid.NewString()
+						if err := x.encodes(&other, other.Connector(), attempt.UpstreamModel); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				if preparation != "unplanned" {
+					if err := x.encodes(&provider, provider.Connector(), attempt.UpstreamModel); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != tc.cost {
+					t.Fatalf("cost reservation = %q, want %q", hold.amount, tc.cost)
+				}
+				body, wire, err := x.encoding(x.takeEncoded(), &provider, provider.Connector(), attempt.UpstreamModel)
+				if err != nil || wire != openai.FamilyGemini {
+					t.Fatalf("encoding wire = %s, error = %v", wire, err)
+				}
+				var encoded struct {
+					Config struct {
+						Output     int64 `json:"maxOutputTokens"`
+						Candidates int64 `json:"candidateCount"`
+					} `json:"generationConfig"`
+				}
+				if err := json.Unmarshal(body, &encoded); err != nil {
+					t.Fatal(err)
+				}
+				if encoded.Config.Output != tc.output || encoded.Config.Candidates != tc.candidates {
+					t.Fatalf("encoded controls = %+v, want output %d and candidates %d", encoded.Config, tc.output, tc.candidates)
+				}
+				// The bounds must remain usable after dispatch takes the kept bodies.
+				admitted, err := x.attemptEstimate(&provider, attempt.UpstreamModel)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if admitted.reply != tc.reply || admitted.reserve != 2+tc.reply {
+					t.Fatalf("admitted = %+v, want reply %d and reservation %d", admitted, tc.reply, 2+tc.reply)
+				}
+			})
+		}
 	}
 }
 

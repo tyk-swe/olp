@@ -218,6 +218,15 @@ type encodedRequest struct {
 	wire   openai.Family
 }
 
+// effectiveOutput retains the merged destination controls after planning lets
+// go of its encoded bodies. Every target needs its own bounds, even when its
+// body is not kept, and neither pricing nor recording needs to encode it again.
+type effectiveOutput struct {
+	source     oif.Document
+	output     *int64
+	candidates int64
+}
+
 // keptEncodings is how many bodies planning keeps for the attempts, which a route
 // of more targets than that is planned for as it always was: the attempts that
 // come after the first four encode their own.
@@ -236,15 +245,21 @@ func encodedKey(provider *runtime.Provider, model string) string {
 // one, and a request that is served for an hour must not hold a copy of itself for
 // each target of its route.
 func (x *execution) encodes(provider *runtime.Provider, cfg connectors.Config, model string) error {
-	body, wire, err := providerinvoke.Encode(x.parsed, cfg, model, provider.ParameterDefaults)
+	invocation, err := providerinvoke.Prepare(x.parsed, cfg, model, provider.ParameterDefaults)
 	if err != nil {
 		return err
 	}
+	native := openai.NewSourceEnvelope(invocation.Wire, x.parsed.Route, x.parsed.Stream, invocation.Prepared.Document())
+	output, candidates := estimate.OutputBounds(native, nil)
+	if x.effectiveOutputs == nil {
+		x.effectiveOutputs = map[string]effectiveOutput{}
+	}
+	x.effectiveOutputs[encodedKey(provider, model)] = effectiveOutput{source: x.parsed.OIF().Document(), output: output, candidates: candidates}
 	if len(x.encoded) < keptEncodings {
 		if x.encoded == nil {
 			x.encoded = map[string]encodedRequest{}
 		}
-		x.encoded[encodedKey(provider, model)] = encodedRequest{source: x.parsed.OIF().Document(), body: body, wire: wire}
+		x.encoded[encodedKey(provider, model)] = encodedRequest{source: x.parsed.OIF().Document(), body: invocation.Prepared.Document().Bytes(), wire: invocation.Wire}
 	}
 	return nil
 }
@@ -284,7 +299,16 @@ func (x *execution) attemptEstimate(provider *runtime.Provider, model string) (a
 		return admittedEstimate{reserve: tokens, input: tokens, provenance: estimate.ProvenanceHeuristic, family: estimate.FamilyOf(model)}, nil
 	}
 	if x.automatic(provider) {
+		key := encodedKey(provider, model)
+		bounds, ok := x.effectiveOutputs[key]
+		if !ok || bounds.source != x.parsed.OIF().Document() {
+			if err := x.encodes(provider, provider.Connector(), model); err != nil {
+				return admittedEstimate{}, err
+			}
+			bounds = x.effectiveOutputs[key]
+		}
 		e := x.summarizeSource().prompt.Estimate(estimate.ForModel(model), provider.ParameterDefaults)
+		e.Output, e.Candidates = bounds.output, bounds.candidates
 		return admittedEstimate{reserve: e.Tokens(), input: e.Input, reply: e.Reply(), provenance: e.Provenance, family: e.Family}, nil
 	}
 	prepared, err := x.preparedProvider(provider, model)

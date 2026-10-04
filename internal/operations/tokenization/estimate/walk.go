@@ -575,10 +575,11 @@ func (w walker) document(block object) {
 	w.in.approx = true
 }
 
-// outputBounds reads how much reply a request allows: the bound it named for
-// one candidate, and how many candidates it asked for. A provider's defaults
-// stand in for what the caller left out, with the precedence the encoder uses.
-func outputBounds(request *openai.Request, defaults map[string]json.RawMessage) (output *int64, candidates int64) {
+// OutputBounds reads how much reply a request allows: the bound it named for
+// one candidate, and how many candidates it asked for. Defaults supply omitted
+// top-level fields. For an effective provider bound, pass the destination
+// request with its defaults already merged and nil defaults.
+func OutputBounds(request *openai.Request, defaults map[string]json.RawMessage) (output *int64, candidates int64) {
 	field := func(name string) json.RawMessage { return fieldOf(request, defaults, name) }
 	candidates = 1
 	outputFields := []string{"max_completion_tokens", "max_tokens"}
