@@ -10,14 +10,17 @@ harness lives in [`tests/bench/`](../tests/bench/README.md).
 
 **No reference results are published yet.** The harness is built and has been
 smoke-tested, but the full-rate runs on reference hardware have not been made,
-so no target below has been judged. The only measurements in this guide are from
-a reduced-rate smoke run on a shared 8 vCPU development virtual machine
-([Smoke run](#smoke-run)): OLP's scenarios S1 to S6 at 30% of the roadmap's
-rates or less, and one scenario of the LiteLLM comparison at 5%, to show that
-the script runs. They show that the harness works and what its output looks
-like. They are not reference numbers, they are not comparable with LiteLLM's
-published figures, they say nothing about whether a target is met, and they must
-not be quoted as the performance of either gateway. LiteLLM's published figures
+so no target that needs full scale or a comparison has been judged. The one
+target that is judged at any scale, zero lost request-metadata events, was met
+in every smoke run of S1 to S3, which says nothing about full rate. The only
+measurements in this guide are from a reduced-rate smoke run on a shared 8 vCPU
+development virtual machine ([Smoke run](#smoke-run)): OLP's scenarios S1 to S6
+at 30% of the roadmap's rates or less, and one scenario of the LiteLLM
+comparison at 5%, to show that the script runs. They show that the harness works
+and what its output looks like. They are not reference numbers, they are not
+comparable with LiteLLM's published figures, they say nothing about whether a
+target that needs full scale or a comparison is met, and they must not be quoted
+as the performance of either gateway. LiteLLM's published figures
 appear as LiteLLM publishes them, with links; the smoke run is the only place
 this repository measures LiteLLM, and it is not a reference run.
 
@@ -45,8 +48,12 @@ response, such as settling a budget, is not charged to the stream. The
 generator still reads the response to its end, and a stream that closes without
 its event, or with an error, is a failure timed to the end of the response. Time
 to first token is the arrival of the first data frame, also from the scheduled
-time. A warmup period at the same rate precedes the measured one and is
-excluded from every statistic.
+time. A warmup period at the same rate precedes the measured one. The load
+generator leaves its requests out of its latency, time-to-first-token and
+error-rate figures and its other counts, but not out of everything: the sustained
+rate counts the requests that finished during the measured period, whichever
+period sent them, and the gateway's CPU, allocation and request-metadata figures
+cover the whole run, warmup included.
 
 **High-dynamic-range histograms.** Latencies are recorded in HDR histograms
 (`github.com/HdrHistogram/hdrhistogram-go`, three significant figures, from one
@@ -134,12 +141,17 @@ behavior, how the gateway is sized for it and what to know when reading it.
 A target the first baseline misses becomes M1 scope (profiling and hot-path
 work), not a revised target.
 
-A target is `met`, `missed` or `not_checked`. It is checked only under the
-conditions it is stated for, and one that was not says why: a smoke run does not
-judge any of them. With `OLP_BENCH_ENFORCE=1` a missed or unchecked target, a
-run that is not a reference run, and baselines that disagree at p50 or p95 all
-fail the run; the baselines' p99 is noted, since a tail varies between sessions
-even on pinned CPUs.
+A target is `met`, `missed`, `needs_comparison` or `not_checked`. It is checked
+only under the conditions it is stated for, and one that was not says why. A run
+of OLP alone reports the targets that set it against LiteLLM as
+`needs_comparison`, which `scripts/bench-compare.sh` settles. A smoke run judges
+none of the targets that need full scale or a comparison. The metadata target is
+the one judged at any scale, and it is `not_checked` only when Valkey was not
+healthy throughout or the gateway's metrics did not refresh after the run. With
+`OLP_BENCH_ENFORCE=1` a missed or unchecked target, a run that is not a
+reference run, and baselines that disagree at p50 or p95 all fail the run; the
+baselines' p99 is noted, since a tail varies between sessions even on pinned
+CPUs.
 
 ## Reproduce
 
@@ -300,10 +312,11 @@ comparison's constants for them are marked as published.
   not the shared transport.
 - **Request metadata outlasts the load.** One metadata consumer persists an event
   at a time, in a PostgreSQL transaction of its own, so at the rates of S1 to S3
-  the events of a run arrive minutes after its load ends: a half-rate S1 run on a
-  development machine (8 vCPUs, otherwise idle) delivered 12,500 events in about
-  86 seconds from the start of the load, about 150 events a second, and a run at
-  full rate produces 70,000 to 210,000. The harness waits for as long as events
+  the events of a run arrive minutes after its load ends: in the
+  [smoke run](#smoke-run), S1 at 300 requests per second produced 21,000 events,
+  11,288 of them still to arrive when its load ended, and the harness waited
+  68.7 seconds for them, at 164 events a second. A run at full rate produces
+  70,000 to 210,000. The harness waits for as long as events
   keep landing and reports how long that took and at what pace (`drain` in the
   result), so a late event is counted as delivered and a lost one is not. Read
   `request_metadata_completeness` with the wait beside it: a run whose events
@@ -334,11 +347,12 @@ comparison's constants for them are marked as published.
   management API once the request metadata has arrived (`budget` in the result),
   and a key that accrued nothing makes the run invalid and leaves the success
   target unchecked.
-- **S4's failure policy is matched.** OLP's circuit opens after five consecutive
-  failures for thirty seconds. LiteLLM's router is set to cool a deployment down
-  after five failures for thirty seconds, with one retry, since OLP's route
-  allows two attempts; LiteLLM's own defaults are three failures and five
-  seconds. A gateway that keeps a failing target out of rotation measures the
+- **S4's failure policy is matched.** OLP's circuit opens for thirty seconds
+  after five counted failures within thirty seconds
+  ([gateway](gateway.md#request-path)). LiteLLM's router is set to cool a
+  deployment down after five failures for thirty seconds, with one retry, since
+  OLP's route allows two attempts; LiteLLM's own defaults are three failures and
+  five seconds. A gateway that keeps a failing target out of rotation measures the
   skip and not a failed attempt for each request, but the two do it differently,
   so each result records its attempts per request, OLP's from its attempt
   records and LiteLLM's from the mock's counters, and how they divided between
@@ -409,6 +423,7 @@ one stream, on a fixed fixture with no database or network:
 | Estimation | `internal/operations/tokenization/estimate` `BenchmarkEstimate`, `BenchmarkMeter`, `BenchmarkHeuristic`, `BenchmarkWalkAgainstLegacy` | Counts a short prompt for each family; counts the bounded part of a long prompt exactly and charges the rest at the measured ratio; walks a request of 30, 4,000 and 100,000 tokens beside the walker it replaced |
 | Cost | `internal/usage` `BenchmarkCostBound`, `BenchmarkPriceCost` | Bounds the cost a request could incur, which admission reserves for a key with a cost budget, and prices the usage of an attempt |
 | Plugin signing | `internal/plugins` `BenchmarkSign` | Runs a plugin's signing hook, interpreted and compiled |
+| Request parsing | `internal/oif` `BenchmarkPlainEnd` | Finds the end of the plain run of a 405,000-byte JSON string, as the parser reads a prompt, eight bytes at a time and, beside it, one byte at a time |
 
 The gate skips four benchmarks of the encoder itself, `BenchmarkLoad`,
 `BenchmarkCount`, `BenchmarkUnbrokenPieces` and `BenchmarkMeterWorstCase`,
@@ -434,10 +449,14 @@ a statistically significant regression above 10% in time or allocations per
 operation. Bytes per operation are reported and never gate. The `bench` job of
 the CI workflow runs the same script on every pull request and keeps its samples
 and report as the `bench-gate` artifact. A sample of every benchmark takes about
-two minutes at the default benchtime and one at 500 ms on an 8-vCPU machine
-(the packages' benchmarks add up to about 60 seconds at 500 ms, of which the
-estimate package is a half), so CI runs each for 500 ms (`BENCH_TIME`) to keep ten samples a
-side. That is about twenty minutes for the two sides before the trees are
+two minutes at the default benchtime and about 80 seconds at 500 ms on an
+8-vCPU machine. Measured with the gate's own invocation (`go test -p 1`, the
+seven packages in turn) on a shared VM at a load average of 1.5 to 2.3, a sample
+took 136 seconds of wall time at the default, 125 of them in benchmarks, and 76
+and 80 seconds at 500 ms in two runs, 65 and 68 of them in benchmarks. The
+estimate package is 26 to 29 seconds of the 500 ms sample, about two fifths of
+its benchmark time. So CI runs each for 500 ms (`BENCH_TIME`) to keep ten
+samples a side. That is about 26 minutes for the two sides before the trees are
 compiled, and a regression is measured again, alone, with twice the samples. The
 job's timeout is an hour, which leaves room for a slower runner or several
 benchmarks to confirm; if the job nears it, lower `BENCH_COUNT` (at least 6) or
@@ -507,7 +526,7 @@ Fill this in for each published run, with the result files kept beside it.
 | Hardware | Provider, instance type, region, vCPU, memory, CPU model, tenancy |
 | Host | Operating system, kernel, CPU frequency governor, `net.ipv4.tcp_mem`, descriptor limit |
 | CPU layout | Gateway, mock upstream and load generator CPU lists; the vCPU count the comparison was made on |
-| OLP | Version, git commit, binary SHA-256 (in each result's `environment`) |
+| OLP | Version and binary SHA-256, which each result's `environment` records (`olp_version`, `olp_binary_sha256`), and the git commit and whether the tree was clean, which the results do not record and the version does not tell, since it is the same for every commit: write them down by hand |
 | LiteLLM | Image digest, profile of each scenario, workers |
 | Services | PostgreSQL and Valkey versions, image digests and settings, and whether `BENCH_SERVICES=external` |
 | Toolchain | Go, Node.js, Docker and Compose versions |
@@ -526,9 +545,10 @@ machine.** They are not reference results: the machine is a shared development
 VM without pinned reference hardware, the rates are 1% to 30% of the roadmap's,
 and the services are the development compose file's. They are not comparable
 with LiteLLM's published figures, which come from a different test on a
-different deployment. **No roadmap target has been judged**: every target that
-needs full scale or a comparison is `not_checked` or `needs_comparison` in the
-results, and this guide does not judge them. The figures below are copied
+different deployment. **No target that needs full scale or a comparison has been
+judged**: each is `not_checked` or `needs_comparison` in the results, and this
+guide does not judge them. The metadata target is judged at any scale and was
+`met` in every S1 to S3 run below. The figures below are copied
 from the result files that `scripts/bench.sh` wrote under `.local/` (rounded to
 two decimals, and to one for requests per CPU second and memory), to show what
 the harness produces and that it runs end to end on this tree.
@@ -566,11 +586,17 @@ OLP_BENCH_SCALE=0.015 OLP_BENCH_WARMUP=3s OLP_BENCH_DURATION=15s BENCH_SCENARIOS
 # Two further points at higher rates, with OLP_BENCH_OUT=.local/bench-extra
 OLP_BENCH_SCALE=0.3 BENCH_SCENARIOS=S1 scripts/bench.sh    # 300 requests per second
 OLP_BENCH_SCALE=0.03 BENCH_SCENARIOS=S3 scripts/bench.sh   # 90 requests per second
+
+# S6 again at the default warmup and period, with OLP_BENCH_OUT=.local/bench-extra
+OLP_BENCH_SCALE=0.015 OLP_BENCH_KEEP_GATEWAY_LOG=1 BENCH_SCENARIOS=S6 scripts/bench.sh
 ```
 
-Partway through, `scripts/bench-compare.sh` rebuilt the mock upstream in place
-(see the table above), so the last three invocations ran against the static
-build and the earlier ones against the dynamic one.
+After the valid S6 run and before the comparison, `scripts/bench-compare.sh`
+rebuilt the mock upstream in place (see the table above). The last three
+invocations above, S1 at 300 requests per second, S3 at 90 and the second
+default-settings S6 run, therefore ran against the static build, and the earlier
+ones against the dynamic one. The first default-settings S6 run, which is not in
+the block, was made earlier, on the dynamic build.
 
 The scale was chosen at the start (0.1, and the smaller S3 and S6 below) and not
 searched for, so these are not the highest rates the gateway holds: in S1 to S5
@@ -597,9 +623,11 @@ one-minute load average the harness read at the start of the test.
 | S1 | 0.3 | 300 | 300 | yes | 1.38 / 2.03 / 4.59 | - | 2.32 |
 | S3 | 0.03 | 90 | 90.03 | yes | 8.32 / 20.58 / 27.65 | 6.62 / 17.46 / 24.30 | 2.28 |
 
-The offered rate was 99.998% or more of the target in every run, and none of
-these seven runs had a failed request, a dropped one or a negative added
-latency. The last two rows are the higher-rate points.
+In every load of these seven runs, the gateway's and the direct-to-mock
+baseline's alike, the offered rate was 99.997% or more of the target (the lowest
+is S2's baseline, at 99.9974%, and the lowest of the gateway loads is S4's, at
+99.9982%), and none of the runs had a failed request, a dropped one or a
+negative added latency. The last two rows are the higher-rate points.
 
 | Scenario | Target rps | Gateway CPUs used (of 2) | Requests per CPU second | CPU ms per request | RSS before / peak / after MiB | Errors % | Metadata delivered | Wait for metadata after the load | Allocations per request: objects / KiB |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -685,9 +713,10 @@ OLP_BENCH_SCALE=0.05 OLP_BENCH_DURATION=10s OLP_BENCH_WARMUP=3s BENCH_SCENARIOS=
 
 It ran to the end and wrote `compare.json` and `compare.md`. The table is copied
 only as proof of that: each load was 500 requests over 10 seconds, so its p99 is
-five samples, and the script judged no target (four were `not_checked` at scale
-0.05, and `request-metadata-lost` was `met`). The baselines of the two sessions
-differed by 0, -0.06 and -0.16 ms at p50, p95 and p99.
+five samples, and the script judged none of the targets that need full scale
+(four were `not_checked` at scale 0.05); the one target judged at any scale,
+`request-metadata-lost`, was `met`. The baselines of the two sessions differed by
+0, -0.06 and -0.16 ms at p50, p95 and p99.
 
 | Scenario | Gateway | p50 ms | p95 ms | p99 ms | rps/vCPU | req/cpu-s | cpu ms/req | peak MiB | errors % | Valid |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

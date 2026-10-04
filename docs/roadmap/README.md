@@ -126,9 +126,11 @@ recomputed whenever a milestone closes:
 | Accounting completeness | Share of admitted requests with complete usage, and share of attempts that are unpriced. |
 | Authorization coverage | Management operations exercised by the authorization and isolation sweeps (must stay 100%). |
 
-At the 0.1.0 baseline the matrix has 149 rows: 14 `Ahead`, 33 `Parity`, 30
-`Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 47 of 147 (32%). Rows
-that an in-progress milestone has since moved are not recounted until it closes.
+At the 0.1.0 baseline the matrix has 150 rows: 15 `Ahead`, 33 `Parity`, 30
+`Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 48 of 148 (32%). Rows
+that an in-progress milestone has since moved are not recounted until it closes;
+the matrix itself already shows the two rows M1 has moved from `Gap` to
+`Partial` (15 `Ahead`, 33 `Parity`, 32 `Partial`, 68 `Gap` and 2 `Excluded`).
 
 ## Definition of done
 

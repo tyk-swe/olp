@@ -18,8 +18,10 @@
 //
 // Latencies are recorded in HDR histograms. Time to first token is the
 // arrival of the first server-sent data frame, also measured from the
-// scheduled time. A warmup period runs at the same rate and is excluded from
-// every statistic.
+// scheduled time. A warmup period runs at the same rate. Its requests are left
+// out of the latency, time-to-first-token and count statistics, but the
+// throughput counts the requests that finish during the measured period,
+// whichever period sent them.
 package loadgen
 
 import (

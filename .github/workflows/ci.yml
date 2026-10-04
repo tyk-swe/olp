@@ -63,10 +63,11 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
           # One sample of every benchmark takes about two minutes at the default
-          # benchtime and one at half a second, on an 8-vCPU machine, and the job
-          # takes ten of them on each side, which is twenty minutes at half a
-          # second before the trees are compiled and a regression is measured
-          # again at twice that. A slower runner needs the hour.
+          # benchtime and about 80 seconds at half a second, on an 8-vCPU
+          # machine, and the job takes ten of them on each side, which is about
+          # 26 minutes at half a second before the trees are compiled and a
+          # regression is measured again at twice that. A slower runner needs
+          # the hour.
           BENCH_TIME: 500ms
           # A pull request that means to remove or rename a benchmark says so.
           BENCH_ALLOW_REMOVED: ${{ contains(github.event.pull_request.labels.*.name, 'allow-removed-benchmarks') && '1' || '0' }}

@@ -24,7 +24,11 @@ progress until the [open exit criteria](#exit-criteria) close.
   performance budget.
 - Admission token estimates are exact where a public tokenizer exists and
   calibrated elsewhere, so limits, budgets and context-window checks rest on
-  accurate numbers.
+  accurate numbers. As built, exact covers the first 32 KiB of a request's text,
+  the rest is calibrated from that part, and the families without a public
+  tokenizer keep the four-character heuristic until
+  [M2.4](m02-provider-catalog.md#m24-reference-catalog) supplies their factors
+  ([decision 3](#decisions-to-settle)).
 - The coding agents and frameworks LiteLLM documents run against OLP under a
   qualification suite.
 - Responses carry standard rate-limit headers and opt-in gateway metadata.
@@ -265,10 +269,10 @@ the specification text did not settle them.
 7. **What each scenario compares.** S6 is excluded from the comparison: no
    target compares it and its socket buffers at 10,000 streams need more TCP
    memory than most hosts have. S4 measures the circuit and not a per-request
-   failover: OLP's per-provider circuit opens after five counted failures, so the
-   steady state is about one attempt per request, and LiteLLM's router is set to
-   the same policy (five failures, thirty seconds, one retry) instead of its
-   defaults of three and five. S5 is not like for like: OLP calls the upstream's
+   failover: OLP's per-provider circuit opens after five counted failures within
+   30 seconds, so the steady state is about one attempt per request, and
+   LiteLLM's router is set to the same policy (five failures, thirty seconds, one
+   retry) instead of its defaults of three and five. S5 is not like for like: OLP calls the upstream's
    Chat Completions endpoint and LiteLLM its Responses endpoint, and each result
    records which ([how each scenario differs](../performance.md#how-each-scenario-differs)).
    S3 names an OpenAI model so that its prompts are tokenized; the other
@@ -421,10 +425,17 @@ for later.
   requests per second, about 30 vCPU at 3,000 requests per second by arithmetic,
   before the CPUs the mock and the load generator need; CPU per request fell as
   the rate rose in S1, so this is a signal for choosing the machine and not a
-  result. Cost reservation also adds about 150 µs of Valkey script time to a
-  priced request (about twice the old path), which at 3,000 requests per second
-  on one budgeted key is about 0.45 s of Valkey main-thread time each second;
-  the key's budget keys share a hash tag, so clustering does not spread it.
+  result. Cost reservation was measured, when it was written, to add about 150 µs
+  of Valkey script time to a priced request (about twice the old path); that
+  figure was not repeated. A priced request runs three scripts, reserve, settle
+  and accrue, which took 242 to 279 µs of script time together in eight runs of
+  `BenchmarkLimitsPricedRequest` against a disposable Valkey 9.1 with
+  `appendonly yes` on the shared smoke machine, so the increment is not the
+  whole cost. At 3,000 requests per second on one budgeted
+  key the three scripts are about 0.7 to 0.85 s of Valkey main-thread time each
+  second, before anything else Valkey does for those requests: S3's one key may
+  saturate the thread that runs them, which a full-rate run has not tried. The
+  key's budget keys share a hash tag, so clustering does not spread it.
 - S6 has not run above 150 streams. At the default warmup and period the
   streams open over 70 seconds but the gateway ends a stream thirty seconds after
   its writes block, so the window must be shortened; the 273 CPU ms spent for
@@ -497,9 +508,12 @@ for later.
       5% of its rate, and [reference results](../performance.md#reference-results)
       reads "None yet".
 - [ ] OLP meets every [target](#targets) above.
-      *Remaining:* no target has been judged. Every one is `not_checked` below full
-      scale or without a comparison, so OLP's performance against LiteLLM is
-      unmeasured at full rate on reference hardware.
+      *Remaining:* no target that needs full scale or a comparison has been
+      judged. Each is `not_checked` below full scale and `needs_comparison` in a
+      run of OLP alone, so OLP's performance against LiteLLM is unmeasured at full
+      rate on reference hardware. The one target judged at any scale, zero lost
+      request-metadata events, was `met` in every smoke run of S1 to S3, which
+      says nothing about full rate.
 - [x] CI fails a pull request that regresses a hot-path microbenchmark beyond
       the [budget](#performance-budget).
       *Evidence:* the `bench` job runs `scripts/bench-gate.sh`, and
@@ -507,31 +521,40 @@ for later.
       the script's tests pass, and a deliberate slowdown of `BenchmarkSign` made
       the gate exit 1 locally. The job has not yet run on a hosted runner (see
       [open items](#open-items)).
-- [x] Estimates for OpenAI encodings match OpenAI's reference tokenizer exactly
-      on the token fixtures, and usage reports show estimation error for every
-      family. (This criterion originally read "provider-reported prompt tokens
-      on the text fixtures of the protocol corpus"; the evidence says what was
-      done instead.)
-      *Evidence:* `TestOracleFixtures` compares every token id of `o200k_base`
-      and `cl100k_base` with `tiktoken` on `tests/fixtures/tokens`, and a framing
-      test compares the OpenAI Cookbook's message counts. The fixtures are
-      `tiktoken` output, not usage a provider reported. The original wording, a
-      comparison with provider-reported prompt tokens on the protocol corpus, is
-      not what was done, and no live provider comparison has been made. The usage
-      reports make that comparison at run time, by route and by `model_family`,
-      and integration tests cover them end to end. Go's newer Unicode tables can
-      split a newly assigned character differently from `tiktoken`.
-- [x] The client qualification suite passes in CI for every client above, and
+- [ ] Estimates for OpenAI encodings match the provider-reported prompt tokens
+      exactly on the text fixtures of the protocol corpus, and usage reports
+      show estimation error for every family.
+      *Done:* `TestOracleFixtures` compares every token id of `o200k_base` and
+      `cl100k_base` with `tiktoken` on `tests/fixtures/tokens`, and a framing test
+      compares the OpenAI Cookbook's message counts. The usage reports set the
+      estimate against the reported input tokens by route, `model_family` and
+      `estimate_provenance`, and integration tests cover them end to end, but they
+      seed three families (`openai-o200k`, `anthropic` and `unknown`) and not
+      every one. Go's newer Unicode tables can split a newly assigned character
+      differently from `tiktoken`.
+      *Remaining:* the comparison with provider-reported prompt tokens. None has
+      been made: the `tiktoken` fixtures are that tokenizer's output, not usage a
+      provider reported, the protocol corpus carries only synthetic usage
+      (`prompt_tokens: 3`), and no live provider comparison has been run. It needs
+      recorded provider responses with their prompts, or a live run. For a prompt
+      past the first 32 KiB of text the estimate is calibrated and not exact
+      ([decision 3](#decisions-to-settle)), so the criterion can hold only for
+      prompts within that bound.
+- [ ] The client qualification suite passes in CI for every client above, and
       `docs/clients.md` documents each configuration.
-      *Evidence:* all nine suites passed on the final tree and in the full
-      `make integration` run at `4a3508d5`, and `make integration`, which CI runs,
-      includes them. They have not yet run on a hosted runner (see
-      [open items](#open-items)). Two surfaces are qualified differently from the
-      table above: Codex's stored-response continuation is its history replay with
-      reasoning items, because it sends `previous_response_id` only over a
-      WebSocket transport the gateway does not serve, and the typed `429` of a
-      key's own limit waits for a Valkey-backed lane
-      ([open items](../clients.md#open-items)).
+      *Done:* `docs/clients.md` documents each configuration, and all nine suites
+      passed locally on the final tree and in the full `make integration` run at
+      `4a3508d5`; `make integration`, which CI runs, includes them. Two surfaces
+      are qualified differently from the table above: Codex's stored-response
+      continuation is its history replay with reasoning items, because it sends
+      `previous_response_id` only over a WebSocket transport the gateway does not
+      serve, and the typed `429` of a key's own limit waits for a Valkey-backed
+      lane ([open items](../clients.md#open-items)). The coding agents run only
+      through routes to their own vendor ([open items](#open-items)).
+      *Remaining:* a passing run on a hosted runner. The suites have not run
+      there, and a runner that cannot bind `127.0.0.2` or does not allow Codex's
+      sandbox fails the egress and Codex tests
+      ([requirements](../clients.md#running-the-suites)).
 - [x] Rate-limit headers appear on both surfaces and match the key's Valkey
       windows in integration tests; metadata headers appear only when the key
       opts in.

@@ -235,12 +235,14 @@ first; the rest of this section says what each field means.
   The wait for the events lasts as long as they keep arriving, and `drain`
   records how long it took, how many events were still to arrive when the load
   ended and the pace they arrived at. One pipeline consumer persists an event at a
-  time, so at the rates of S1 to S3 the events outlast the load by minutes: a
-  half-rate S1 run on a development machine (8 vCPUs, otherwise idle) delivered
-  its 12,500 events in about 86 seconds from the start of the load, 61 of them
-  after it ended, which is about 150 events a second, and the full runs, which
-  produce 70,000 to 210,000 events, take many times that. A run whose events arrive late has them all delivered and says how
-  late; one whose events stop arriving is `settled: false`. Valkey's health and
+  time, so at the rates of S1 to S3 the events outlast the load by minutes: in the
+  [smoke run](../../docs/performance.md#smoke-run), S1 at 300 requests per second
+  produced 21,000 events, 11,288 of them still to arrive when its load ended, and
+  the wait for them lasted 68.7 seconds at 164 events a second. A full-rate run
+  produces 70,000 to 210,000 events, which at that pace would take many minutes
+  to arrive; none has been run. A run whose events arrive late has them all
+  delivered and says how late; one whose events stop arriving is
+  `settled: false`. Valkey's health and
   the gateway's own dropped and abandoned counters come from
   a metrics snapshot that the gateway refreshes every fifteen seconds, so they
   are read from one taken after the run ended (`metrics_stale` says when none
@@ -279,7 +281,7 @@ measured figure and `meets_target` (null unless it could be judged).
 | --- | --- |
 | S1 on a 2-vCPU gateway: added latency at most 2 ms at p95 and 5 ms at p99 | Only for a gateway pinned to exactly two CPUs, with the mock upstream and the load generator pinned to CPUs of their own, at full scale, in valid runs |
 | S3: 3,000 RPS at a 100% success rate | At full scale, in valid runs |
-| S1 to S3 with healthy Valkey: zero lost request-metadata events | Always; unhealthy Valkey makes it `not_checked` |
+| S1 to S3 with healthy Valkey: zero lost request-metadata events | At any scale; unhealthy Valkey, or metrics that did not refresh after the run, make it `not_checked` |
 | S1 to S5: added latency below LiteLLM's, more RPS per vCPU; S3 with fewer vCPUs than LiteLLM's profile | `needs_comparison`: it takes the same scenario run against LiteLLM, which `scripts/bench-compare.sh` does |
 
 A smoke run reports them and fails nothing. With `OLP_BENCH_ENFORCE=1`, which
@@ -310,8 +312,9 @@ how to read the table and the record to fill in for a published run are in
 
 ### What to know when reading a run
 
-- **S4 measures the circuit.** A provider's circuit opens after five consecutive
-  failures and stays open for thirty seconds, then lets one probe through. With
+- **S4 measures the circuit.** A provider's circuit opens after five counted
+  failures within thirty seconds and stays open for thirty seconds, then lets one
+  probe through ([gateway](../../docs/gateway.md#request-path)). With
   the first target always failing, nearly every request is served by the second
   without trying the first: `attempts.per_request` is about 1.0, not 2.0, and
   `failover.requests_failed_over` is the five that opened the circuit plus a

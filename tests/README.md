@@ -115,11 +115,10 @@ The [benchmark guide](bench/README.md) has the scenarios, the settings and how
 to read a result, and `scripts/bench-compare.sh` runs the same scenarios against
 LiteLLM; see the [performance guide](../docs/performance.md).
 
-The hot paths have `testing.B` benchmarks beside the code
-(in `internal/runtime`, `internal/protocols`, `internal/gateway` and
-`internal/plugins`), which `make bench-gate` compares with the merge base and CI runs on every
-pull request. They are ordinary test files, so `make test-go` compiles them and
-runs none of them.
+The hot paths have `testing.B` benchmarks beside the code, in the packages the
+[microbenchmark table](#microbenchmarks) lists, which `make bench-gate` compares
+with the merge base and CI runs on every pull request. They are ordinary test
+files, so `make test-go` compiles them and runs none of them.
 
 ## Suite ownership
 
@@ -210,6 +209,7 @@ compiles them and never runs them.
 | `internal/protocols` | `BenchmarkTranslateRequest`, `BenchmarkTranslateResponse` and `BenchmarkTranslateStream` for OpenAI Chat, Anthropic Messages and Gemini: each dialect to itself, as a route to a provider of the caller's own dialect is served, and each of Anthropic and Gemini to and from OpenAI Chat |
 | `internal/operations/tokenization/estimate` | `BenchmarkEstimate` (a short prompt for every family) beside the encoder benchmarks, of which `BenchmarkMeter` and `BenchmarkHeuristic` measure the long prompts admission counts |
 | `internal/usage`, `internal/plugins` | `BenchmarkCostBound` and `BenchmarkPriceCost`; `BenchmarkSign` |
+| `internal/oif` | `BenchmarkPlainEnd` (the end of the plain run of a 405,000-byte JSON string, eight bytes at a time beside one at a time) |
 
 ```sh
 go test -run='^$' -bench=. -benchmem ./internal/...
@@ -227,7 +227,7 @@ is its first use, `BenchmarkCount` is a whole prompt of 50K and 100K tokens
 counted exactly where admission counts a bounded part, and `BenchmarkUnbrokenPieces`
 and `BenchmarkMeterWorstCase` are input chosen to be slow. The hot path is
 everything else, which skipping them selects, and which takes about two minutes
-at the default `-benchtime` and one at `-benchtime=500ms`:
+at the default `-benchtime` and about 80 seconds at `-benchtime=500ms`:
 
 ```sh
 go test -run='^$' -skip='^(BenchmarkLoad|BenchmarkCount|BenchmarkUnbrokenPieces|BenchmarkMeterWorstCase)$' -bench=. -benchmem ./internal/...

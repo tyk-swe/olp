@@ -176,10 +176,10 @@ type attemptStats struct {
 
 // failoverResult is S4's account of what the gateway did with the failing
 // first target. The gateway's circuit is kept per provider and opens after
-// five consecutive failures, so once it is open the first target is skipped
-// except for one probe every thirty seconds; the steady state then measures
-// the skip, and only the requests before it opened and the probes pay for a
-// failed attempt.
+// five counted failures within thirty seconds, so once it is open the first
+// target is skipped except for one probe every thirty seconds; the steady state
+// then measures the skip, and only the requests before it opened and the probes
+// pay for a failed attempt.
 type failoverResult struct {
 	FirstTarget, SecondTarget string `json:"-"`
 	FirstTargetAttempts       int64  `json:"first_target_attempts"`

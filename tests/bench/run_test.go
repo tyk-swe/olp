@@ -488,7 +488,7 @@ func summarizeFailover(p plan, rows []attemptRow, requests int64) *failoverResul
 	if requests > 0 {
 		f.FailedOverShare = float64(f.RequestsFailedOver) / float64(requests)
 	}
-	f.Note = "The gateway's circuit is kept per provider and opens after five consecutive failures, " +
+	f.Note = "The gateway's circuit is kept per provider and opens after five counted failures within thirty seconds, " +
 		"so once it is open the first target is skipped except for one probe every thirty seconds. " +
 		"The steady state therefore measures the skip, and only the requests before the circuit opened and the probes pay for a failed attempt; " +
 		"requests_failed_over says how many that was."
