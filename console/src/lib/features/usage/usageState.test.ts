@@ -336,5 +336,25 @@ describe('clearing the usage report', () => {
     expect(
       clearedUsageState({ dimension: 'model', granularity: 'hour' }).dimension
     ).toBe('model');
+    for (const dimension of ['model_family', 'estimate_provenance'] as const) {
+      expect(
+        clearedUsageState({ dimension, granularity: 'hour' }).dimension
+      ).toBe(dimension);
+    }
+  });
+
+  it('round trips the estimate breakdowns through the URL', () => {
+    for (const dimension of ['model_family', 'estimate_provenance'] as const) {
+      const state = readUsageState(
+        new URLSearchParams({ dimension }),
+        defaults
+      );
+      expect(state.dimension).toBe(dimension);
+      expect(usageProblem(state)).toBeNull();
+      expect(usageSearch(state)).toContain(`dimension=${dimension}`);
+      expect(
+        readUsageState(new URLSearchParams(usageSearch(state)), defaults)
+      ).toEqual(state);
+    }
   });
 });

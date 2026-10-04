@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"slices"
 )
 
@@ -90,7 +91,7 @@ func Definitions() []operations.Dialect {
 		}
 		d.InputText = func(request oif.Request) ([]operations.Text, error) { return countText(request, id) }
 		d.OutputText = outputText
-		d.Estimate = estimate
+		d.Estimate = documentEstimate
 		d.Probe = func(model string) []byte { return countProbe(id, model) }
 		d.Defaults = countDefaults(id)
 		d.RequestSchema = countRequestSchema(id)
@@ -107,7 +108,7 @@ func Definitions() []operations.Dialect {
 		}
 		out = append(out, d)
 	}
-	d := operations.Dialect{Identity: oif.Identity{ID: "tei-tokenize", Revision: operations.Revision}, Operation: identity, Surface: "native", Label: "TEI native tokenizer", Address: operations.Address{RelativePath: "tokenize"}, Documentation: "https://github.com/huggingface/text-embeddings-inference/blob/29ccc53ba56c9b4f4de8f19a14858d527fab680d/router/src/http/types.rs", Evidence: "tei-tokenize-native-offsets/1", Request: tokenizeRequest, Result: tokenizeResult, InputText: tokenizeText, OutputText: outputText, Estimate: estimate, Probe: func(string) []byte {
+	d := operations.Dialect{Identity: oif.Identity{ID: "tei-tokenize", Revision: operations.Revision}, Operation: identity, Surface: "native", Label: "TEI native tokenizer", Address: operations.Address{RelativePath: "tokenize"}, Documentation: "https://github.com/huggingface/text-embeddings-inference/blob/29ccc53ba56c9b4f4de8f19a14858d527fab680d/router/src/http/types.rs", Evidence: "tei-tokenize-native-offsets/1", Request: tokenizeRequest, Result: tokenizeResult, InputText: tokenizeText, OutputText: outputText, Estimate: documentEstimate, Probe: func(string) []byte {
 		return []byte(`{"inputs":"A neutral tokenizer probe.","add_special_tokens":true}`)
 	}}
 	d.Defaults = map[string]operations.Field{"add_special_tokens": field(map[string]any{"type": "boolean"}, func(v oif.Value) bool { return v.Kind() == oif.Boolean }), "prompt_name": field(map[string]any{"type": []string{"string", "null"}}, nullableString)}
@@ -115,7 +116,7 @@ func Definitions() []operations.Dialect {
 	d.ResultSchema = operations.Raw(map[string]any{"type": "array", "items": map[string]any{"type": "array", "items": map[string]any{"type": "object", "required": []string{"id", "text", "special", "start", "stop"}}}, "description": "One ordered token array per input, retaining native IDs, text, special flags and nullable offsets."})
 	return append(out, d)
 }
-func estimate(view oif.View) int64 {
+func documentEstimate(view oif.View) int64 {
 	var doc oif.Document
 	switch r := view.(type) {
 	case CountRequest:
@@ -123,7 +124,7 @@ func estimate(view oif.View) int64 {
 	case TokenizeRequest:
 		doc = r.source.Document()
 	}
-	n := int64((len(doc.Raw()) + 3) / 4)
+	n := estimate.HeuristicBytesTokens(len(doc.Raw()))
 	if n < 1 {
 		return 1
 	}

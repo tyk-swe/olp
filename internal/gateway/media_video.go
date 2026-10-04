@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -74,7 +75,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), overall)
 	defer cancel()
 	var e *Error
-	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.estimate, overall); e != nil {
+	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, overall); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}
@@ -425,7 +426,9 @@ func (s *Server) admitVideoRequest(parent context.Context, x *execution, authori
 	x.budgetGroupID = authority.BudgetGroupID
 	ctx, cancel := context.WithTimeout(parent, ttl)
 	var e *Error
-	x.lease, e = s.Admission.reserveKey(ctx, authority, 0, ttl)
+	// A job call carries no prompt, and reserves what any other call on a resource
+	// does: a key with a token limit refuses a reservation of nothing.
+	x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), resourceEstimate, ttl)
 	if e != nil {
 		cancel()
 		return nil, nil, e
@@ -437,13 +440,16 @@ func (s *Server) admitVideoRequest(parent context.Context, x *execution, authori
 }
 
 // videoJobCall dispatches one pinned-target upstream call for a media job and
-// returns the attempt fact for the caller to record.
+// returns the attempt fact for the caller to record. A list polls its jobs
+// concurrently, so the call states the attempt in its fact and leaves the
+// execution to the caller.
 func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.JobRecord, call *media.UpstreamCall, request *media.Request) (*media.Result, *attemptFailure, AttemptFact) {
 	fact := AttemptFact{
 		TargetID:           record.ID,
 		ProviderID:         record.ProviderID,
 		ProviderRevisionID: record.ProviderRevisionID,
 		UpstreamModel:      record.UpstreamModel,
+		ModelFamily:        string(estimate.FamilyOf(record.UpstreamModel)),
 		Mode:               "unary",
 		StartedAt:          s.now(),
 	}
@@ -460,6 +466,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 	// Connection and credential authority stay pinned; quota changes in the
 	// current release still apply to subsequent requests for the retained job.
 	provider, slot := target.Provider, target.Slot
+	fact.VendorID = provider.VendorID
 	var strictTemplate *mediacontract.Template
 	if record.StrictContract {
 		var err error
@@ -595,6 +602,31 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 	return result, nil, fact
 }
 
+// noteJobAttempt records the one call a job read, content download or delete
+// made, which is the attempt that serves the response.
+func (x *execution) noteJobAttempt(fact AttemptFact) {
+	x.facts = append(x.facts, fact)
+	x.attemptCount, x.attemptVendor = len(x.facts), fact.VendorID
+}
+
+// notePolls states the polls a list made, once they have all been recorded. They
+// are its attempts, and it names a provider only when one served them all: a list
+// that reached several has no single vendor to name, and one that polled nothing
+// made no attempt.
+func (x *execution) notePolls() {
+	x.attemptCount, x.attemptVendor = len(x.facts), ""
+	if len(x.facts) == 0 {
+		return
+	}
+	x.attemptVendor = x.facts[0].VendorID
+	for _, fact := range x.facts[1:] {
+		if fact.VendorID != x.attemptVendor {
+			x.attemptVendor = ""
+			return
+		}
+	}
+}
+
 // videoList pages the caller's jobs and refreshes non-terminal records.
 func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 	x, authority, done := s.mediaBegin(w, r)
@@ -654,6 +686,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 			x.facts = append(x.facts, *outcome.fact)
 		}
 	}
+	x.notePolls()
 	if refreshError != nil {
 		s.mediaFail(x, w, refreshError)
 		return
@@ -765,7 +798,7 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 	}
 	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, call, &media.Request{Op: media.OpVideoGet, Route: record.RouteSlug})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
-	x.facts = append(x.facts, fact)
+	x.noteJobAttempt(fact)
 	if transportFailure != nil {
 		s.mediaFailOutcome(x, w, transportFailure)
 		return
@@ -851,7 +884,7 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 	}
 	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, call, &media.Request{Op: media.OpVideoContent, Route: record.RouteSlug})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
-	x.facts = append(x.facts, fact)
+	x.noteJobAttempt(fact)
 	if transportFailure != nil {
 		s.mediaFailOutcome(x, w, transportFailure)
 		return
@@ -916,7 +949,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	result, transportFailure, fact := s.videoJobCall(r.Context(), x, &record, call, &media.Request{Op: media.OpVideoDelete, Route: record.RouteSlug})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
-	x.facts = append(x.facts, fact)
+	x.noteJobAttempt(fact)
 	deleted := false
 	if transportFailure != nil {
 		// The delete-missing-is-success rule: an upstream 404 confirms the

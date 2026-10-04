@@ -65,7 +65,11 @@ func (s *Server) selectUnary(x *execution, family openai.Family, dialect string,
 		model = header.Model
 	}
 	route, exists := x.request.release.Snapshot.Routes[model]
-	if !explicit && (!exists || !route.Fidelity.Strict()) {
+	// The native Gemini embedding methods exist only on strict routes, and the
+	// parser that takes any other request cannot read their bodies, so an
+	// unknown or transformed route is refused here with its own error.
+	nativeOnly := family == openai.FamilyGeminiEmbeddings || family == openai.FamilyGeminiEmbeddingsBatch
+	if !explicit && !nativeOnly && (!exists || !route.Fidelity.Strict()) {
 		return false, nil
 	}
 	if !exists {
@@ -138,10 +142,8 @@ func (s *Server) prepareUnary(x *execution) *Error {
 	if x.semanticQueryInvalid {
 		return invalidRequest("invalid_request", "The query is malformed or ambiguous.", nil)
 	}
-	if x.clientSurface() == "gemini" {
-		if e := x.dropQueryKey(); e != nil {
-			return e
-		}
+	if e := x.dropIngressQuery(); e != nil {
+		return e
 	}
 	var incompatible error
 	options := s.selectionOptions(x)
@@ -152,12 +154,12 @@ func (s *Server) prepareUnary(x *execution) *Error {
 		}
 		return err
 	}
-	options.Effective = func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+	options.Effective = func(p runtime.Provider, t runtime.Target) (runtime.Names, *runtime.TokenDemand) {
 		plan, err := x.unaryPlan(&p, t.ProviderModel)
 		if err != nil {
 			return nil, nil
 		}
-		return plan.Parameters(), nil
+		return runtime.Listed(plan.Parameters()), nil
 	}
 	plan, err := runtime.PlanRequest(x.request.release.Snapshot, x.route.Slug, x.operationName(), x.surfaceName(), "unary", x.affinity, options)
 	if err != nil {
@@ -197,11 +199,11 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *execution
 	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
 	ctx, cancel := context.WithTimeout(r.Context(), overall)
 	defer cancel()
-	x.lease, e = s.Admission.reserveKey(ctx, x.authority, keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), overall)
+	x.lease, e = s.Admission.reserveKeyCosted(ctx, x.authority, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), overall, s.costReservation(x, x.authority))
 	if e != nil {
 		return fail(e)
 	}
-	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.providerEstimate, dispatch: func(ctx context.Context, a runtime.Attempt, p *runtime.Provider, slot runtime.Slot, n int) (AttemptFact, operationplan.Result, *attemptFailure) {
+	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a runtime.Attempt, p *runtime.Provider, slot runtime.Slot, n int) (AttemptFact, operationplan.Result, *attemptFailure) {
 		return s.unaryAttempt(ctx, x, a, p, slot, n)
 	}})
 	if result.err != nil {
@@ -214,6 +216,7 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *execution
 		return fail(serverError(500, "internal_error", "The result could not be written."))
 	}
 	w.Header().Set("Content-Type", "application/json")
+	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
 	out := &outcome{committed: true}
 	fact := &x.facts[len(x.facts)-1]

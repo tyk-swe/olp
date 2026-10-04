@@ -358,7 +358,11 @@ func TestLimitsMinuteRolloverResetsOnceAndRetryMatchesServerWindow(t *testing.T)
 	}
 }
 
-func TestLimitsRetryStaysPositiveNearTheMinuteEnd(t *testing.T) {
+// TestLimitsMinuteEndGivesAPositiveRetryAndTheNextMinuteItsOwnAllowance lands in
+// the last part of a window, where the retry hint and the reset must stay positive
+// and agree with each other, and then crosses into the next window, where the
+// allowance starts over and resets at the end of that minute.
+func TestLimitsMinuteEndGivesAPositiveRetryAndTheNextMinuteItsOwnAllowance(t *testing.T) {
 	c := limClient(t)
 	namespace := limNamespace(t, c, "minute-end")
 	limiter := limLimiter(t, c, namespace)
@@ -377,17 +381,22 @@ func TestLimitsRetryStaysPositiveNearTheMinuteEnd(t *testing.T) {
 			}
 			time.Sleep(600 * time.Millisecond)
 		}
-		request := limRequest(limLookup())
+		request := limStatedRequest(limLookup())
 		request.RequestsPerMinute = limPointer(int64(1))
 		request.TokensPerMinute = nil
 		request.MaxConcurrency = nil
-		if _, err := limiter.Reserve(t.Context(), request); err != nil {
+		request.RequestedTokens = 0
+
+		before := limServerTimeMS(t, c)
+		_, err := limiter.Reserve(t.Context(), request)
+		after := limServerTimeMS(t, c)
+		if err != nil {
 			if attempt == 2 {
 				t.Fatalf("Reserve: %v", err)
 			}
 			continue
 		}
-		_, err := limiter.Reserve(t.Context(), request)
+		_, err = limiter.Reserve(t.Context(), request)
 		var exceeded *limits.ExceededError
 		if !errors.As(err, &exceeded) {
 			// The window rolled between the two calls; try again.
@@ -401,6 +410,36 @@ func TestLimitsRetryStaysPositiveNearTheMinuteEnd(t *testing.T) {
 		}
 		if exceeded.RetryAfter <= 0 || exceeded.RetryAfter > 1_500*time.Millisecond {
 			t.Fatalf("retry = %v, want a positive hint no longer than the remainder", exceeded.RetryAfter)
+		}
+		// The rejection says when the minute ends in the same words as its retry
+		// hint: both are what the script measured.
+		limWantAllowance(t, exceeded.Rate, 1, 0, 0, 0)
+		if exceeded.Rate.ResetAfter != exceeded.RetryAfter {
+			t.Fatalf("ResetAfter = %v, want the retry hint %v", exceeded.Rate.ResetAfter, exceeded.RetryAfter)
+		}
+		if before/60_000 != after/60_000 {
+			// The window rolled under the first call, so its state describes the
+			// next minute and the checks of the end of this one do not apply.
+			if attempt == 2 {
+				t.Fatalf("the window rolled under the reservation three times: %d to %d", before, after)
+			}
+			continue
+		}
+		end := time.UnixMilli((before/60_000 + 1) * 60_000)
+		if !exceeded.Rate.ResetAt.Equal(end) {
+			t.Fatalf("ResetAt = %v, want the end of the window %v", exceeded.Rate.ResetAt, end)
+		}
+
+		// Once Valkey's clock passes the end of the minute the same lookup has its
+		// whole allowance again, and it resets at the end of the next minute.
+		for limServerTimeMS(t, c) < end.UnixMilli() {
+			time.Sleep(20 * time.Millisecond)
+		}
+		_, next, bracket := limReserveStated(t, c, limiter, request)
+		limWantAllowance(t, next, 1, 0, 0, 0)
+		limWantReset(t, next, bracket[0], bracket[1])
+		if want := end.Add(time.Minute); !next.ResetAt.Equal(want) {
+			t.Fatalf("ResetAt after the roll = %v, want the end of the next minute %v", next.ResetAt, want)
 		}
 		return
 	}
@@ -616,14 +655,16 @@ func TestLimitsMalformedRateStateFailsClosedBeforeMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	value := do(t, c, "EVAL", string(script), "2", rateKey, concurrencyKey,
-		"9007199254740992", "0", "0", "0", "lease", "1000")
-	items, ok := value.([]any)
-	if !ok || len(items) != 6 {
-		t.Fatalf("EVAL = %#v", value)
-	}
-	if items[0] != int64(1) || items[1] != int64(-1) || items[2] != "invalid_arguments" {
-		t.Fatalf("EVAL = %#v, want an invalid_arguments failure", items)
+	for _, report := range []string{"0", "1"} {
+		value := do(t, c, "EVAL", string(script), "2", rateKey, concurrencyKey,
+			"9007199254740992", "0", "0", "0", "lease", "1000", report)
+		items, ok := value.([]any)
+		if !ok || len(items) != 6 {
+			t.Fatalf("EVAL = %#v", value)
+		}
+		if items[0] != int64(2) || items[1] != int64(-1) || items[2] != "invalid_arguments" {
+			t.Fatalf("EVAL = %#v, want an invalid_arguments failure", items)
+		}
 	}
 }
 

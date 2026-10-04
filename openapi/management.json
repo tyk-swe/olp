@@ -162,6 +162,10 @@
               "null"
             ]
           },
+          "response_metadata": {
+            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.",
+            "type": "boolean"
+          },
           "revoked_at": {
             "format": "date-time",
             "type": [
@@ -205,7 +209,8 @@
           "budget",
           "etag",
           "created_at",
-          "allowed_attribution_keys"
+          "allowed_attribution_keys",
+          "response_metadata"
         ],
         "type": "object"
       },
@@ -1947,6 +1952,10 @@
               "integer",
               "null"
             ]
+          },
+          "response_metadata": {
+            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.",
+            "type": "boolean"
           },
           "scopes": {
             "items": {
@@ -9114,7 +9123,15 @@
           "eligible": {
             "type": "boolean"
           },
+          "estimate_provenance": {
+            "description": "How estimated_input_tokens was counted: tokenizer for an exact count by the model's own tokenizer of a prompt that is all text and message framing, calibrated for a count that is partly a measured ratio or a guess (the tail of a prompt too long to count exactly, or one with images or media charged at a flat rate, or with tool schemas or tool calls, which a model reads in a rendering of its own), heuristic for the four-characters-per-token rule, which also prices the tail of a long prompt that follows too little exact text to measure a ratio from. Null when the caller supplied the estimate or no request was inspected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "estimated_input_tokens": {
+            "description": "The request's input tokens as this target's model counts them, which is the estimate routing weighs the target's context window by, or the estimate the caller supplied. Null when neither exists.",
             "format": "int64",
             "type": [
               "integer",
@@ -9130,6 +9147,13 @@
           },
           "metadata_observed_at": {
             "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model_family": {
+            "description": "The family of models that share the tokenizer estimated_input_tokens was counted with: openai-o200k, openai-cl100k, anthropic, gemini or other. Null when the caller supplied the estimate or no request was inspected.",
             "type": [
               "string",
               "null"
@@ -9740,6 +9764,7 @@
       "SimulateRouteRequest": {
         "properties": {
           "estimated_input_tokens": {
+            "description": "Input tokens to weigh every target's context window by. When supplied it stands for every target, the request is not counted, and the decisions report no provenance for it.",
             "format": "int64",
             "minimum": 0,
             "type": [
@@ -9748,6 +9773,7 @@
             ]
           },
           "max_output_tokens": {
+            "description": "Reply bound to weigh the context windows by. It replaces the bound the request names.",
             "format": "int64",
             "minimum": 0,
             "type": [
@@ -9792,7 +9818,7 @@
           "request": {
             "type": "object",
             "additionalProperties": true,
-            "description": "Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated."
+            "description": "Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them."
           },
           "semantic_headers": {
             "$ref": "#/components/schemas/SimulationSemanticHeaders"
@@ -9818,6 +9844,7 @@
             ]
           },
           "estimated_input_tokens": {
+            "description": "Input tokens to weigh every target's context window by. When supplied it stands for every target, the request is not counted, and the decisions report no provenance for it.",
             "format": "int64",
             "minimum": 0,
             "type": [
@@ -9826,6 +9853,7 @@
             ]
           },
           "max_output_tokens": {
+            "description": "Reply bound to weigh the context windows by. It replaces the bound the request names.",
             "format": "int64",
             "minimum": 0,
             "type": [
@@ -10186,6 +10214,10 @@
               "null"
             ]
           },
+          "response_metadata": {
+            "description": "Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.",
+            "type": "boolean"
+          },
           "scopes": {
             "items": {
               "type": "string"
@@ -10389,11 +10421,21 @@
           "dimension": {
             "type": "string"
           },
+          "estimated_attempt_count": {
+            "description": "Attempts counted in estimated_input_tokens and reported_input_tokens: those with both an estimate and observed input usage. It counts attempts, not requests.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "estimated_cost": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "estimated_input_tokens": {
+            "description": "Input tokens admission estimated, summed only over the attempts that had both an estimate and observed usage. It covers the same attempts as reported_input_tokens; an attempt that was never estimated, or whose provider reported no input usage, is in neither.",
+            "type": "string"
           },
           "incomplete_count": {
             "format": "int64",
@@ -10407,6 +10449,10 @@
             "type": "string"
           },
           "output_tokens": {
+            "type": "string"
+          },
+          "reported_input_tokens": {
+            "description": "Input tokens the providers reported for the attempts that estimated_input_tokens covers, so the two compare directly. input_tokens covers every attempt with observed usage, estimated or not. The estimation error is (estimated_input_tokens - reported_input_tokens) / reported_input_tokens, positive when admission over-estimated.",
             "type": "string"
           },
           "request_count": {
@@ -10431,7 +10477,10 @@
           "cache_write_1h_input_tokens",
           "media_units",
           "unpriced_count",
-          "incomplete_count"
+          "incomplete_count",
+          "estimated_input_tokens",
+          "reported_input_tokens",
+          "estimated_attempt_count"
         ],
         "type": "object"
       },
@@ -10544,11 +10593,21 @@
               "null"
             ]
           },
+          "estimated_attempt_count": {
+            "description": "Attempts counted in estimated_input_tokens and reported_input_tokens: those with both an estimate and observed input usage. It counts attempts, not requests.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "estimated_cost": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "estimated_input_tokens": {
+            "description": "Input tokens admission estimated, summed only over the attempts that had both an estimate and observed usage. It covers the same attempts as reported_input_tokens; an attempt that was never estimated, or whose provider reported no input usage, is in neither.",
+            "type": "string"
           },
           "incomplete_count": {
             "format": "int64",
@@ -10562,6 +10621,10 @@
             "type": "string"
           },
           "output_tokens": {
+            "type": "string"
+          },
+          "reported_input_tokens": {
+            "description": "Input tokens the providers reported for the attempts that estimated_input_tokens covers, so the two compare directly. input_tokens covers every attempt with observed usage, estimated or not. The estimation error is (estimated_input_tokens - reported_input_tokens) / reported_input_tokens, positive when admission over-estimated.",
             "type": "string"
           },
           "request_count": {
@@ -10586,7 +10649,10 @@
           "cache_write_1h_input_tokens",
           "media_units",
           "unpriced_count",
-          "incomplete_count"
+          "incomplete_count",
+          "estimated_input_tokens",
+          "reported_input_tokens",
+          "estimated_attempt_count"
         ],
         "type": "object"
       },
@@ -10637,11 +10703,21 @@
               "null"
             ]
           },
+          "estimated_attempt_count": {
+            "description": "Attempts counted in estimated_input_tokens and reported_input_tokens: those with both an estimate and observed input usage. It counts attempts, not requests.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "estimated_cost": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "estimated_input_tokens": {
+            "description": "Input tokens admission estimated, summed only over the attempts that had both an estimate and observed usage. It covers the same attempts as reported_input_tokens; an attempt that was never estimated, or whose provider reported no input usage, is in neither.",
+            "type": "string"
           },
           "incomplete_count": {
             "format": "int64",
@@ -10655,6 +10731,10 @@
             "type": "string"
           },
           "output_tokens": {
+            "type": "string"
+          },
+          "reported_input_tokens": {
+            "description": "Input tokens the providers reported for the attempts that estimated_input_tokens covers, so the two compare directly. input_tokens covers every attempt with observed usage, estimated or not. The estimation error is (estimated_input_tokens - reported_input_tokens) / reported_input_tokens, positive when admission over-estimated.",
             "type": "string"
           },
           "request_count": {
@@ -10694,6 +10774,9 @@
           "media_units",
           "unpriced_count",
           "incomplete_count",
+          "estimated_input_tokens",
+          "reported_input_tokens",
+          "estimated_attempt_count",
           "request_metadata_gap_events",
           "uncertain_request_metadata_gap_count",
           "coverage",
@@ -11351,7 +11434,7 @@
           "request": {
             "type": "object",
             "additionalProperties": true,
-            "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract."
+            "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them."
           },
           "route": {
             "type": "string",
@@ -24339,7 +24422,7 @@
             }
           },
           {
-            "description": "Break down by route, provider, model, api_key, operation, or attribution (requires attribution_key).",
+            "description": "Break down by route, provider, model, model_family, estimate_provenance, api_key, operation, or attribution (requires attribution_key). model_family and estimate_provenance group by the tokenizer family of each attempt's model and the method behind its input estimate. An attempt that was never estimated, such as a stored-response call, a realtime session or a job poll, still has its model's family and appears as none under estimate_provenance; unknown appears only for attempts recorded before families were. A request counts once, under its first attempt, while token totals follow each attempt.",
             "in": "query",
             "name": "dimension",
             "required": true,

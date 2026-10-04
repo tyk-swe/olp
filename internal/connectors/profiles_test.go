@@ -454,3 +454,53 @@ func assertProfileSignature(t *testing.T, request *http.Request, body []byte, se
 		t.Fatal("signature does not cover final native body, path and headers")
 	}
 }
+
+// A connector says which semantic headers its profile carries, and what it
+// publishes for one, without regard to how the name is spelled, and publishes
+// another value without changing the connector it was derived from.
+func TestSemanticHeadersAreReadAndRepublishedByName(t *testing.T) {
+	messages := profileConfig(t, "anthropic-messages")
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{"a profile that declares it", messages, true},
+		{"a profile that declares it, in another spelling", Config{ProfileID: "anthropic-messages", ProfileRevision: ProfileRevision}, true},
+		{"Claude on Vertex AI", Config{ProfileID: "vertex-anthropic", ProfileRevision: ProfileRevision}, true},
+		{"Claude on Bedrock InvokeModel", Config{ProfileID: "bedrock-anthropic-invoke", ProfileRevision: ProfileRevision}, false},
+		{"a profile that does not exist", Config{ProfileID: "no-such-profile", ProfileRevision: ProfileRevision}, false},
+		{"no profile", Config{Kind: "anthropic"}, false},
+	} {
+		if got := tc.cfg.DeclaresSemanticHeader("anthropic-beta"); got != tc.want {
+			t.Errorf("%s: DeclaresSemanticHeader = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+
+	messages.SemanticHeaders = map[string]string{"anthropic-beta": "operator-1"}
+	if value, ok := messages.SemanticHeader("Anthropic-Beta"); !ok || value != "operator-1" {
+		t.Errorf("SemanticHeader = %q, %v, want the published list whatever its spelling", value, ok)
+	}
+	if _, ok := messages.SemanticHeader("Openai-Beta"); ok {
+		t.Error("SemanticHeader found a header the connector does not publish")
+	}
+	original := len(messages.SemanticHeaders)
+	other := messages.WithSemanticHeader("ANTHROPIC-BETA", "operator-1,caller-2")
+	if value, _ := other.SemanticHeader("Anthropic-Beta"); value != "operator-1,caller-2" || len(other.SemanticHeaders) != original {
+		t.Errorf("WithSemanticHeader published %v, want one list in place of the old one", other.SemanticHeaders)
+	}
+	if value, _ := messages.SemanticHeader("Anthropic-Beta"); value != "operator-1" || len(messages.SemanticHeaders) != original {
+		t.Errorf("WithSemanticHeader changed the connector it was derived from: %v", messages.SemanticHeaders)
+	}
+	// What the connector publishes is what hosting sends, and it validates.
+	if err := other.ValidateProfile(); err != nil {
+		t.Fatal(err)
+	}
+	request, _ := http.NewRequest(http.MethodPost, "https://provider.example/v1/messages", nil)
+	if err := other.ApplySemantic(request); err != nil || request.Header.Get("Anthropic-Beta") != "operator-1,caller-2" || len(request.Header.Values("Anthropic-Beta")) != 1 {
+		t.Errorf("ApplySemantic sent %q, %v", request.Header.Values("Anthropic-Beta"), err)
+	}
+	if bare := (Config{}).WithSemanticHeader("Anthropic-Beta", "a"); len(bare.SemanticHeaders) != 1 {
+		t.Errorf("a connector that published nothing published %v", bare.SemanticHeaders)
+	}
+}

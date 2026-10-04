@@ -17,14 +17,32 @@ type TokenDemand struct {
 	MaxOutputTokens      *int64
 }
 
+// Names are the names of the controls a request uses. A policy that requires
+// parameters reads them and no other does, so they are a function: for a large
+// request, listing them means decoding all of it.
+type Names func() []string
+
+// Listed is the Names of a list that is already at hand.
+func Listed(names []string) Names { return func() []string { return names } }
+
+func (n Names) list() []string {
+	if n == nil {
+		return nil
+	}
+	return n()
+}
+
 type SelectionOptions struct {
 	KeyID       string
 	Preferences *Preferences
-	Parameters  []string
+	Parameters  Names
 	Inputs      *usage.RoutingInputs
 	TokenDemand *TokenDemand
-	Now         time.Time
-	CheckSlots  bool
+	// Demand, when set, supplies the token demand of each target in place of
+	// TokenDemand, for a request whose input counts differently on each model.
+	Demand     func(Provider, Target) *TokenDemand
+	Now        time.Time
+	CheckSlots bool
 	// CredentialEligibility excludes credential versions that may not serve;
 	// a provider's ineligible network credential names its reason.
 	CredentialEligibility func(credentialID string) Eligibility
@@ -33,7 +51,7 @@ type SelectionOptions struct {
 	// are ineligible.
 	UnconfinedPlugins bool
 	Accept            func(Provider, Target) error
-	Effective         func(Provider, Target) ([]string, *TokenDemand)
+	Effective         func(Provider, Target) (Names, *TokenDemand)
 }
 type Decision struct {
 	Incompatibility       *Incompatibility    `json:"incompatibility,omitempty"`
@@ -132,14 +150,22 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 			row.decision.VendorID = &provider.VendorID
 		}
 		var metadata ModelMetadata
-		_ = json.Unmarshal(provider.Models[target.ProviderModel], &metadata)
+		// A model with no metadata is not decoded: the error that would build is
+		// discarded, for every target of every request.
+		if raw := provider.Models[target.ProviderModel]; len(raw) > 0 {
+			_ = json.Unmarshal(raw, &metadata)
+		}
 		row.decision.MetadataObservedAt = metadata.ObservedAt
 		row.decision.ContextLength = metadata.ContextLength
 		row.decision.MaxOutputTokens = metadata.MaxOutputTokens
-		if options.TokenDemand != nil {
-			input := options.TokenDemand.EstimatedInputTokens
+		demand := options.TokenDemand
+		if options.Demand != nil {
+			demand = options.Demand(provider, target)
+		}
+		if demand != nil {
+			input := demand.EstimatedInputTokens
 			row.decision.EstimatedInputTokens = &input
-			row.decision.RequestedOutputTokens = options.TokenDemand.MaxOutputTokens
+			row.decision.RequestedOutputTokens = demand.MaxOutputTokens
 		}
 		row.decision.Price = options.Inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, operation, now)
 		row.decision.Performance = options.Inputs.Metrics(provider.ID, target.ProviderModel, operation, mode, now)
@@ -155,7 +181,7 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 			reason = "capability_not_certified"
 		}
 		if reason == "" {
-			reason = capacityReason(metadata, options.TokenDemand)
+			reason = capacityReason(metadata, demand)
 		}
 		if reason == "" {
 			reason = constraintReason(policy, provider, metadata, row.decision.Price, options.Parameters)
@@ -388,7 +414,7 @@ func saturatingSum(a, b int64) int64 {
 	return a + b
 }
 
-func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price *usage.RoutingPrice, parameters []string) string {
+func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price *usage.RoutingPrice, parameters Names) string {
 	for _, c := range policy.Constraints {
 		if c.Only != nil && !anySelector(c.Only, p) {
 			return "provider_not_allowed"
@@ -408,13 +434,15 @@ func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price
 		if required(c.RequireZeroDataRetention) && (m.ZeroDataRetention == nil || !*m.ZeroDataRetention || m.Source == nil || m.ObservedAt == nil) {
 			return "zero_data_retention_required"
 		}
-		if required(c.RequireParameters) && len(parameters) > 0 {
-			if m.SupportedParameters == nil {
-				return "parameters_unknown"
-			}
-			for _, name := range parameters {
-				if !slices.Contains(*m.SupportedParameters, name) {
-					return "parameter_not_supported"
+		if required(c.RequireParameters) {
+			if names := parameters.list(); len(names) > 0 {
+				if m.SupportedParameters == nil {
+					return "parameters_unknown"
+				}
+				for _, name := range names {
+					if !slices.Contains(*m.SupportedParameters, name) {
+						return "parameter_not_supported"
+					}
 				}
 			}
 		}

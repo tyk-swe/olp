@@ -8,12 +8,12 @@ import (
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
-// attemptAdapter supplies the operation-specific estimate and one upstream
-// attempt. Dispatch owns transport deadlines and delivery, including draining
-// streams before returning their final fact. The loop owns admission, attempt
-// numbering, settlement, health and retries.
+// attemptAdapter supplies the operation-specific estimate of an attempt and one
+// upstream attempt. Dispatch owns transport deadlines and delivery, including
+// draining streams before returning their final fact. The loop owns admission,
+// attempt numbering, settlement, health and retries.
 type attemptAdapter[Result any] struct {
-	estimate func(*runtime.Provider) int64
+	estimate func(runtime.Attempt, *runtime.Provider) int64
 	dispatch func(context.Context, runtime.Attempt, *runtime.Provider, runtime.Slot, int) (AttemptFact, Result, *attemptFailure)
 }
 
@@ -51,7 +51,7 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapt
 			if !x.servingAllowed(&provider, attempt.UpstreamModel, slot, false) {
 				continue
 			}
-			gate := s.gateSlot(ctx, &provider, &slot, adapter.estimate(&provider), deadline)
+			gate := s.gateSlot(ctx, &provider, &slot, adapter.estimate(attempt, &provider), deadline)
 			switch gate.verdict {
 			case gateExpired:
 				return attemptOutcome[Result]{err: (&attemptFailure{class: classTimeout}).toError()}

@@ -2,10 +2,10 @@ package protocols
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"io"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -16,36 +16,37 @@ type InlineMediaLimits struct {
 
 // ValidateInlineMedia inspects native media locations without translating the
 // request. Native extensions remain valid; prompt text and tool JSON do not count.
+// It reads the request's parsed document, so the prompt text it passes over is
+// not scanned again, and the media it decodes is read where it lies.
 func ValidateInlineMedia(request *openai.Request, limits InlineMediaLimits) error {
 	if request.Family.Operation() != openai.OperationGeneration && request.Family.Operation() != "token_count" {
 		return nil
 	}
-	doc := request.Document()
-	messages, partKey := arr(doc["messages"]), "content"
+	doc := request.OIF().Document().Root()
+	messages, partKey := member(doc, "messages").Elements(), "content"
 	if request.Family == openai.FamilyResponses || request.Family == openai.FamilyInputTokens {
-		messages = arr(doc["input"])
+		messages = member(doc, "input").Elements()
 	}
 	switch request.Family {
 	case openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyGeminiCount:
 		content := doc
-		if nested, err := object(doc["generateContentRequest"]); err == nil {
+		if nested := member(doc, "generateContentRequest"); nested.Kind() == oif.Object {
 			content = nested
 		}
-		messages, partKey = arr(content["contents"]), "parts"
+		messages, partKey = member(content, "contents").Elements(), "parts"
 	}
 	count, total := 0, int64(0)
-	var visit func(parts []json.RawMessage, depth int) error
-	visit = func(parts []json.RawMessage, depth int) error {
-		for _, part := range parts {
-			p, _ := object(part)
+	var visit func(parts []oif.Value, depth int) error
+	visit = func(parts []oif.Value, depth int) error {
+		for _, p := range parts {
 			// Tool results nest their own media: Anthropic tool_result content
 			// and Gemini functionResponse parts.
 			if depth < 2 {
-				var nested []json.RawMessage
-				if str(p["type"]) == "tool_result" {
-					nested = arr(p["content"])
-				} else if response, err := object(p["functionResponse"]); err == nil {
-					nested = arr(response["parts"])
+				var nested []oif.Value
+				if chars(member(p, "type")) == "tool_result" {
+					nested = member(p, "content").Elements()
+				} else if response := member(p, "functionResponse"); response.Kind() == oif.Object {
+					nested = member(response, "parts").Elements()
 				}
 				if err := visit(nested, depth+1); err != nil {
 					return err
@@ -81,34 +82,46 @@ func ValidateInlineMedia(request *openai.Request, limits InlineMediaLimits) erro
 		return nil
 	}
 	for _, message := range messages {
-		m, _ := object(message)
-		if err := visit(arr(m[partKey]), 0); err != nil {
+		if err := visit(member(message, partKey).Elements(), 0); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func inlineMediaData(p Object) (string, bool) {
-	nested := func(raw json.RawMessage, key string) string { v, _ := object(raw); return str(v[key]) }
-	switch str(p["type"]) {
+// member is a member of an object, and no value for one it does not have or for
+// a value that is not an object.
+func member(v oif.Value, name string) oif.Value {
+	m, _ := v.Lookup(name)
+	return m
+}
+
+// chars is the text of a string, and nothing for any other value.
+func chars(v oif.Value) string {
+	text, _ := v.Chars()
+	return text
+}
+
+func inlineMediaData(p oif.Value) (string, bool) {
+	nested := func(v oif.Value, key string) string { return chars(member(v, key)) }
+	switch chars(member(p, "type")) {
 	case "image_url":
-		return nested(p["image_url"], "url"), true
+		return nested(member(p, "image_url"), "url"), true
 	case "input_image":
-		return str(p["image_url"]), true
+		return chars(member(p, "image_url")), true
 	case "input_audio":
-		return nested(p["input_audio"], "data"), false
+		return nested(member(p, "input_audio"), "data"), false
 	case "input_file":
-		return str(p["file_data"]), true
+		return chars(member(p, "file_data")), true
 	case "file":
-		return nested(p["file"], "file_data"), true
+		return nested(member(p, "file"), "file_data"), true
 	case "image", "document":
-		if nested(p["source"], "type") == "base64" {
-			return nested(p["source"], "data"), false
+		if source := member(p, "source"); nested(source, "type") == "base64" {
+			return nested(source, "data"), false
 		}
 	}
 	for _, key := range []string{"inlineData", "inline_data"} {
-		if data := nested(p[key], "data"); data != "" {
+		if data := nested(member(p, key), "data"); data != "" {
 			return data, false
 		}
 	}

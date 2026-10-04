@@ -89,6 +89,11 @@ func encodeBedrock(c *Generation, model, operation string) (Object, error) {
 			parts = append(parts, Object{"image": raw(map[string]any{"format": format, "source": map[string]string{"bytes": data}})})
 		}
 		if m.Role == "system" || m.Role == "developer" {
+			// Converse has one system field, ahead of the conversation. A system
+			// message between turns would silently move to the front.
+			if len(turns) > 0 {
+				return nil, unsupported("late system message")
+			}
 			if m.ToolID != "" || len(m.Calls) > 0 {
 				return nil, unsupported("system tool metadata")
 			}

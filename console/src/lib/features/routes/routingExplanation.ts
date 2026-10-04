@@ -1,4 +1,5 @@
 import type { components } from '$lib/api/schema';
+import { formatInteger } from '$lib/format';
 
 type Schemas = components['schemas'];
 type RoutingDecision = Schemas['RoutingDecision'];
@@ -24,9 +25,35 @@ export type ExplanationRow = {
   price: RoutingDecision['price'];
   performance: RoutingDecision['performance'];
   metadataObservedAt: string | null;
+  /** The input tokens the request was estimated at for this target, and how
+   * they were counted, as one line; null when nothing was estimated. */
+  estimate: string | null;
   interaction: RoutingDecision['interaction'];
   incompatibility: RoutingDecision['incompatibility'];
 };
+
+const provenanceLabels: Record<string, string> = {
+  tokenizer: 'exact count',
+  calibrated: 'calibrated count',
+  heuristic: 'four characters per token'
+};
+
+/**
+ * What a decision says about its estimated input. The provenance and family are
+ * absent when the caller supplied the figure, so the line claims nothing about
+ * how it was made then.
+ */
+export function describeEstimate(decision: RoutingDecision): string | null {
+  const tokens = decision.estimated_input_tokens;
+  if (tokens === null || tokens === undefined) return null;
+  const how = decision.estimate_provenance
+    ? (provenanceLabels[decision.estimate_provenance] ??
+      decision.estimate_provenance)
+    : null;
+  return [`${formatInteger(tokens)} input tokens`, how, decision.model_family]
+    .filter(Boolean)
+    .join(' · ');
+}
 
 function decisionRow(
   decision: RoutingDecision,
@@ -47,6 +74,7 @@ function decisionRow(
     price: decision.price,
     performance: decision.performance,
     metadataObservedAt: decision.metadata_observed_at ?? null,
+    estimate: describeEstimate(decision),
     interaction: decision.interaction,
     incompatibility: decision.incompatibility
   };
@@ -102,6 +130,7 @@ export function simulationRows(targets: SimulationTarget[]): ExplanationRow[] {
       price: null,
       performance: null,
       metadataObservedAt: null,
+      estimate: null,
       interaction: undefined,
       incompatibility: undefined
     };

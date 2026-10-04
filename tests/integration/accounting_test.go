@@ -631,3 +631,116 @@ func TestAccountingRejectsCachedTokensWithoutTheirTotal(t *testing.T) {
 		t.Fatalf("persist err = %v, want ErrInvalidEvent", err)
 	}
 }
+
+func TestAccountingRecordsTheInputEstimateOfEachAttempt(t *testing.T) {
+	t.Parallel()
+	fixture := acctSeed(t, acctPool(t))
+	observed := time.Now().UTC().Add(-time.Minute)
+	acctPricing(t, fixture, 1, observed.Add(-time.Hour),
+		acctPrice{Kind: "openai", VendorID: acctPtr("openai"), Model: "gpt-4o",
+			Operation: "generation", Input: acctPtr("3"), Output: acctPtr("15")})
+
+	// The first attempt failed before the provider reported anything, and was
+	// estimated for another family than the one that served.
+	failed := acctAttempt(t, fixture.Provider, 1, "claude-test", 529, acctSettled())
+	failed.EstimatedInputTokens, failed.EstimateProvenance, failed.ModelFamily =
+		acctPtr(int64(31)), usage.EstimateHeuristic, "anthropic"
+	served := acctAttempt(t, fixture.Provider, 2, "gpt-4o", 200, acctObserved(1000, 500, nil, nil))
+	served.EstimatedInputTokens, served.EstimateProvenance, served.ModelFamily =
+		acctPtr(int64(1012)), usage.EstimateTokenizer, "openai-o200k"
+	event := acctEvent(t, fixture, acctEventOptions{ObservedAt: observed,
+		Attempts: []usage.Attempt{failed, served}})
+	if result := acctPersist(t, fixture, event); result.Outcome != usage.PersistOutcomePersisted {
+		t.Fatalf("outcome = %v, want persisted", result.Outcome)
+	}
+	// Re-delivery is a duplicate and must not disturb what was recorded.
+	if result := acctPersist(t, fixture, event); result.Outcome != usage.PersistOutcomeDuplicate {
+		t.Fatalf("redelivery outcome = %v, want duplicate", result.Outcome)
+	}
+	for ordinal, want := range map[int]struct {
+		estimate   *int64
+		provenance string
+		family     string
+	}{
+		1: {acctPtr(int64(31)), usage.EstimateHeuristic, "anthropic"},
+		2: {acctPtr(int64(1012)), usage.EstimateTokenizer, "openai-o200k"},
+	} {
+		var estimate *int64
+		var provenance, family string
+		if err := fixture.Pool.QueryRow(t.Context(), `SELECT estimated_input_tokens, estimate_provenance,
+		        model_family FROM olp.attempt_usage_facts
+		    WHERE request_id = $1::uuid AND attempt_ordinal = $2`, event.RequestID, ordinal).
+			Scan(&estimate, &provenance, &family); err != nil {
+			t.Fatalf("load attempt %d: %v", ordinal, err)
+		}
+		if estimate == nil || *estimate != *want.estimate || provenance != want.provenance || family != want.family {
+			t.Errorf("attempt %d recorded %v %q %q, want %d %q %q", ordinal, estimate, provenance,
+				family, *want.estimate, want.provenance, want.family)
+		}
+	}
+
+	// An attempt that read no prompt has no estimate and keeps the family of its
+	// model: the fact table takes both, and stores the family without inventing
+	// the estimate.
+	polled := acctAttempt(t, fixture.Provider, 1, "gpt-4o", 200, acctObserved(10, 10, nil, nil))
+	polled.ModelFamily = "openai-o200k"
+	pollEvent := acctEvent(t, fixture, acctEventOptions{ObservedAt: observed, Attempts: []usage.Attempt{polled}})
+	if result := acctPersist(t, fixture, pollEvent); result.Outcome != usage.PersistOutcomePersisted {
+		t.Fatalf("outcome for a family without an estimate = %v, want persisted", result.Outcome)
+	}
+	var pollEstimate *int64
+	var pollProvenance, pollFamily string
+	if err := fixture.Pool.QueryRow(t.Context(), `SELECT estimated_input_tokens, estimate_provenance,
+	        model_family FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`, pollEvent.RequestID).
+		Scan(&pollEstimate, &pollProvenance, &pollFamily); err != nil {
+		t.Fatalf("load attempt without an estimate: %v", err)
+	}
+	if pollEstimate != nil || pollProvenance != "" || pollFamily != "openai-o200k" {
+		t.Fatalf("an attempt without an estimate recorded %v %q %q", pollEstimate, pollProvenance, pollFamily)
+	}
+
+	// An event from before estimates were recorded stores no estimate at all.
+	legacy := acctEvent(t, fixture, acctEventOptions{ObservedAt: observed,
+		Attempts: []usage.Attempt{
+			acctAttempt(t, fixture.Provider, 1, "gpt-4o", 200, acctObserved(10, 10, nil, nil)),
+		}})
+	acctPersist(t, fixture, legacy)
+	var estimate *int64
+	var provenance, family string
+	if err := fixture.Pool.QueryRow(t.Context(), `SELECT estimated_input_tokens, estimate_provenance,
+	        model_family FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`, legacy.RequestID).
+		Scan(&estimate, &provenance, &family); err != nil {
+		t.Fatalf("load legacy attempt: %v", err)
+	}
+	if estimate != nil || provenance != "" || family != "" {
+		t.Fatalf("an unestimated attempt recorded %v %q %q", estimate, provenance, family)
+	}
+}
+
+// The database refuses what the event contract refuses, so the two cannot drift
+// apart unnoticed: an estimate its constraints would abort on is one Validate
+// has already turned away.
+func TestAccountingFactsRefuseAMalformedEstimate(t *testing.T) {
+	t.Parallel()
+	fixture := acctSeed(t, acctPool(t))
+	for name, columns := range map[string]string{
+		"a negative estimate":              "-1, 'tokenizer', ''",
+		"an estimate without provenance":   "5, '', ''",
+		"a provenance without an estimate": "NULL, 'tokenizer', ''",
+		"an unknown provenance":            "5, 'guess', ''",
+		"a malformed family":               "NULL, '', 'Not A Family'",
+	} {
+		t.Run(name, func(t *testing.T) {
+			event := acctEvent(t, fixture, acctEventOptions{Attempts: []usage.Attempt{
+				acctAttempt(t, fixture.Provider, 1, "gpt-4o", 200, acctObserved(10, 10, nil, nil)),
+			}})
+			acctPersist(t, fixture, event)
+			_, err := fixture.Pool.Exec(t.Context(), `UPDATE olp.attempt_usage_facts
+			    SET (estimated_input_tokens, estimate_provenance, model_family) = (`+columns+`)
+			    WHERE request_id = $1::uuid`, event.RequestID)
+			if err == nil {
+				t.Fatalf("the fact table accepted %s", name)
+			}
+		})
+	}
+}

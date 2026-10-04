@@ -1,0 +1,34 @@
+goos: linux
+goarch: amd64
+pkg: github.com/tyk-swe/olp/internal/estimate
+cpu: Test CPU
+        │    head     │
+        │   sec/op    │
+Count-8   396.4n ± 3%
+
+        │    head    │
+        │    B/op    │
+Count-8   0.000 ± 0%
+
+        │    head    │
+        │ allocs/op  │
+Count-8   0.000 ± 0%
+
+pkg: github.com/tyk-swe/olp/internal/gateway
+            │    head     │
+            │   sec/op    │
+Admission-8   1.205µ ± 2%
+Plan-8        800.1n ± 4%
+geomean       981.8n
+
+            │    head    │
+            │    B/op    │
+Admission-8   512.0 ± 0%
+Plan-8        256.0 ± 0%
+geomean       362.0
+
+            │    head    │
+            │ allocs/op  │
+Admission-8   6.000 ± 0%
+Plan-8        3.000 ± 0%
+geomean       4.243

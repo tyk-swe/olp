@@ -2,9 +2,12 @@ package usage
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func usageFilterRange(t *testing.T, start, end string) Filters {
@@ -116,6 +119,8 @@ func TestUsageRowsSpanLiveFactsAndRetainedBuckets(t *testing.T) {
 		"target_unpriced_count", "target_incomplete_count", "observed_at >= $", "observed_at < $",
 		"bucket >= $", "bucket + interval '1 hour' <= $", "route_slug = $", "provider_id = $",
 		"upstream_model = $", "api_key_id = $", "operation = $", "UNION ALL",
+		"model_family", "estimate_provenance", "estimate_reported_input_tokens",
+		"estimate_attempt_count",
 	} {
 		if !strings.Contains(sql, fragment) {
 			t.Fatalf("usage rows CTE is missing %q:\n%s", fragment, sql)
@@ -131,6 +136,86 @@ func TestUsageRowsSpanLiveFactsAndRetainedBuckets(t *testing.T) {
 	// The retained half starts at the first whole bucket inside the range.
 	if at, ok := query.args[7].(time.Time); !ok || !at.Equal(ceilHour(filters.Start)) {
 		t.Fatalf("retained lower bound = %v, want %v", query.args[7], ceilHour(filters.Start))
+	}
+}
+
+// The estimation error is knowable only for attempts that had both an
+// estimate and observed input usage; the live half must pair them the same way
+// the rollup does, or a retained hour and a live hour would disagree.
+func TestUsageRowsPairEstimatesWithObservedUsageInBothHalves(t *testing.T) {
+	filters := usageFilterRange(t, "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")
+	var query filterQuery
+	filters.usageRows(&query, scopeFor(filters))
+	sql := query.sql()
+	live, retained, found := strings.Cut(sql, "UNION ALL")
+	if !found {
+		t.Fatalf("usage rows have no retained half:\n%s", sql)
+	}
+	for _, column := range []string{"estimated_input_tokens", "estimate_reported_input_tokens", "estimate_attempt_count"} {
+		if !strings.Contains(live, " AS "+column) || !strings.Contains(retained, column) {
+			t.Errorf("%s is missing from a half of the usage rows:\n%s", column, sql)
+		}
+	}
+	paired := "WHEN " + estimatePaired + " THEN"
+	if strings.Count(live, paired) != 3 {
+		t.Errorf("the live half pairs %d estimate columns, want 3:\n%s", strings.Count(live, paired), live)
+	}
+	if strings.Contains(retained, "CASE") && strings.Contains(retained, estimatePaired) {
+		t.Errorf("the retained half recomputes pairing instead of reading the stored sums:\n%s", retained)
+	}
+}
+
+// Every shared total is projected once and scanned once; a column added to one
+// list and not the other would shift every value after it.
+func TestUsageTotalsColumnsMatchTheirScanTargets(t *testing.T) {
+	columns, depth, start := 0, 0, 0
+	for index, char := range totalsColumns {
+		switch char {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				columns++
+				start = index + 1
+			}
+		}
+	}
+	if strings.TrimSpace(totalsColumns[start:]) != "" {
+		columns++
+	}
+	if targets := len((&Totals{}).scanTargets()); columns != targets {
+		t.Fatalf("totalsColumns projects %d columns for %d scan targets", columns, targets)
+	}
+}
+
+type capturingQueryer struct{ sql string }
+
+func (c *capturingQueryer) QueryRow(context.Context, string, ...any) pgx.Row { return nil }
+func (c *capturingQueryer) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	c.sql = sql
+	return nil, errors.New("stop after capturing the statement")
+}
+
+func TestUsageBreakdownByEstimateDimensionsNamesTheUnestimated(t *testing.T) {
+	filters := usageFilterRange(t, "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")
+	for dimension, want := range map[string]string{
+		DimensionModelFamily:        "COALESCE(NULLIF(model_family, ''), 'unknown') AS dimension",
+		DimensionEstimateProvenance: "COALESCE(NULLIF(estimate_provenance, ''), 'none') AS dimension",
+	} {
+		q := &capturingQueryer{}
+		if _, err := ReadBreakdown(context.Background(), q, filters, dimension, 10); err == nil {
+			t.Fatalf("%s: the statement was not sent to the database", dimension)
+		}
+		if !strings.Contains(q.sql, want) {
+			t.Errorf("%s: statement does not group by %q:\n%s", dimension, want, q.sql)
+		}
+		// Requests count once per request here, so the rows sum to the range's
+		// requests however many families a failover crossed.
+		if !strings.Contains(q.sql, "request_counted") || strings.Contains(q.sql, "model_request_counted") {
+			t.Errorf("%s: statement does not count requests per request:\n%s", dimension, q.sql)
+		}
 	}
 }
 
@@ -159,7 +244,8 @@ func TestUsageTotalsRejectNegativeStoredCounts(t *testing.T) {
 	if !totals.valid() {
 		t.Fatal("a non-negative total was rejected")
 	}
-	for _, invalid := range []Totals{{RequestCount: -1}, {UnpricedCount: -1}, {IncompleteCount: -1}} {
+	for _, invalid := range []Totals{{RequestCount: -1}, {UnpricedCount: -1}, {IncompleteCount: -1},
+		{EstimatedAttemptCount: -1}} {
 		if invalid.valid() {
 			t.Fatalf("negative totals %+v were accepted", invalid)
 		}

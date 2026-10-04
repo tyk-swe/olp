@@ -73,3 +73,27 @@ func TestTextResponseFormatDoesNotRequireQualification(t *testing.T) {
 		t.Fatalf("plain requests keep their targets: a=%d b=%d", h.mock.count("a"), h.mock.count("b"))
 	}
 }
+
+// A route that requires parameters weighs each target against the controls the
+// request uses, which are read from the request only for such a route.
+func TestRequiredParametersAreChecked(t *testing.T) {
+	require := true
+	for _, tc := range []struct {
+		field string
+		a, b  int
+	}{
+		{`,"top_p":0.5`, 0, 1},
+		{`,"temperature":0.5`, 1, 0},
+	} {
+		h := newHarness(t, Config{})
+		route := h.rt.release.Snapshot.Routes[routeSlug]
+		route.Policy = &runtime.Policy{Constraints: runtime.Preferences{RequireParameters: &require}}
+		h.rt.release.Snapshot.Routes[routeSlug] = route
+		declareParams(h, modelA, []string{"temperature"})
+		declareParams(h, modelB, []string{"top_p"})
+		resp, body := h.chat(fullKey, nil, tc.field)
+		if resp.StatusCode != http.StatusOK || h.mock.count("a") != tc.a || h.mock.count("b") != tc.b {
+			t.Fatalf("%s: status %d body %v calls a=%d b=%d, want a=%d b=%d", tc.field, resp.StatusCode, body, h.mock.count("a"), h.mock.count("b"), tc.a, tc.b)
+		}
+	}
+}

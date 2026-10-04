@@ -1,0 +1,144 @@
+# LiteLLM, the gateway the benchmark compares OLP with (docs/performance.md,
+# scripts/bench-compare.sh). Use it with compose.dev.yaml, which supplies the
+# disposable PostgreSQL and Valkey it needs, or with services of your own; it
+# declares no dependency on either.
+#
+# The image is pinned by digest to the latest stable release at the time of
+# writing, https://github.com/BerriAI/litellm/releases/tag/v1.103.2, which is
+# also what the main-stable tag pointed at. The digest is the multi-architecture
+# index, so it resolves on amd64 and arm64. To move it, resolve the new
+# release's index digest (docker buildx imagetools inspect) and change the tag
+# and the digest together; a published comparison names the digest it ran.
+#
+# Everything is on the host's network, as OLP and the mock upstream are, so the
+# comparison measures the gateways and not Docker's NAT or userland proxy, and
+# the proxy listens on loopback only. Run it as scripts/bench-compare.sh does:
+#
+#   - one of the two profiles at a time, by service name: `litellm` for the
+#     documented production settings, or `litellm-ht` with its two sidecars for
+#     the high-throughput profile. Both bind LITELLM_PORT.
+#   - every container on the cpuset of the OLP gateway it is compared with
+#     (LITELLM_CPUSET), a worker for each of its CPUs (LITELLM_WORKERS), and
+#     4 GiB of memory for each worker (LITELLM_MEMORY_LIMIT), the guide's sizing.
+#     The mock upstream and the load generator stay off these CPUs; pin them
+#     with taskset (OLP_BENCH_MOCK_CPUS and OLP_BENCH_LOADGEN_CPUS).
+#   - a database of its own in the PostgreSQL (LITELLM_DATABASE_URL), and the
+#     Valkey it shares Redis-protocol state through (REDIS_HOST, REDIS_PORT and
+#     REDIS_PASSWORD).
+name: olp-bench
+
+x-litellm-image: &litellm-image ghcr.io/berriai/litellm:v1.103.2@sha256:f63fb81b831b170ec16851e23c36ac5bf52ef106b271406429524a2ed730bbfd
+
+x-litellm-container: &litellm-container
+  image: *litellm-image
+  network_mode: host
+  cpuset: ${LITELLM_CPUSET:?the CPUs every LiteLLM container may use, as a list such as 0-3}
+  mem_limit: ${LITELLM_MEMORY_LIMIT:?4g for each worker}
+  restart: 'no'
+  # A container starts with 1,024 open files unless told otherwise, which a
+  # gateway holding thousands of connections would meet long before its capacity.
+  # scripts/bench.sh raises OLP's to the host's hard limit, so LiteLLM gets the
+  # same.
+  ulimits:
+    nofile:
+      soft: 524288
+      hard: 524288
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: '2'
+
+# The production guide, https://docs.litellm.ai/docs/proxy/prod: production mode
+# and logging, a salt key for the database, and no telemetry.
+x-litellm-environment: &litellm-environment
+  LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?an sk- key made for this run}
+  LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?an sk- key made for this run}
+  LITELLM_MODE: PRODUCTION
+  LITELLM_LOG: ERROR
+  LITELLM_TELEMETRY: 'False'
+  DATABASE_URL: ${LITELLM_DATABASE_URL:?a PostgreSQL URL of a database for LiteLLM}
+  REDIS_HOST: ${REDIS_HOST:?}
+  REDIS_PORT: ${REDIS_PORT:?}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+  BENCH_MOCK_API_BASE: ${BENCH_MOCK_API_BASE:?the mock upstream's OpenAI base URL}
+
+# The high-throughput profile, https://docs.litellm.ai/docs/proxy/high_throughput,
+# less what is Kubernetes (the autoscaler, the pods and the load balancer). The
+# gateway and the collector share these.
+x-litellm-profile: &litellm-profile
+  # One PgBouncer in front of PostgreSQL for all the workers, with the chart's
+  # example pool of eight connections.
+  LITELLM_PGBOUNCER_ENABLED: 'true'
+  LITELLM_PGBOUNCER_PORT: ${LITELLM_PGBOUNCER_PORT:?a free loopback port}
+  LITELLM_PGBOUNCER_MAX_DB_CONNECTIONS: '8'
+  LITELLM_PGBOUNCER_MAX_CLIENT_CONN: '1000'
+  # Spend is processed by the collector sidecar, not the request workers.
+  LITELLM_COLLECTOR_ENABLED: 'true'
+  LITELLM_COLLECTOR_ADDRESS: unix:///var/run/litellm/collector.sock
+  LITELLM_COLLECTOR_BUFFER_SIZE: '1000'
+  LITELLM_COLLECTOR_ON_UNAVAILABLE: fallback
+  LITELLM_COLLECTOR_DRAIN_TIMEOUT_SECONDS: '10'
+
+services:
+  # The documented production settings: S1, S2, S4 and S5.
+  litellm:
+    <<: *litellm-container
+    profiles: [production]
+    command:
+      - --config=/app/config.yaml
+      - --host=127.0.0.1
+      - --port=${LITELLM_PORT:?a free loopback port}
+      - --num_workers=${LITELLM_WORKERS:?one for each CPU}
+    environment: *litellm-environment
+    volumes:
+      - ./litellm/production.yaml:/app/config.yaml:ro
+
+  # The high-throughput profile: S3.
+  litellm-ht:
+    <<: *litellm-container
+    profiles: [high-throughput]
+    command:
+      - --config=/app/config.yaml
+      - --host=127.0.0.1
+      - --port=${LITELLM_PORT:?a free loopback port}
+      - --num_workers=${LITELLM_WORKERS:?one for each CPU}
+    environment:
+      <<: [*litellm-environment, *litellm-profile]
+      # Rust token counting for large prompts.
+      LITELLM_RUST: '1'
+      KEEPALIVE_TIMEOUT: '75'
+      PROMETHEUS_MULTIPROC_DIR: /tmp/litellm_prometheus_multiproc
+    volumes:
+      - ./litellm/high-throughput.yaml:/app/config.yaml:ro
+      - collector-socket:/var/run/litellm
+      - prometheus-multiproc:/tmp/litellm_prometheus_multiproc
+
+  litellm-ht-collector:
+    <<: *litellm-container
+    profiles: [high-throughput]
+    entrypoint: [python, -m, litellm.proxy.collector]
+    command: []
+    environment:
+      <<: [*litellm-environment, *litellm-profile]
+      CONFIG_FILE_PATH: /app/config.yaml
+      LITELLM_JOB_ROLE: collector
+    volumes:
+      - ./litellm/high-throughput.yaml:/app/config.yaml:ro
+      - collector-socket:/var/run/litellm
+
+  litellm-ht-metrics:
+    <<: *litellm-container
+    profiles: [high-throughput]
+    entrypoint: [python, -m, litellm.proxy.prometheus_metrics_server]
+    command:
+      - --host=127.0.0.1
+      - --port=${LITELLM_METRICS_PORT:?a free loopback port}
+    environment:
+      PROMETHEUS_MULTIPROC_DIR: /tmp/litellm_prometheus_multiproc
+    volumes:
+      - prometheus-multiproc:/tmp/litellm_prometheus_multiproc
+
+volumes:
+  collector-socket:
+  prometheus-multiproc:

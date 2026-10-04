@@ -13,33 +13,152 @@ import (
 // arrive as int64 and strings as string.
 func reply(values ...any) []any { return values }
 
+// allowance is the five fields a rate reply appends to the six every reservation
+// reply begins with.
+type allowance struct{ requestLimit, requestRemaining, tokenLimit, tokenRemaining, resetMS int64 }
+
+// headReply builds the reserve_limits reply of a request that did not ask for the
+// allowance, and the one a failure has whatever was asked: the six fields every
+// reply begins with.
+func headReply(status int64, detail string, retry, window, expiry int64) []any {
+	return reply(rateReplyVersion, status, detail, retry, window, expiry)
+}
+
+// rateReply builds the reserve_limits reply of a request that asked for the
+// allowance: the six fields of headReply and the five that state it.
+func rateReply(status int64, detail string, retry, window, expiry int64, a allowance) []any {
+	return reply(rateReplyVersion, status, detail, retry, window, expiry,
+		a.requestLimit, a.requestRemaining, a.tokenLimit, a.tokenRemaining, a.resetMS)
+}
+
+// rateReplyVersion is the reserve_limits reply version, spelled out so that a
+// change to the contract has to change these tests.
+const rateReplyVersion = int64(2)
+
+// testWindow is a fixed window ID and the instant, in Unix milliseconds, at which
+// it ends.
+const (
+	testWindow      = int64(29_823_060)
+	testWindowEndMS = int64(1_789_383_660_000)
+)
+
 func TestParseReservationRejectsMalformedResponses(t *testing.T) {
 	t.Parallel()
+	both := allowance{requestLimit: 10, requestRemaining: 4, tokenLimit: 1000, tokenRemaining: 900, resetMS: 30_000}
+	requestsOnly := allowance{requestLimit: 10, requestRemaining: 4, resetMS: 30_000}
+	granted := func(mutate func(items []any)) []any {
+		items := rateReply(1, "ok", 0, testWindow, 0, both)
+		mutate(items)
+		return items
+	}
+	rejected := func(detail string, retry int64, a allowance) []any {
+		return rateReply(0, detail, retry, testWindow, 0, a)
+	}
 	for _, test := range []struct {
 		name  string
 		value any
 	}{
-		{"unknown version", reply(int64(2), int64(1), "ok", int64(0), int64(1), int64(0))},
-		{"granted with retry hint", reply(int64(1), int64(1), "ok", int64(1), int64(1), int64(0))},
-		{"rejection without retry hint", reply(int64(1), int64(0), "rpm", int64(0), int64(1), int64(0))},
-		{"retry beyond the window", reply(int64(1), int64(0), "rpm", int64(60_001), int64(1), int64(0))},
-		{"rejection without a window", reply(int64(1), int64(0), "rpm", int64(1), int64(0), int64(0))},
-		{"rejection that leased concurrency", reply(int64(1), int64(0), "rpm", int64(1), int64(1), int64(1))},
-		{"unknown dimension", reply(int64(1), int64(0), "unknown", int64(1), int64(1), int64(0))},
-		{"malformed state with a retry hint", reply(int64(1), int64(-1), "malformed_rate_state", int64(1), int64(1), int64(0))},
-		{"script failure with a window", reply(int64(1), int64(-1), "invalid_arguments", int64(0), int64(1), int64(0))},
-		{"counter beyond the Lua range", reply(int64(1), int64(1), "ok", int64(0), maxLuaInteger+1, int64(0))},
-		{"negative window", reply(int64(1), int64(1), "ok", int64(0), int64(-1), int64(0))},
-		{"string where an integer belongs", reply("1", int64(1), "ok", int64(0), int64(1), int64(0))},
-		{"integer where a string belongs", reply(int64(1), int64(1), int64(0), int64(0), int64(1), int64(0))},
-		{"short array", reply(int64(1), int64(1), "ok", int64(0), int64(1))},
-		{"empty array", reply()},
+		{"the version before the allowance", []any{int64(1), int64(1), "ok", int64(0), testWindow, int64(0)}},
+		{"the version before the allowance with the allowance", granted(func(items []any) { items[0] = int64(1) })},
+		{"a later version", granted(func(items []any) { items[0] = int64(3) })},
+		{"granted with retry hint", granted(func(items []any) { items[3] = int64(1) })},
+		{"granted without a window", granted(func(items []any) { items[4] = int64(0) })},
+		{"rejection without retry hint", rejected("rpm", 0, allowance{requestLimit: 10, resetMS: 0})},
+		{"retry beyond the window", rejected("rpm", 60_001, allowance{requestLimit: 10, resetMS: 60_001})},
+		{"rejection without a window", rateReply(0, "rpm", 1, 0, 0, allowance{requestLimit: 10, resetMS: 1})},
+		{"rejection that leased concurrency", rateReply(0, "rpm", 1, testWindow, 1, allowance{requestLimit: 10, resetMS: 1})},
+		{"unknown dimension", rejected("unknown", 1, allowance{requestLimit: 10, resetMS: 1})},
+		{"unknown status", rateReply(2, "ok", 0, testWindow, 0, both)},
+		{"malformed state with a retry hint", headReply(-1, "malformed_rate_state", 1, testWindow, 0)},
+		{"malformed state without a window", headReply(-1, "malformed_rate_state", 0, 0, 0)},
+		{"malformed state that states an allowance", rateReply(-1, "malformed_rate_state", 0, testWindow, 0, both)},
+		{"malformed state that states an empty allowance", rateReply(-1, "malformed_rate_state", 0, testWindow, 0, allowance{})},
+		{"script failure with a window", headReply(-1, "invalid_arguments", 0, testWindow, 0)},
+		{"script failure that states an allowance", rateReply(-1, "invalid_server_time", 0, 0, 0, allowance{resetMS: 1})},
+		{"script failure that states an empty allowance", rateReply(-1, "invalid_arguments", 0, 0, 0, allowance{})},
+		{"unknown failure", headReply(-1, "unknown", 0, 0, 0)},
+		{"a grant that does not state the allowance it was asked for", headReply(1, "ok", 0, testWindow, 0)},
+		{"a rejection that does not state the allowance it was asked for", headReply(0, "rpm", 30_000, testWindow, 0)},
+		{"counter beyond the Lua range", granted(func(items []any) { items[4] = maxLuaInteger + 1 })},
+		{"negative window", granted(func(items []any) { items[4] = int64(-1) })},
+		{"a window that never ends", rateReply(1, "ok", 0, maxLuaInteger/60_000, 0, both)},
+		{"remaining beyond the Lua range", granted(func(items []any) { items[7] = maxLuaInteger + 1 })},
+		{"negative remaining", granted(func(items []any) { items[7] = int64(-1) })},
+		{"negative limit", granted(func(items []any) { items[6] = int64(-1) })},
+		{"string where an integer belongs", granted(func(items []any) { items[0] = "2" })},
+		{"string where the limit belongs", granted(func(items []any) { items[6] = "10" })},
+		{"integer where a string belongs", granted(func(items []any) { items[2] = int64(0) })},
+		{"request remaining above its limit", granted(func(items []any) { items[7] = int64(11) })},
+		{"token remaining above its limit", granted(func(items []any) { items[9] = int64(1001) })},
+		{"request remaining of an unlimited dimension", rateReply(1, "ok", 0, testWindow, 0, allowance{tokenLimit: 1000, requestRemaining: 1, tokenRemaining: 900, resetMS: 30_000})},
+		{"token remaining of an unlimited dimension", rateReply(1, "ok", 0, testWindow, 0, allowance{requestLimit: 10, requestRemaining: 4, tokenRemaining: 1, resetMS: 30_000})},
+		{"a granted request that left a request limit untouched", granted(func(items []any) { items[7] = int64(10) })},
+		{"a granted request that left a token limit untouched", granted(func(items []any) { items[9] = int64(1000) })},
+		{"a window that is over", granted(func(items []any) { items[10] = int64(0) })},
+		{"a window beyond a minute", granted(func(items []any) { items[10] = int64(60_001) })},
+		{"a window of nothing limited", rateReply(1, "ok", 0, testWindow, 0, allowance{resetMS: 30_000})},
+		{"requests exhausted with requests left", rejected("rpm", 30_000, both)},
+		{"requests exhausted without a request limit", rejected("rpm", 30_000, allowance{tokenLimit: 1000, tokenRemaining: 900, resetMS: 30_000})},
+		{"tokens exhausted without a token limit", rejected("tpm", 30_000, requestsOnly)},
+		{"requests exhausted with another retry hint", rejected("rpm", 29_000, allowance{requestLimit: 10, resetMS: 30_000})},
+		{"tokens exhausted with another retry hint", rejected("tpm", 29_000, both)},
+		{"short array", rateReply(1, "ok", 0, testWindow, 0, both)[:10]},
+		{"long array", append(rateReply(1, "ok", 0, testWindow, 0, both), int64(0))},
+		{"empty array", []any{}},
 		{"nil array", []any(nil)},
 		{"not an array", int64(1)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := parseReservation(test.value); !errors.Is(err, ErrUnexpectedResponse) {
+			if _, err := parseReservation(test.value, true); !errors.Is(err, ErrUnexpectedResponse) {
+				t.Fatalf("parseReservation(%v) error = %v, want ErrUnexpectedResponse", test.value, err)
+			}
+		})
+	}
+}
+
+// TestParseReservationRejectsMalformedResponsesToARequestThatDidNotAsk proves a
+// request that did not ask for the allowance is answered with the six fields and
+// no more, whatever the decision: a script that answers it with the allowance is
+// not the one this package runs, and is refused as one that answered too little
+// is.
+func TestParseReservationRejectsMalformedResponsesToARequestThatDidNotAsk(t *testing.T) {
+	t.Parallel()
+	both := allowance{requestLimit: 10, requestRemaining: 4, tokenLimit: 1000, tokenRemaining: 900, resetMS: 30_000}
+	for _, test := range []struct {
+		name  string
+		value any
+	}{
+		{"a grant that states the allowance", rateReply(1, "ok", 0, testWindow, 0, both)},
+		{"a grant that states an empty allowance", rateReply(1, "ok", 0, testWindow, 0, allowance{})},
+		{"a rejection that states the allowance", rateReply(0, "rpm", 30_000, testWindow, 0, allowance{10, 0, 1000, 900, 30_000})},
+		{"a concurrency rejection that states the allowance", rateReply(0, "concurrency", 4_000, testWindow, 0, both)},
+		{"a failure that states an empty allowance", rateReply(-1, "malformed_rate_state", 0, testWindow, 0, allowance{})},
+		{"the version before the allowance", []any{int64(1), int64(1), "ok", int64(0), testWindow, int64(0)}},
+		{"a later version", reply(int64(3), int64(1), "ok", int64(0), testWindow, int64(0))},
+		{"granted with retry hint", headReply(1, "ok", 1, testWindow, 0)},
+		{"granted without a window", headReply(1, "ok", 0, 0, 0)},
+		{"rejection without retry hint", headReply(0, "rpm", 0, testWindow, 0)},
+		{"retry beyond the window", headReply(0, "rpm", 60_001, testWindow, 0)},
+		{"token retry beyond the window", headReply(0, "tpm", 60_001, testWindow, 0)},
+		{"rejection without a window", headReply(0, "rpm", 1, 0, 0)},
+		{"rejection that leased concurrency", headReply(0, "tpm", 1, testWindow, 1)},
+		{"unknown dimension", headReply(0, "unknown", 1, testWindow, 0)},
+		{"unknown status", headReply(2, "ok", 0, testWindow, 0)},
+		{"malformed state with a retry hint", headReply(-1, "malformed_rate_state", 1, testWindow, 0)},
+		{"malformed state without a window", headReply(-1, "malformed_rate_state", 0, 0, 0)},
+		{"script failure with a window", headReply(-1, "invalid_arguments", 0, testWindow, 0)},
+		{"unknown failure", headReply(-1, "unknown", 0, 0, 0)},
+		{"counter beyond the Lua range", headReply(1, "ok", 0, maxLuaInteger+1, 0)},
+		{"negative window", headReply(1, "ok", 0, -1, 0)},
+		{"short array", headReply(1, "ok", 0, testWindow, 0)[:5]},
+		{"empty array", []any{}},
+		{"nil array", []any(nil)},
+		{"not an array", int64(1)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := parseReservation(test.value, false); !errors.Is(err, ErrUnexpectedResponse) {
 				t.Fatalf("parseReservation(%v) error = %v, want ErrUnexpectedResponse", test.value, err)
 			}
 		})
@@ -48,54 +167,167 @@ func TestParseReservationRejectsMalformedResponses(t *testing.T) {
 
 func TestParseReservationAcceptsTheScriptContract(t *testing.T) {
 	t.Parallel()
+	state := func(requestLimit, requestRemaining, tokenLimit, tokenRemaining, resetMS int64) RateState {
+		return RateState{
+			RequestLimit: requestLimit, RequestRemaining: requestRemaining,
+			TokenLimit: tokenLimit, TokenRemaining: tokenRemaining,
+			ResetAfter: time.Duration(resetMS) * time.Millisecond,
+			ResetAt:    time.UnixMilli(testWindowEndMS).UTC(),
+		}
+	}
 	for _, test := range []struct {
 		name  string
 		value any
 		want  scriptResult
 	}{
 		{
-			"granted without concurrency",
-			reply(int64(1), int64(1), "ok", int64(0), int64(29_823_060), int64(0)),
-			scriptResult{kind: resultGranted, windowID: 29_823_060},
+			"granted with requests and tokens",
+			rateReply(1, "ok", 0, testWindow, 0, allowance{10, 4, 1000, 900, 30_000}),
+			scriptResult{kind: resultGranted, windowID: testWindow, rate: state(10, 4, 1000, 900, 30_000)},
+		},
+		{
+			"granted with the last request and the last tokens",
+			rateReply(1, "ok", 0, testWindow, 0, allowance{10, 0, 1000, 0, 1}),
+			scriptResult{kind: resultGranted, windowID: testWindow, rate: state(10, 0, 1000, 0, 1)},
+		},
+		{
+			"granted with requests only",
+			rateReply(1, "ok", 0, testWindow, 0, allowance{requestLimit: 10, requestRemaining: 9, resetMS: 60_000}),
+			scriptResult{kind: resultGranted, windowID: testWindow, rate: state(10, 9, 0, 0, 60_000)},
+		},
+		{
+			"granted with tokens only",
+			rateReply(1, "ok", 0, testWindow, 0, allowance{tokenLimit: 1000, tokenRemaining: 995, resetMS: 12_345}),
+			scriptResult{kind: resultGranted, windowID: testWindow, rate: state(0, 0, 1000, 995, 12_345)},
 		},
 		{
 			"granted with a concurrency lease",
-			reply(int64(1), int64(1), "ok", int64(0), int64(29_823_060), int64(1_789_383_605_000)),
-			scriptResult{kind: resultGranted, windowID: 29_823_060, leaseExpiresAtMS: 1_789_383_605_000},
+			rateReply(1, "ok", 0, testWindow, 1_789_383_605_000, allowance{10, 4, 0, 0, 30_000}),
+			scriptResult{kind: resultGranted, windowID: testWindow, leaseExpiresAtMS: 1_789_383_605_000, rate: state(10, 4, 0, 0, 30_000)},
+		},
+		{
+			"granted with concurrency only",
+			rateReply(1, "ok", 0, testWindow, 1_789_383_605_000, allowance{}),
+			scriptResult{kind: resultGranted, windowID: testWindow, leaseExpiresAtMS: 1_789_383_605_000},
 		},
 		{
 			"requests exhausted",
-			reply(int64(1), int64(0), "rpm", int64(60_000), int64(29_823_060), int64(0)),
-			scriptResult{kind: resultRejected, dimension: DimensionRequests, retryAfterMS: 60_000},
+			rateReply(0, "rpm", 60_000, testWindow, 0, allowance{10, 0, 1000, 900, 60_000}),
+			scriptResult{kind: resultRejected, dimension: DimensionRequests, retryAfterMS: 60_000, rate: state(10, 0, 1000, 900, 60_000)},
 		},
 		{
 			"tokens exhausted",
-			reply(int64(1), int64(0), "tpm", int64(1), int64(29_823_060), int64(0)),
-			scriptResult{kind: resultRejected, dimension: DimensionTokens, retryAfterMS: 1},
+			rateReply(0, "tpm", 1, testWindow, 0, allowance{10, 3, 1000, 4, 1}),
+			scriptResult{kind: resultRejected, dimension: DimensionTokens, retryAfterMS: 1, rate: state(10, 3, 1000, 4, 1)},
+		},
+		{
+			"tokens exhausted beyond a window's capacity",
+			rateReply(0, "tpm", 30_000, testWindow, 0, allowance{tokenLimit: 1000, tokenRemaining: 1000, resetMS: 30_000}),
+			scriptResult{kind: resultRejected, dimension: DimensionTokens, retryAfterMS: 30_000, rate: state(0, 0, 1000, 1000, 30_000)},
 		},
 		{
 			"concurrency exhausted beyond a minute",
-			reply(int64(1), int64(0), "concurrency", int64(120_000), int64(29_823_060), int64(0)),
-			scriptResult{kind: resultRejected, dimension: DimensionConcurrency, retryAfterMS: 120_000},
+			rateReply(0, "concurrency", 120_000, testWindow, 0, allowance{10, 5, 1000, 995, 30_000}),
+			scriptResult{kind: resultRejected, dimension: DimensionConcurrency, retryAfterMS: 120_000, rate: state(10, 5, 1000, 995, 30_000)},
 		},
 		{
-			"malformed concurrency state",
-			reply(int64(1), int64(-1), "malformed_concurrency_state", int64(0), int64(29_823_060), int64(0)),
+			"concurrency exhausted without a rate limit",
+			rateReply(0, "concurrency", 4_000, testWindow, 0, allowance{}),
+			scriptResult{kind: resultRejected, dimension: DimensionConcurrency, retryAfterMS: 4_000},
+		},
+		{
+			"malformed rate state",
+			headReply(-1, "malformed_rate_state", 0, testWindow, 0),
 			scriptResult{kind: resultMalformed},
 		},
 		{
+			"malformed concurrency state",
+			headReply(-1, "malformed_concurrency_state", 0, testWindow, 0),
+			scriptResult{kind: resultMalformed},
+		},
+		{
+			"invalid arguments",
+			headReply(-1, "invalid_arguments", 0, 0, 0),
+			scriptResult{kind: resultScriptFailure},
+		},
+		{
 			"invalid server time",
-			reply(int64(1), int64(-1), "invalid_server_time", int64(0), int64(0), int64(0)),
+			headReply(-1, "invalid_server_time", 0, 0, 0),
 			scriptResult{kind: resultScriptFailure},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := parseReservation(test.value)
+			got, err := parseReservation(test.value, true)
 			if err != nil {
 				t.Fatalf("parseReservation() error = %v", err)
 			}
 			if got != test.want {
+				t.Fatalf("parseReservation() = %+v, want %+v", got, test.want)
+			}
+		})
+	}
+}
+
+// TestParseReservationAcceptsTheShortContract proves the six fields are the whole
+// answer to a request that did not ask for the allowance: the decision is read as
+// it is read with the allowance, and states none.
+func TestParseReservationAcceptsTheShortContract(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		value any
+		want  scriptResult
+	}{
+		{"granted", headReply(1, "ok", 0, testWindow, 0), scriptResult{kind: resultGranted, windowID: testWindow}},
+		{
+			"granted with a concurrency lease",
+			headReply(1, "ok", 0, testWindow, 1_789_383_605_000),
+			scriptResult{kind: resultGranted, windowID: testWindow, leaseExpiresAtMS: 1_789_383_605_000},
+		},
+		{
+			"requests exhausted",
+			headReply(0, "rpm", 60_000, testWindow, 0),
+			scriptResult{kind: resultRejected, dimension: DimensionRequests, retryAfterMS: 60_000},
+		},
+		{
+			"tokens exhausted",
+			headReply(0, "tpm", 1, testWindow, 0),
+			scriptResult{kind: resultRejected, dimension: DimensionTokens, retryAfterMS: 1},
+		},
+		{
+			"concurrency exhausted beyond a minute",
+			headReply(0, "concurrency", 120_000, testWindow, 0),
+			scriptResult{kind: resultRejected, dimension: DimensionConcurrency, retryAfterMS: 120_000},
+		},
+		{
+			"malformed rate state",
+			headReply(-1, "malformed_rate_state", 0, testWindow, 0),
+			scriptResult{kind: resultMalformed},
+		},
+		{
+			"malformed concurrency state",
+			headReply(-1, "malformed_concurrency_state", 0, testWindow, 0),
+			scriptResult{kind: resultMalformed},
+		},
+		{
+			"invalid arguments",
+			headReply(-1, "invalid_arguments", 0, 0, 0),
+			scriptResult{kind: resultScriptFailure},
+		},
+		{
+			"invalid server time",
+			headReply(-1, "invalid_server_time", 0, 0, 0),
+			scriptResult{kind: resultScriptFailure},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseReservation(test.value, false)
+			if err != nil {
+				t.Fatalf("parseReservation() error = %v", err)
+			}
+			if got != test.want || got.rate != (RateState{}) {
 				t.Fatalf("parseReservation() = %+v, want %+v", got, test.want)
 			}
 		})
@@ -115,6 +347,9 @@ func TestParseCostReservationRejectsMalformedResponses(t *testing.T) {
 		{"daily retry beyond a day", reply(int64(1), int64(0), "daily_cost", dayMS+1, int64(20_000), int64(24_000))},
 		{"monthly retry beyond a month", reply(int64(1), int64(0), "monthly_cost", maxMonthMS+1, int64(20_000), int64(24_000))},
 		{"rejection without a retry hint", reply(int64(1), int64(0), "daily_cost", int64(0), int64(20_000), int64(24_000))},
+		{"estimate rejection without a retry hint", reply(int64(1), int64(0), "daily_cost_estimate", int64(0), int64(20_000), int64(24_000))},
+		{"estimate rejection beyond a day", reply(int64(1), int64(0), "daily_cost_estimate", dayMS+1, int64(20_000), int64(24_000))},
+		{"estimate rejection of an unknown window", reply(int64(1), int64(0), "yearly_cost_estimate", int64(1), int64(20_000), int64(24_000))},
 		{"uninitialized with a retry hint", reply(int64(1), int64(-1), "uninitialized_daily_cost_state", int64(1), int64(20_000), int64(24_000))},
 		{"unknown reason", reply(int64(1), int64(-1), "exploded", int64(0), int64(20_000), int64(24_000))},
 		{"short array", reply(int64(1), int64(1), "ok", int64(0), int64(20_000))},
@@ -149,6 +384,16 @@ func TestParseCostReservationAcceptsTheScriptContract(t *testing.T) {
 			"monthly budget exhausted",
 			reply(int64(1), int64(0), "monthly_cost", maxMonthMS, int64(20_000), int64(24_000)),
 			scriptResult{kind: resultRejected, dimension: DimensionMonthlyCost, retryAfterMS: maxMonthMS},
+		},
+		{
+			"daily budget cannot hold the estimate",
+			reply(int64(1), int64(0), "daily_cost_estimate", int64(1000), int64(20_000), int64(24_000)),
+			scriptResult{kind: resultRejected, dimension: DimensionDailyCost, retryAfterMS: 1000, estimate: true},
+		},
+		{
+			"monthly budget cannot hold the estimate",
+			reply(int64(1), int64(0), "monthly_cost_estimate", maxMonthMS, int64(20_000), int64(24_000)),
+			scriptResult{kind: resultRejected, dimension: DimensionMonthlyCost, retryAfterMS: maxMonthMS, estimate: true},
 		},
 		{
 			"monthly state awaits reconciliation",
@@ -210,12 +455,21 @@ func TestParseReconciliation(t *testing.T) {
 	}
 }
 
+// everyBudget is a request bound by a rate limit and a cost budget, which is what
+// it takes to be given every key.
+func everyBudget(lookup, owner string) Request {
+	return Request{
+		CostOwnerID: owner, LookupID: lookup,
+		RequestsPerMinute: pointer(int64(1)), DailyCostLimit: pointer("1"),
+	}
+}
+
 func TestKeysShareOneClusterHashTag(t *testing.T) {
 	t.Parallel()
 	limiter := &Limiter{namespace: "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits"}
 	const apiKeyID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
-	first := limiter.keysFor("lookup_one_abc", apiKeyID)
-	second := limiter.keysFor("lookup_two_abc", apiKeyID)
+	first := limiter.keysFor(everyBudget("lookup_one_abc", apiKeyID))
+	second := limiter.keysFor(everyBudget("lookup_two_abc", apiKeyID))
 
 	if got, want := first.rate, "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits:{lookup_one_abc}:rate"; got != want {
 		t.Fatalf("rate key = %q, want %q", got, want)
@@ -498,6 +752,11 @@ func TestCostSnapshotValidation(t *testing.T) {
 	if err := base.validate(); err != nil {
 		t.Fatalf("the base snapshot is invalid: %v", err)
 	}
+	named := base
+	named.RequestID = "0192CF87-D4AB-7F2E-A8B1-C2D3E4F50608"
+	if err := named.validate(); err != nil {
+		t.Fatalf("a snapshot that names its request is invalid: %v", err)
+	}
 	for _, test := range []struct {
 		name   string
 		mutate func(*CostSnapshot)
@@ -509,6 +768,7 @@ func TestCostSnapshotValidation(t *testing.T) {
 		{"monthly accrued is negative", func(s *CostSnapshot) { s.MonthlyAccrued = "-0.5" }},
 		{"unpriced attempts are negative", func(s *CostSnapshot) { s.UnpricedAttempts = -1 }},
 		{"unpriced attempts beyond the Lua range", func(s *CostSnapshot) { s.UnpricedAttempts = maxLuaInteger + 1 }},
+		{"request is not a UUID", func(s *CostSnapshot) { s.RequestID = "request" }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -518,6 +778,241 @@ func TestCostSnapshotValidation(t *testing.T) {
 				t.Fatal("validate() accepted a snapshot Valkey cannot store exactly")
 			}
 		})
+	}
+}
+
+func TestParseSettlement(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		value   any
+		want    bool
+		wantErr bool
+	}{
+		{"settled", reply(int64(1), int64(1), "ok", int64(1), int64(0)), true, false},
+		{"nothing left to settle", reply(int64(1), int64(1), "ok", int64(0), int64(0)), false, false},
+		{"unknown version", reply(int64(2), int64(1), "ok", int64(1), int64(0)), false, true},
+		{"invalid arguments", reply(int64(1), int64(-1), "invalid_arguments", int64(0), int64(0)), false, true},
+		{"count out of range", reply(int64(1), int64(1), "ok", int64(2), int64(0)), false, true},
+		{"spare field in use", reply(int64(1), int64(1), "ok", int64(1), int64(1)), false, true},
+		{"unknown detail", reply(int64(1), int64(1), "done", int64(1), int64(0)), false, true},
+		{"six fields", reply(int64(1), int64(1), "ok", int64(1), int64(0), int64(0)), false, true},
+		{"not an array", int64(1), false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseSettlement(test.value)
+			if (err != nil) != test.wantErr || got != test.want {
+				t.Fatalf("parseSettlement() = (%t, %v), want (%t, error %t)", got, err, test.want, test.wantErr)
+			}
+			if test.wantErr && !errors.Is(err, ErrUnexpectedResponse) {
+				t.Fatalf("parseSettlement() error = %v, want ErrUnexpectedResponse", err)
+			}
+		})
+	}
+}
+
+// TestReplyVersionsAdvanceIndependently proves a script family's reply is judged
+// against its own version, so changing what one family answers cannot make the
+// other family's scripts look foreign.
+func TestReplyVersionsAdvanceIndependently(t *testing.T) {
+	t.Parallel()
+	value := reply(int64(2), int64(1), "ok", int64(0), int64(1), int64(0))
+	if _, _, _, _, _, ok := tuple(value, 2); !ok {
+		t.Fatal("a reply at the requested version was refused")
+	}
+	if _, _, _, _, _, ok := tuple(value, 1); ok {
+		t.Fatal("a reply at another version was accepted")
+	}
+}
+
+// TestScriptFamiliesRefuseEachOthersReplies proves the rate and cost parsers each
+// refuse a reply made for the other script, now that the two answer in different
+// shapes.
+func TestScriptFamiliesRefuseEachOthersReplies(t *testing.T) {
+	t.Parallel()
+	rate := rateReply(1, "ok", 0, testWindow, 0, allowance{requestLimit: 10, requestRemaining: 4, resetMS: 1})
+	cost := reply(int64(1), int64(1), "ok", int64(0), int64(20_000), int64(24_000))
+	if _, err := parseReservation(rate, true); err != nil {
+		t.Fatalf("parseReservation(rate reply) error = %v", err)
+	}
+	if _, err := parseCostReservation(cost); err != nil {
+		t.Fatalf("parseCostReservation(cost reply) error = %v", err)
+	}
+	for _, stated := range []bool{true, false} {
+		if _, err := parseReservation(cost, stated); !errors.Is(err, ErrUnexpectedResponse) {
+			t.Fatalf("parseReservation(cost reply, %t) error = %v, want ErrUnexpectedResponse", stated, err)
+		}
+	}
+	if _, err := parseCostReservation(rate); !errors.Is(err, ErrUnexpectedResponse) {
+		t.Fatalf("parseCostReservation(rate reply) error = %v, want ErrUnexpectedResponse", err)
+	}
+}
+
+// TestCostPendingHelpersAreIdentical holds the three scripts that share the
+// reservation helpers to one copy of them. The scripts are run by Valkey one at
+// a time and cannot import each other, so each carries the block; a drifted copy
+// would settle or release reservations by rules the other scripts do not share.
+func TestCostPendingHelpersAreIdentical(t *testing.T) {
+	t.Parallel()
+	block := func(name, script string) string {
+		begin := strings.Index(script, "-- BEGIN cost_pending")
+		end := strings.Index(script, "-- END cost_pending")
+		if begin < 0 || end < begin {
+			t.Fatalf("%s carries no cost_pending block", name)
+		}
+		return script[begin : end+len("-- END cost_pending")]
+	}
+	reserve := block("reserve_cost.lua", reserveCostSource)
+	for name, source := range map[string]string{
+		"settle_cost.lua": settleCostSource, "reconcile_cost.lua": reconcileCostSource,
+	} {
+		if got := block(name, source); got != reserve {
+			t.Fatalf("%s carries a different cost_pending block than reserve_cost.lua", name)
+		}
+	}
+}
+
+func TestCostReservationRequestValidation(t *testing.T) {
+	t.Parallel()
+	const request = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"
+	base := func() Request {
+		return Request{
+			CostOwnerID:    "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607",
+			LookupID:       "lookup_one_abc",
+			DailyCostLimit: pointer("10"),
+			LeaseTTL:       5 * time.Second,
+			CostEstimate:   "0.25",
+			RequestID:      request,
+		}
+	}
+	if err := base().Validate(); err != nil {
+		t.Fatalf("the base request is invalid: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*Request)
+	}{
+		{"estimate without a cost budget", func(r *Request) { r.DailyCostLimit = nil }},
+		{"estimate that is zero", func(r *Request) { r.CostEstimate = "0.000" }},
+		{"estimate that is negative", func(r *Request) { r.CostEstimate = "-1" }},
+		{"estimate in scientific notation", func(r *Request) { r.CostEstimate = "1e3" }},
+		{"estimate with too many fractional digits", func(r *Request) { r.CostEstimate = "0.0000000000001" }},
+		{"estimate with too many integer digits", func(r *Request) { r.CostEstimate = "1000000000000" }},
+		{"estimate without a request", func(r *Request) { r.RequestID = "" }},
+		{"estimate under a request that is not a UUID", func(r *Request) { r.RequestID = "request" }},
+		{"negative grace", func(r *Request) { r.CostGrace = -time.Second }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			request := base()
+			test.mutate(&request)
+			var invalid *InvalidRequestError
+			if err := request.Validate(); !errors.As(err, &invalid) {
+				t.Fatalf("Validate() error = %v, want InvalidRequestError", err)
+			}
+		})
+	}
+	// Without an estimate nothing about the reservation applies.
+	unpriced := base()
+	unpriced.CostEstimate, unpriced.RequestID = "", ""
+	if err := unpriced.Validate(); err != nil {
+		t.Fatalf("a request without an estimate is invalid: %v", err)
+	}
+	if grace := unpriced.costGrace(); grace != DefaultCostGrace {
+		t.Fatalf("default grace = %v, want %v", grace, DefaultCostGrace)
+	}
+	unpriced.CostGrace = time.Second
+	if grace := unpriced.costGrace(); grace != time.Second {
+		t.Fatalf("grace = %v, want one second", grace)
+	}
+}
+
+func TestRequestReportsRateLimits(t *testing.T) {
+	t.Parallel()
+	var none Request
+	if none.HasRateLimits() {
+		t.Fatal("an empty request reports rate limits it does not have")
+	}
+	if (Request{DailyCostLimit: pointer("1")}).HasRateLimits() {
+		t.Fatal("a cost budget was reported as a rate limit")
+	}
+	for name, request := range map[string]Request{
+		"requests":    {RequestsPerMinute: pointer(int64(1))},
+		"tokens":      {TokensPerMinute: pointer(int64(1))},
+		"concurrency": {MaxConcurrency: pointer(int64(1))},
+	} {
+		if !request.HasRateLimits() {
+			t.Fatalf("a %s limit was not reported as a rate limit", name)
+		}
+	}
+}
+
+func TestPendingKeysShareTheBalancesHashTag(t *testing.T) {
+	t.Parallel()
+	limiter := &Limiter{namespace: "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits"}
+	const owner = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"
+	first := limiter.keysFor(everyBudget("lookup_one_abc", owner))
+	second := limiter.keysFor(everyBudget("lookup_two_abc", owner))
+	if got, want := first.pending, "olp:0192cf87d4ab7f2ea8b1c2d3e4f50607:limits:{0192cf87d4ab7f2ea8b1c2d3e4f50608}:cost:pending"; got != want {
+		t.Fatalf("pending key = %q, want %q", got, want)
+	}
+	if got, want := first.expiry, strings.TrimSuffix(first.pending, "pending")+"expiry"; got != want {
+		t.Fatalf("expiry key = %q, want %q", got, want)
+	}
+	// The script reads the balances and the reservations together, which a
+	// cluster allows only under one hash tag, whichever lookup spends.
+	for _, key := range []string{first.pending, first.expiry, first.monthlyCost} {
+		if hashTag(key) != hashTag(first.dailyCost) {
+			t.Fatalf("%q does not share the hash tag of %q", key, first.dailyCost)
+		}
+	}
+	if first.pending != second.pending || first.expiry != second.expiry {
+		t.Fatal("pending keys differ between lookups of one owner")
+	}
+}
+
+// TestLeasesForwardToTheAttachedGroupLease covers what needs no Valkey: a
+// request admitted against a budget group finishes both its leases through the
+// one handle it keeps, and a request that holds no lease finishes nothing.
+func TestLeasesForwardToTheAttachedGroupLease(t *testing.T) {
+	t.Parallel()
+	var none *Lease
+	none.Attach(&Lease{})
+	none.SetActualCost("1")
+	if none.HasCostReservation() {
+		t.Fatal("no lease reports a cost reservation")
+	}
+	for name, err := range map[string]error{
+		"refund": none.Refund(t.Context()), "reconcile": none.Reconcile(t.Context(), 1),
+		"release": none.Release(t.Context()), "settle": none.SettleCost(t.Context()),
+	} {
+		if err != nil {
+			t.Fatalf("a missing lease failed to %s: %v", name, err)
+		}
+	}
+
+	group := &Lease{costReserved: true}
+	key := &Lease{}
+	if key.HasCostReservation() {
+		t.Fatal("a lease with no estimate reports one")
+	}
+	key.Attach(nil)
+	key.Attach(group)
+	if !key.HasCostReservation() {
+		t.Fatal("the attached group's estimate is not reported")
+	}
+	key.SetActualCost("0.5")
+	if group.actualCost != "0.5" || key.actualCost != "0.5" {
+		t.Fatalf("actual cost = %q / %q, want both leases told", key.actualCost, group.actualCost)
+	}
+	// A lease without an estimate and a reconcile without a token budget touch
+	// nothing, so no Valkey connection is needed to finish them.
+	plain := &Lease{}
+	plain.Attach(&Lease{})
+	if err := errors.Join(plain.Reconcile(t.Context(), 5), plain.Release(t.Context()),
+		plain.Refund(t.Context()), plain.SettleCost(t.Context())); err != nil {
+		t.Fatalf("finishing leases that hold nothing failed: %v", err)
 	}
 }
 

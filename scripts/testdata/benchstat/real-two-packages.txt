@@ -1,0 +1,57 @@
+goos: linux
+goarch: amd64
+pkg: toy/a
+cpu: Intel Core Processor (Haswell, no TSX)
+                       │    old.txt    │                new.txt                 │
+                       │    sec/op     │    sec/op      vs base                 │
+Same-8                    182.1n ± 14%    160.2n ± 12%    -12.00% (p=0.002 n=8)
+Zero-8                    1.789n ±  2%   61.715n ±  8%  +3349.69% (p=0.000 n=8)
+Sub/s-8                  108.15n ± 16%    86.60n ±  6%    -19.92% (p=0.001 n=8)
+Sub/ssssssssssssssss-8    480.9n ± 26%    199.6n ±  9%    -58.50% (p=0.000 n=8)
+Faster-8                  428.9n ± 20%    123.8n ± 30%    -71.14% (p=0.000 n=8)
+Metric-8                  182.6n ± 24%    229.5n ± 18%    +25.66% (p=0.005 n=8)
+geomean                   104.8n          130.1n          +24.13%
+
+                       │    old.txt    │               new.txt               │
+                       │     B/op      │    B/op     vs base                 │
+Same-8                    144.0 ± 0%     144.0 ± 0%        ~ (p=1.000 n=8) ¹
+Zero-8                     0.00 ± 0%     40.00 ± 0%        ? (p=0.000 n=8)
+Sub/s-8                   40.00 ± 0%     40.00 ± 0%        ~ (p=1.000 n=8) ¹
+Sub/ssssssssssssssss-8    336.0 ± 0%     336.0 ± 0%        ~ (p=1.000 n=8) ¹
+Faster-8                 432.00 ± 0%     64.00 ± 0%  -85.19% (p=0.000 n=8)
+Metric-8                  144.0 ± 0%     144.0 ± 0%        ~ (p=1.000 n=8) ¹
+geomean                              ²   94.53       ?
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+                       │   old.txt    │            new.txt            │
+                       │  allocs/op   │ allocs/op   vs base           │
+Same-8                   2.000 ± 0%     2.000 ± 0%  ~ (p=1.000 n=8) ¹
+Zero-8                   0.000 ± 0%     2.000 ± 0%  ? (p=0.000 n=8)
+Sub/s-8                  2.000 ± 0%     2.000 ± 0%  ~ (p=1.000 n=8) ¹
+Sub/ssssssssssssssss-8   2.000 ± 0%     2.000 ± 0%  ~ (p=1.000 n=8) ¹
+Faster-8                 2.000 ± 0%     2.000 ± 0%  ~ (p=1.000 n=8) ¹
+Metric-8                 2.000 ± 0%     2.000 ± 0%  ~ (p=1.000 n=8) ¹
+geomean                             ²   2.000       ?
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+         │  old.txt   │            new.txt            │
+         │ widgets/op │ widgets/op  vs base           │
+Metric-8   42.00 ± 0%   42.00 ± 0%  ~ (p=1.000 n=8) ¹
+¹ all samples are equal
+
+pkg: toy/b
+       │   old.txt   │               new.txt               │
+       │   sec/op    │    sec/op     vs base               │
+Same-8   142.2n ± 8%   254.3n ± 40%  +78.83% (p=0.000 n=8)
+
+       │  old.txt   │            new.txt            │
+       │    B/op    │    B/op     vs base           │
+Same-8   144.0 ± 0%   144.0 ± 0%  ~ (p=1.000 n=8) ¹
+¹ all samples are equal
+
+       │  old.txt   │            new.txt            │
+       │ allocs/op  │ allocs/op   vs base           │
+Same-8   2.000 ± 0%   2.000 ± 0%  ~ (p=1.000 n=8) ¹
+¹ all samples are equal

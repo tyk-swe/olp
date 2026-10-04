@@ -604,6 +604,9 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The upgrade carries no allowance or metadata headers. The provider is not
+	// dialled until the session is accepted, so there is no attempt to describe,
+	// and a WebSocket client does not read the rate-limit headers of an HTTP API.
 	client, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})

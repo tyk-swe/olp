@@ -27,6 +27,12 @@ const compactFormat = new Intl.NumberFormat(LOCALE, {
 const integerFormat = new Intl.NumberFormat(LOCALE, {
   maximumFractionDigits: 0
 });
+const signedPercentFormat = new Intl.NumberFormat(LOCALE, {
+  style: 'percent',
+  signDisplay: 'exceptZero',
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1
+});
 const fixedFormats = [0, 1, 2].map(
   (digits) =>
     new Intl.NumberFormat(LOCALE, {
@@ -70,6 +76,17 @@ export function formatCompact(
   const number = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(number)) return String(value);
   return compactFormat.format(number);
+}
+
+/**
+ * A signed ratio as a percentage, one decimal, with an explicit plus for a
+ * positive one: `+3.2%`, `-0.4%`. A ratio that rounds to zero carries no sign,
+ * and one that cannot be computed is a dash, never a zero.
+ */
+export function formatSignedPercent(ratio: number | null | undefined): string {
+  if (ratio === null || ratio === undefined || !Number.isFinite(ratio))
+    return '—';
+  return signedPercentFormat.format(ratio);
 }
 
 export function formatInteger(

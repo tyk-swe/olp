@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -162,6 +163,112 @@ func TestAccountingEventIsAccountable(t *testing.T) {
 	}
 	if event.Attempts[0].Routing.StreamedOutputTokens != nil {
 		t.Fatal("an attempt that reported no usage streamed no tokens")
+	}
+}
+
+func TestAccountingEventCarriesTheInputEstimateOfEachAttempt(t *testing.T) {
+	envelope := accountingEnvelope(t)
+	envelope.Attempts[0].ModelFamily = "anthropic"
+	envelope.Attempts[0].EstimatedInputTokens = 31
+	envelope.Attempts[0].EstimateProvenance = usage.EstimateHeuristic
+	envelope.Attempts[1].ModelFamily = "openai-o200k"
+	envelope.Attempts[1].EstimatedInputTokens = 5
+	envelope.Attempts[1].EstimateProvenance = usage.EstimateTokenizer
+
+	event := accountingEvent(envelope)
+	if event == nil {
+		t.Fatal("no event for a served request")
+	}
+	payload, err := usage.Encode(event)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	decoded, err := usage.Decode(payload)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, err = usage.Validate(decoded); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	// A background response parks its event as plain JSON on the resource and
+	// settles it later; the estimate must survive that detour too.
+	parked, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var settled usage.Event
+	if err = json.Unmarshal(parked, &settled); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for index, want := range []struct {
+		tokens     int64
+		provenance string
+		family     string
+	}{{31, usage.EstimateHeuristic, "anthropic"}, {5, usage.EstimateTokenizer, "openai-o200k"}} {
+		if got := settled.Attempts[index]; got.EstimatedInputTokens == nil || *got.EstimatedInputTokens != want.tokens ||
+			got.EstimateProvenance != want.provenance || got.ModelFamily != want.family {
+			t.Errorf("parked attempt %d lost its estimate: %+v", index+1, got)
+		}
+		got := decoded.Attempts[index]
+		if got.EstimatedInputTokens == nil || *got.EstimatedInputTokens != want.tokens ||
+			got.EstimateProvenance != want.provenance || got.ModelFamily != want.family {
+			t.Errorf("attempt %d estimate = %v %q %q, want %d %q %q", index+1,
+				got.EstimatedInputTokens, got.EstimateProvenance, got.ModelFamily,
+				want.tokens, want.provenance, want.family)
+		}
+	}
+}
+
+func TestAccountingEventLeavesUnestimatedAttemptsWithoutAnEstimate(t *testing.T) {
+	event := accountingEvent(accountingEnvelope(t))
+	if event == nil {
+		t.Fatal("no event for a served request")
+	}
+	for _, attempt := range event.Attempts {
+		if attempt.EstimatedInputTokens != nil || attempt.EstimateProvenance != "" || attempt.ModelFamily != "" {
+			t.Errorf("attempt %d = %+v, want no estimate", attempt.Ordinal, attempt)
+		}
+	}
+	// An estimate of zero tokens is still an estimate.
+	envelope := accountingEnvelope(t)
+	envelope.Attempts[1].EstimateProvenance = usage.EstimateTokenizer
+	event = accountingEvent(envelope)
+	if got := event.Attempts[1].EstimatedInputTokens; got == nil || *got != 0 {
+		t.Fatalf("estimate = %v, want a recorded zero", got)
+	}
+}
+
+// The estimate is an annotation. One the event contract would refuse is left
+// off, because the alternative is the sink dropping the whole billing record.
+func TestAccountingEventDropsAnEstimateTheContractWouldRefuse(t *testing.T) {
+	for name, mutate := range map[string]func(*AttemptFact){
+		"unknown provenance": func(f *AttemptFact) { f.EstimatedInputTokens, f.EstimateProvenance = 9, "guess" },
+		"malformed family": func(f *AttemptFact) {
+			f.EstimatedInputTokens, f.EstimateProvenance, f.ModelFamily = 9, usage.EstimateTokenizer, "OpenAI"
+		},
+		"tokens, no provenance": func(f *AttemptFact) { f.EstimatedInputTokens = 9 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			envelope := accountingEnvelope(t)
+			mutate(&envelope.Attempts[1])
+			event := accountingEvent(envelope)
+			if _, err := usage.Validate(event); err != nil {
+				t.Fatalf("the annotation cost the request its billing record: %v", err)
+			}
+			if got := event.Attempts[1]; got.EstimatedInputTokens != nil || got.EstimateProvenance != "" || got.ModelFamily != "" {
+				t.Fatalf("attempt = %+v, want the refused estimate left off", got)
+			}
+		})
+	}
+	// A negative estimate is a floor of zero, like the usage the provider reports.
+	envelope := accountingEnvelope(t)
+	envelope.Attempts[1].EstimatedInputTokens, envelope.Attempts[1].EstimateProvenance = -4, usage.EstimateHeuristic
+	event := accountingEvent(envelope)
+	if _, err := usage.Validate(event); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if got := event.Attempts[1].EstimatedInputTokens; got == nil || *got != 0 {
+		t.Fatalf("estimate = %v, want it floored at zero", got)
 	}
 }
 

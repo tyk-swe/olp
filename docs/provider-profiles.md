@@ -180,7 +180,23 @@ arbitrary query setting can change destination or credential scope.
 | `tls_handshake_timeout_ms` | TLS phase budget, 1–120000 ms. |
 | `response_header_timeout_ms` | Response-header deadline, 1–600000 ms. |
 | `idle_conn_timeout_ms` | Idle pooled-connection lifetime, 1–3600000 ms. |
-| `max_idle_conns`, `max_idle_conns_per_host`, `max_conns_per_host` | Positive bounded pool settings, at most 4096. |
+| `max_idle_conns`, `max_idle_conns_per_host`, `max_conns_per_host` | Positive bounded pool settings, at most 4096. A pool that sets none has 128, 16 and 64. |
+
+A provider has one of two kinds of connection pool, and which one depends on
+whether `options.network` exists. A provider with no `options.network` and no
+profile shares the gateway's own transport: it keeps at most 16 idle connections
+to a host and puts no limit on the connections it opens to one. Setting any
+`options.network` field, even `connect_timeout_ms` alone, or selecting a provider
+profile, gives the provider a pool of its own for each credential slot, and that
+pool is capped at 64 connections to a host, 16 of them idle and 128 idle in all,
+unless the settings above say otherwise. A request waits inside the transport for
+a connection the cap does not allow, with no error, no admission rejection and no
+open circuit, so over HTTP/1.1 the latency of everything past the 64th request in
+flight at one slot grows by the queue. A provider that carries more concurrent
+streams than that raises `max_conns_per_host` and `max_idle_conns_per_host` (a
+pool never takes more than 4,096) or spreads its traffic over more credential
+slots or providers, whose pools are separate. See
+[provider connection capacity](deployment.md#provider-connection-capacity).
 
 Both the proxy and every destination DNS answer pass the existing egress policy.
 CONNECT and SOCKS requests carry locally validated destination IPs while preserving

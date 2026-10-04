@@ -109,7 +109,7 @@ func TestConfiguredDefaultBoundsReachSharedAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	x := &execution{parsed: request, attempts: []runtime.Attempt{{ProviderID: provider.ID, UpstreamModel: modelA}}}
-	if got := x.providerEstimate(&provider); got < 9001 {
+	if got := x.attemptReservation(x.attempts[0], &provider); got < 9001 {
 		t.Fatalf("configured bound omitted from shared reservation: %d", got)
 	}
 	prepared, err := x.preparedProvider(&provider, modelA)

@@ -266,6 +266,22 @@
         access. Provider state may retain user content at the upstream provider.
       </p>
     </fieldset>
+    <fieldset class="checks">
+      <legend>Response metadata</legend>
+      <label
+        ><input
+          type="checkbox"
+          bind:checked={form.responseMetadata}
+          disabled={!canManage}
+        />
+        Add gateway metadata headers</label
+      >
+      <p class="section-help">
+        Adds X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost
+        to inference responses. The gateway names the serving provider only with
+        this opt-in; an upstream's own error message is relayed as it is.
+      </p>
+    </fieldset>
     <fieldset class="checks routes">
       <legend>Allowed route slugs</legend>
       <p>
@@ -423,11 +439,12 @@
     <p class="section-help">
       {#if services.limitsEnforced}Amounts use the installation pricing
         currency. Daily and monthly windows reset at midnight UTC. Budgeted
-        requests are refused when Valkey is unavailable. These are accrued-cost
-        thresholds: accepted concurrent work can exceed them, and unpriced
-        attempts accrue no cost. Leave blank for no cost budget.{:else}Save
-        daily and monthly budget amounts for future enforcement. Spending is not
-        measured or restricted yet.{/if}
+        requests are refused when Valkey is unavailable. A request must fit
+        beside the spend so far and the estimated cost of requests still
+        running; unpriced attempts accrue no cost and some operations are not
+        estimated, so these are not invoice caps. Leave blank for no cost
+        budget.{:else}Save daily and monthly budget amounts for future
+        enforcement. Spending is not measured or restricted yet.{/if}
     </p>
     <div class="form-grid budget-inputs">
       <div class="form-field">

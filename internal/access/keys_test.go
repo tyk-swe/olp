@@ -1,6 +1,7 @@
 package access
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
@@ -161,5 +162,31 @@ func TestParseProjectIDCanonicalises(t *testing.T) {
 	}
 	if got, err := parseProjectID(nil); got != nil || err != nil {
 		t.Fatalf("absent project id = %v, %v", got, err)
+	}
+}
+
+func TestKeyPolicyResponseMetadataIsOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		policy string
+		want   bool
+	}{
+		{"stored before the policy existed", `{"scopes":["inference"],"allowed_routes":[]}`, false},
+		{"explicitly off", `{"response_metadata":false}`, false},
+		{"opted in", `{"response_metadata":true}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var policy KeyPolicy
+			if err := json.Unmarshal([]byte(tc.policy), &policy); err != nil {
+				t.Fatal(err)
+			}
+			if policy.ResponseMetadata != tc.want {
+				t.Fatalf("response_metadata = %v, want %v", policy.ResponseMetadata, tc.want)
+			}
+		})
+	}
+	encoded, err := json.Marshal(KeyPolicy{ResponseMetadata: true})
+	if err != nil || !strings.Contains(string(encoded), `"response_metadata":true`) {
+		t.Fatalf("stored policy = %s, %v", encoded, err)
 	}
 }

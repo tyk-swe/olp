@@ -17,6 +17,7 @@
     budgetWindowState
   } from '$lib/features/access/api-keys/budgetPresentation';
   import UsageChart from '$lib/features/usage/UsageChart.svelte';
+  import { presentEstimate } from '$lib/features/usage/estimatePresentation';
   import UsageCompletenessStatus from '$lib/features/usage/UsageCompletenessStatus.svelte';
   import { errorMessage } from '$lib/api/http';
   import {
@@ -183,8 +184,10 @@
       >Break down by <select bind:value={draft.dimension}
         ><option value="route">Route</option><option value="provider"
           >Provider</option
-        ><option value="model">Model</option><option value="api_key"
-          >API key</option
+        ><option value="model">Model</option><option value="model_family"
+          >Model family</option
+        ><option value="estimate_provenance">Estimate provenance</option><option
+          value="api_key">API key</option
         ><option value="operation">Operation</option><option value="attribution"
           >Attribution</option
         ></select
@@ -220,6 +223,7 @@
     >
   </div>
 {:else if usage.data}
+  {@const estimate = presentEstimate(usage.data.summary)}
   <UsageCompletenessStatus completeness={usage.data.completeness} />
 
   {#if usage.data.apiKey}
@@ -398,6 +402,15 @@
         )}</strong
       >
     </article>
+    <article class="card metric-card">
+      <p>Input estimate error</p>
+      <strong>{estimate.error}</strong>
+      <small
+        >{estimate.note}{#if estimate.hasSample}
+          {estimate.comparison} estimated / reported input across {estimate.sample}
+          that had both.{/if}</small
+      >
+    </article>
   </section>
 
   <UsageChart
@@ -440,19 +453,23 @@
                 scope="col">Requests</th
               ><th scope="col">Input tokens</th><th scope="col">Cached input</th
               ><th scope="col">Cache write</th><th scope="col">Output tokens</th
+              ><th scope="col">Estimated / reported input</th><th scope="col"
+                >Estimate error</th
               ><th scope="col">Estimated cost</th><th scope="col"
                 >Completeness</th
               ></tr
             ></thead
           >
           <tbody
-            >{#each usage.data.breakdown as row (row.dimension)}<tr
+            >{#each usage.data.breakdown as row (row.dimension)}{@const rowEstimate =
+                presentEstimate(row)}<tr
                 ><td><strong>{row.dimension}</strong></td><td
                   >{formatCompact(row.request_count)}</td
                 ><td>{formatCompact(row.input_tokens)}</td><td
                   >{formatCompact(row.cached_input_tokens)}</td
                 ><td>{formatCompact(row.cache_write_input_tokens)}</td><td
                   >{formatCompact(row.output_tokens)}</td
+                ><td>{rowEstimate.comparison}</td><td>{rowEstimate.error}</td
                 ><td>{formatCost(row.estimated_cost, row.currency)}</td><td
                   >{#if row.incomplete_count > 0}<span class="badge danger"
                       >{row.incomplete_count} incomplete</span

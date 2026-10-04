@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 )
 
 const teiDocs = "https://github.com/huggingface/text-embeddings-inference/blob/29ccc53ba56c9b4f4de8f19a14858d527fab680d/router/src/http/types.rs"
@@ -130,7 +131,7 @@ func Definitions() []operations.Dialect {
 	scoring.RequestSchema = operations.ObjectSchema(map[string]any{"inputs": map[string]any{"type": "object", "required": []string{"source_sentence", "sentences"}, "properties": map[string]any{"source_sentence": map[string]any{"type": "string"}, "sentences": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}}}, "parameters": map[string]any{"type": []string{"object", "null"}}}, "inputs")
 	scoring.ResultSchema = operations.Raw(map[string]any{"type": "array", "items": map[string]any{"type": "number"}, "description": "One unchanged similarity score per input sentence, in original order."})
 	for _, d := range []*operations.Dialect{&moderation, &predict, &scoring} {
-		d.Estimate = estimate
+		d.Estimate = documentEstimate
 	}
 	return []operations.Dialect{moderation, predict, scoring}
 }
@@ -141,7 +142,7 @@ func bindModel(doc oif.Document, model string) ([]oif.Change, error) {
 	encoded, _ := json.Marshal(model)
 	return []oif.Change{{Pointer: "/model", Value: string(encoded), Origin: oif.IdentityBinding, Reason: "published model binding"}}, nil
 }
-func estimate(view oif.View) int64 {
+func documentEstimate(view oif.View) int64 {
 	var source oif.Request
 	switch r := view.(type) {
 	case ModerationRequest:
@@ -151,7 +152,7 @@ func estimate(view oif.View) int64 {
 	case ScoringRequest:
 		source = r.source
 	}
-	return int64((len(source.Document().Raw()) + 3) / 4)
+	return estimate.HeuristicBytesTokens(len(source.Document().Raw()))
 }
 func boolean() operations.Field {
 	return operations.FieldSchema(map[string]any{"type": "boolean"}, func(v oif.Value) error {

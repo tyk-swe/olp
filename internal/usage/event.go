@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 
@@ -72,6 +73,72 @@ type Attempt struct {
 	LatencyMS     int64         `json:"latency_ms"`
 	FirstByteMS   *int64        `json:"first_byte_ms"`
 	Usage         *AttemptUsage `json:"usage,omitempty"`
+	// EstimatedInputTokens is what admission estimated this attempt's input to
+	// be before the provider reported it, so a report can set the two side by
+	// side. EstimateProvenance says how it was produced, one of the Estimate*
+	// constants. They are absent together when no estimate was made, as for a
+	// stored-response call, a realtime session or a job poll. ModelFamily names
+	// the tokenizer family of the attempt's model, which an attempt records
+	// whether or not it was estimated; it is empty only on events from before
+	// families were recorded. Like Routing and Usage they are omitted when
+	// empty, so such events decode to the zero value.
+	EstimatedInputTokens *int64 `json:"estimated_input_tokens,omitempty"`
+	EstimateProvenance   string `json:"estimate_provenance,omitempty"`
+	ModelFamily          string `json:"model_family,omitempty"`
+}
+
+// How an attempt's input estimate was produced.
+const (
+	// EstimateTokenizer is an exact count by the family's own tokenizer of a
+	// prompt that is all text and message framing.
+	EstimateTokenizer = "tokenizer"
+	// EstimateCalibrated is a count that is partly a ratio or a guess: the
+	// characters-per-token heuristic scaled by a per-family factor, a tokenizer
+	// count extrapolated past its bound, or one that also charges images, media,
+	// tool schemas or tool calls.
+	EstimateCalibrated = "calibrated"
+	// EstimateHeuristic is the unscaled characters-per-token heuristic, which
+	// also prices the tail of a long prompt that follows too little exact text
+	// to measure a ratio from.
+	EstimateHeuristic = "heuristic"
+)
+
+var knownEstimateProvenances = map[string]struct{}{
+	EstimateTokenizer: {}, EstimateCalibrated: {}, EstimateHeuristic: {},
+}
+
+// modelFamilyPattern bounds a model family label. The set of families grows
+// with the reference catalogue, so the label is checked for shape here and the
+// producer owns which names exist.
+var modelFamilyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+
+// ValidEstimate reports whether an attempt's estimate fields can be recorded as
+// they are, for producers that would rather leave an annotation off than lose
+// the event it rides on.
+func ValidEstimate(tokens *int64, provenance, family string) bool {
+	return checkEstimate(tokens, provenance, family) == nil
+}
+
+// checkEstimate reports why an attempt's estimate fields cannot be stored. The
+// fact table enforces the same rules, and an event it would refuse must never
+// reach it: the persisting transaction would abort after the delivery was
+// acknowledged and be retried forever.
+func checkEstimate(tokens *int64, provenance, family string) error {
+	switch {
+	case tokens != nil && *tokens < 0:
+		return errors.New("input estimate is negative")
+	case (tokens == nil) != (provenance == ""):
+		return errors.New("input estimate and its provenance must appear together")
+	}
+	if provenance != "" {
+		if _, ok := knownEstimateProvenances[provenance]; !ok {
+			return errors.New("estimate provenance is unknown")
+		}
+	}
+	if family != "" && !modelFamilyPattern.MatchString(family) {
+		return errors.New("model family is malformed")
+	}
+	return nil
 }
 
 // AttemptUsage is the billing evidence one attempt produced. `Observed` says
@@ -195,6 +262,11 @@ type wireAttempt struct {
 	LatencyMS     *uint64      `json:"latency_ms"`
 	FirstByteMS   *uint64      `json:"first_byte_ms"`
 	Usage         *wireUsage   `json:"usage"`
+	// The estimate fields are optional on the wire: an event written before
+	// estimates were recorded carries none of them.
+	EstimatedInputTokens *int64  `json:"estimated_input_tokens"`
+	EstimateProvenance   *string `json:"estimate_provenance"`
+	ModelFamily          *string `json:"model_family"`
 }
 
 type wireUsage struct {
@@ -388,6 +460,16 @@ func (w wireAttempt) decode() (*Attempt, error) {
 		if attempt.Usage, err = w.Usage.decode(); err != nil {
 			return nil, err
 		}
+	}
+	attempt.EstimatedInputTokens = w.EstimatedInputTokens
+	if w.EstimateProvenance != nil {
+		attempt.EstimateProvenance = *w.EstimateProvenance
+	}
+	if w.ModelFamily != nil {
+		attempt.ModelFamily = *w.ModelFamily
+	}
+	if err = checkEstimate(attempt.EstimatedInputTokens, attempt.EstimateProvenance, attempt.ModelFamily); err != nil {
+		return nil, fmt.Errorf("request metadata %w", err)
 	}
 	return attempt, nil
 }
@@ -682,6 +764,9 @@ func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
 	usage, err := validateUsage(attempt.Usage, index)
 	if err != nil {
 		return nil, err
+	}
+	if err = checkEstimate(attempt.EstimatedInputTokens, attempt.EstimateProvenance, attempt.ModelFamily); err != nil {
+		return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 	}
 	validated := &ValidatedAttempt{
 		Attempt:    attempt,

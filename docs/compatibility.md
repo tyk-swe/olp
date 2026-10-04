@@ -132,6 +132,25 @@ usage are recorded as billing-uncertain.
 | `GET /anthropic/v1/models` | model_list | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
 | `GET /anthropic/v1/models/{id}` | model_get | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
 
+A Messages request may carry `system` messages between turns, as Claude Code
+sends them. The fields of an Anthropic beta travel with the `Anthropic-Beta`
+header, so an Anthropic upstream receives the caller's header when the route
+hands it the caller's own request: on a strict route through the
+`anthropic-messages` profile, and on a transformed route to a provider that
+takes it, an Anthropic provider or one whose profile declares the header, as the
+Vertex AI hosting of Claude does. A request translated from another dialect
+carries none, and neither does Bedrock InvokeModel. A provider whose profile
+publishes `Anthropic-Beta` among its semantic headers is sent its own betas and
+the caller's, each once, since the caller's fields need theirs; a strict route
+refuses a caller's list that differs from the published one with
+`semantic_header_conflict`, because its profile binds one value. A header not a
+valid header value, longer than 2048 bytes, or longer than that once joined with
+a provider's published betas, is refused wherever it could be forwarded. The
+Anthropic SDKs add `?beta=true` to the beta namespace's calls; a strict route
+consumes it, since it selects no behavior, and refuses any other query setting
+the profile does not declare. See
+[Client compatibility](clients.md#claude-code).
+
 ### Gemini surface
 
 Gemini endpoints are served under both `/gemini/v1` and `/gemini/v1beta`.
@@ -198,6 +217,12 @@ unsupported response and stream extensions are dropped. The Anthropic and Gemini
 request fixtures in `tests/fixtures/protocols/` cover preservation of fields
 such as `cache_control`, `metadata`, `topK`, and `safetySettings`.
 
+A system message between turns, which Claude Code sends, is kept in place where
+the target can place it and refused where it cannot: Anthropic, Gemini, and
+Bedrock Converse have one system field ahead of the conversation, so a request
+translated to them with a late system message fails with `unsupported_parameter`
+instead of moving the message to the front.
+
 `tests/fixtures/protocols/selected-operation-families.json` covers every
 operation family and surface. Keep these tables aligned with the
 [protocol suites](../internal/protocols/translation_test.go) when semantics
@@ -237,6 +262,18 @@ rather than guessed. These checks live in the
 [connector capability rules](../internal/connectors/capabilities.go) enforce
 unary token counting and refuse asynchronous generation. Preserved counting
 requests are validated after model rewriting as well.
+
+Gemini takes a schema in two kinds of field. `parameters` and `responseSchema`
+take an OpenAPI subset and refuse any member outside it, which OpenAI and
+Anthropic clients routinely send (`$schema`, `additionalProperties`, `$ref`,
+`const`, `oneOf`, a `type` that is a list, an `enum` of anything but strings);
+`parametersJsonSchema` and `responseJsonSchema` take JSON Schema as it is, as
+Google's own SDKs send it. A translated request puts a tool or response schema
+in the subset field when every member of it is in the subset, so such a schema
+reaches Gemini as it always did, and in the JSON Schema field when any is not,
+so the schema reaches the model whole and is never rewritten or trimmed. The other direction rewrites only what
+the two dialects spell differently: a Gemini schema's capital type names
+(`OBJECT`, `STRING`) become the lower-case names of JSON Schema.
 
 Gemini reports a `STOP` finish reason even when a candidate contains only
 function calls. The gateway corrects that to a tool-call finish reason so agent

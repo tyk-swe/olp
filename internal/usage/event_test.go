@@ -213,6 +213,23 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 			units := "1.2.3"
 			e.Attempts[1].Usage.MediaUnits = &units
 		}},
+		{"negative input estimate", func(e *Event) {
+			estimated := int64(-1)
+			e.Attempts[1].EstimatedInputTokens, e.Attempts[1].EstimateProvenance = &estimated, EstimateTokenizer
+		}},
+		{"input estimate without provenance", func(e *Event) {
+			estimated := int64(12)
+			e.Attempts[1].EstimatedInputTokens = &estimated
+		}},
+		{"estimate provenance without an input estimate", func(e *Event) {
+			e.Attempts[1].EstimateProvenance = EstimateHeuristic
+		}},
+		{"unknown estimate provenance", func(e *Event) {
+			estimated := int64(12)
+			e.Attempts[1].EstimatedInputTokens, e.Attempts[1].EstimateProvenance = &estimated, "guess"
+		}},
+		{"malformed model family", func(e *Event) { e.Attempts[1].ModelFamily = "OpenAI o200k" }},
+		{"oversized model family", func(e *Event) { e.Attempts[1].ModelFamily = "f" + strings.Repeat("a", 64) }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -404,6 +421,107 @@ func decodedMatches(t *testing.T, want *Event, got *Event) bool {
 	return string(wantJSON) == string(gotJSON)
 }
 
+func TestEncodeDecodeRoundTripCarriesTheInputEstimate(t *testing.T) {
+	event := metadataEvent()
+	estimated := int64(7)
+	event.Attempts[0].ModelFamily = "anthropic"
+	event.Attempts[1].EstimatedInputTokens = &estimated
+	event.Attempts[1].EstimateProvenance = EstimateCalibrated
+	event.Attempts[1].ModelFamily = "openai-o200k"
+
+	payload, err := Encode(event)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	decoded, err := Decode(payload)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !decodedMatches(t, event, decoded) {
+		t.Errorf("round trip changed the event:\n got %s", payload)
+	}
+	if decoded.Attempts[0].EstimatedInputTokens != nil || decoded.Attempts[0].EstimateProvenance != "" ||
+		decoded.Attempts[0].ModelFamily != "anthropic" {
+		t.Errorf("first attempt = %+v, want a family and no estimate", decoded.Attempts[0])
+	}
+	final := decoded.Attempts[1]
+	if final.EstimatedInputTokens == nil || *final.EstimatedInputTokens != 7 ||
+		final.EstimateProvenance != EstimateCalibrated || final.ModelFamily != "openai-o200k" {
+		t.Errorf("final attempt = %+v, want estimate 7 calibrated for openai-o200k", final)
+	}
+	if _, err = Validate(decoded); err != nil {
+		t.Fatalf("validate round trip: %v", err)
+	}
+}
+
+// An estimate of zero is an estimate: it is stored, not mistaken for none.
+func TestEncodeDecodeRoundTripKeepsAZeroEstimate(t *testing.T) {
+	event := metadataEvent()
+	zero := int64(0)
+	event.Attempts[1].EstimatedInputTokens, event.Attempts[1].EstimateProvenance = &zero, EstimateTokenizer
+	payload, err := Encode(event)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	decoded, err := Decode(payload)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := decoded.Attempts[1].EstimatedInputTokens
+	if got == nil || *got != 0 || decoded.Attempts[1].EstimateProvenance != EstimateTokenizer {
+		t.Fatalf("attempt = %+v, want a zero tokenizer estimate", decoded.Attempts[1])
+	}
+}
+
+// Events written before estimates were recorded carry none of the keys, and
+// remain the same version: they decode, validate and read as never estimated.
+func TestDecodeAcceptsAttemptsWrittenBeforeEstimatesWereRecorded(t *testing.T) {
+	payload, err := Encode(metadataEvent())
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	for _, key := range []string{"estimated_input_tokens", "estimate_provenance", "model_family"} {
+		if strings.Contains(string(payload), key) {
+			t.Fatalf("an unestimated attempt wrote %s: %s", key, payload)
+		}
+	}
+	decoded, err := Decode(payload)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, attempt := range decoded.Attempts {
+		if attempt.EstimatedInputTokens != nil || attempt.EstimateProvenance != "" || attempt.ModelFamily != "" {
+			t.Errorf("attempt %d = %+v, want no estimate", attempt.Ordinal, attempt)
+		}
+	}
+	if _, err = Validate(decoded); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+}
+
+// An explicit null or empty value is the same as an absent one.
+func TestDecodeReadsNullEstimateFieldsAsAbsent(t *testing.T) {
+	payload, err := Encode(metadataEvent())
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var envelope map[string]json.RawMessage
+	if err = json.Unmarshal(payload, &envelope); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	withAttemptFields(t, map[string]string{
+		"estimated_input_tokens": `null`, "estimate_provenance": `null`, "model_family": `""`,
+	})(envelope)
+	decoded, err := Decode(marshalForTest(t, envelope))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if attempt := decoded.Attempts[0]; attempt.EstimatedInputTokens != nil ||
+		attempt.EstimateProvenance != "" || attempt.ModelFamily != "" {
+		t.Errorf("attempt = %+v, want no estimate", attempt)
+	}
+}
+
 func TestEncodePreAttemptEventCarriesAnEmptyAttemptList(t *testing.T) {
 	event := metadataEvent()
 	event.Attempts = nil
@@ -482,6 +600,33 @@ func TestSerializedEventCarriesNoContentFields(t *testing.T) {
 	// The first attempt never carried routing or usage evidence, so neither key
 	// is written at all.
 	assertJSONKeys(t, "pre-routing attempt", attempts[0], []string{
+		"committed", "completed_at", "error_class", "first_byte_ms", "id", "latency_ms",
+		"ordinal", "provider_id", "started_at", "status_code", "upstream_model", "usage",
+	})
+}
+
+func TestSerializedAttemptCarriesTheEstimateKeysOnlyWhenEstimated(t *testing.T) {
+	event := metadataEvent()
+	estimated := int64(7)
+	event.Attempts[1].EstimatedInputTokens = &estimated
+	event.Attempts[1].EstimateProvenance = EstimateTokenizer
+	event.Attempts[1].ModelFamily = "gemini"
+	payload, err := Encode(event)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var envelope struct {
+		Attempts []map[string]json.RawMessage `json:"attempts"`
+	}
+	if err = json.Unmarshal(payload, &envelope); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	assertJSONKeys(t, "estimated attempt", envelope.Attempts[1], []string{
+		"committed", "completed_at", "error_class", "estimate_provenance", "estimated_input_tokens",
+		"first_byte_ms", "id", "latency_ms", "model_family", "ordinal", "provider_id", "started_at",
+		"status_code", "upstream_model", "usage",
+	})
+	assertJSONKeys(t, "unestimated attempt", envelope.Attempts[0], []string{
 		"committed", "completed_at", "error_class", "first_byte_ms", "id", "latency_ms",
 		"ordinal", "provider_id", "started_at", "status_code", "upstream_model", "usage",
 	})
@@ -571,6 +716,24 @@ func TestDecodeRejectsMalformedFields(t *testing.T) {
 			attempts[0]["routing"] = json.RawMessage(`{"mode":"unary"}`)
 			m["attempts"] = marshalForTest(t, attempts)
 		}},
+		{"estimate is a string", withAttemptFields(t, map[string]string{
+			"estimated_input_tokens": `"12"`, "estimate_provenance": `"tokenizer"`})},
+		{"estimate is fractional", withAttemptFields(t, map[string]string{
+			"estimated_input_tokens": `1.5`, "estimate_provenance": `"tokenizer"`})},
+		{"estimate is negative", withAttemptFields(t, map[string]string{
+			"estimated_input_tokens": `-1`, "estimate_provenance": `"tokenizer"`})},
+		{"estimate without provenance", withAttemptFields(t, map[string]string{
+			"estimated_input_tokens": `12`})},
+		{"provenance without estimate", withAttemptFields(t, map[string]string{
+			"estimate_provenance": `"heuristic"`})},
+		{"provenance is unknown", withAttemptFields(t, map[string]string{
+			"estimated_input_tokens": `12`, "estimate_provenance": `"guess"`})},
+		{"provenance is a number", withAttemptFields(t, map[string]string{
+			"estimated_input_tokens": `12`, "estimate_provenance": `1`})},
+		{"model family is malformed", withAttemptFields(t, map[string]string{
+			"model_family": `"Not A Family"`})},
+		{"model family is a number", withAttemptFields(t, map[string]string{
+			"model_family": `7`})},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -587,6 +750,21 @@ func TestDecodeRejectsMalformedFields(t *testing.T) {
 				t.Error("a malformed payload must not read as an invalid event")
 			}
 		})
+	}
+}
+
+// withAttemptFields sets raw JSON fields on the first attempt of an envelope.
+func withAttemptFields(t *testing.T, fields map[string]string) func(map[string]json.RawMessage) {
+	t.Helper()
+	return func(m map[string]json.RawMessage) {
+		var attempts []map[string]json.RawMessage
+		if err := json.Unmarshal(m["attempts"], &attempts); err != nil {
+			t.Fatalf("unmarshal attempts: %v", err)
+		}
+		for key, value := range fields {
+			attempts[0][key] = json.RawMessage(value)
+		}
+		m["attempts"] = marshalForTest(t, attempts)
 	}
 }
 

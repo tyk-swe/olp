@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,17 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+// sbGroup creates a budget group with a daily budget, opens its balance, and
+// returns its identifier.
+func sbGroup(t *testing.T, f *glFixture, name, daily string) string {
+	t.Helper()
+	group := f.h.want(f.owner, "POST", "/api/v1/budget-groups",
+		map[string]any{"name": name, "daily_cost_limit": daily}, idem("group-"+name), 201)
+	id := group["id"].(string)
+	kbOpen(t, f, id)
+	return id
+}
 
 func TestSharedBudgetAdmission(t *testing.T) {
 	c := limClient(t)
@@ -60,6 +72,10 @@ func TestSharedBudgetAdmission(t *testing.T) {
 	}
 	if f.vendor.chats.Load() != served {
 		t.Fatal("a request over the shared budget reached the upstream")
+	}
+	// The group's budget is used up, which is what the answer says.
+	if message := kbMessage(t, f, secretA, nil); !strings.Contains(message, "was exhausted") {
+		t.Fatalf("an exhausted group budget refused with %q", message)
 	}
 
 	_, solo := f.key("solo", map[string]any{"requests_per_minute": 10})
@@ -217,6 +233,13 @@ func TestSharedBudgetAccounting(t *testing.T) {
 	if len(result.CostSnapshots) != 2 {
 		t.Fatalf("cost snapshots = %d, want one per owner", len(result.CostSnapshots))
 	}
+	// Each snapshot names the request it accounts for, which is how installing
+	// it removes the cost reserved for that request from the key and the group.
+	for _, snapshot := range result.CostSnapshots {
+		if snapshot.RequestID != event.RequestID {
+			t.Fatalf("snapshot for %s names request %q, want %q", snapshot.CostOwnerID, snapshot.RequestID, event.RequestID)
+		}
+	}
 	var keySnapshot, groupSnapshot *limits.CostSnapshot
 	for i := range result.CostSnapshots {
 		switch result.CostSnapshots[i].CostOwnerID {
@@ -311,4 +334,153 @@ func TestSharedBudgetAccounting(t *testing.T) {
 	if storedGroup == nil || *storedGroup != groupA {
 		t.Fatalf("second fact attributed to %v, want the admitted group %s", storedGroup, groupA)
 	}
+}
+
+// TestSharedBudgetAdmissionReservesTheEstimatedCost proves a budget group is
+// measured the way a key is: what a request could cost has to fit beside what the
+// group has spent and what its members' requests in flight hold, and when the
+// request ends the group holds what it cost.
+func TestSharedBudgetAdmissionReservesTheEstimatedCost(t *testing.T) {
+	f := glSeedIn(t, "shared-estimate", kbPrice)
+	groupID := sbGroup(t, f, "shared estimate", "0.03")
+	keyID, secretA := f.key("estimate-a", map[string]any{"budget_group_id": groupID})
+	_, secretB := f.key("estimate-b", map[string]any{"budget_group_id": groupID})
+	bounded := map[string]any{"max_tokens": 16}
+
+	// No reply bound, so the request could cost far more than the group holds.
+	served := f.vendor.chats.Load()
+	if status, code, _ := f.chat(secretA); status != http.StatusTooManyRequests || code != "budget_exhausted" {
+		t.Fatalf("a request that could cost more than the group budget: %d %s", status, code)
+	}
+	if f.vendor.chats.Load() != served {
+		t.Fatal("a request the group refused reached the upstream")
+	}
+	if got := kbReserved(t, f, groupID); got != "0" {
+		t.Fatalf("a refused request reserved %q against the group", got)
+	}
+	// Nothing is spent, so the group is not exhausted: it is the request that does
+	// not fit.
+	if message := kbMessage(t, f, secretA, nil); !strings.Contains(message, "cannot cover this request's estimated cost") {
+		t.Fatalf("the group refused an estimate that does not fit with %q", message)
+	}
+
+	// A member's request in flight holds the group's budget against the others.
+	f.vendor.delay.Store(int64(200 * time.Millisecond))
+	defer f.vendor.delay.Store(0)
+	streamed := make(chan int, 1)
+	go func() {
+		status, _ := glStreamWith(t.Context(), f.h, secretA, bounded)
+		streamed <- status
+	}()
+	glInFlight(t, f.vendor, served)
+	if got := kbReserved(t, f, groupID); got != kbBounded {
+		t.Fatalf("an in-flight request holds %q of the group, want %q", got, kbBounded)
+	}
+	status, code, header := f.chatWith(secretB, bounded)
+	if status != http.StatusTooManyRequests || code != "budget_exhausted" {
+		t.Fatalf("another member while one is in flight: %d %s", status, code)
+	}
+	if retry := glRetryAfter(t, header); retry != 1 {
+		t.Fatalf("Retry-After %d, want the one second a reservation takes to clear", retry)
+	}
+	if status := <-streamed; status != http.StatusOK {
+		t.Fatalf("streamed request: %d", status)
+	}
+	f.vendor.delay.Store(0)
+
+	// It cost 0.0064, which is what the group now holds, and the member has no
+	// budget of its own to hold anything.
+	kbWaitReserved(t, f, groupID, kbActual)
+	if got := kbReserved(t, f, keyID); got != "0" {
+		t.Fatalf("a key without a cost budget holds %q", got)
+	}
+	if status, code, _ := f.chatWith(secretB, bounded); status != http.StatusOK {
+		t.Fatalf("another member once it ended: %d %s", status, code)
+	}
+	kbWaitReserved(t, f, groupID, "0.0128")
+}
+
+// TestSharedBudgetLeaseIsReleasedWhenTheKeyRefuses proves a request refused after
+// the group's budget was reserved gives it back: whichever of the key's own limits
+// refuses it, and the early answer for a request no token window could hold.
+func TestSharedBudgetLeaseIsReleasedWhenTheKeyRefuses(t *testing.T) {
+	f := glSeedIn(t, "shared-release", kbPrice)
+	groupID := sbGroup(t, f, "shared release", "10.00")
+	bounded := map[string]any{"max_tokens": 16}
+
+	t.Run("the key's own cost budget", func(t *testing.T) {
+		_, secret := kbBudgetedKey(t, f, "own-budget", "0.01", map[string]any{"budget_group_id": groupID})
+		served := f.vendor.chats.Load()
+		if status, code, _ := f.chatWith(secret, bounded); status != http.StatusTooManyRequests || code != "budget_exhausted" {
+			t.Fatalf("a request that could cost more than the key's budget: %d %s", status, code)
+		}
+		if f.vendor.chats.Load() != served {
+			t.Fatal("a request the key's budget refused reached the upstream")
+		}
+		if got := kbReserved(t, f, groupID); got != "0" {
+			t.Fatalf("the group still holds %q for a request its member refused", got)
+		}
+	})
+
+	t.Run("the key's request limit", func(t *testing.T) {
+		_, secret := f.key("request-limit", map[string]any{"budget_group_id": groupID, "requests_per_minute": 1})
+		if status, code, _ := f.chatWith(secret, bounded); status != http.StatusOK {
+			t.Fatalf("first request: %d %s", status, code)
+		}
+		kbWaitReserved(t, f, groupID, kbActual)
+		if status, code, _ := f.chatWith(secret, bounded); status != http.StatusTooManyRequests || code != "rate_limit_exceeded" {
+			t.Fatalf("second request: %d %s", status, code)
+		}
+		// Only what the first request cost: the second held the group's budget
+		// for the moment it took to be refused.
+		kbWaitReserved(t, f, groupID, kbActual)
+	})
+
+	t.Run("a request no token window can hold", func(t *testing.T) {
+		_, secret := f.key("token-limit", map[string]any{"budget_group_id": groupID, "tokens_per_minute": 16})
+		status, code, _ := f.chat(secret)
+		if status != http.StatusBadRequest || code != "request_exceeds_token_limit" {
+			t.Fatalf("oversized request: %d %s", status, code)
+		}
+		kbWaitReserved(t, f, groupID, kbActual)
+	})
+}
+
+// TestSharedBudgetAccountingRemovesBothReservations proves one request's spend
+// replaces its reservation on the key and on the group, with the real pipeline
+// accounting it.
+func TestSharedBudgetAccountingRemovesBothReservations(t *testing.T) {
+	f := glSeedIn(t, "shared-accrual", kbPrice)
+	glAccounting(t, f)
+	groupID := sbGroup(t, f, "shared accrual", "1.00")
+	keyID, secret := kbBudgetedKey(t, f, "both", "1.00", map[string]any{"budget_group_id": groupID})
+
+	if status, code, _ := f.chatWith(secret, map[string]any{"max_tokens": 16}); status != http.StatusOK {
+		t.Fatalf("request: %d %s", status, code)
+	}
+	glEventually(t, "the spend to be accrued on the key and the group", func() bool {
+		return kbAccrued(t, f, keyID) == kbActual && kbAccrued(t, f, groupID) == kbActual
+	})
+	kbWaitReserved(t, f, keyID, "0")
+	kbWaitReserved(t, f, groupID, "0")
+}
+
+// TestSharedBudgetReleasedWhenMemberRequestNeverDispatches proves a member's
+// request that was admitted and then never reached an upstream gives back what it
+// reserved on its group, through the one lease that finishes both. Without the
+// group's share being refunded, the request would hold the group's budget until it
+// lapsed, and its other members would be refused for spend that never happened.
+func TestSharedBudgetReleasedWhenMemberRequestNeverDispatches(t *testing.T) {
+	f := glSeedIn(t, "group-undispatched", kbPrice)
+	groupID := sbGroup(t, f, "undispatched", "10.00")
+	// The member needs a hard limit of its own: without one admission hands back
+	// the group's lease as it is, and the lease that finishes both is never made.
+	_, secret := f.key("member", map[string]any{"budget_group_id": groupID, "requests_per_minute": 100})
+	f.vendor.Close()
+	for attempt := range 2 {
+		if status, code, _ := f.chatWith(secret, map[string]any{"max_tokens": 16}); status != http.StatusBadGateway {
+			t.Fatalf("request %d: %d %s, want the unreachable upstream", attempt+1, status, code)
+		}
+	}
+	kbWaitReserved(t, f, groupID, "0")
 }

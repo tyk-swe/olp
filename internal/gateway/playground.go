@@ -466,6 +466,8 @@ func (sw *playgroundStreamWriter) write(event string, data []byte, limited bool)
 	}
 	rc := http.NewResponseController(sw.w)
 	if !sw.committed {
+		// The playground answers a signed-in member, not an API key: there is no
+		// allowance or key policy to state, so it adds no response headers.
 		sw.w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		sw.w.Header().Set("X-Accel-Buffering", "no")
 		sw.w.WriteHeader(http.StatusOK)

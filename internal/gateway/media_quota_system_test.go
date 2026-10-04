@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -217,6 +218,18 @@ func (f *mediaFixture) awaitCompleted(t *testing.T, minimum int64) {
 // mediaLimiter uses the disposable service provisioned by make integration.
 func mediaLimiter(t *testing.T) *limits.Limiter {
 	t.Helper()
+	client, namespace := mediaValkey(t)
+	limiter, err := limits.New(client, namespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return limiter
+}
+
+// mediaValkey connects to the disposable service provisioned by make integration
+// and names a namespace in it that is emptied when the test ends.
+func mediaValkey(t *testing.T) (*coordination.Client, string) {
+	t.Helper()
 	endpoint := os.Getenv("OLP_TEST_VALKEY_URL")
 	if endpoint == "" {
 		t.Fatal("OLP_TEST_VALKEY_URL is required; run make integration")
@@ -245,11 +258,33 @@ func mediaLimiter(t *testing.T) *limits.Limiter {
 			}
 		}
 	})
-	limiter, err := limits.New(client, namespace)
-	if err != nil {
-		t.Fatal(err)
+	return client, namespace
+}
+
+// mediaSettleInMinute waits out an imminent minute boundary, on Valkey's own
+// clock, which is the only one the limiter's fixed windows consult, so that a
+// test that spans several calls counts them in one window.
+func mediaSettleInMinute(t *testing.T, client *coordination.Client, minimum time.Duration) {
+	t.Helper()
+	now := func() int64 {
+		reply, err := client.Do(t.Context(), "TIME")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parts, ok := reply.([]any)
+		if !ok || len(parts) != 2 {
+			t.Fatalf("TIME = %#v", reply)
+		}
+		text, _ := parts[0].(string)
+		seconds, err := strconv.ParseInt(text, 10, 64)
+		if err != nil {
+			t.Fatalf("TIME seconds: %v", err)
+		}
+		return seconds
 	}
-	return limiter
+	if remaining := time.Duration(60-now()%60) * time.Second; remaining < minimum {
+		time.Sleep(remaining + 50*time.Millisecond)
+	}
 }
 
 func TestIntegrationMediaKeySettlementChargesDispatchedRequests(t *testing.T) {

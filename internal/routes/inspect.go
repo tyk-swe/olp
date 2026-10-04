@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 
 	"golang.org/x/net/http/httpguts"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
@@ -23,7 +25,12 @@ import (
 
 type inspectedDecision struct {
 	runtime.Decision
-	Interaction *interactionInspection `json:"interaction"`
+	// EstimateProvenance and ModelFamily say how the estimated input of the
+	// decision was counted and for which family of models. They are null when
+	// the caller supplied the estimate or sent no request to count.
+	EstimateProvenance *string                `json:"estimate_provenance"`
+	ModelFamily        *string                `json:"model_family"`
+	Interaction        *interactionInspection `json:"interaction"`
 }
 
 type interactionInspection struct {
@@ -193,33 +200,33 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 	return parsed, nil
 }
 
-func inspectionAccept(route runtime.Route, parsed *openai.Request, context interaction.Context, demand *runtime.TokenDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) ([]string, *runtime.TokenDemand), map[string]*interactionInspection) {
+func inspectionAccept(route runtime.Route, parsed *openai.Request, context interaction.Context, demand *simulatedDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
 	inspections := map[string]*interactionInspection{}
 	if parsed == nil {
 		return nil, nil, inspections
 	}
 	fidelity := route.Fidelity.Mode
 	effectiveRequests := map[string]*openai.Request{}
-	var effective func(runtime.Provider, runtime.Target) ([]string, *runtime.TokenDemand)
+	var effective func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand)
 	if route.Fidelity.Strict() {
-		effective = func(_ runtime.Provider, target runtime.Target) ([]string, *runtime.TokenDemand) {
+		effective = func(_ runtime.Provider, target runtime.Target) (runtime.Names, *runtime.TokenDemand) {
 			request := effectiveRequests[target.ID]
 			delete(effectiveRequests, target.ID)
 			if request == nil {
-				return nil, demand
+				return nil, demand.source(target)
 			}
-			output := runtime.EffectiveOutputLimit(request)
+			output := demand.outputBound(request)
 			var resolved *runtime.TokenDemand
-			if demand != nil || output != nil {
+			if prepared := demand.prepared(target, request); prepared != nil || output != nil {
 				resolved = &runtime.TokenDemand{MaxOutputTokens: output}
-				if demand != nil {
-					resolved.EstimatedInputTokens = demand.EstimatedInputTokens
+				if prepared != nil {
+					resolved.EstimatedInputTokens = prepared.EstimatedInputTokens
 					if output == nil {
-						resolved.MaxOutputTokens = demand.MaxOutputTokens
+						resolved.MaxOutputTokens = prepared.MaxOutputTokens
 					}
 				}
 			}
-			return protocols.ParameterNames(request), resolved
+			return sync.OnceValue(func() []string { return protocols.ParameterNames(request) }), resolved
 		}
 	}
 	accept := func(provider runtime.Provider, target runtime.Target) error {
@@ -311,7 +318,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 	return accept, effective, inspections
 }
 
-func inspectedDecisions(decisions []runtime.Decision, route runtime.Route, inspected bool, details map[string]*interactionInspection) []inspectedDecision {
+func inspectedDecisions(decisions []runtime.Decision, route runtime.Route, inspected bool, details map[string]*interactionInspection, estimates map[string]estimate.Estimate) []inspectedDecision {
 	result := make([]inspectedDecision, 0, len(decisions))
 	for _, decision := range decisions {
 		inspection := details[decision.TargetID]
@@ -322,7 +329,12 @@ func inspectedDecisions(decisions []runtime.Decision, route runtime.Route, inspe
 			}
 			inspection = &interactionInspection{Status: status, Fidelity: route.Fidelity.Mode, Evidence: []string{}}
 		}
-		result = append(result, inspectedDecision{Decision: decision, Interaction: inspection})
+		entry := inspectedDecision{Decision: decision, Interaction: inspection}
+		if e, ok := estimates[decision.TargetID]; ok {
+			provenance, family := string(e.Provenance), string(e.Family)
+			entry.EstimateProvenance, entry.ModelFamily = &provenance, &family
+		}
+		result = append(result, entry)
 	}
 	return result
 }

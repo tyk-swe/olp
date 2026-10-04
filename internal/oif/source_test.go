@@ -163,3 +163,114 @@ func FuzzSourceRetainsValidNativeLexemes(f *testing.F) {
 		}
 	})
 }
+
+// decoded is what encoding/json makes of a JSON string, which Text and Chars
+// are held to for every string a document can hold.
+func decoded(t testing.TB, raw string) string {
+	t.Helper()
+	var s string
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		t.Fatalf("%s: %v", raw, err)
+	}
+	return s
+}
+
+func TestStringsDecodeAsEncodingJSONDecodesThem(t *testing.T) {
+	for _, raw := range []string{
+		`""`, `"plain"`, `"café 日本語 😀"`, `"a\"b"`, `"\\"`, `"\/"`, `"\b\f\n\r\t"`,
+		`"\u0000"`, `"\u001f"`, `"Aéあ"`, `"😀"`, `"😀😀"`, `"􏿿"`, `"  "`,
+		`"line one\nline two\n"`, `"\\u0041"`, `"\\\\"`, `"trailing\\"`, `"\n"`, `"xAy\\z\"w"`,
+		`"` + strings.Repeat("The report says: \\\"slow\\\"\\n", 300) + `"`,
+	} {
+		v, _ := source(t, `{"s":`+raw+`}`).Lookup("/s")
+		want := decoded(t, raw)
+		if got, ok := v.Text(); !ok || got != want {
+			t.Errorf("Text of %.60s is %q, want %q", raw, got, want)
+		}
+		if got, ok := v.Chars(); !ok || got != want {
+			t.Errorf("Chars of %.60s is %q, want %q", raw, got, want)
+		}
+	}
+	for _, raw := range []string{`null`, `0`, `true`, `[]`, `{}`, `["a"]`} {
+		v, _ := source(t, `{"s":`+raw+`}`).Lookup("/s")
+		if text, ok := v.Text(); ok || text != "" {
+			t.Errorf("Text of %s is %q, %v", raw, text, ok)
+		}
+		if text, ok := v.Chars(); ok || text != "" {
+			t.Errorf("Chars of %s is %q, %v", raw, text, ok)
+		}
+	}
+	if text, ok := (oif.Value{}).Chars(); ok || text != "" {
+		t.Errorf("Chars of no value is %q, %v", text, ok)
+	}
+}
+
+// Chars reads a string that has no escape without copying it, which is what lets
+// the walk of a request's prompt read a 400 KB message as often as it likes at
+// the price of the one pass that decodes the rest.
+func TestCharsDoesNotCopyAStringWithNoEscape(t *testing.T) {
+	plain, _ := source(t, `{"s":"`+strings.Repeat("a long message ", 1000)+`"}`).Lookup("/s")
+	if got := testing.AllocsPerRun(20, func() { plain.Chars() }); got != 0 {
+		t.Errorf("Chars of a string with no escape allocates %v times", got)
+	}
+	if got := testing.AllocsPerRun(20, func() { plain.Text() }); got != 1 {
+		t.Errorf("Text of a string with no escape allocates %v times, want the one copy", got)
+	}
+	escaped, _ := source(t, `{"s":"`+strings.Repeat("a long message\\n", 1000)+`"}`).Lookup("/s")
+	if got := testing.AllocsPerRun(20, func() { escaped.Text() }); got != 1 {
+		t.Errorf("Text of a string with escapes allocates %v times, want its one decoded copy", got)
+	}
+}
+
+func FuzzStringsDecodeAsEncodingJSONDecodesThem(f *testing.F) {
+	for _, s := range []string{`{"a":"😀 x\n\"y\"\\"}`, `["\u0000\u001f","é\/","\\\\u0041"]`, `"plain"`, `{"k\n":{"k":["\t"]}}`} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		d, err := oif.ParseJSON(data, oif.Limits{MaxBytes: 8192, MaxNodes: 256, MaxDepth: 16})
+		if err != nil {
+			return
+		}
+		var visit func(v oif.Value)
+		visit = func(v oif.Value) {
+			switch v.Kind() {
+			case oif.String:
+				want := decoded(t, v.Raw())
+				if got, ok := v.Text(); !ok || got != want {
+					t.Fatalf("Text of %q is %q, want %q", v.Raw(), got, want)
+				}
+				if got, ok := v.Chars(); !ok || got != want {
+					t.Fatalf("Chars of %q is %q, want %q", v.Raw(), got, want)
+				}
+			case oif.Array:
+				for _, e := range v.Elements() {
+					visit(e)
+				}
+			case oif.Object:
+				for _, m := range v.Members() {
+					visit(m.Value)
+				}
+			}
+		}
+		visit(d.Root())
+	})
+}
+
+func TestFieldsWithoutLeavesOutOnlyTheNamedMembers(t *testing.T) {
+	d := source(t, `{"messages":[{"role":"user"}],"model":"m","":1,"a":null}`)
+	all := d.Fields()
+	if got := d.FieldsWithout(); len(got) != 4 || string(got["messages"]) != `[{"role":"user"}]` || string(got["a"]) != "null" {
+		t.Fatalf("no names left out %v of %v", got, all)
+	}
+	got := d.FieldsWithout("messages", "missing")
+	if len(got) != 3 || got["messages"] != nil || string(got["model"]) != `"m"` || string(got[""]) != "1" {
+		t.Fatalf("messages left out: %v", got)
+	}
+	// Left out of a copy, and not out of the document.
+	if v, ok := d.Lookup("/messages"); !ok || v.Raw() != `[{"role":"user"}]` {
+		t.Fatal("the document lost a member")
+	}
+	if got := source(t, `[1]`).FieldsWithout("a"); got != nil {
+		t.Fatalf("a document that is not an object has fields %v", got)
+	}
+}

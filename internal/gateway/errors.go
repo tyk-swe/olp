@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 // Error is an OpenAI-shaped error returned to inference clients.
@@ -17,6 +19,10 @@ type Error struct {
 	Param      *string
 	RetryAfter time.Duration
 	NoRetry    bool
+	// rate is the allowance of the key whose request limits refused the request,
+	// as its reservation measured it, for the rate-limit headers of a 429. It is
+	// zero for every other error.
+	rate limits.RateState
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
@@ -46,6 +52,7 @@ func writeSurfaceError(w http.ResponseWriter, e *Error, surface string) {
 	if e.RetryAfter > 0 {
 		h.Set("Retry-After", strconv.FormatInt(int64(math.Ceil(e.RetryAfter.Seconds())), 10))
 	}
+	setRateLimitHeaders(h, surface, e.rate)
 	w.WriteHeader(e.Status)
 	w.Write(e.surfaceBody(surface))
 }

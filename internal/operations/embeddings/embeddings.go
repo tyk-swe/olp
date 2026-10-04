@@ -12,6 +12,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 )
 
 var identity = oif.Identity{ID: "embeddings", Revision: operations.Revision}
@@ -325,7 +326,7 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 		return r, err
 	}
 	for _, text := range texts {
-		r.estimate += int64((len(text.Value) + 3) / 4)
+		r.estimate += estimate.HeuristicBytesTokens(len(text.Value))
 	}
 	if id == "openai-embeddings" || strings.HasPrefix(id, "tei-") {
 		r.estimate += tokenIDs(input)
@@ -400,9 +401,15 @@ func liftResult(source oif.Request, result oif.Result, id string) (Result, error
 		}
 	case "gemini-embeddings":
 		values = []oif.Value{operations.Member(operations.Member(root, "embedding"), "values")}
+		if out.usage, err = geminiUsage(root); err != nil {
+			return out, err
+		}
 	case "gemini-batch-embeddings":
 		for _, embedding := range operations.Member(root, "embeddings").Elements() {
 			values = append(values, operations.Member(embedding, "values"))
+		}
+		if out.usage, err = geminiUsage(root); err != nil {
+			return out, err
 		}
 	case "vertex-embeddings":
 		var tokens int64
@@ -582,6 +589,27 @@ func validateVector(value oif.Value, format Format, index int) (Vector, error) {
 	return vector, nil
 }
 
+// geminiUsage is the usage a Gemini embedding response reports in its
+// usageMetadata: the tokens of the prompt. A response that reports none has no
+// usage.
+func geminiUsage(root oif.Value) (*operations.Usage, error) {
+	metadata := operations.Member(root, "usageMetadata")
+	if operations.Optional(metadata) {
+		return nil, nil
+	}
+	if metadata.Kind() != oif.Object {
+		return nil, operations.Violation("/usageMetadata", "native_usage")
+	}
+	token := operations.Member(metadata, "promptTokenCount")
+	if operations.Optional(token) {
+		return nil, nil
+	}
+	n, ok := operations.Int(token)
+	if !ok || n < 0 {
+		return nil, operations.Violation("/usageMetadata/promptTokenCount", "native_usage")
+	}
+	return &operations.Usage{InputTokens: &n, TotalTokens: &n}, nil
+}
 func tokenUsage(value oif.Value, totalIsInput bool) (*operations.Usage, error) {
 	if value.Kind() != oif.Object {
 		return nil, operations.Violation("/usage", "native_usage")

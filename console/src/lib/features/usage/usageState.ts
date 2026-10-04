@@ -1,5 +1,8 @@
 import { instant } from '$lib/api/query';
-import type { UsageFilters } from '$lib/features/usage/api/usage';
+import type {
+  UsageDimension,
+  UsageFilters
+} from '$lib/features/usage/api/usage';
 import { dateTimeLocalValue } from '$lib/format';
 import { timeOrder, timeValid, UUID } from '$lib/lists/filters';
 
@@ -7,10 +10,12 @@ const dimensions = [
   'route',
   'provider',
   'model',
+  'model_family',
+  'estimate_provenance',
   'api_key',
   'operation',
   'attribution'
-] as const;
+] as const satisfies readonly UsageDimension[];
 const resources = [
   'route',
   'model',

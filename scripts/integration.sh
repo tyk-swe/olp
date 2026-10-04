@@ -59,6 +59,9 @@ go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestInt
 # fixture profiles cannot change the normal suite's fixed catalogue inventory.
 go test -race -tags=integration,extension -count=1 -timeout=5m -v -run '^TestRegisteredExtensionsPublic$' ./tests/integration
 OLP_SDK_SMOKE_SURFACES=openai,anthropic,gemini ./tests/sdk-smoke/run.sh
+# Pinned coding agents, agent SDKs and frameworks against a scripted upstream.
+# It starts its own gateway and uses none of the services above.
+./tests/clients/run.sh
 export OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" OLP_VALKEY_URL="$OLP_TEST_VALKEY_URL"
 # Browser OIDC uses a separate, explicitly test-only binary. Release builds
 # never allow loopback identity issuers.

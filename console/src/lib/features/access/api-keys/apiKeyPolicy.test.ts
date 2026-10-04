@@ -33,6 +33,7 @@ const key = {
   },
   expires_at: '2027-01-01T12:30:00Z',
   allow_provider_state: false,
+  response_metadata: true,
   allowed_attribution_keys: ['team'],
   revoked_at: null,
   rotated_at: null,
@@ -57,6 +58,7 @@ describe('API key form state', () => {
       monthlyCostLimit: '',
       expiresAt: '',
       allowProviderState: false,
+      responseMetadata: false,
       allowedAttributionKeys: []
     });
   });
@@ -68,6 +70,7 @@ describe('API key form state', () => {
       name: 'production SDK',
       allowedRoutes: ['default'],
       allowedAttributionKeys: ['team'],
+      responseMetadata: true,
       requestsPerMinute: '120',
       dailyCostLimit: '1.250000000001',
       monthlyCostLimit: '20.00'
@@ -76,10 +79,22 @@ describe('API key form state', () => {
       name: 'production SDK',
       allowed_routes: ['default'],
       allowed_attribution_keys: ['team'],
+      response_metadata: true,
       requests_per_minute: 120,
       daily_cost_limit: '1.250000000001',
       monthly_cost_limit: '20.00'
     });
+  });
+
+  it('sends the response metadata opt-in as an explicit boolean', () => {
+    const state = createApiKeyFormState(key);
+    state.responseMetadata = false;
+    expect(buildApiKeyPolicyInput(state, key).response_metadata).toBe(false);
+
+    const created = createApiKeyFormState();
+    expect(buildApiKeyPolicyInput(created).response_metadata).toBe(false);
+    created.responseMetadata = true;
+    expect(buildApiKeyPolicyInput(created).response_metadata).toBe(true);
   });
 
   it('leaves an untouched expiry out instead of rounding it to the minute', () => {

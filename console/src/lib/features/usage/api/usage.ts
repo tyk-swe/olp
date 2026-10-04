@@ -46,10 +46,19 @@ export async function usageSeries(
   return unwrap({ data, error, response });
 }
 
+export type UsageDimension =
+  | 'route'
+  | 'provider'
+  | 'model'
+  | 'model_family'
+  | 'estimate_provenance'
+  | 'api_key'
+  | 'operation'
+  | 'attribution';
+
 export async function usageBreakdown(
   filters: UsageFilters,
-  dimension:
-    'route' | 'provider' | 'model' | 'api_key' | 'operation' | 'attribution'
+  dimension: UsageDimension
 ): Promise<UsageBreakdownResult> {
   const { data, error, response } = await apiClient.GET(
     '/api/v1/usage/breakdown',

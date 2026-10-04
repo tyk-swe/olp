@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -87,7 +88,8 @@ func (s *Server) mediaJSONHandler(decode func([]byte) (*media.Request, *media.Er
 			return
 		}
 		x.family = openai.Family(request.Op)
-		x.estimate = (int64(len(body))+3)/4 + 1
+		sized := estimate.HeuristicBytesTokens(len(body))
+		x.estimate, x.sizedInput = sized+1, &sized
 		s.serveMedia(r.Context(), w, x, authority, request)
 	}
 }
@@ -145,7 +147,7 @@ func (s *Server) parseMediaForm(w http.ResponseWriter, r *http.Request, keyID st
 // and the routing header every route-planned media operation shares.
 func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution, access.Authority, bool) {
 	x := &execution{request: s.begin(w, r), family: openai.FamilyChat, actor: "api_key"}
-	x.semanticHeaders = r.Header.Clone()
+	x.semanticHeaders = semanticHeaders(r.Header)
 	query, queryErr := url.ParseQuery(r.URL.RawQuery)
 	x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
 	if !s.admit(r.Context()) {
@@ -165,6 +167,7 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution,
 	}
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 	x.budgetGroupID = authority.BudgetGroupID
+	x.responseMetadata = authority.Policy.ResponseMetadata
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		s.release(r.Context())
 		s.mediaFail(x, w, e)
@@ -203,7 +206,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execu
 	ctx, cancel := context.WithTimeout(ctx, overall)
 	defer cancel()
 	var e *Error
-	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.estimate, overall); e != nil {
+	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, overall); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}
@@ -266,7 +269,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	// a default or an explicit native null.
 	candidates := make(map[string][]string, len(route.Targets))
 	options := s.selectionOptions(x)
-	options.Parameters = mediaParameterNames(request)
+	options.Parameters = runtime.Listed(mediaParameterNames(request))
 	options.Accept = func(p runtime.Provider, t runtime.Target) error {
 		if !connectorsSupports(p, request.Op, x.mode) {
 			return errors.New("connector capability unavailable")
@@ -304,17 +307,17 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 		}
 		return nil
 	}
-	options.Effective = func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+	options.Effective = func(p runtime.Provider, t runtime.Target) (runtime.Names, *runtime.TokenDemand) {
 		if p.ProfileID == "" {
 			// Automatic providers keep their codec's null/default wire behavior;
 			// only explicit profiles define an exact effective native source.
-			return mediaParameterNames(request), nil
+			return runtime.Listed(mediaParameterNames(request)), nil
 		}
 		parameters, ok := candidates[t.ID]
 		if !ok {
 			return nil, nil
 		}
-		return parameters, nil
+		return runtime.Listed(parameters), nil
 	}
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, request.Op, "openai", x.mode, x.affinity, options)
 	if err != nil {
@@ -486,7 +489,7 @@ type mediaOutcome struct {
 // retains its absolute attempt deadline and side-effect ambiguity rules.
 func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *execution) *mediaOutcome {
 	attempted := runAttempts(ctx, s, x, attemptAdapter[*media.Result]{
-		estimate: func(*runtime.Provider) int64 { return x.estimate },
+		estimate: func(runtime.Attempt, *runtime.Provider) int64 { return x.estimate },
 		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *media.Result, *attemptFailure) {
 			return s.mediaAttempt(ctx, w, x, attempt, provider, slot, ordinal)
 		},
@@ -826,6 +829,7 @@ func (s *Server) deliverMedia(w http.ResponseWriter, x *execution, out *mediaOut
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
+	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(out.status)
 	out.committed = true
 	err := write()
@@ -952,7 +956,7 @@ func (s *Server) streamArtifact(w http.ResponseWriter, x *execution, out *mediaO
 // reservation. Only a terminal event proves that the response completed.
 func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x *execution, result *media.Result, contract *mediacontract.Template, bound mediacontract.Bound) (*openai.Usage, bool, *attemptFailure) {
 	defer result.Body.Close()
-	sw := &streamWriter{w: w, family: x.family}
+	sw := &streamWriter{w: w, family: x.family, x: x}
 	var usage *openai.Usage
 	var sequence uint64
 	terminal := errors.New("media stream completed")

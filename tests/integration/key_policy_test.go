@@ -151,3 +151,53 @@ func TestAPIKeyBudgetAndTokenLimitContract(t *testing.T) {
 		t.Fatal("explicit null did not clear the limits")
 	}
 }
+
+func TestAPIKeyResponseMetadataPolicy(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	created := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "metadata default"}, idem("metadata-default"), 201)
+	path := "/api/v1/api-keys/" + created["id"].(string)
+	secret := created["secret"].(string)
+	// The management detail and the durable authority the gateway reads must
+	// agree, and every other policy field must survive each change.
+	assertMetadata := func(want bool) map[string]any {
+		t.Helper()
+		record := h.want(owner, "GET", path, nil, nil, 200)
+		if record["response_metadata"] != want {
+			t.Fatalf("detail response_metadata = %v, want %v", record["response_metadata"], want)
+		}
+		authority, err := h.authority(secret)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if authority.Policy.ResponseMetadata != want {
+			t.Fatalf("authority response_metadata = %v, want %v", authority.Policy.ResponseMetadata, want)
+		}
+		return record
+	}
+	record := assertMetadata(false)
+	// A key stored before the policy existed reads as opted out.
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET policy=policy-'response_metadata' WHERE id=$1`, created["id"]); err != nil {
+		t.Fatal(err)
+	}
+	record = assertMetadata(false)
+	h.want(owner, "PATCH", path, map[string]any{"response_metadata": "yes"}, etagHeader(record), 422)
+	h.want(owner, "PATCH", path, map[string]any{"response_metadata": true, "requests_per_minute": 7}, etagHeader(record), 200)
+	record = assertMetadata(true)
+	if record["requests_per_minute"] != float64(7) {
+		t.Fatalf("opting in changed another limit: %v", record)
+	}
+	// An omitted field keeps the stored choice.
+	h.want(owner, "PATCH", path, map[string]any{"name": "renamed"}, etagHeader(record), 200)
+	record = assertMetadata(true)
+	headers := etagHeader(record)
+	headers["Idempotency-Key"] = uuid.NewString()
+	secret = h.want(owner, "POST", path+"/rotate", nil, headers, 200)["secret"].(string)
+	record = assertMetadata(true)
+	h.want(owner, "PATCH", path, map[string]any{"response_metadata": false}, etagHeader(record), 200)
+	assertMetadata(false)
+
+	optedIn := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "metadata opt-in", "response_metadata": true}, idem("metadata-opt-in"), 201)
+	path, secret = "/api/v1/api-keys/"+optedIn["id"].(string), optedIn["secret"].(string)
+	assertMetadata(true)
+}

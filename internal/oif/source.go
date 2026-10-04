@@ -5,8 +5,10 @@ package oif
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -141,15 +143,79 @@ func (v Value) Bytes() []byte {
 	}
 	return []byte(v.Raw())
 }
+
+// Text is the decoded text of a string value, in memory of its own.
 func (v Value) Text() (string, bool) {
+	text, shared, ok := v.text()
+	if shared {
+		text = strings.Clone(text)
+	}
+	return text, ok
+}
+
+// Chars is the decoded text of a string value, which for a string with no
+// escape in it is the document's own bytes, read without a copy. It holds the
+// whole document up for as long as it is kept, so it is for reading, and Text is
+// for keeping.
+func (v Value) Chars() (string, bool) {
+	text, _, ok := v.text()
+	return text, ok
+}
+
+// text decodes a string value of a document that ParseJSON accepted, whose
+// strings hold only the escapes JSON has and only surrogates that are paired,
+// so decoding it takes one pass and cannot fail. A string with no escape is its
+// own bytes, and shared says the text is part of the document.
+func (v Value) text() (text string, shared, ok bool) {
 	if v.Kind() != String {
-		return "", false
+		return "", false, false
 	}
-	var s string
-	if json.Unmarshal(v.Bytes(), &s) != nil {
-		return "", false
+	raw := v.Raw()
+	body := raw[1 : len(raw)-1]
+	i := strings.IndexByte(body, '\\')
+	if i < 0 {
+		return body, true, true
 	}
-	return s, true
+	var out strings.Builder
+	out.Grow(len(body))
+	for i >= 0 {
+		out.WriteString(body[:i])
+		c := body[i+1]
+		body = body[i+2:]
+		switch c {
+		case 'b':
+			out.WriteByte('\b')
+		case 'f':
+			out.WriteByte('\f')
+		case 'n':
+			out.WriteByte('\n')
+		case 'r':
+			out.WriteByte('\r')
+		case 't':
+			out.WriteByte('\t')
+		case 'u':
+			r := hexRune(body[:4])
+			body = body[4:]
+			if utf16.IsSurrogate(r) {
+				// The second half of a pair, which the parser required.
+				r = utf16.DecodeRune(r, hexRune(body[2:6]))
+				body = body[6:]
+			}
+			out.WriteRune(r)
+		default:
+			// A quotation mark, a backslash or a solidus stands for itself.
+			out.WriteByte(c)
+		}
+		i = strings.IndexByte(body, '\\')
+	}
+	out.WriteString(body)
+	return out.String(), false, true
+}
+
+// hexRune is the value of four hexadecimal digits that the parser checked.
+func hexRune(digits string) rune {
+	n, _ := strconv.ParseUint(digits, 16, 16)
+	return rune(n)
 }
 func (v Value) Lookup(name string) (Value, bool) {
 	if v.Kind() != Object {
@@ -186,13 +252,20 @@ func (v Value) Members() []Member {
 }
 
 // Fields is a compatibility copy. Codecs may rewrite it without changing source.
-func (d Document) Fields() map[string]json.RawMessage {
+func (d Document) Fields() map[string]json.RawMessage { return d.FieldsWithout() }
+
+// FieldsWithout is Fields without the named members, for a reader that reads
+// them from the document and would otherwise copy them, a prompt of 400 KB
+// among them, for nothing.
+func (d Document) FieldsWithout(names ...string) map[string]json.RawMessage {
 	if d.Root().Kind() != Object {
 		return nil
 	}
 	out := make(map[string]json.RawMessage, len(d.data.nodes[0].members))
 	for _, m := range d.data.nodes[0].members {
-		out[m.name] = Value{d.data, m.index}.Bytes()
+		if !slices.Contains(names, m.name) {
+			out[m.name] = Value{d.data, m.index}.Bytes()
+		}
 	}
 	return out
 }
@@ -428,11 +501,44 @@ func (p *parser) hex() (uint64, error) {
 	p.at += 4
 	return n, nil
 }
+
+// plainEnd is the index of the first byte of s from i on that a string cannot
+// hold as it is, which is a quotation mark, a backslash or a control character,
+// and len(s) if there is none. The text of a prompt is nearly all plain bytes
+// and is hundreds of kilobytes of them, so it is read eight bytes at a time and
+// only the word that holds a byte of another kind is read one by one.
+func plainEnd(s string, i int) int {
+	const ones, highs = 0x0101010101010101, 0x8080808080808080
+	for ; len(s)-i >= 8; i += 8 {
+		b := s[i : i+8]
+		w := uint64(b[0]) | uint64(b[1])<<8 | uint64(b[2])<<16 | uint64(b[3])<<24 |
+			uint64(b[4])<<32 | uint64(b[5])<<40 | uint64(b[6])<<48 | uint64(b[7])<<56
+		// A word is flagged if a byte of it is below 0x20 or is a quotation mark
+		// or a backslash. Each test is exact about whether any byte of the word is
+		// of its kind, so a flag that only a neighbouring byte raised costs a
+		// read of the word and no more.
+		quote, slash := w^(ones*'"'), w^(ones*'\\')
+		if ((w-ones*0x20)&^w|(quote-ones)&^quote|(slash-ones)&^slash)&highs != 0 {
+			break
+		}
+	}
+	for ; i < len(s); i++ {
+		if c := s[i]; c == '"' || c == '\\' || c < 0x20 {
+			break
+		}
+	}
+	return i
+}
+
 func (p *parser) string() error {
 	if !p.take('"') {
 		return p.fail("expected_string")
 	}
-	for p.at < len(p.d.raw) {
+	for {
+		p.at = plainEnd(p.d.raw, p.at)
+		if p.at >= len(p.d.raw) {
+			break
+		}
 		c := p.d.raw[p.at]
 		p.at++
 		if c == '"' {

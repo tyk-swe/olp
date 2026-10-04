@@ -26,9 +26,9 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -106,6 +106,7 @@ type Server struct {
 	admission   *observability.Pool
 	health      *healthTracker
 	now         func() time.Time
+	counted     func(estimate.Family)
 }
 
 // upstreamHeaderTimeout caps the wait for upstream response headers; the
@@ -125,6 +126,12 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 	}
 	auth := connectors.NewAuth(policy)
 	auth.Signer = cfg.Signer
+	// The tokenizers parse their rank tables on first use, which would land on
+	// the first request that needs one. A table that cannot be read leaves its
+	// family on the heuristic, which says so in every estimate it makes.
+	if err := estimate.Preload(); err != nil {
+		log.Warn("tokenizer unavailable; its models are estimated by the four-characters-per-token rule", "error", err.Error())
+	}
 	return &Server{
 		Runtime:     rt,
 		Sink:        LogSink{Log: log},
@@ -180,6 +187,9 @@ type request struct {
 	release   *runtime.Release
 	// trace is the request's observability span; a no-op when tracing is off.
 	trace *telemetry.RequestTrace
+	// counted, when set, hears each time the request's prompt is counted for a
+	// model family. Tests use it to see that a family is counted once.
+	counted func(estimate.Family)
 }
 
 // accountingID is the identity durable records are stored under: the request
@@ -204,9 +214,13 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	}
 	h := w.Header()
 	h.Set("X-Request-Id", id)
+	if requestSurface(r) == "anthropic" {
+		// The Anthropic SDKs report the request id of an error from this header.
+		h.Set("Request-Id", id)
+	}
 	h.Set("Cache-Control", "no-store")
 	s.cors(w, r)
-	return request{id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context())}
+	return request{id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
 }
 
 // cors permits browser SDK clients only from explicitly configured origins.
@@ -217,7 +231,11 @@ func (s *Server) cors(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
 	h.Add("Vary", "Origin")
-	h.Set("Access-Control-Expose-Headers", "X-Request-Id, Retry-After, X-Should-Retry, X-OLP-Delivery-Replay")
+	expose := exposedHeaders
+	if requestSurface(r) == "anthropic" {
+		expose = exposedHeadersAnthropic
+	}
+	h.Set("Access-Control-Expose-Headers", expose)
 }
 
 func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
@@ -417,7 +435,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			}
 			writeSurfaceError(w, e, x.clientSurface())
 		}
-		x.semanticHeaders = r.Header.Clone()
+		x.semanticHeaders = semanticHeaders(r.Header)
 		query, queryErr := url.ParseQuery(r.URL.RawQuery)
 		x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
 		status := http.StatusInternalServerError
@@ -427,7 +445,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			// The budgets this request reserved are settled even when the
 			// client is gone: a concurrency slot nobody releases is a slot
 			// every replica keeps counting.
-			settleKey(r.Context(), x.lease, x.dispatched, x.settledTokens(), s.log)
+			s.settleAdmission(r.Context(), x)
 		}()
 		// A context timeout alone cannot interrupt a blocked socket read.
 		rc := http.NewResponseController(w)
@@ -451,6 +469,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		}
 		x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 		x.budgetGroupID = authority.BudgetGroupID
+		x.responseMetadata = authority.Policy.ResponseMetadata
 		x.authority = authority
 		if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 			x.failure, status = e, e.Status
@@ -544,13 +563,13 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		ctx, cancel := context.WithTimeout(r.Context(), overall)
 		defer cancel()
 		reservationEstimate := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
-		if x.lease, e = s.Admission.reserveKey(ctx, authority, reservationEstimate, overall); e != nil {
+		if x.lease, e = s.Admission.reserveKeyCosted(ctx, authority, x.clientSurface(), reservationEstimate, overall, s.costReservation(x, authority)); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
 		if parsed.Stream {
-			sw := &streamWriter{w: w, family: family}
+			sw := &streamWriter{w: w, family: family, x: x}
 			x.emit = func(frame []byte) error {
 				err := sw.emit(frame)
 				if err == nil {
@@ -596,6 +615,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		}
 		out.completion.Body = enforced
 		status = http.StatusOK
+		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
 		out.committed = true
 		x.facts[len(x.facts)-1].Committed = true
@@ -652,20 +672,26 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 			param := "query"
 			return invalidRequest("invalid_request", "The query must be unambiguous URL-encoded parameters.", &param)
 		}
-		if x.clientSurface() == "gemini" {
-			if e := x.dropQueryKey(); e != nil {
-				return e
-			}
+		if e := x.dropIngressQuery(); e != nil {
+			return e
 		}
+	}
+	if e := x.checkAnthropicBeta(); e != nil {
+		return e
 	}
 	var semantic error
 	var policyDecisions []contentpolicy.Decision
 	source := x.summarizeSource()
 	options := s.selectionOptions(x)
-	options.Parameters, options.TokenDemand = source.parameters, source.demand
-	options.Effective = func(p runtime.Provider, t runtime.Target) ([]string, *runtime.TokenDemand) {
+	// A target's context window is weighed against the request as the model that
+	// would serve it counts it, so the demand follows the target.
+	options.Parameters = source.parameters
+	options.Demand = func(_ runtime.Provider, t runtime.Target) *runtime.TokenDemand {
+		return x.sourceDemand(t.ProviderModel)
+	}
+	options.Effective = func(p runtime.Provider, t runtime.Target) (runtime.Names, *runtime.TokenDemand) {
 		if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
-			return source.parameters, source.demand
+			return source.parameters, x.sourceDemand(t.ProviderModel)
 		}
 		prepared, err := x.preparedProvider(&p, t.ProviderModel)
 		if err != nil {
@@ -701,7 +727,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 				policyDecisions = prepared.policyDecisions
 			}
 		} else {
-			_, _, e = providerinvoke.Encode(x.parsed, cfg, t.ProviderModel, p.ParameterDefaults)
+			e = x.encodes(&p, cfg, t.ProviderModel)
 		}
 		if e != nil {
 			semantic = e
@@ -832,8 +858,11 @@ func writeJSON(w http.ResponseWriter, body any) {
 // applies a per-frame write deadline so slow readers cannot pin upstream
 // work forever.
 type streamWriter struct {
-	w         http.ResponseWriter
-	family    openai.Family
+	w      http.ResponseWriter
+	family openai.Family
+	// x is the request being streamed, whose response headers are added as the
+	// stream is committed. A writer that only reports an error has none.
+	x         *execution
 	committed bool
 }
 
@@ -853,6 +882,9 @@ func (sw *streamWriter) emit(frame []byte) error {
 			h.Set("Content-Type", "application/vnd.amazon.eventstream")
 		}
 		h.Set("X-Accel-Buffering", "no")
+		if sw.x != nil {
+			sw.x.responseHeaders(h, true)
+		}
 		sw.w.WriteHeader(http.StatusOK)
 		sw.committed = true
 	}

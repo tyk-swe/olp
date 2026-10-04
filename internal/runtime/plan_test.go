@@ -36,7 +36,7 @@ func TestPoliciesIntersectUnknownFactsAndPublishedLimits(t *testing.T) {
 	p.Models = map[string]json.RawMessage{"wire-model": metadata}
 	s.Providers[p.ID] = p
 	s.InstallationPolicy = &Policy{Constraints: Preferences{Regions: []string{"eu"}, RequireZeroDataRetention: ptr(true), RequireParameters: ptr(true)}}
-	plan, e := PlanRequest(&s, slug, "generation", "openai", "unary", []byte("seed"), SelectionOptions{Parameters: []string{"temperature"}, Now: now})
+	plan, e := PlanRequest(&s, slug, "generation", "openai", "unary", []byte("seed"), SelectionOptions{Parameters: Listed([]string{"temperature"}), Now: now})
 	if e != nil || len(plan.Attempts) != 1 || plan.Attempts[0].ProviderID != ids[0] {
 		t.Fatalf("facts: %+v %v", plan, e)
 	}
@@ -71,7 +71,7 @@ func TestPlanningPreparesEligibleTargetsAndChecksEffectiveRequest(t *testing.T) 
 		{name: "disabled provider", setup: func(p *Provider, _ *SelectionOptions) { p.Enabled = false }, reason: "provider_not_active"},
 		{name: "uncertified operation", setup: func(p *Provider, _ *SelectionOptions) { p.Capabilities = nil }, reason: "capability_not_certified"},
 		{name: "source capacity", setup: func(_ *Provider, o *SelectionOptions) { o.TokenDemand.EstimatedInputTokens = 101 }, reason: "context_length_exceeded"},
-		{name: "source parameters", setup: func(_ *Provider, o *SelectionOptions) { o.Parameters = []string{"top_p"} }, reason: "parameter_not_supported"},
+		{name: "source parameters", setup: func(_ *Provider, o *SelectionOptions) { o.Parameters = Listed([]string{"top_p"}) }, reason: "parameter_not_supported"},
 		{name: "revoked credential", setup: func(_ *Provider, o *SelectionOptions) {
 			o.CredentialEligibility = func(string) Eligibility { return Revoked }
 		}, reason: "credential_revoked"},
@@ -101,15 +101,15 @@ func TestPlanningPreparesEligibleTargetsAndChecksEffectiveRequest(t *testing.T) 
 			}
 			var calls []string
 			options := SelectionOptions{
-				Parameters: []string{"temperature"}, TokenDemand: &TokenDemand{EstimatedInputTokens: 10, MaxOutputTokens: ptr(int64(5))},
+				Parameters: Listed([]string{"temperature"}), TokenDemand: &TokenDemand{EstimatedInputTokens: 10, MaxOutputTokens: ptr(int64(5))},
 				CheckSlots: true, CredentialEligibility: func(string) Eligibility { return Eligible },
 				Accept: func(Provider, Target) error {
 					calls = append(calls, "accept")
 					return tc.acceptErr
 				},
-				Effective: func(Provider, Target) ([]string, *TokenDemand) {
+				Effective: func(Provider, Target) (Names, *TokenDemand) {
 					calls = append(calls, "effective")
-					return parameters, demand
+					return Listed(parameters), demand
 				},
 			}
 			if tc.setup != nil {
@@ -357,5 +357,46 @@ func TestPlanningRefusesUnconfinedPluginTargetsWithoutTheTier(t *testing.T) {
 		if reasons[ids[0]] != "" || reasons[ids[1]] != want {
 			t.Fatalf("with the tier enabled %v, reasons %v", enabled, reasons)
 		}
+	}
+}
+
+// TestParametersAreReadOnlyByAPolicyThatRequiresThem holds the names of a request
+// to the rule that only require_parameters reads them: a request that is large
+// has to be decoded to list them, so a route whose policy does not ask for them
+// must not pay for it, from the source request or from a target's own.
+func TestParametersAreReadOnlyByAPolicyThatRequiresThem(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		required bool
+		reads    int
+	}{
+		{"required", true, 2},
+		{"not required", false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, slug, ids := planningFixture()
+			route := s.Routes[slug]
+			route.Targets = route.Targets[:1]
+			if tc.required {
+				route.Policy = &Policy{Constraints: Preferences{RequireParameters: ptr(true)}}
+			}
+			s.Routes[slug] = route
+			metadata, _ := json.Marshal(ModelMetadata{SupportedParameters: &[]string{"temperature", "top_p"}})
+			provider := s.Providers[ids[0]]
+			provider.Models = map[string]json.RawMessage{"wire-model": metadata}
+			s.Providers[provider.ID] = provider
+			reads := 0
+			names := func() []string { reads++; return []string{"temperature"} }
+			plan, err := PlanRequest(&s, slug, "generation", "openai", "unary", []byte("seed"), SelectionOptions{
+				Parameters: names,
+				Effective:  func(Provider, Target) (Names, *TokenDemand) { return names, nil },
+			})
+			if err != nil || len(plan.Attempts) != 1 {
+				t.Fatalf("plan=%+v error=%v", plan, err)
+			}
+			if reads != tc.reads {
+				t.Fatalf("the names were read %d times, want %d", reads, tc.reads)
+			}
+		})
 	}
 }

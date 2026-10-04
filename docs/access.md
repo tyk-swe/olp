@@ -101,12 +101,31 @@ A project, or a resource in one, outside the caller's scope answers 404 exactly
 as if it did not exist; a visible project the caller cannot change answers 403.
 
 `GET/POST /api/v1/budget-groups` and `GET/PATCH /api/v1/budget-groups/{id}`
-manage shared accrued-cost budgets. A group requires a positive daily or monthly
+manage shared cost budgets, measured against accrued spend and the estimated cost
+of the members' requests in flight. A group requires a positive daily or monthly
 limit, uses the installation currency, and belongs to one project or the
 unassigned boundary. Attach a key through `budget_group_id`; key and group must
 share that boundary. Writes require key-management permission and project write
 access. Group limits supplement individual key limits and share their
 [initialization and recovery rules](operations.md#spend-budget-reconciliation).
+
+## Key response metadata
+
+The key policy `response_metadata` is off by default. Set it when creating a key,
+with `PATCH /api/v1/api-keys/{id}`, or in the console key form to opt the key
+into the `X-OLP-Attempts`, `X-OLP-Route-Revision`, `X-OLP-Provider` and
+`X-OLP-Cost` response headers described in
+[gateway](gateway.md#gateway-metadata). Callers address routes, not upstreams, so
+the gateway names the provider that served a request only to keys that opt in. It
+does not scrub what an upstream says of itself: the message of an upstream
+rejection is relayed with credential values redacted, whatever the policy, and
+may name the vendor or the model. Rotation keeps the setting, and a change takes
+effect on each gateway's next authority refresh.
+
+The remaining-allowance headers need no opt-in. A key with a requests-per-minute
+or tokens-per-minute limit receives the
+[rate-limit headers](gateway.md#rate-limit-headers) of its surface for the
+dimensions it limits, and a key with neither receives none.
 
 ## Management tokens and provisioning
 

@@ -29,6 +29,11 @@ const provider = 'Accounting upstream';
 const route = 'accounting-chat';
 const keyName = 'Accounting budget key';
 const dailyBudget = '5.00';
+// Admission reserves a priced request's estimated cost against the key's
+// budget, and a request that names no bound is estimated at 4,096 reply
+// tokens, which at the price below alone exceeds the budget. Every chat here
+// bounds its reply, as a client calling a small budgeted key has to.
+const maxTokens = 16;
 // The mock upstream reports 7 input and 5 output tokens for every completion,
 // so 1000.00 and 2600.00 per million make each priced request cost exactly
 // 0.007 + 0.013 = 0.02. Whole cents keep the assertions about accounting
@@ -80,7 +85,7 @@ async function issueBudgetedKey(page: Page): Promise<string> {
 /// whether the upstream usage reached the caller.
 function sendChat(page: Page, secret: string, streaming: boolean) {
   return page.evaluate(
-    async ({ apiKey, slug, stream }) => {
+    async ({ apiKey, slug, stream, limit }) => {
       const response = await fetch('/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -90,6 +95,7 @@ function sendChat(page: Page, secret: string, streaming: boolean) {
         body: JSON.stringify({
           model: slug,
           messages: [{ role: 'user', content: 'Account for this request.' }],
+          max_tokens: limit,
           ...(stream
             ? { stream: true, stream_options: { include_usage: true } }
             : {})
@@ -103,7 +109,7 @@ function sendChat(page: Page, secret: string, streaming: boolean) {
         code: /"code":\s*"([a-z_]+)"/.exec(body)?.[1] ?? null
       };
     },
-    { apiKey: secret, slug: route, stream: streaming }
+    { apiKey: secret, slug: route, stream: streaming, limit: maxTokens }
   );
 }
 

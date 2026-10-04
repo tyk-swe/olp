@@ -168,8 +168,25 @@ processes and ingestion in workers, with database CPU/I/O headroom for both.
 Successful mock suites qualify their tested behavior, not a production SLO,
 live-provider certification, invoice accuracy, or disaster-recovery RPO.
 Validate capacity and failure behavior on the actual deployment; use the
-[testing guide](../tests/README.md) for qualification scope and
-[backup and restore](operations.md#backup-and-restore) for recovery requirements.
+[testing guide](../tests/README.md) for qualification scope,
+[performance](performance.md) for how added latency and CPU per request are
+measured, and [backup and restore](operations.md#backup-and-restore) for
+recovery requirements.
+
+### Provider connection capacity
+
+Over HTTP/1.1, every request in flight holds a connection to its provider's
+host, which a pool bounds; HTTP/2 shares a connection among many. A provider with no
+`options.network` and no profile uses the gateway's shared transport, which caps
+none. A provider with any `options.network` field, or a profile, has a pool of its
+own for each credential slot, capped by default at 64 connections to the host, 16
+idle and 128 idle in all, and a request past the cap waits in the pool without an
+error or a rejection. Size `max_conns_per_host` and `max_idle_conns_per_host`
+(each at most 4,096) for the concurrent requests one credential slot of a provider
+should carry, or spread them over more slots or providers; S2 of the
+[benchmark](performance.md) holds about 1,300 streams at its full rate, which a
+default pool would queue. The pool settings are in the
+[provider guide](provider-profiles.md#secure-connection-options).
 
 ### Tracing
 

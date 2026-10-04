@@ -21,6 +21,10 @@ type RoutingPrice struct {
 	Revision      int       `json:"revision"`
 	EffectiveAt   time.Time `json:"effective_at"`
 	ScopePriority int       `json:"scope_priority"`
+
+	// rates is Price parsed for pricing a request without parsing it again. It
+	// is set when the routing inputs are loaded and shared by every copy.
+	rates *priceRates
 }
 type Performance struct {
 	SampleCount int64     `json:"sample_count"`
@@ -122,6 +126,7 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
 			rows.Close()
 			return nil, err
 		}
+		p.rates = parseRates(&p.Price)
 		in.Prices = append(in.Prices, p)
 	}
 	rows.Close()

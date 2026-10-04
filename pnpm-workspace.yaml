@@ -1,6 +1,7 @@
 packages:
   - console
   - tests/sdk-smoke
+  - tests/clients
 
 engineStrict: true
 
@@ -8,7 +9,21 @@ allowBuilds:
   esbuild: true
   '@google/genai': false
   protobufjs: false
+  # Client packages of tests/clients. Claude Code's installer only links the
+  # platform binary its optional package ships, without network access. Gemini
+  # CLI's optional native modules are never built; it falls back without them.
+  '@anthropic-ai/claude-code': true
+  '@github/keytar': false
+  node-pty: false
+  tree-sitter: false
 
 # The OpenAPI generator pins a vulnerable YAML parser; use its fixed patch.
 overrides:
   js-yaml@4.3.1: 4.3.2
+  # The llamaindex umbrella pins older core and env than its provider packages
+  # require as peers; one copy keeps their classes interoperable.
+  '@llamaindex/core': 0.6.23
+  '@llamaindex/env': 0.1.31
+  # svelte and @sveltejs/kit admit the fixed release but resolve to an earlier
+  # one with six published advisories; pin the fix.
+  devalue: 5.9.4

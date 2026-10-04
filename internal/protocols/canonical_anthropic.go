@@ -78,6 +78,10 @@ func decodeAnthropicGeneration(r *reader) error {
 			return e
 		}
 		c.Tools = append(c.Tools, Tool{Name: str(t.take("name")), Description: str(t.take("description")), Schema: t.take("input_schema")})
+		// Eager input streaming only asks Anthropic to send the arguments of a
+		// call as soon as they are generated, like stream_options a transport
+		// option with no meaning to any other provider.
+		t.take("eager_input_streaming")
 		t.finish()
 	}
 	if v := r.take("tool_choice"); present(v) {

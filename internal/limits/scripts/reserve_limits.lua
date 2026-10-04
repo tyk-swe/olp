@@ -1,20 +1,34 @@
 -- Atomic fixed-UTC-minute RPM/TPM and expiring concurrency reservation.
--- Response v1:
+-- Response v2:
 --   {version, status, dimension_or_error, retry_after_ms, window_id,
 --    concurrency_lease_expires_at_ms}
+-- followed, when the call asked for it, by
+--   {rpm_limit, rpm_remaining, tpm_limit, tpm_remaining, window_remaining_ms}
 -- status: 1 = granted, 0 = rejected, -1 = malformed state/arguments.
+-- A grant or a rejection answers the five allowance fields exactly when
+-- report_allowance is 1, and the six fields alone otherwise, so a caller that
+-- does not read the allowance is not made to receive it. A status of -1 answers
+-- the six fields alone whatever was asked, because it can come before the call
+-- has been read.
+-- A limit of 0 means that dimension is unlimited and its remaining is 0. A
+-- remaining count is what the limit leaves once this request's reservation is
+-- counted, and a rejected request reserves nothing, so its counts are what the
+-- window still holds. A counter already above its limit leaves 0.
+-- window_remaining_ms is the time to the end of the fixed UTC minute the counts
+-- belong to, and is 0 when neither a request nor a token limit applies.
 --
 -- KEYS: stable rate hash, concurrency zset. Both keys must carry the same
 --       Valkey Cluster hash tag.
 -- ARGV: rpm_limit, tpm_limit, requested_tokens, concurrency_limit, lease_id,
---       lease_ttl_ms. A zero limit means that dimension is unlimited.
+--       lease_ttl_ms, report_allowance (0 or 1). A zero limit means that
+--       dimension is unlimited.
 
-local RESPONSE_VERSION = 1
+local RESPONSE_VERSION = 2
 local MAX_SAFE_INTEGER_TEXT = "9007199254740991"
 local MINUTE_MS = 60000
 
-local function failure(reason)
-  return {RESPONSE_VERSION, -1, reason, 0, 0, 0}
+local function failure(reason, window_id)
+  return {RESPONSE_VERSION, -1, reason, 0, window_id or 0, 0}
 end
 
 local function is_safe_unsigned_integer(raw)
@@ -41,7 +55,7 @@ local function parse_safe_unsigned_integer(raw)
   return tonumber(raw)
 end
 
-if #KEYS ~= 2 or #ARGV ~= 6 then
+if #KEYS ~= 2 or #ARGV ~= 7 then
   return failure("invalid_arguments")
 end
 
@@ -51,6 +65,7 @@ local requested_tokens = parse_safe_unsigned_integer(ARGV[3])
 local concurrency_limit = parse_safe_unsigned_integer(ARGV[4])
 local lease_id = ARGV[5]
 local lease_ttl = parse_safe_unsigned_integer(ARGV[6])
+local report_allowance = ARGV[7]
 
 if rpm_limit == nil or tpm_limit == nil or requested_tokens == nil
     or concurrency_limit == nil or lease_ttl == nil
@@ -59,6 +74,7 @@ if rpm_limit == nil or tpm_limit == nil or requested_tokens == nil
     or (concurrency_limit > 0 and concurrency_limit < 1)
     or (tpm_limit > 0 and requested_tokens < 1)
     or lease_ttl < 1
+    or (report_allowance ~= "0" and report_allowance ~= "1")
     or type(lease_id) ~= "string" or #lease_id < 1 or #lease_id > 128 then
   return failure("invalid_arguments")
 end
@@ -99,10 +115,49 @@ local rate_is_current = false
 local rpm = 0
 local tpm = 0
 
+-- What a limit leaves once used is spent. A counter above its limit, which a
+-- reconciliation or a lowered limit can leave, allows nothing rather than a
+-- negative amount.
+local function allowance(limit, used)
+  if limit == 0 or used >= limit then
+    return 0
+  end
+  return limit - used
+end
+
+-- The answer to a request the state was readable for. rpm_used and tpm_used are
+-- the counters after this request's reservation, which for a rejection are the
+-- counters as they were.
+local function decision(status, detail, retry_after_ms, lease_expires_at_ms, rpm_used, tpm_used)
+  if report_allowance == "0" then
+    return {
+      RESPONSE_VERSION,
+      status,
+      detail,
+      retry_after_ms,
+      window_id,
+      lease_expires_at_ms
+    }
+  end
+  return {
+    RESPONSE_VERSION,
+    status,
+    detail,
+    retry_after_ms,
+    window_id,
+    lease_expires_at_ms,
+    rpm_limit,
+    allowance(rpm_limit, rpm_used),
+    tpm_limit,
+    allowance(tpm_limit, tpm_used),
+    rate_enabled and window_remaining_ms or 0
+  }
+end
+
 if rate_enabled then
   local kind = redis.call("TYPE", KEYS[1]).ok
   if kind ~= "none" and kind ~= "hash" then
-    return {RESPONSE_VERSION, -1, "malformed_rate_state", 0, window_id, 0}
+    return failure("malformed_rate_state", window_id)
   end
   local state = redis.call("HMGET", KEYS[1], "window", "rpm", "tpm")
   local present = 0
@@ -113,7 +168,7 @@ if rate_enabled then
   end
 
   if present ~= 0 and present ~= 3 then
-    return {RESPONSE_VERSION, -1, "malformed_rate_state", 0, window_id, 0}
+    return failure("malformed_rate_state", window_id)
   end
 
   if present == 3 then
@@ -122,7 +177,7 @@ if rate_enabled then
     local stored_tpm = parse_safe_unsigned_integer(state[3])
     if stored_window == nil or stored_rpm == nil or stored_tpm == nil
         or stored_window > window_id then
-      return {RESPONSE_VERSION, -1, "malformed_rate_state", 0, window_id, 0}
+      return failure("malformed_rate_state", window_id)
     end
     if stored_window == window_id then
       rate_is_current = true
@@ -133,13 +188,13 @@ if rate_enabled then
 end
 
 if rpm_limit > 0 and rpm >= rpm_limit then
-  return {RESPONSE_VERSION, 0, "rpm", window_remaining_ms, window_id, 0}
+  return decision(0, "rpm", window_remaining_ms, 0, rpm, tpm)
 end
 -- Subtraction avoids forming a potentially inexact sum near Lua's largest
 -- exactly representable integer.
 if tpm_limit > 0
     and (requested_tokens > tpm_limit or tpm > tpm_limit - requested_tokens) then
-  return {RESPONSE_VERSION, 0, "tpm", window_remaining_ms, window_id, 0}
+  return decision(0, "tpm", window_remaining_ms, 0, rpm, tpm)
 end
 
 local concurrency = 0
@@ -147,7 +202,7 @@ local newest_concurrency_expiry = 0
 if concurrency_limit > 0 then
   local kind = redis.call("TYPE", KEYS[2]).ok
   if kind ~= "none" and kind ~= "zset" then
-    return {RESPONSE_VERSION, -1, "malformed_concurrency_state", 0, window_id, 0}
+    return failure("malformed_concurrency_state", window_id)
   end
   redis.call("ZREMRANGEBYSCORE", KEYS[2], "-inf", now_ms)
   concurrency = tonumber(redis.call("ZCARD", KEYS[2]))
@@ -155,35 +210,28 @@ if concurrency_limit > 0 then
     local oldest = redis.call("ZRANGE", KEYS[2], 0, 0, "WITHSCORES")
     if type(oldest) ~= "table" or #oldest ~= 2
         or not is_safe_unsigned_integer(oldest[2]) then
-      return {RESPONSE_VERSION, -1, "malformed_concurrency_state", 0, window_id, 0}
+      return failure("malformed_concurrency_state", window_id)
     end
     local oldest_expiry = tonumber(oldest[2])
     if oldest_expiry <= now_ms then
-      return {RESPONSE_VERSION, -1, "malformed_concurrency_state", 0, window_id, 0}
+      return failure("malformed_concurrency_state", window_id)
     end
     local newest = redis.call("ZRANGE", KEYS[2], -1, -1, "WITHSCORES")
     if type(newest) ~= "table" or #newest ~= 2
         or not is_safe_unsigned_integer(newest[2]) then
-      return {RESPONSE_VERSION, -1, "malformed_concurrency_state", 0, window_id, 0}
+      return failure("malformed_concurrency_state", window_id)
     end
     newest_concurrency_expiry = tonumber(newest[2])
     if newest_concurrency_expiry < oldest_expiry then
-      return {RESPONSE_VERSION, -1, "malformed_concurrency_state", 0, window_id, 0}
+      return failure("malformed_concurrency_state", window_id)
     end
     if concurrency >= concurrency_limit then
-      return {
-        RESPONSE_VERSION,
-        0,
-        "concurrency",
-        oldest_expiry - now_ms,
-        window_id,
-        0
-      }
+      return decision(0, "concurrency", oldest_expiry - now_ms, 0, rpm, tpm)
     end
   elseif concurrency >= concurrency_limit then
     -- This is unreachable for a positive configured limit, but fail safely if
     -- the representation or command behavior ever changes.
-    return {RESPONSE_VERSION, -1, "malformed_concurrency_state", 0, window_id, 0}
+    return failure("malformed_concurrency_state", window_id)
   end
 end
 
@@ -227,4 +275,5 @@ if concurrency_limit > 0 then
   redis.call("PEXPIRE", KEYS[2], newest_concurrency_expiry - now_ms)
 end
 
-return {RESPONSE_VERSION, 1, "ok", 0, window_id, lease_expires_at_ms}
+-- A limited counter stays within its limit here, so the sums are exact.
+return decision(1, "ok", 0, lease_expires_at_ms, rpm + 1, tpm + requested_tokens)

@@ -1,18 +1,16 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -102,8 +100,10 @@ func limitsUnavailable() *Error {
 	return serverError(http.StatusServiceUnavailable, "distributed_limits_unavailable", "Request limits cannot be enforced right now; retry shortly.")
 }
 
-// rateLimited renders the rejection a shared budget produced.
-func rateLimited(dimension limits.Dimension, retryAfter time.Duration) *Error {
+// rateLimited renders the rejection a shared budget produced. estimate says a
+// cost budget refused the request although it is not spent: the request's own
+// estimated cost does not fit beside what is accrued and in flight.
+func rateLimited(dimension limits.Dimension, retryAfter time.Duration, estimate bool) *Error {
 	code, message := "rate_limit_exceeded", "The API key rate limit was exceeded."
 	switch dimension {
 	case limits.DimensionRequests:
@@ -113,10 +113,16 @@ func rateLimited(dimension limits.Dimension, retryAfter time.Duration) *Error {
 	case limits.DimensionConcurrency:
 		message = "The API key concurrency limit was exceeded."
 	case limits.DimensionDailyCost, limits.DimensionMonthlyCost:
-		// Both budgets answer with the one message the API contract pins,
-		// including why spend a dashboard reports as under the limit can still
-		// exhaust it: an attempt nobody could price is charged nothing.
-		code, message = "budget_exhausted", "The API key cost budget was exhausted. Unpriced attempts accrue 0."
+		// Both budgets keep one code. An exhausted budget says why spend a
+		// dashboard reports as under the limit can still exhaust it: an attempt
+		// nobody could price is charged nothing. A budget with room left says it
+		// is the request that does not fit, which is what a client can change.
+		code = "budget_exhausted"
+		if estimate {
+			message = "The API key cost budget cannot cover this request's estimated cost beside the spend and requests already counted against it. Lower max_tokens, wait for requests in flight to finish, or raise the budget."
+		} else {
+			message = "The API key cost budget was exhausted. Unpriced attempts accrue 0."
+		}
 	}
 	return &Error{
 		Status:     http.StatusTooManyRequests,
@@ -138,7 +144,12 @@ func retryHint(dimension limits.Dimension, retryAfter time.Duration) time.Durati
 	return max(retryAfter, time.Second)
 }
 
-// keyRequest describes the API key budgets as one admission decision.
+// keyRequest describes the API key budgets as one admission decision. It is the
+// one reservation whose allowance the caller is told, in the rate-limit headers,
+// so it is the one that asks the rate script to state it: the quotas of a
+// provider are not the caller's, and are answered with the decision alone. The
+// surface the caller speaks may have no such headers, and then admission clears
+// the request for the allowance, which nothing would write.
 func keyRequest(authority access.Authority, estimate int64, ttl time.Duration) limits.Request {
 	policy := authority.Policy
 	return limits.Request{
@@ -151,6 +162,7 @@ func keyRequest(authority access.Authority, estimate int64, ttl time.Duration) l
 		MonthlyCostLimit:  policy.MonthlyCostLimit,
 		RequestedTokens:   estimate,
 		LeaseTTL:          ttl,
+		ReportRate:        true,
 	}
 }
 
@@ -171,28 +183,48 @@ func groupRequest(authority access.Authority, ttl time.Duration) *limits.Request
 
 // reserveKey admits one request against the API key budgets. A nil lease with
 // a nil error admits the request without one: either the key bounds nothing,
-// or the limiter is unreachable and the installation chose to fail open.
-func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, estimate int64, ttl time.Duration) (*limits.Lease, *Error) {
-	if group := groupRequest(authority, ttl); group != nil {
+// or the limiter is unreachable and the installation chose to fail open. The
+// surface is the one the caller speaks, whose headers report the key's allowance
+// if it has any.
+func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration) (*limits.Lease, *Error) {
+	return a.reserveKeyCosted(ctx, authority, surface, estimate, ttl, costReservation{})
+}
+
+// reserveKeyCosted admits one request against the API key budgets and, for a
+// request that can be priced, reserves its estimated cost against the cost
+// budgets of the key and its budget group beside the spend already accrued. The
+// group's budget is taken first, since it is shared; its lease is attached to the
+// key's, so the one handle the request keeps finishes both. A budget that
+// refuses the request after the group's was taken gives the group's back.
+func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
+	var group *limits.Lease
+	if request := groupRequest(authority, ttl); request != nil {
 		if !a.ready() {
 			return nil, limitsUnavailable()
 		}
+		request.CostEstimate, request.RequestID = hold.amount, hold.requestID
 		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
-		_, err := a.limiter.Reserve(decision, *group)
+		lease, err := a.limiter.Reserve(decision, *request)
 		cancel()
 		if err != nil {
 			if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 				a.recordRejection(exceeded.Dimension)
-				return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter)
+				return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
 			}
 			return nil, a.outage(authority.ID, true, err)
 		}
+		group = lease
 	}
 	request := keyRequest(authority, estimate, ttl)
+	// The allowance is stated for a response that will report it. A surface
+	// whose SDKs read no rate-limit headers, Gemini, Bedrock and the native
+	// operations, would be answered an allowance nothing writes, and the reply
+	// costs the request about a dozen allocations to build.
+	request.ReportRate = rateHeadersOf(surface) != nil
 	if !request.HasHardLimits() {
 		// Nothing to enforce, so nothing to store: a key without hard limits
-		// never reaches Valkey.
-		return nil, nil
+		// reaches Valkey only for the group it belongs to.
+		return group, nil
 	}
 	if !a.ready() {
 		return nil, limitsUnavailable()
@@ -200,19 +232,36 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 	if request.TokensPerMinute != nil && estimate > *request.TokensPerMinute {
 		// No window will ever hold this request: answer now rather than make
 		// the caller retry into a limit it cannot satisfy.
+		settleKey(ctx, group, false, nil, a.logger())
 		return nil, invalidRequest("request_exceeds_token_limit", "This request needs more tokens than the API key tokens per minute limit allows.", nil)
+	}
+	if request.HasCostBudget() {
+		request.CostEstimate, request.RequestID = hold.amount, hold.requestID
 	}
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
 	lease, err := a.limiter.Reserve(decision, request)
 	if err == nil {
+		lease.Attach(group)
 		return lease, nil
 	}
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 		a.recordRejection(exceeded.Dimension)
-		return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter)
+		settleKey(ctx, group, false, nil, a.logger())
+		// Only the key's own request and token limits state an allowance, and
+		// only its rejection reports it: a budget group has none, and the quota
+		// of a provider is not the caller's.
+		e := rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
+		e.rate = exceeded.Rate
+		return nil, e
 	}
-	return nil, a.outage(authority.ID, request.HasCostBudget(), err)
+	if e := a.outage(authority.ID, request.HasCostBudget(), err); e != nil {
+		settleKey(ctx, group, false, nil, a.logger())
+		return nil, e
+	}
+	// Failing open admits the request without the key's own reservation, but the
+	// group's was taken and still has to be settled.
+	return group, nil
 }
 
 // outage decides what happens to a request whose budgets cannot be consulted.
@@ -232,7 +281,13 @@ func (a *Admission) outage(keyID string, costBudget bool, cause error) *Error {
 // settleKey finishes the key reservation. A request that never dispatched an
 // attempt consumed nothing and is refunded in full; any other request keeps
 // the request and token it spent but must return the concurrency slot, and
-// reports the tokens it actually used when the provider disclosed them.
+// reports the tokens it actually used when the provider disclosed them. The cost
+// it reserved becomes the cost it recorded. That is settled last, and a cost is
+// settled once, because it is the step whose loss costs least: the reservation
+// then lapses on its own and is removed sooner by the spend accounting records
+// for the request. A request that never dispatched, and one that recorded no cost
+// because its usage is still to come, have no spend to remove their reservation,
+// so it is given back by a release, which is retried like the others.
 //
 // The caller's context may already be cancelled — the client may have hung up,
 // which is exactly when the slot has to come back — so cancellation is dropped
@@ -255,6 +310,9 @@ func settleKey(ctx context.Context, lease *limits.Lease, dispatched bool, actual
 	}
 	if err := lease.Release(ctx); err != nil {
 		log.Warn("limit reservation release failed", "error", err.Error())
+	}
+	if err := lease.SettleCost(ctx); err != nil {
+		log.Warn("cost reservation settlement failed", "error", err.Error())
 	}
 }
 
@@ -279,7 +337,6 @@ func (t *targetReservation) settle(ctx context.Context, dispatched bool, actual 
 func connectionRequest(provider *runtime.Provider, estimate int64, ttl time.Duration) limits.Request {
 	request := limits.Request{
 		CostOwnerID:     provider.ID,
-		LookupID:        limits.ConnectionLookup(provider.ID),
 		RequestedTokens: estimate,
 		LeaseTTL:        ttl,
 	}
@@ -288,20 +345,27 @@ func connectionRequest(provider *runtime.Provider, estimate int64, ttl time.Dura
 		request.TokensPerMinute = provider.Limits.TokensPerMinute
 		request.MaxConcurrency = provider.Limits.MaxConcurrency
 	}
+	// Naming the quota allocates, so a provider that has none is not made to.
+	if request.HasHardLimits() {
+		request.LookupID = limits.ConnectionLookup(provider.ID)
+	}
 	return request
 }
 
 // slotRequest describes the quota of one credential slot.
 func slotRequest(slot *runtime.Slot, estimate int64, ttl time.Duration) limits.Request {
-	return limits.Request{
+	request := limits.Request{
 		CostOwnerID:       slot.ID,
-		LookupID:          limits.SlotLookup(slot.ID),
 		RequestsPerMinute: slot.RequestsPerMinute,
 		TokensPerMinute:   slot.TokensPerMinute,
 		MaxConcurrency:    slot.MaxConcurrency,
 		RequestedTokens:   estimate,
 		LeaseTTL:          ttl,
 	}
+	if request.HasHardLimits() {
+		request.LookupID = limits.SlotLookup(slot.ID)
+	}
+	return request
 }
 
 // reserveTarget admits one attempt against the provider connection quota and
@@ -403,285 +467,20 @@ func (a *Admission) cooling(ctx context.Context, providerID string, slot *runtim
 	return cooling
 }
 
-const (
-	// charsPerToken is the ratio text is charged at. Four characters per token
-	// is a conservative portable approximation across connectors.
-	charsPerToken = 4
-	// imageTokens and mediaTokens are the flat charges for content whose size
-	// on the wire says nothing about what a model will be billed for: an
-	// inline image arrives as a megabyte of base64, and charging it by its
-	// length would refuse requests no provider would have refused.
-	imageTokens = 1000
-	mediaTokens = 2000
-	// defaultOutputTokens stands in for a caller that named no output bound.
-	defaultOutputTokens = 4096
-	// maxEstimate is the largest integer the limiter can store.
-	maxEstimate = 1<<53 - 1
-)
-
-// estimateTokens is the tokens a request may consume, charged before the
-// upstream reports what it actually used. The prompt is walked rather than
-// weighed: text is charged at four characters per token, each media part at a
-// flat rate, and the reply at the largest size the caller allowed — the bound
-// it named for one candidate, multiplied by the candidates asked for. It is
-// deliberately generous — a reservation is reconciled against the real usage
-// as soon as the attempt ends, and admitting work that cannot fit in the
-// window is worse than deferring work that would have.
-func estimateTokens(parsed *openai.Request, defaults ...map[string]json.RawMessage) int64 {
-	input, output, candidates := estimateParts(parsed, defaults...)
-	return estimateTokensFromParts(parsed, input, output, candidates)
-}
-
-func estimateTokensFromParts(parsed *openai.Request, input int64, output *int64, candidates int64) int64 {
-	if parsed != nil && parsed.Family.Operation() != "generation" {
-		return max(input, 1)
-	}
-	bound := int64(defaultOutputTokens)
-	if output != nil {
-		bound = *output
-	}
-	return max(addBounded(input, multiplyBounded(max(bound, 1), max(candidates, 1))), 1)
-}
-
-func estimateParts(parsed *openai.Request, defaults ...map[string]json.RawMessage) (input int64, output *int64, candidates int64) {
-	// Match Encode's precedence, including explicit null opting out of a
-	// default and either chat token-bound alias overriding the other.
-	field := func(name string) json.RawMessage {
-		if parsed != nil {
-			if raw := parsed.Field(name); len(raw) > 0 {
-				return raw
-			}
-			if parsed.Family == openai.FamilyChat &&
-				((name == "max_tokens" && len(parsed.Field("max_completion_tokens")) > 0) ||
-					(name == "max_completion_tokens" && len(parsed.Field("max_tokens")) > 0)) {
-				return nil
-			}
-		}
-		if len(defaults) > 0 {
-			return defaults[0][name]
-		}
-		return nil
-	}
-	candidates = 1
-	if parsed != nil {
-		switch parsed.Family {
-		case openai.FamilyChat:
-			input = estimateItems(field("messages"))
-		case openai.FamilyEmbeddings:
-			input = estimateEmbeddingInput(field("input"))
-		case openai.FamilyResponses, openai.FamilyInputTokens, openai.FamilyModeration:
-			input = addBounded(estimateItems(field("input")), estimateText(field("instructions")))
-		}
-		if parsed.Family.Surface() != "openai" {
-			input = addBounded(estimateNative(field("messages")), estimateNative(field("system")))
-			input = addBounded(input, estimateNative(field("contents")))
-			input = addBounded(input, estimateNative(field("systemInstruction")))
-			input = addBounded(input, estimateNative(field("generateContentRequest")))
-		}
-		if parsed.Family.Surface() != "openai" {
-			input = addBounded(input, estimateSchema(field("tools")))
-		} else {
-			input = addBounded(input, estimateTools(field("tools")))
-		}
-		if parsed.Family.Operation() != "generation" {
-			return max(input, 1), nil, 1
-		}
-	}
-	outputFields := []string{"max_completion_tokens", "max_tokens"}
-	if parsed != nil && parsed.Family == openai.FamilyResponses {
-		outputFields = []string{"max_output_tokens"}
-	}
-	for _, name := range outputFields {
-		if value, ok := integerValue(field(name)); ok {
-			output = &value
-			break
-		}
-	}
-	if parsed != nil && parsed.Family == openai.FamilyBedrock {
-		if value, ok := integerValue(jsonObject(field("inferenceConfig"))["maxTokens"]); ok {
-			output = &value
-		}
-	}
-	if parsed != nil && parsed.Family.Surface() == "gemini" {
-		config := jsonObject(field("generationConfig"))
-		if v, ok := integerValue(config["maxOutputTokens"]); ok {
-			output = &v
-		}
-		if v, ok := integerValue(config["candidateCount"]); ok {
-			candidates = v
-		}
-	}
-
-	if parsed == nil || parsed.Family == openai.FamilyChat {
-		if value, ok := integerValue(field("n")); ok {
-			candidates = value
-		}
-	}
-	return input, output, candidates
-}
-
-// estimateItems charges the conversation one request carries: the messages of
-// a chat request, or the input of a responses request, which may also be one
-// plain string. A shape this gateway does not recognise is charged nothing
-// rather than guessed at, because the reservation is reconciled against the
-// usage the upstream reports as soon as the attempt ends.
-func estimateItems(raw json.RawMessage) int64 {
-	if tokens, ok := textTokens(raw); ok {
-		return tokens
-	}
-	total := int64(0)
-	for _, raw := range jsonArray(raw) {
-		item := jsonObject(raw)
-		if item == nil {
-			continue
-		}
-		// A responses tool result carries what it returned in `output`.
-		total = addBounded(total, estimateContent(item["content"]))
-		total = addBounded(total, estimateContent(item["output"]))
-		// The identifiers and arguments a message travels with are prompt text
-		// like any other; `call_id` and `arguments` are the responses spelling
-		// of the chat tool-call fields.
-		for _, name := range [...]string{"name", "tool_call_id", "call_id", "arguments"} {
-			total = addBounded(total, estimateText(item[name]))
-		}
-		for _, raw := range jsonArray(item["tool_calls"]) {
-			call := jsonObject(raw)
-			if function := jsonObject(call["function"]); function != nil {
-				call = function
-			}
-			total = addBounded(total, estimateText(call["name"]))
-			total = addBounded(total, estimateText(call["arguments"]))
-		}
-	}
-	return total
-}
-
-// estimateContent charges one message body: plain text, or the parts a
-// multimodal message carries.
-func estimateContent(raw json.RawMessage) int64 {
-	if tokens, ok := textTokens(raw); ok {
-		return tokens
-	}
-	total := int64(0)
-	for _, raw := range jsonArray(raw) {
-		part := jsonObject(raw)
-		if part == nil {
-			// A bare string among the parts is text.
-			total = addBounded(total, estimateText(raw))
-			continue
-		}
-		kind, _ := textOf(part["type"])
-		switch kind {
-		case "image_url", "input_image":
-			total = addBounded(total, imageTokens)
-		case "input_audio", "input_file", "file":
-			total = addBounded(total, mediaTokens)
-		default:
-			total = addBounded(total, estimateText(part["text"]))
-			total = addBounded(total, estimateText(part["refusal"]))
-		}
-	}
-	return total
-}
-
-// estimateTools charges the tool catalogue a request carries: a schema the
-// model has to read costs what any other prompt text costs.
-func estimateTools(raw json.RawMessage) int64 {
-	total := int64(0)
-	for _, raw := range jsonArray(raw) {
-		tool := jsonObject(raw)
-		// Chat nests the definition under `function`; responses holds it flat.
-		if function := jsonObject(tool["function"]); function != nil {
-			tool = function
-		}
-		total = addBounded(total, estimateText(tool["name"]))
-		total = addBounded(total, estimateText(tool["description"]))
-		total = addBounded(total, estimateSchema(tool["parameters"]))
-	}
-	return total
-}
-
-// estimateSchema charges a JSON schema as the document it is, with whatever
-// formatting the caller happened to send removed.
-func estimateSchema(raw json.RawMessage) int64 {
-	if len(raw) == 0 {
-		return 0
-	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, raw); err != nil {
-		return 0
-	}
-	return charge(utf8.RuneCount(compact.Bytes()))
-}
-
-// textTokens charges a JSON string, reporting whether the value was one.
-func textTokens(raw json.RawMessage) (int64, bool) {
-	text, ok := textOf(raw)
-	if !ok {
-		return 0, false
-	}
-	return charge(utf8.RuneCountInString(text)), true
-}
-
-// estimateText charges a field that holds text, and nothing for one that
-// holds anything else.
-func estimateText(raw json.RawMessage) int64 {
-	tokens, _ := textTokens(raw)
-	return tokens
-}
-
-// charge converts a character count into tokens, rounding up so that no text
-// is free.
-func charge(characters int) int64 {
-	return int64((characters + charsPerToken - 1) / charsPerToken)
-}
-
-// textOf reads a JSON string, reporting whether the value was one. Characters
-// are counted rather than bytes so a multi-byte script is not overcharged.
-func textOf(raw json.RawMessage) (string, bool) {
-	var text string
-	if len(raw) == 0 || json.Unmarshal(raw, &text) != nil {
-		return "", false
-	}
-	return text, true
-}
-
-// jsonArray and jsonObject decode a value of the shape the estimate expects,
-// and nothing at all for any other shape.
-func jsonArray(raw json.RawMessage) []json.RawMessage {
-	var items []json.RawMessage
-	if len(raw) == 0 || json.Unmarshal(raw, &items) != nil {
-		return nil
-	}
-	return items
-}
-
-func jsonObject(raw json.RawMessage) map[string]json.RawMessage {
-	var fields map[string]json.RawMessage
-	if len(raw) == 0 || json.Unmarshal(raw, &fields) != nil {
-		return nil
-	}
-	return fields
-}
-
-// integerValue distinguishes null from an explicit integer.
-func integerValue(raw json.RawMessage) (int64, bool) {
-	var value *int64
-	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil || value == nil {
-		return 0, false
-	}
-	return *value, true
-}
+// maxEstimate is the largest integer the limiter can store.
+const maxEstimate = estimate.MaxTokens
 
 // requestEstimate covers any provider the pinned route may select. Connection
 // defaults affect what is actually sent, even when the client omitted a bound.
+// Each attempt is priced once, for its own provider and model, so the cost
+// grows with the targets of a route and not with their square.
 func requestEstimate(x *execution) int64 {
-	var estimate int64
+	var reserved int64
 	for _, attempt := range x.attempts {
 		provider := x.snapshot().Providers[attempt.ProviderID]
-		estimate = max(estimate, x.providerEstimate(&provider))
+		reserved = max(reserved, x.attemptReservation(attempt, &provider))
 	}
-	return max(estimate, 1)
+	return max(reserved, 1)
 }
 
 // keyReservationEstimate covers every upstream attempt the route may dispatch.
@@ -740,50 +539,4 @@ func totalTokens(usage *openai.Usage) *int64 {
 	total := addBounded(min(usage.InputTokens, maxEstimate), min(usage.OutputTokens, maxEstimate))
 	total = max(total, min(usage.TotalTokens, maxEstimate))
 	return &total
-}
-
-// Native content uses the same text/media reservation units as OpenAI. Blob
-// bytes are never mistaken for text tokens.
-func estimateNative(raw json.RawMessage) int64 {
-	if n, ok := textTokens(raw); ok {
-		return n
-	}
-	var items []json.RawMessage
-	if json.Unmarshal(raw, &items) == nil {
-		var n int64
-		for _, item := range items {
-			n = addBounded(n, estimateNative(item))
-		}
-		return n
-	}
-	f := jsonObject(raw)
-	if f == nil {
-		return 0
-	}
-	if f["inlineData"] != nil || f["fileData"] != nil || string(f["type"]) == `"image"` {
-		return imageTokens
-	}
-	var n int64
-	for _, key := range []string{"text", "content", "parts", "contents", "systemInstruction", "functionResponse", "functionCall", "input", "output"} {
-		if value := f[key]; value != nil {
-			n = addBounded(n, estimateNative(value))
-		}
-	}
-	return n
-}
-
-func estimateEmbeddingInput(raw json.RawMessage) int64 {
-	if value, ok := textTokens(raw); ok {
-		return value
-	}
-	total := int64(0)
-	for _, item := range jsonArray(raw) {
-		var token uint32
-		if json.Unmarshal(item, &token) == nil {
-			total = addBounded(total, 1)
-		} else {
-			total = addBounded(total, estimateEmbeddingInput(item))
-		}
-	}
-	return total
 }

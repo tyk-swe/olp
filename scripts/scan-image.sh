@@ -27,6 +27,7 @@ mkdir -p "$reports/native-inventory"
 docker cp "$container:/usr/share/doc/openllmproxy/." "$reports/native-inventory"
 docker rm "$container" >/dev/null
 test -s "$reports/native-inventory/GLIDE-THIRD-PARTY-LICENSES"
+test -s "$reports/native-inventory/TIKTOKEN-LICENSE"
 test -s "$reports/native-inventory/native-link.txt"
 count=0
 while IFS= read -r document; do

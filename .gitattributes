@@ -8,3 +8,5 @@ console/pnpm-lock.yaml linguist-generated=true
 tests/sdk-smoke/pnpm-lock.yaml linguist-generated=true
 docs/assets/screenshots/*.png -diff
 console/tests/e2e/*-snapshots/*.png -diff
+internal/operations/tokenization/estimate/ranks/*.bin binary linguist-generated=true
+tests/fixtures/tokens/*.json linguist-generated=true

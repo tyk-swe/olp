@@ -119,10 +119,12 @@ const insertFactSQL = `INSERT INTO olp.attempt_usage_facts
          model_request_counted, target_request_counted, request_unpriced_counted,
          provider_unpriced_counted, model_unpriced_counted, target_unpriced_counted,
          request_incomplete_counted, provider_incomplete_counted,
-         model_incomplete_counted, target_incomplete_counted, attribution)
+         model_incomplete_counted, target_incomplete_counted, attribution,
+         estimated_input_tokens, estimate_provenance, model_family)
     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, $24::uuid, $7::uuid, $8, $9, $10, $11, $12,
             $13, $14, $15, $16, $17, $18, $25, $26, $27, $19::numeric, $20::numeric, $21, $22::uuid, $23,
-            false, false, false, false, false, false, false, false, false, false, false, false, $28::jsonb)
+            false, false, false, false, false, false, false, false, false, false, false, false, $28::jsonb,
+            $29, $30, $31)
     ON CONFLICT (request_id, attempt_ordinal) DO NOTHING`
 
 // factTotalsSQL sums exactly the facts this event inserted. The receipt
@@ -395,6 +397,7 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAtte
 		pricing.estimatedCost, unpriced, pricing.pricingRevisionID, pricing.currency,
 		ev.BudgetGroupID, usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens,
 		usage.CacheWrite1HInputTokens, string(AttributionJSON(ev.Attribution)),
+		attempt.Attempt.EstimatedInputTokens, attempt.Attempt.EstimateProvenance, attempt.Attempt.ModelFamily,
 	); err != nil {
 		return fmt.Errorf("persist attempt usage fact: %w", err)
 	}
@@ -418,12 +421,17 @@ func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) ([]limits.CostSna
 	if err != nil {
 		return nil, fmt.Errorf("apply request metadata cost delta: %w", err)
 	}
+	// Each snapshot names the request it accounts for, so that installing it in
+	// the distributed counters also removes the cost the gateway reserved for the
+	// request when it was admitted.
+	snapshot.RequestID = ev.RequestID
 	snapshots := []limits.CostSnapshot{snapshot}
 	if ev.BudgetGroupID != nil {
 		group, err := limits.AddGroupCostDelta(ctx, tx, *ev.BudgetGroupID, ev.ObservedAt, cost, unpriced)
 		if err != nil {
 			return nil, fmt.Errorf("apply request metadata group cost delta: %w", err)
 		}
+		group.RequestID = ev.RequestID
 		snapshots = append(snapshots, group)
 	}
 	return snapshots, nil

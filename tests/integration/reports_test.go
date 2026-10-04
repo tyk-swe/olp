@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -180,6 +181,12 @@ type repFact struct {
 	IncompleteProvider bool
 	IncompleteModel    bool
 	IncompleteTarget   bool
+	// Estimate is what admission estimated this attempt's input to be, with
+	// the provenance and family it came with; unset is an attempt that was
+	// never estimated.
+	Estimate   *int64
+	Provenance string
+	Family     string
 }
 
 func (f *repFixture) fact(v repFact) {
@@ -191,16 +198,18 @@ func (f *repFixture) fact(v repFact) {
 	        request_counted, provider_request_counted, model_request_counted, target_request_counted,
 	        request_unpriced_counted, provider_unpriced_counted, model_unpriced_counted,
 	        target_unpriced_counted, request_incomplete_counted, provider_incomplete_counted,
-	        model_incomplete_counted, target_incomplete_counted)
+	        model_incomplete_counted, target_incomplete_counted, estimated_input_tokens,
+	        estimate_provenance, model_family)
 	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
 	        $19::text::numeric, $20::text::numeric, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-	        $31, $32, $33, $34, $35)`,
+	        $31, $32, $33, $34, $35, $36, $37, $38)`,
 		access.NewID(), access.NewID(), v.RequestID, v.StartedAt, v.Ordinal, f.Key, v.ProviderID,
 		v.Route, v.Model, v.Operation, v.Surface, v.ObservedAt, v.Charge, v.Observed, v.Complete,
 		v.Input, v.Output, v.Cached, v.Media, v.Cost, v.Unpriced, v.RevisionID, v.Currency,
 		v.CountRequest, v.CountProvider, v.CountModel, v.CountTarget,
 		v.UnpricedRequest, v.UnpricedProvider, v.UnpricedModel, v.UnpricedTarget,
-		v.IncompleteRequest, v.IncompleteProvider, v.IncompleteModel, v.IncompleteTarget)
+		v.IncompleteRequest, v.IncompleteProvider, v.IncompleteModel, v.IncompleteTarget,
+		v.Estimate, v.Provenance, v.Family)
 }
 
 // repHourly is one retained rollup bucket.
@@ -231,6 +240,13 @@ type repHourly struct {
 	IncompleteTarget   int64
 	Currency           *string
 	UnpricedAttempts   int64
+	// The estimate dimensions of the bucket, and the sums over the attempts
+	// that had both an estimate and reported input.
+	Family            string
+	Provenance        string
+	Estimated         int64
+	EstimateReported  int64
+	EstimatedAttempts int64
 }
 
 func (f *repFixture) hourly(v repHourly) {
@@ -239,14 +255,18 @@ func (f *repFixture) hourly(v repHourly) {
 	        target_request_count, input_tokens, output_tokens, cached_input_tokens, media_units,
 	        estimated_cost, request_unpriced_count, provider_unpriced_count, model_unpriced_count,
 	        target_unpriced_count, request_incomplete_count, provider_incomplete_count,
-	        model_incomplete_count, target_incomplete_count, currency, unpriced_attempt_count)
+	        model_incomplete_count, target_incomplete_count, currency, unpriced_attempt_count,
+	        model_family, estimate_provenance, estimated_input_tokens,
+	        estimate_reported_input_tokens, estimate_attempt_count)
 	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::text::numeric,
-	        $16::text::numeric, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)`,
+	        $16::text::numeric, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
+	        $31)`,
 		v.Bucket, v.Route, v.ProviderID, v.Model, v.Operation, v.Surface, v.APIKey, v.Requests,
 		v.ProviderRequests, v.ModelRequests, v.TargetRequests, v.Input, v.Output, v.Cached, v.Media,
 		v.Cost, v.UnpricedRequests, v.UnpricedProvider, v.UnpricedModel, v.UnpricedTarget,
 		v.IncompleteRequests, v.IncompleteProvider, v.IncompleteModel, v.IncompleteTarget,
-		v.Currency, v.UnpricedAttempts)
+		v.Currency, v.UnpricedAttempts, v.Family, v.Provenance, v.Estimated,
+		v.EstimateReported, v.EstimatedAttempts)
 }
 
 // repProblemCode reads the code out of an RFC 9457 problem document, where it
@@ -1041,6 +1061,11 @@ func repSameTotals(t *testing.T, before, after usage.Summary) {
 		before.CachedInputTokens != after.CachedInputTokens || before.MediaUnits != after.MediaUnits {
 		t.Fatalf("tokens changed: before %+v after %+v", before.Totals, after.Totals)
 	}
+	if before.EstimatedInputTokens != after.EstimatedInputTokens ||
+		before.ReportedInputTokens != after.ReportedInputTokens ||
+		before.EstimatedAttemptCount != after.EstimatedAttemptCount {
+		t.Fatalf("estimate totals changed: before %+v after %+v", before.Totals, after.Totals)
+	}
 	if repOptional(before.EstimatedCost) != repOptional(after.EstimatedCost) {
 		t.Fatalf("cost changed: before %v after %v",
 			repOptional(before.EstimatedCost), repOptional(after.EstimatedCost))
@@ -1195,5 +1220,241 @@ func TestUsageRetentionHonoursTheConfiguredWindow(t *testing.T) {
 	f.exec(`UPDATE olp.settings SET value = '0' WHERE key = 'retention.usage_days'`)
 	if _, err = usage.RunMaintenance(ctx, f.pool, now); err == nil {
 		t.Fatal("maintenance ran with a retention setting outside its bounds")
+	}
+}
+
+// repEstimated seeds one request with one attempt whose input was estimated,
+// observed at the given time. Every attempt is its own request and counts once.
+func repEstimated(f *repFixture, at time.Time, route, model string, v repFact) {
+	id := access.NewID()
+	f.request(repRequest{ID: id, StartedAt: at, Route: route, Operation: "generation",
+		Surface: "openai", StatusCode: repInt(200), AttemptCount: 1})
+	v.RequestID, v.StartedAt, v.Ordinal, v.ObservedAt = id, at, 1, at.Add(10*time.Minute)
+	v.Route, v.ProviderID, v.Model, v.Operation, v.Surface = route, f.P1, model, "generation", "openai"
+	v.CountRequest, v.CountProvider, v.CountModel, v.CountTarget = true, true, true, true
+	f.fact(v)
+}
+
+// repSeedEstimates lays out one retained hour and live attempts across two
+// routes and families, with the attempts whose error cannot be known mixed in:
+// one that failed before reporting, one that reported no input, one that was
+// never estimated, which keeps its model's family as the gateway records it for
+// a call that reads no prompt, and one recorded before families were.
+func repSeedEstimates(f *repFixture) {
+	f.hourly(repHourly{Bucket: f.Base, Route: "alpha", ProviderID: f.P1, Model: "gpt-x",
+		Operation: "generation", Surface: "openai", APIKey: &f.Key,
+		Requests: 3, ProviderRequests: 3, ModelRequests: 3, TargetRequests: 3,
+		Input: 100, Output: 20, Media: "0.000000",
+		Family: "openai-o200k", Provenance: "tokenizer",
+		Estimated: 90, EstimateReported: 80, EstimatedAttempts: 3})
+	hour := f.Base.Add(time.Hour)
+	billable := repFact{Charge: "billable", Observed: true, Complete: true}
+	with := func(base repFact, input *int64, estimate *int64, provenance, family string) repFact {
+		base.Input, base.Estimate, base.Provenance, base.Family = input, estimate, provenance, family
+		return base
+	}
+	repEstimated(f, hour, "alpha", "gpt-x", with(billable, repCount(10), repCount(12), "tokenizer", "openai-o200k"))
+	repEstimated(f, hour, "beta", "claude-x", with(billable, repCount(40), repCount(30), "heuristic", "anthropic"))
+	// Recorded before estimates and families were: nothing of either.
+	repEstimated(f, hour, "beta", "claude-x", with(billable, repCount(5), nil, "", ""))
+	// Never estimated, as a realtime session or a job poll: no estimate and no
+	// provenance, and the family of the model all the same.
+	repEstimated(f, hour, "beta", "claude-x", with(billable, repCount(2), nil, "", "anthropic"))
+	// Failed before the provider reported anything: estimated, never compared.
+	repEstimated(f, hour, "alpha", "gpt-x", repFact{Charge: "not_billable", Complete: true,
+		Estimate: repCount(20), Provenance: "tokenizer", Family: "openai-o200k"})
+	// Reported usage without any input count: nothing to compare the estimate to.
+	repEstimated(f, hour, "alpha", "gpt-x", with(billable, nil, repCount(7), "tokenizer", "openai-o200k"))
+}
+
+type repEstimateTotals struct {
+	Requests              int64
+	Input                 string
+	Estimated, Reported   string
+	EstimatedAttemptCount int64
+}
+
+func repEstimateOf(totals usage.Totals) repEstimateTotals {
+	return repEstimateTotals{totals.RequestCount, totals.InputTokens, totals.EstimatedInputTokens,
+		totals.ReportedInputTokens, totals.EstimatedAttemptCount}
+}
+
+func TestReportsSetEstimatedInputAgainstReportedUsage(t *testing.T) {
+	f := repSetup(t)
+	repSeedEstimates(f)
+	ctx := context.Background()
+	window := repRange(f, 0, 3)
+
+	// Only attempts with both an estimate and reported input are compared, and
+	// both sums run over those same attempts: the retained hour contributes its
+	// stored sums, not its all-attempt input of 100.
+	summary, err := usage.ReadSummary(ctx, f.pool, window, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("read summary: %v", err)
+	}
+	want := repEstimateTotals{Requests: 9, Input: "157", Estimated: "132", Reported: "130", EstimatedAttemptCount: 5}
+	if got := repEstimateOf(summary.Totals); got != want {
+		t.Fatalf("summary = %+v, want %+v", got, want)
+	}
+
+	for _, c := range []struct {
+		dimension string
+		want      map[string]repEstimateTotals
+		order     []string
+	}{
+		{usage.DimensionRoute, map[string]repEstimateTotals{
+			"alpha": {6, "110", "102", "90", 4},
+			"beta":  {3, "47", "30", "40", 1},
+		}, []string{"alpha", "beta"}},
+		// The attempt that was never estimated is in its model's family, where it
+		// adds to the tokens and nothing to the estimate. Only a row recorded
+		// before families were is unknown.
+		{usage.DimensionModelFamily, map[string]repEstimateTotals{
+			"openai-o200k": {6, "110", "102", "90", 4},
+			"anthropic":    {2, "42", "30", "40", 1},
+			"unknown":      {1, "5", "0", "0", 0},
+		}, []string{"openai-o200k", "anthropic", "unknown"}},
+		{usage.DimensionEstimateProvenance, map[string]repEstimateTotals{
+			"tokenizer": {6, "110", "102", "90", 4},
+			"none":      {2, "7", "0", "0", 0},
+			"heuristic": {1, "40", "30", "40", 1},
+		}, []string{"tokenizer", "none", "heuristic"}},
+	} {
+		t.Run(c.dimension, func(t *testing.T) {
+			report, err := usage.ReadBreakdown(ctx, f.pool, window, c.dimension, 10)
+			if err != nil {
+				t.Fatalf("read breakdown: %v", err)
+			}
+			var order []string
+			for _, item := range report.Items {
+				order = append(order, item.Dimension)
+				if got, ok := c.want[item.Dimension]; !ok || repEstimateOf(item.Totals) != got {
+					t.Errorf("%s = %+v, want %+v", item.Dimension, repEstimateOf(item.Totals), got)
+				}
+			}
+			if strings.Join(order, ",") != strings.Join(c.order, ",") {
+				t.Fatalf("rows = %v, want %v", order, c.order)
+			}
+		})
+	}
+
+	series, err := usage.ReadSeries(ctx, f.pool, window, usage.GranularityHour)
+	if err != nil {
+		t.Fatalf("read series: %v", err)
+	}
+	if len(series.Items) != 2 {
+		t.Fatalf("buckets = %d, want 2", len(series.Items))
+	}
+	for i, want := range []repEstimateTotals{{3, "100", "90", "80", 3}, {6, "57", "42", "50", 2}} {
+		if got := repEstimateOf(series.Items[i].Totals); got != want {
+			t.Errorf("bucket %d = %+v, want %+v", i, got, want)
+		}
+	}
+
+	// A range with no estimated attempt reports zeros, which the console shows
+	// as no error rather than a perfect one.
+	none, err := usage.ReadSummary(ctx, f.pool, repRange(f, 4, 5), time.Now().UTC())
+	if err != nil {
+		t.Fatalf("read empty summary: %v", err)
+	}
+	if got := repEstimateOf(none.Totals); got != (repEstimateTotals{Input: "0", Estimated: "0", Reported: "0"}) {
+		t.Fatalf("empty range = %+v, want zeros", got)
+	}
+}
+
+func TestUsageMaintenanceRollsUpEstimatesByFamilyAndProvenance(t *testing.T) {
+	f := repSetup(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	bucket := now.Add(-100 * 24 * time.Hour).Truncate(time.Hour)
+	// Media units keep the live and retained media totals at the same scale.
+	billable := repFact{Charge: "billable", Observed: true, Complete: true, Media: repText("0.500000")}
+	seed := func(at time.Time, v repFact, input, estimate *int64, provenance, family string) {
+		v.Input, v.Estimate, v.Provenance, v.Family = input, estimate, provenance, family
+		repEstimated(f, at, "alpha", "m1", v)
+	}
+	seed(bucket, billable, repCount(7), repCount(8), "tokenizer", "openai-o200k")
+	seed(bucket, billable, repCount(10), repCount(10), "tokenizer", "openai-o200k")
+	seed(bucket, billable, repCount(30), repCount(40), "heuristic", "anthropic")
+	seed(bucket, repFact{Charge: "not_billable", Complete: true}, nil, repCount(12), "heuristic", "anthropic")
+	seed(bucket, billable, repCount(9), nil, "", "")
+	// Never estimated, but of a family: its own row, apart from the estimated
+	// attempts of that family and from the rows recorded before families were.
+	seed(bucket, billable, repCount(4), nil, "", "anthropic")
+
+	window := usage.Filters{Start: bucket, End: bucket.Add(time.Hour), AllProjects: true}
+	before, err := usage.ReadSummary(ctx, f.pool, window, now)
+	if err != nil {
+		t.Fatalf("read summary: %v", err)
+	}
+	if got := repEstimateOf(before.Totals); got.Estimated != "58" || got.Reported != "47" || got.EstimatedAttemptCount != 3 {
+		t.Fatalf("live estimate totals = %+v, want 58 estimated against 47 reported over 3 attempts", got)
+	}
+
+	report, err := usage.RunMaintenance(ctx, f.pool, now)
+	if err != nil {
+		t.Fatalf("run maintenance: %v", err)
+	}
+	// Facts that differ only in family or provenance roll into separate rows.
+	if report.UsageRows != 6 || report.RollupRows != 4 {
+		t.Fatalf("rollup = %d facts into %d rows, want 6 into 4", report.UsageRows, report.RollupRows)
+	}
+	retained := func() map[string]repEstimateTotals {
+		rows, err := f.pool.Query(ctx, `SELECT model_family || '/' || estimate_provenance,
+		        estimated_input_tokens::text, estimate_reported_input_tokens::text,
+		        input_tokens::text, estimate_attempt_count
+		    FROM olp.attempt_usage_hourly`)
+		if err != nil {
+			t.Fatalf("read hourly: %v", err)
+		}
+		defer rows.Close()
+		got := map[string]repEstimateTotals{}
+		for rows.Next() {
+			var key string
+			var totals repEstimateTotals
+			if err = rows.Scan(&key, &totals.Estimated, &totals.Reported, &totals.Input,
+				&totals.EstimatedAttemptCount); err != nil {
+				t.Fatalf("scan hourly: %v", err)
+			}
+			got[key] = totals
+		}
+		return got
+	}
+	want := map[string]repEstimateTotals{
+		"openai-o200k/tokenizer": {Input: "17", Estimated: "18", Reported: "17", EstimatedAttemptCount: 2},
+		"anthropic/heuristic":    {Input: "30", Estimated: "40", Reported: "30", EstimatedAttemptCount: 1},
+		"anthropic/":             {Input: "4", Estimated: "0", Reported: "0"},
+		"/":                      {Input: "9", Estimated: "0", Reported: "0"},
+	}
+	if got := retained(); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("retained rows = %v, want %v", got, want)
+	}
+	after, err := usage.ReadSummary(ctx, f.pool, window, now)
+	if err != nil {
+		t.Fatalf("read summary: %v", err)
+	}
+	repSameTotals(t, before, after)
+	byFamily, err := usage.ReadBreakdown(ctx, f.pool, window, usage.DimensionModelFamily, 10)
+	if err != nil {
+		t.Fatalf("read breakdown: %v", err)
+	}
+	for _, item := range byFamily.Items {
+		if item.Dimension == "anthropic" && repEstimateOf(item.Totals).Reported != "30" {
+			t.Fatalf("retained anthropic = %+v, want 30 reported", repEstimateOf(item.Totals))
+		}
+	}
+
+	// A later fact in the same hour and family folds into its row: the sums
+	// accumulate rather than being replaced.
+	seed(bucket, billable, repCount(20), repCount(25), "tokenizer", "openai-o200k")
+	if _, err = usage.RunMaintenance(ctx, f.pool, now); err != nil {
+		t.Fatalf("run maintenance: %v", err)
+	}
+	want["openai-o200k/tokenizer"] = repEstimateTotals{Input: "37", Estimated: "43", Reported: "37", EstimatedAttemptCount: 3}
+	if got := retained(); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("folded rows = %v, want %v", got, want)
+	}
+	if total := f.count("SELECT count(*) FROM olp.attempt_usage_hourly"); total != 4 {
+		t.Fatalf("hourly rows = %d, want the four the facts folded into", total)
 	}
 }

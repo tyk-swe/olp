@@ -209,7 +209,7 @@ const rollupSQL = `WITH candidates AS (
                 target_request_counted, request_unpriced_counted, provider_unpriced_counted,
                 model_unpriced_counted, target_unpriced_counted, request_incomplete_counted,
                 provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted,
-                attribution
+                attribution, usage_observed, estimated_input_tokens, estimate_provenance, model_family
     ), rolled AS (
       INSERT INTO olp.attempt_usage_hourly
         (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
@@ -220,7 +220,9 @@ const rollupSQL = `WITH candidates AS (
          media_units, estimated_cost,
          request_unpriced_count, provider_unpriced_count, model_unpriced_count,
          target_unpriced_count, unpriced_attempt_count, request_incomplete_count,
-         provider_incomplete_count, model_incomplete_count, target_incomplete_count, currency)
+         provider_incomplete_count, model_incomplete_count, target_incomplete_count, currency,
+         model_family, estimate_provenance, estimated_input_tokens,
+         estimate_reported_input_tokens, estimate_attempt_count)
       SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
              route_slug, provider_id, upstream_model, operation, surface, api_key_id,
              budget_group_id, attribution,
@@ -243,11 +245,15 @@ const rollupSQL = `WITH candidates AS (
              COUNT(*) FILTER (WHERE request_incomplete_counted),
              COUNT(*) FILTER (WHERE provider_incomplete_counted),
              COUNT(*) FILTER (WHERE model_incomplete_counted),
-             COUNT(*) FILTER (WHERE target_incomplete_counted), MAX(currency)
+             COUNT(*) FILTER (WHERE target_incomplete_counted), MAX(currency),
+             model_family, estimate_provenance,
+             COALESCE(SUM(estimated_input_tokens) FILTER (WHERE ` + estimatePaired + `), 0),
+             COALESCE(SUM(input_tokens) FILTER (WHERE ` + estimatePaired + `), 0),
+             COUNT(*) FILTER (WHERE ` + estimatePaired + `)
         FROM expired
        GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
                 route_slug, provider_id, upstream_model, operation, surface, api_key_id,
-                budget_group_id, attribution
+                budget_group_id, attribution, model_family, estimate_provenance
       ON CONFLICT ON CONSTRAINT attempt_usage_hourly_dimensions_key DO UPDATE SET
         request_count = attempt_usage_hourly.request_count + EXCLUDED.request_count,
         provider_request_count = attempt_usage_hourly.provider_request_count + EXCLUDED.provider_request_count,
@@ -272,7 +278,10 @@ const rollupSQL = `WITH candidates AS (
         provider_incomplete_count = attempt_usage_hourly.provider_incomplete_count + EXCLUDED.provider_incomplete_count,
         model_incomplete_count = attempt_usage_hourly.model_incomplete_count + EXCLUDED.model_incomplete_count,
         target_incomplete_count = attempt_usage_hourly.target_incomplete_count + EXCLUDED.target_incomplete_count,
-        currency = COALESCE(attempt_usage_hourly.currency, EXCLUDED.currency)
+        currency = COALESCE(attempt_usage_hourly.currency, EXCLUDED.currency),
+        estimated_input_tokens = attempt_usage_hourly.estimated_input_tokens + EXCLUDED.estimated_input_tokens,
+        estimate_reported_input_tokens = attempt_usage_hourly.estimate_reported_input_tokens + EXCLUDED.estimate_reported_input_tokens,
+        estimate_attempt_count = attempt_usage_hourly.estimate_attempt_count + EXCLUDED.estimate_attempt_count
       RETURNING 1
     )
     SELECT (SELECT count(*) FROM rolled)::bigint, (SELECT count(*) FROM expired)::bigint`

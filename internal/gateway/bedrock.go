@@ -87,6 +87,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 	}
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
 	x.budgetGroupID = authority.BudgetGroupID
+	x.responseMetadata = authority.Policy.ResponseMetadata
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		fail(e)
 		return
@@ -128,7 +129,8 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 	}
 	// Bedrock inference is metered like any other generation: the request
 	// size bounds the reservation and the reported usage settles it.
-	x.estimate = max(resourceEstimate, int64(len(body))/4)
+	sized := int64(len(body)) / 4
+	x.estimate, x.sizedInput = max(resourceEstimate, sized), &sized
 	p, e := s.selectPinSurface(r.Context(), x, &route, operation, "bedrock", mode, func(provider *runtime.Provider, model string) bool {
 		return bedrockQualified(provider, model, operation, mode)
 	})
@@ -179,6 +181,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 		contentType = "application/json"
 	}
 	w.Header().Set("Content-Type", contentType)
+	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(result)
 	x.delivered(s.now())
@@ -346,6 +349,7 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 		contentType = "application/vnd.amazon.eventstream"
 	}
 	w.Header().Set("Content-Type", contentType)
+	x.responseHeaders(w.Header(), true)
 	w.WriteHeader(http.StatusOK)
 	x.delivered(s.now())
 	rc := http.NewResponseController(w)

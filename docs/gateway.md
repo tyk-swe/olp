@@ -83,8 +83,11 @@ route within that project boundary. The body model, or Gemini URL model, must be
 a published route slug. Model list/get expose only those routes the key may use.
 
 Each request receives an `X-Request-Id` (a client-supplied value is kept when it
-is a safe token), a no-store cache policy, and CORS headers for explicitly
-allowed browser origins (`OLP_GATEWAY_CORS_ALLOWED_ORIGINS`). JSON endpoint
+is a safe token; the Anthropic surface sends the same value as `request-id`,
+which the Anthropic SDKs read), a no-store cache policy, and CORS headers for explicitly
+allowed browser origins (`OLP_GATEWAY_CORS_ALLOWED_ORIGINS`). Responses also carry
+the key's [rate-limit headers](#response-headers) and, for a key that opted in,
+gateway metadata. JSON endpoint
 bodies must be `application/json`, optionally gzip-compressed, and within the
 JSON body limit before and after inflation; the media endpoints also accept raw
 and `multipart/form-data` bodies bounded by `OLP_HTTP_MAX_MEDIA_BODY_BYTES` and
@@ -159,10 +162,120 @@ the response has been flushed.
 | 408 | `request_timeout` | Request body not received within 15 seconds. |
 | 413 / 415 | `request_too_large`, `unsupported_media_type`, `unsupported_content_encoding` | Body limits and content negotiation. |
 | 422 | `content_policy_surface_unavailable`, `content_policy_streaming_requires_unary` | The request surface cannot be inspected by the route's content policy, or output rules require a buffered unary response instead of streaming. |
-| 429 | `rate_limit_exceeded`, `budget_exhausted`, `upstream_rate_limit` | The key's requests, tokens, or concurrency limit was exceeded; the key's daily or monthly cost budget is exhausted; or every attempt was rate limited upstream. `Retry-After` carries whole seconds. |
+| 429 | `rate_limit_exceeded`, `budget_exhausted`, `upstream_rate_limit` | The key's requests, tokens, or concurrency limit was exceeded; the key's daily or monthly cost budget is exhausted or cannot hold the request's [estimated cost](#cost-reservation); or every attempt was rate limited upstream. `Retry-After` carries whole seconds, and a limit of a key that has a request or token limit adds that key's [rate-limit headers](#rate-limit-headers). |
 | 502 | `upstream_unavailable`, `upstream_rejected`, `upstream_authentication_failed`, `upstream_permission_denied`, `provider_protocol_error`, `upstream_response_too_large` | Upstream or transport failures after the budget is spent, or a stream from an upstream that serves only streams whose aggregated non-streaming result exceeds the response size limit. |
 | 503 | `authority_unavailable`, `request_admission_overloaded`, `distributed_limits_unavailable`, `upstream_unavailable` | Stale authority, admission limit, limits that cannot be enforced, or no eligible target. |
 | 504 | `gateway_timeout` | Route deadline reached before commitment. |
+
+## Response headers
+
+Beside `X-Request-Id`, a response can carry two more sets of headers: the
+caller key's remaining allowance, which every key with a request or token limit
+receives, and metadata about how the gateway served the request, which only a key
+that opts in receives. Both are written before the response is committed, from
+what admission and the attempt loop already hold, so they cost no Valkey round
+trip, and a request that needs neither allocates nothing for them. The allowance
+comes with the answer of the reservation that admits the key: the rate script
+states it only to a key with a request or token limit, so a key bound by
+concurrency alone, and a provider's connection or credential quota, which is
+reserved on every attempt, are answered with the decision and no more.
+
+### Rate-limit headers
+
+Each surface gets the family its own SDKs already read.
+
+| Surface | Requests | Tokens |
+| --- | --- | --- |
+| OpenAI (`/v1/...`) | `x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests`, `x-ratelimit-reset-requests` | `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-tokens`, `x-ratelimit-reset-tokens` |
+| Anthropic (`/anthropic/...`) | `anthropic-ratelimit-requests-limit`, `-remaining`, `-reset` | `anthropic-ratelimit-tokens-limit`, `-remaining`, `-reset` |
+
+Gemini, Bedrock and native-operation endpoints send none: their clients read no
+such headers.
+
+- **Only what the key limits.** A key limited to requests per minute gets the
+  request headers alone, and one limited to tokens the token headers alone. A key
+  with neither limit gets none, including a key bound only by concurrency or by a
+  cost budget. So does a request admitted without a reservation, which is one that
+  failed open while Valkey was unavailable.
+- **The key's own window.** The values are what the admission reservation
+  measured in the fixed UTC minute the request was counted in. `limit` is the
+  per-minute limit and `remaining` what the limit leaves once this request's
+  reservation is counted, never below zero. The token reservation is the
+  admission estimate, a prompt plus the largest reply for every attempt the request
+  may dispatch, and not usage: settlement replaces it with the tokens the provider
+  reported, so the next response can show more remaining than this one implied.
+  The counts are not read again when the response is written, so a stream that
+  commits after a long wait states the window as it was admitted.
+- **Reset.** Both dimensions reset when the minute ends. OpenAI's headers give the
+  time left in the notation of a Go duration, such as `20ms`, `1s`, `8.64s` or
+  `1m0s`, counted down from the reservation to the moment the headers are written
+  and stated in whole milliseconds, rounded up.
+  Anthropic's give the instant the minute ends as an RFC 3339 time in UTC, such as
+  `2026-10-02T09:31:00Z`. The minute is Valkey's, so every replica and client
+  agrees on it whatever its own clock says.
+- **Rejections.** A request refused by the key's requests, tokens or concurrency
+  limit gets the same headers beside `Retry-After`, describing the window that
+  refused it. The refused request reserved nothing, so `remaining` is what the
+  window still holds. A concurrency refusal's `Retry-After` is the short wait for
+  a slot, while the reset is still the end of the minute. A refusal by a cost
+  budget, a provider's connection or credential quota, an upstream's rate limit or
+  admission overload states no allowance, because none of them is the key's
+  requests or tokens.
+
+### Gateway metadata
+
+The key policy `response_metadata` (off by default; see
+[access](access.md#key-response-metadata)) adds these headers to its successful
+responses.
+
+| Header | Value |
+| --- | --- |
+| `X-OLP-Attempts` | The attempts the request had made when the response was committed, counting one a connection or credential quota refused locally. `2` after a failover. |
+| `X-OLP-Route-Revision` | The `revision_id` of the route revision that served the request, the identifier `GET /api/v1/routes/{route_id}/revisions/{revision_id}` takes. A call on a retained resource reports the route's current revision, not the one that created the resource, and a video job read, download, delete or list, which is answered from the jobs' own records, reports none. |
+| `X-OLP-Provider` | The vendor of the provider that served the request, as its configuration names it. A provider with no vendor, as a plugin provider has none, is not named. Callers address routes, not upstreams, so this is the one place the gateway itself names an upstream, and only for a key that opts in. The message of an upstream rejection is relayed as the upstream wrote it, with credential values redacted, and can name its vendor or model whatever the key's policy. |
+| `X-OLP-Cost` | The cost of a unary response in the installation currency, as a plain decimal such as `0.000064`. |
+
+A stream records its serving attempt before its first frame is committed, so
+`X-OLP-Attempts` and `X-OLP-Provider` describe the attempt that is streaming, and a
+failover before the first byte is counted. A stream cannot carry a cost, since its
+usage is not known until it ends; the request history API has it afterwards.
+
+A call on one video job is its one attempt. A video list refreshes every job that
+is still queued or running with a poll of its provider, and those polls are its
+attempts: `X-OLP-Attempts` counts them all, and `X-OLP-Provider` names a provider
+only when every poll went to the same one. A list with no job to poll made no
+attempt and carries no metadata.
+
+`X-OLP-Cost` is the cost accounting will record for the request, priced from the
+gateway's pinned price list and the usage the provider reported. It is left out
+when the request would be recorded as unpriced: an attempt that was billed or may
+have been billed has no price or no rate for something it used, or a provider
+answered successfully and reported no usage. A price of zero is a cost of `0`.
+Failed attempts that reported nothing add nothing.
+
+### Which responses carry them
+
+Every success response of an inference endpoint is covered: Chat Completions,
+Responses, Messages, Gemini generation, embeddings, rerank, moderation, token
+counting, the media endpoints, Bedrock, the native operations, and calls on
+retained provider resources (files, batches, stored responses, interactions and
+video jobs), whose one pinned attempt is counted, and a video list, whose polls
+are. Error responses carry neither set, except the rate-limit headers of a limit
+rejection, and a response that made no attempt, such as a file list answered from
+the gateway's own records, has no metadata to give. These do not carry either
+set:
+
+- WebSocket upgrades (Realtime and Gemini Live). The provider is dialled only
+  after the session is accepted, so there is no attempt to describe, and a
+  WebSocket client does not read an HTTP API's rate-limit headers.
+- A replayed or recovered continuation delivery, which is answered from stored
+  state before admission and makes no attempt.
+- Model listings, which are served without admission, and the console playground,
+  which answers a signed-in member and not a key.
+
+For browser clients, the headers above, `Retry-After`, `X-Should-Retry` and
+`X-OLP-Delivery-Replay` are listed in `Access-Control-Expose-Headers` for the
+origins in `OLP_GATEWAY_CORS_ALLOWED_ORIGINS`.
 
 ## Content policy
 
@@ -260,16 +373,118 @@ configured quota is skipped rather than used unmetered.
 
 A request is admitted once it is authenticated, parsed, and routed, and before
 any provider is called. The gateway estimates the tokens the request may use —
-text at four characters per token across messages, tool calls, and tool schemas,
-a flat charge per inline image or media part, plus the largest reply the caller
-allowed (`max_completion_tokens`, `max_tokens`, or `max_output_tokens`, 4096 by
-default, times `n`) — for every attempt the request permits, and reserves the
-key's requests-per-minute, tokens-per-minute, and concurrency windows and its
-cost budgets together. The lease is sized by the route's overall deadline; it is
-the backstop for a replica that dies mid-request, not the request deadline. An
-estimate larger than the key's tokens-per-minute limit is refused immediately
-with `400 request_exceeds_token_limit` rather than sent to retry into a window
-it can never fit.
+its prompt, plus the largest reply the caller allowed (`max_completion_tokens`,
+`max_tokens`, or `max_output_tokens`, 4096 by default, times `n`) — for every
+attempt the request permits, and reserves the key's requests-per-minute,
+tokens-per-minute, and concurrency windows and its cost budgets together. The
+lease is sized by the route's overall deadline; it is the backstop for a replica
+that dies mid-request, not the request deadline. An estimate larger than the
+key's tokens-per-minute limit is refused immediately with
+`400 request_exceeds_token_limit` rather than sent to retry into a window it can
+never fit. The windows each response leaves the key with are reported in its
+[rate-limit headers](#rate-limit-headers).
+
+### How the prompt is estimated
+
+The request is walked once into its text and its media parts: message content,
+tool calls and their results, the names and arguments a call travels with, every
+tool schema, the schema a structured output must follow (a chat
+`response_format`, a Responses `text.format`, Anthropic's
+`output_config.format`, Gemini's response schema, Bedrock's `outputConfig`), the
+tool catalogue of a Bedrock request, a Responses reasoning summary and Anthropic
+thinking text, in any of the client dialects. Each inline image costs a flat
+1,000 tokens and each audio, file or document part 2,000, whatever the bytes the
+part carries; a document given as text is counted by its text. Some of a prompt
+is not read as text: encrypted reasoning (a Responses `encrypted_content`,
+Anthropic `redacted_thinking`) and, in the Anthropic and Gemini dialects, the
+arguments of a tool call and the response of a function response, which are
+counted only where they hold text under a key the walker knows (`text`,
+`content`, `parts`, `input`, `output`). Those leave a prompt under-counted,
+which the reservation's reconciliation against the reported usage corrects after
+the attempt, and which the estimate says by being `calibrated`. The same walk
+serves every target. It keeps the first 36 KiB of the text and only the size of
+the rest, which is all a count reads, so a request of megabytes is not held
+twice while its upstream answers. What the text costs depends on the model that
+will read it, and the gateway counts it for the upstream model of each target,
+once for each family, however many attempts, credential slots or translated
+targets use that family. A route that fails over from an OpenAI model to a
+Claude model counts the prompt twice, once for each family, and a request in the
+Anthropic dialect sent to an OpenAI target is counted by OpenAI's tokenizer,
+because the family follows the target model and not the client's dialect.
+
+| Family | Models | Counted by | Provenance |
+| --- | --- | --- | --- |
+| `openai-o200k` | GPT-4o, GPT-4.1, GPT-5, o-series, gpt-oss | OpenAI's `o200k_base` byte-pair encoding | `tokenizer` |
+| `openai-cl100k` | GPT-4, GPT-3.5 Turbo, `text-embedding-3` | OpenAI's `cl100k_base` encoding | `tokenizer` |
+| `anthropic` | Claude, including Bedrock and Vertex names | four characters per token | `heuristic` |
+| `gemini` | Gemini | four characters per token | `heuristic` |
+| `other` | everything the registry does not recognize | four characters per token | `heuristic` |
+
+The OpenAI encodings are in the binary, and their counts match OpenAI's own
+`tiktoken` token for token on the text of the checked-in fixtures, which are
+generated by `tiktoken` itself. The encoder reads the letter, number and space
+classes of its split patterns from Go's Unicode tables, which are newer than the
+ones the engine behind `tiktoken` was built with, so a character assigned since
+(the newest CJK ideographs, for one) can split a piece differently and cost a
+token more or less; a Go upgrade moves the tables with it. A model name decides
+the family by OpenAI's own rules (an exact name or a prefix, with a provider
+path, a `ft:` prefix or a `:` variant removed); a name that does not say, such
+as an Azure deployment name, is never assumed to be an OpenAI model, because a
+wrong tokenizer miscounts without saying so. OpenAI chat models also read each
+message's role, three tokens of framing around each message, one more for a
+name, and three that prime the reply; these are the figures of the OpenAI
+Cookbook, and an OpenAI count includes them. A request in another dialect is
+framed by what that dialect calls a message: each entry of the Anthropic,
+Bedrock or Gemini conversation, and each system prompt, and the instructions of
+a Responses request. The other families charge text only, four characters per
+token with every field rounded up, and that charge is scaled by a per-family
+factor that is 1 until the [reference catalog](roadmap/m02-provider-catalog.md)
+carries measured ones.
+
+Each estimate carries its provenance. `tokenizer` is an exact count of the text
+and of the message framing OpenAI documents, for a prompt that is nothing else:
+a prompt with any member the count cannot read as the model does, or leaves out,
+is never `tokenizer`. `calibrated` is a count that is partly a ratio or a guess.
+A prompt past 32 KiB of text is counted exactly up to that point and the rest is
+charged at the tokens per byte the exact part measured, which keeps a
+100,000-token prompt from costing milliseconds of CPU on every request; the
+ratio is within a quarter of a percent for a prompt of one kind of text, and can
+be tens of percent off when the first 32 KiB is unlike the rest, such as a short
+instruction ahead of a long document in another script. A count that charged an
+image, document or media part at a flat rate is calibrated, because the flat
+rate is a guess next to an exact count of the text, and so is the count of a
+request with a tool catalogue, tool calls, a structured-output schema or
+reasoning, which a model reads in a rendering of its own that no provider
+documents, or with encrypted content that no count reads. `heuristic` is the
+four-characters rule. It is also the count of a long prompt whose tail came
+after less than 4 KiB of exact text, too little to measure a ratio from, and is
+charged at four bytes to a token. Requests that reach an upstream through a
+native operation contract (the embeddings, rerank, classification and
+token-counting endpoints of a strict route), and Bedrock invoke, Gemini
+interaction creation and JSON media requests (speech and image generation), are
+estimated from the size of their documents, four bytes to a token, and are
+always `heuristic`. Stored-response lifecycle calls, realtime sessions, job
+polls, multipart media uploads (image edits and variations, transcription and
+translation) and video creation read no prompt, or reserve a flat charge, and
+record no estimate; their attempts still record the family of their model.
+
+Planning uses the same counts. A target whose context window cannot hold the
+estimate is excluded before any provider is called, and each target is weighed
+by the count of its own model: a prompt that is a hundred tokens to the
+four-characters rule may be three hundred to an OpenAI tokenizer, and the target
+that serves it is chosen by the second figure. Where a target is sent a request
+of its own, because a provider profile, a strict contract or a content policy
+rewrote it, the estimate is the larger of the caller's request and that one, each
+counted for the target's family, and the input the attempt records is the larger
+of the two with the less trustworthy provenance of the two counts. A request that
+reads the same as the caller's is not counted again.
+
+Every attempt records the estimate it was admitted under: the input alone, not
+the reply the reservation also holds, its provenance, and the model family. The
+[usage reports](operations.md#accounting-delivery-and-shutdown) compare the estimate with the
+input the provider reported, by route and by model family, and
+[route simulation](provider-routing.md#explain-and-observe) shows it for each
+target.
 
 Each attempt then reserves the provider connection quota and the credential slot
 quota, with concurrency leases covering the remaining overall route deadline. An
@@ -278,8 +493,9 @@ rejected slot refunds the connection reservation it already took, the attempt is
 recorded as a rate-limit failure with its `Retry-After`, and failover continues
 to the next target. When a request ends, a reservation that dispatched nothing
 is refunded in full; otherwise the token reservation is reconciled against the
-usage the upstream reported and the concurrency lease is released. Settlement
-ignores client cancellation, so a caller that hangs up still returns its slot.
+usage the upstream reported, the concurrency lease is released, and the cost
+reservation becomes the cost incurred. Settlement ignores client cancellation, so
+a caller that hangs up still returns its slot.
 
 Credential failures record a version-scoped cooldown in Valkey; rate limits
 record a logical-slot cooldown that survives rotation. Shared cooldown state is
@@ -289,10 +505,95 @@ shared cooldown is treated as absent.
 
 Cost budgets compare attributed spend with daily/monthly thresholds, using UTC
 windows and exact decimals. A request must satisfy both its key and any assigned
-budget group. Concurrent accepted work can exceed a threshold; unpriced attempts
-accrue zero. Exhaustion returns `429 budget_exhausted`. Missing, malformed, or
+budget group. Exhaustion returns `429 budget_exhausted`; so does a budget with room
+left that cannot hold the request's estimate beside what is spent and in flight,
+and its message says which it was. Missing, malformed, or
 wrong-window snapshots return `503 distributed_limits_unavailable` until
 [authoritative initialization](operations.md#spend-budget-reconciliation) completes.
+
+That wait is by design: a budget is enforced against the spend PostgreSQL has
+confirmed, and the gateway never invents a zero for a key whose spend it does not
+know. Only the worker plane's reconciliation pass, which runs every minute, and the
+accounting of a request that has finished, install the snapshot of a window. So a
+key created with a cost budget, a budget added to a key that had none, and a
+budgeted key whose UTC day or month has just rolled over, refuse requests with that
+503 until the next pass, which is up to a minute and which the gateway cannot
+shorten. A client sees an ordinary retryable 503. A provisioning script or a
+benchmark that creates a key and sends traffic at once waits for the first pass,
+which the worker logs as `reconciled cost budgets`. A deployment without a running
+worker never installs one.
+
+### Cost reservation
+
+A budget is measured against the spend already accrued and also against what
+requests in flight may still spend, so a burst cannot all be admitted against
+the same unspent balance. A priced request reserves an estimate of its cost in the
+same Valkey call that checks the balance, and is admitted only if the accrued
+spend, plus what other requests hold, plus its own estimate, fits every window
+the key and its group have. A request that exactly fills a window is admitted.
+A rejection reserves nothing. It keeps the code `budget_exhausted` in both
+cases, but only a budget whose accrued spend has reached its limit is called
+exhausted. When the budget has room and the request's estimate does not fit
+beside the spend and the requests in flight, the message says so and names what
+helps (a lower `max_tokens`, waiting for requests in flight, or a larger
+budget); `Retry-After` is one second when waiting can admit the request, and the
+end of the window when nothing short of a larger budget can.
+
+The estimate is the most one request could cost across the attempts it may
+dispatch, priced from the gateway's pinned price list, the revision accounting
+pins the request to. Input is charged at the highest input-side rate the price
+has, whether input, cached input or any cache write, because nothing says
+beforehand whether the provider will read or write its cache. The reply is
+charged at the output rate for the tokens the request allows, which is
+4,096 when it names no bound, times the candidates it asks for. Each division by a
+million rounds up. Settlement bills every dispatch that reports usage, so when a
+route can fail over or retry through another credential slot the estimate is the
+sum of the dispatches the request may make, not just the dearest single attempt.
+
+A request that ends replaces its estimate with the cost of the attempts that
+reported usage, priced exactly as accounting will price them; one that was never
+dispatched, or whose upstream reported nothing, releases it. When accounting
+records the request, it installs the spend and removes the reservation in one
+step, so the budget never counts a request twice, and delivering the same event
+again removes nothing more. Settlement ignores client cancellation, as the other
+reservations do. Replacing the estimate with a cost is a single attempt that
+gives up after 100 milliseconds, because losing it only leaves the estimate for
+accounting or the lapse to remove; giving an estimate back, for a request that
+was never dispatched or whose cost is nothing, is retried like every other
+release, since no spend is coming to remove it. A reservation that nothing
+removes, because its event was lost or accounting stalled, lapses at the route
+deadline plus five minutes, after which the budget counts accrued spend alone
+again. Lapsed reservations are retired as later reservations and settlements
+find them, a bounded page at a time, so that a backlog left by a long stall
+cannot hold Valkey while it is cleared: until a backlog has been worked through,
+what is left of it still counts, which can hold a budget back for a short while
+and never lets it overspend.
+
+Reservations are advisory and derived. The accrued balance is the authority and
+fails closed; a damaged reservation, including one whose two keys no longer
+agree because only one of them was deleted or evicted, is discarded rather than
+allowed to block accounting, and deleting the reservation keys loses only the
+protection for requests in flight. They live beside the balances, in `cost:pending` and
+`cost:expiry` ([Valkey keys](operations.md#shared-state-in-valkey)).
+
+What is not reserved, and is judged on accrued spend alone: an attempt whose
+model has no price, or a price without a rate the request needs; any request
+while the gateway's price list is more than a minute old; and media, audio and
+video requests, realtime sessions, Gemini Live and Interactions, Bedrock invoke
+and stored-response lifecycle calls, whose cost is not known before they run. A
+background response is reserved while its creating request runs and released when
+it returns; its spend counts when its final usage arrives. The reservation is
+therefore not an invoice cap. Overspend remains possible from token counts that
+are heuristic for a family without a public tokenizer, failover that bills more
+than once, accounting that lags beyond the lapse above, unpriced spend, and every
+request that reserves nothing.
+
+Because reserved cost counts, a key can be refused while its spend reads below its
+limit, and a small budget on an expensive model can be refused at zero spend
+when the request names no `max_tokens`: the default reply alone may cost more than
+the budget. A refusal for in-flight reservations carries `Retry-After: 1`; one
+for a request that could not fit even alone carries the time until the window
+ends, though no wait will admit it, so bound the reply or raise the budget.
 
 When Valkey is configured but unreachable, `limits.valkey_unavailable` controls
 rate/concurrency-only keys: `fail_closed` returns

@@ -1,0 +1,61 @@
+goos: linux
+goarch: amd64
+pkg: github.com/tyk-swe/olp/internal/access
+cpu: Test CPU
+               │    base     │                head                │
+               │   sec/op    │   sec/op     vs base               │
+Authenticate-8   3.008µ ± 2%   3.058µ ± 2%  +1.67% (p=0.035 n=10)
+
+               │     base     │               head               │
+               │     B/op     │     B/op      vs base            │
+Authenticate-8   1.000Ki ± 0%   1.000Ki ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal
+
+               │    base    │              head              │
+               │ allocs/op  │ allocs/op   vs base            │
+Authenticate-8   10.00 ± 0%   10.00 ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal
+
+pkg: github.com/tyk-swe/olp/internal/gateway
+            │     base     │                  head                  │
+            │    sec/op    │    sec/op     vs base                  │
+Admission-8   1.210µ ±  2%   1.512µ ±  2%  +25.00% (p=0.000 n=10)
+Plan-8        790.2n ±  4%   795.2n ±  4%        ~ (p=0.481 n=10)
+Relay/64-8    14.86µ ±  3%   14.96µ ±  3%        ~ (p=0.353 n=10)
+OnlyBase-8    101.4n ±  3%
+Noisy-8       481.6n ± 22%   539.4n ± 22%        ~ (p=0.075 n=10)
+ZeroAlloc-8   49.96n ±  2%   49.96n ±  2%        ~ (p=1.000 n=10)
+Faster-8      897.5n ±  2%   598.3n ±  2%  -33.33% (p=0.000 n=10)
+OnlyHead-8                   101.4n ±  3%
+geomean       609.1n         604.2n         -0.93%                ¹
+¹ benchmark set differs from baseline; geomeans may not be comparable
+
+            │      base      │                head                │
+            │      B/op      │     B/op      vs base              │
+Admission-8     512.0 ± 0%       512.0 ± 0%  ~ (p=1.000 n=10) ¹
+Plan-8          256.0 ± 0%       256.0 ± 0%  ~ (p=1.000 n=10) ¹
+Relay/64-8    4.000Ki ± 0%     4.000Ki ± 0%  ~ (p=1.000 n=10) ¹
+OnlyBase-8      0.000 ± 0%
+Noisy-8         64.00 ± 0%       64.00 ± 0%  ~ (p=1.000 n=10) ¹
+ZeroAlloc-8      0.00 ± 0%       16.00 ± 0%  ? (p=0.000 n=10)
+Faster-8        128.0 ± 0%       128.0 ± 0%  ~ (p=1.000 n=10) ¹
+OnlyHead-8                       0.000 ± 0%
+geomean                    ²                 ?                ³ ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+³ benchmark set differs from baseline; geomeans may not be comparable
+
+            │     base     │                  head                  │
+            │  allocs/op   │ allocs/op   vs base                    │
+Admission-8   6.000 ± 0%     6.000 ± 0%        ~ (p=1.000 n=10) ¹
+Plan-8        3.000 ± 0%     3.000 ± 0%        ~ (p=1.000 n=10) ¹
+Relay/64-8    12.00 ± 0%     15.00 ± 0%  +25.00% (p=0.000 n=10)
+OnlyBase-8    0.000 ± 0%
+Noisy-8       1.000 ± 0%     1.000 ± 0%        ~ (p=1.000 n=10) ¹
+ZeroAlloc-8   0.000 ± 0%     1.000 ± 0%        ? (p=0.000 n=10)
+Faster-8      2.000 ± 0%     2.000 ± 0%        ~ (p=1.000 n=10) ¹
+OnlyHead-8                   0.000 ± 0%
+geomean                  ²               ?                      ³ ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+³ benchmark set differs from baseline; geomeans may not be comparable

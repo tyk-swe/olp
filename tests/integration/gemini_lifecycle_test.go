@@ -62,6 +62,9 @@ type geminiLifecycleProvider struct {
 	escapedReadID   atomic.Bool
 	escapedStreamID atomic.Bool
 	replyGate       atomic.Pointer[geminiReplyGate]
+	// deleteMissing makes a delete answer that the Interaction does not exist, as
+	// it does for one an earlier delete whose response was lost already removed.
+	deleteMissing atomic.Bool
 }
 
 func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
@@ -154,6 +157,10 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(w, `{"id":%q,"model":%q,"status":"cancelled"}`, id, vendorModel)
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1beta/interactions/"):
+			if p.deleteMissing.Load() {
+				http.Error(w, `{"error":{"code":404,"message":"Interaction not found","status":"NOT_FOUND"}}`, http.StatusNotFound)
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)

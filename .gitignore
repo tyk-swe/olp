@@ -16,6 +16,9 @@ gha-creds-*.json
 *.log
 /logs/
 
+# go test -c, and go test with a profile flag, leave the test binary behind.
+*.test
+
 /playwright-report/
 /test-results/
 /blob-report/

@@ -10,6 +10,13 @@ nullable_dir=$(go list -m -f '{{.Dir}}' github.com/oapi-codegen/nullable)
 printf '%s  %s\n' d41218ff141de28756b85f79958bc33e077e9bfa6bd695b5e2b8736b779f5a9d "$nullable_dir/LICENSE" | sha256sum --check --status
 go run github.com/google/go-licenses/v2@v2.0.1 check ./cmd/olp --ignore=github.com/oapi-codegen/nullable \
   --allowed_licenses=AGPL-3.0,AGPL-3.0-only,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT,MPL-2.0,Unicode-DFS-2016,Unicode-3.0
+# The OpenAI rank files embedded for token estimation are data under tiktoken's
+# MIT license, which ships beside them and in the image. Pin the reviewed notice,
+# and check that the embedded data still rebuilds the files whose SHA-256
+# tiktoken pins, so neither can change without review.
+tiktoken_notice=internal/operations/tokenization/estimate/ranks/LICENSE
+printf '%s  %s\n' 418cb499b436128d653d79941333a5437b7be2ea9213dcc2f04d15d5d2c51d86 "$tiktoken_notice" | sha256sum --check --status
+go test -count=1 -run '^TestRankSources$' ./internal/operations/tokenization/estimate
 pnpm audit --prod --audit-level high
 # GLIDE's prebuilt Rust core is not traversed by Go's vulnerability database.
 # Image qualification additionally requires its shipped notices, native linking

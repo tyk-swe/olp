@@ -25,7 +25,6 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/upstream"
@@ -73,6 +72,8 @@ type execution struct {
 	servingSlot          string
 	servingBinding       string
 	preparedProviders    map[string]preparedProvider
+	encoded              map[string]encodedRequest
+	effectiveOutputs     map[string]effectiveOutput
 	sourceSummary        *requestSummary
 	request              request
 	family               openai.Family
@@ -97,6 +98,11 @@ type execution struct {
 	policyDecisions []contentpolicy.Decision
 	emit            openai.Emit
 	estimate        int64
+	// sizedInput is the input estimate of a request the gateway reads only the
+	// size of: four bytes to a token over its body, as media, Bedrock invoke and
+	// Gemini interaction requests are reserved. It is nil for every other
+	// request, which is walked, and for lifecycle calls that carry no prompt.
+	sizedInput *int64
 
 	historicalSnapshot *runtime.Snapshot
 	responseContract   *storedResponseContract
@@ -112,6 +118,17 @@ type execution struct {
 	firstByte  *time.Duration // request start to the first payload byte the client received
 	lease      *limits.Lease  // the API key reservation, settled once the request ends
 	dispatched bool           // at least one attempt was handed to a provider
+	// responseMetadata is the key's response_metadata policy: the response says
+	// how the gateway served it.
+	responseMetadata bool
+	// attemptCount and attemptVendor describe the attempt now being made, and
+	// so the one that serves the response if it succeeds: how many attempts the
+	// request has made including this one, and the vendor of its provider. They
+	// are recorded as the attempt opens because a stream commits its response
+	// before the attempt's fact is appended. A job call, which has no stream,
+	// records them with its fact, and a list of jobs once all its polls are in.
+	attemptCount  int
+	attemptVendor string
 	// grantGeneration belongs to the token read for the current attempt.
 	grantGeneration int64
 	// sensitive holds every credential value applied to an upstream request
@@ -164,6 +181,15 @@ type outcome struct {
 // provider, capped by its requested budget. Each target may be tried through
 // each of its usable credential slots.
 func (s *Server) dispatchableAttempts(x *execution) int {
+	return s.walkDispatchable(x, nil)
+}
+
+// walkDispatchable visits the attempts this request can hand to a provider in
+// the order the attempt loop tries them, once for each usable credential slot of
+// each, until the request's attempt budget is met. It returns how many it
+// visited. Admission walks the same attempts the loop will, so what it reserves
+// covers what can be dispatched and no more.
+func (s *Server) walkDispatchable(x *execution, visit func(runtime.Attempt)) int {
 	remaining := x.budget
 	available := 0
 	for _, attempt := range x.attempts {
@@ -174,6 +200,9 @@ func (s *Server) dispatchableAttempts(x *execution) int {
 		for i := range provider.Slots {
 			if s.slotAvailable(x, attempt, &provider.Slots[i]) {
 				available++
+				if visit != nil {
+					visit(attempt)
+				}
 			}
 			if available == remaining {
 				return available
@@ -316,9 +345,7 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 	ctx, cancel := context.WithTimeout(ctx, overall)
 	defer cancel()
 	out := runAttempts(ctx, s, x, attemptAdapter[*openai.Completion]{
-		estimate: func(provider *runtime.Provider) int64 {
-			return x.providerEstimate(provider)
-		},
+		estimate: x.attemptReservation,
 		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
 			return s.attempt(ctx, x, attempt, provider, slot, ordinal)
 		},
@@ -449,6 +476,8 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 		Mode:               x.mode,
 		StartedAt:          s.now(),
 	}
+	x.recordEstimate(&fact, a)
+	x.attemptCount, x.attemptVendor = ordinal, a.VendorID
 	if slot.CredentialID != nil {
 		fact.CredentialID = *slot.CredentialID
 	}
@@ -506,6 +535,7 @@ func (s *Server) rejectedFact(x *execution, a runtime.Attempt, slot runtime.Slot
 func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
 	fact := s.newFact(x, a, slot, ordinal)
 	cfg := provider.Connector()
+	kept := x.takeEncoded()
 	fact.Carried = cfg.CarriedByPlugin()
 	// A plugin that carries the request reports only whether it was sent, so
 	// the attempt must not risk repeating work it may have done.
@@ -574,7 +604,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			}
 		}
 	} else {
-		body, wire, err = providerinvoke.Encode(x.parsed, cfg, a.UpstreamModel, provider.ParameterDefaults)
+		body, wire, err = x.encoding(kept, provider, cfg, a.UpstreamModel)
 	}
 	if err != nil {
 		return fail(classProtocol, nil)
@@ -612,6 +642,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		if wire == "bedrock" || cfg.EventStream() {
 			req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 		}
+	}
+	if contract == nil {
+		cfg = forwardAnthropicBeta(req.Header, x, wire, cfg)
 	}
 	if err := s.applySlotCredential(actx, x, req, cfg, slot, body); err != nil {
 		switch {
