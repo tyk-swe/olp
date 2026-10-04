@@ -14,6 +14,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
@@ -200,6 +201,32 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 	return parsed, nil
 }
 
+// Bound cumulative regexp input across every target in one inspection. Charge
+// twice the document bytes to include decoded structured arguments and keys.
+const maxInspectionPolicyBytes = 8 << 20
+
+func inspectionPolicyBudget(policy *contentpolicy.Policy) func(int) error {
+	remaining, rules := maxInspectionPolicyBytes, 0
+	if policy != nil {
+		for _, rule := range policy.Rules {
+			if rule.Phase == contentpolicy.PhaseInput {
+				rules++
+			}
+		}
+	}
+	return func(size int) error {
+		if rules == 0 {
+			return nil
+		}
+		if size > remaining/(2*rules) {
+			remaining = 0
+			return &inspectionDiagnostic{"inspection_limit", "/request", "policy_work_limit", "Reduce the request size, input policy rules or inspected targets."}
+		}
+		remaining -= size * 2 * rules
+		return nil
+	}
+}
+
 func inspectionAccept(route runtime.Route, parsed *openai.Request, context interaction.Context, demand *simulatedDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
 	inspections := map[string]*interactionInspection{}
 	if parsed == nil {
@@ -207,6 +234,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 	}
 	fidelity := route.Fidelity.Mode
 	effectiveRequests := map[string]*openai.Request{}
+	policyBudget := inspectionPolicyBudget(route.ContentPolicy)
 	var effective func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand)
 	if route.Fidelity.Strict() {
 		effective = func(_ runtime.Provider, target runtime.Target) (runtime.Names, *runtime.TokenDemand) {
@@ -304,6 +332,9 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 			result.SemanticContext = append(result.SemanticContext, inspectedField{Field: "/query/" + name, Kind: "string", Origin: origin, Redacted: true})
 		}
 		slices.SortFunc(result.SemanticContext, func(a, b inspectedField) int { return strings.Compare(a.Field, b.Field) })
+		if err := policyBudget(effectiveRequest.OIF().Document().Len()); err != nil {
+			return err
+		}
 		if _, err := plan.CheckInput(); err != nil {
 			safe := safeInspectionError(err)
 			if diagnostic, ok := safe.(*inspectionDiagnostic); ok && diagnostic.code == "content_policy_blocked" {

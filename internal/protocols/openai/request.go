@@ -194,6 +194,9 @@ func (r *Request) WithFields(fields map[string]json.RawMessage, origin oif.Origi
 
 // Parse validates the gateway envelope of one request document.
 func Parse(family Family, data []byte) (*Request, error) {
+	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, &RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+	}
 	doc, err := oif.ParseJSON(data, oif.Limits{})
 	if err != nil {
 		return nil, &RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}

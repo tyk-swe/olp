@@ -138,3 +138,15 @@ func TestOnlyResponsesStreamsAggregate(t *testing.T) {
 		}
 	}
 }
+
+func TestAggregatedResponsesBoundsTinyItems(t *testing.T) {
+	var stream strings.Builder
+	stream.WriteString(responsesEvents(createdEvent))
+	for i := 0; i <= maxAggregateItems; i++ {
+		stream.WriteString(responsesEvents(itemDone(i, `{}`)))
+	}
+	c, err := Aggregate(FamilyResponses, strings.NewReader(stream.String()), 4096, 256<<20)
+	if !errors.Is(err, ErrAggregateTooLarge) || c != nil && len(c.Body) != 0 {
+		t.Fatalf("tiny item flood: completion=%+v error=%v", c, err)
+	}
+}

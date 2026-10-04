@@ -63,6 +63,9 @@ func protocolError(message string) error { return &openai.ProtocolError{Detail: 
 // Parse validates a client envelope. Gemini's model and transport are path
 // parameters, so body fields can never replace them.
 func Parse(family openai.Family, data []byte, model string) (*openai.Request, error) {
+	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, &openai.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+	}
 	if family.Surface() == "openai" {
 		return openai.Parse(family, data)
 	}

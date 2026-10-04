@@ -274,3 +274,15 @@ func TestFieldsWithoutLeavesOutOnlyTheNamedMembers(t *testing.T) {
 		t.Fatalf("a document that is not an object has fields %v", got)
 	}
 }
+
+func TestDefaultNodeLimitRejectsCompactScalarFlood(t *testing.T) {
+	for _, raw := range []string{
+		`[` + strings.Repeat(`0,`, 1<<16) + `0]`,
+		`{"input":[` + strings.Repeat(`0,`, 1<<16) + `0]}`,
+	} {
+		_, err := oif.ParseJSON([]byte(raw), oif.Limits{})
+		if err == nil || !strings.Contains(err.Error(), "node_limit") {
+			t.Fatalf("compact flood should fail node budget, got %v", err)
+		}
+	}
+}
