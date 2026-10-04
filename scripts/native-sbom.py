@@ -13,8 +13,8 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULE = "github.com/valkey-io/valkey-glide/go/v2"
-VERSION = "v2.5.2"
-COMMIT = "a2165cc9d752818a9912c4aafe1cd7235ed2d5bc"
+VERSION = "v2.5.3"
+COMMIT = "098b8fdf9db6f8beff47d5ec758dffb0e61d04cd"
 lock_path = ROOT / "deploy/native/valkey-glide.Cargo.lock"
 lock = tomllib.loads(lock_path.read_text())
 module = json.loads(subprocess.check_output(["go", "list", "-m", "-json", MODULE], cwd=ROOT))
@@ -43,7 +43,7 @@ spdx = {
     "spdxVersion": "SPDX-2.3", "dataLicense": "CC0-1.0", "SPDXID": "SPDXRef-DOCUMENT",
     "name": f"valkey-glide-go-{VERSION}-ffi-lock-inventory",
     "documentNamespace": f"https://github.com/tyk-swe/olp/sbom/glide/{COMMIT}",
-    "creationInfo": {"creators": ["Tool: scripts/native-sbom.py"], "created": "2026-09-18T00:00:00Z"},
+    "creationInfo": {"creators": ["Tool: scripts/native-sbom.py"], "created": "2026-10-04T00:00:00Z"},
     "packages": packages,
     "relationships": [{"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": p["SPDXID"]} for p in packages],
 }
