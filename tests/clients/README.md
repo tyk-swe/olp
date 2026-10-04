@@ -58,7 +58,8 @@ object of environment variables. `run.sh` exports them to each suite.
 | Variable | Value |
 | --- | --- |
 | `OLP_CLIENTS_ORIGIN` | Gateway origin, `http://127.0.0.1:<port>` |
-| `OLP_CLIENTS_API_KEY` | A key with `inference` and `models_read` scope for every route |
+| `OLP_CLIENTS_API_KEY` | A key with `inference` and `models_read` scope for every route; provider state is forbidden |
+| `OLP_CLIENTS_STATE_API_KEY` | The same scopes with `allow_provider_state`; retention-policy qualification uses it to verify transparent opt-in semantics |
 | `OLP_CLIENTS_RESTRICTED_API_KEY` | A key allowed on no published route: it receives `403 route_forbidden` |
 | `OLP_CLIENTS_OPENAI_BASE_URL` | Origin plus `/v1` |
 | `OLP_CLIENTS_ANTHROPIC_BASE_URL` | Origin plus `/anthropic`; Anthropic SDKs append `/v1` |
