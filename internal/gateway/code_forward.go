@@ -116,7 +116,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	request.ContentLength = int64(len(raw))
 	request.Header = attempt.headers(r.Header)
-	request.Trailer = codexwire.ForwardHeaders(r.Trailer, true)
+	request.Trailer = codexwire.ForwardTrailers(r.Trailer, r.Header, true)
 	if len(request.Trailer) != 0 {
 		request.ContentLength = -1
 		request.Header.Del("Content-Length")
@@ -137,9 +137,12 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	defer response.Body.Close()
 	attempt.response(ctx, response.StatusCode, response.Header)
 	maps.Copy(w.Header(), codexwire.ForwardHeaders(response.Header, false))
+	for name := range codexwire.ForwardTrailers(response.Trailer, response.Header, false) {
+		w.Header().Add("Trailer", name)
+	}
 	w.WriteHeader(response.StatusCode)
 	attempt.copyResponse(ctx, w, response)
-	for name, values := range codexwire.ForwardHeaders(response.Trailer, false) {
+	for name, values := range codexwire.ForwardTrailers(response.Trailer, response.Header, false) {
 		w.Header()[http.TrailerPrefix+name] = values
 	}
 }
@@ -383,8 +386,6 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 		a.health(ctx, "quota_limited")
 	case status == 401 || status == 403 || status >= 500:
 		a.health(ctx, "unavailable")
-	case status >= 200 && status < 300:
-		a.health(ctx, "healthy")
 	}
 	if allowance := codexwire.Allowance(headers, a.server.now()); allowance != nil {
 		a.allowance(ctx, *allowance)

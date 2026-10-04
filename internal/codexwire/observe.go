@@ -262,11 +262,7 @@ func finishAllowance(a *codemode.Allowance) *codemode.Allowance {
 // ForwardHeaders excludes authentication, OLP controls and hop-by-hop fields.
 func ForwardHeaders(source http.Header, request bool) http.Header {
 	result := source.Clone()
-	for _, connection := range source.Values("Connection") {
-		for _, name := range strings.Split(connection, ",") {
-			result.Del(strings.TrimSpace(name))
-		}
-	}
+	removeConnectionFields(result, source)
 	for _, name := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade"} {
 		result.Del(name)
 	}
@@ -281,4 +277,20 @@ func ForwardHeaders(source http.Header, request bool) http.Header {
 		}
 	}
 	return result
+}
+
+// ForwardTrailers also excludes fields nominated by the original message's
+// Connection headers, which are absent from its trailer map.
+func ForwardTrailers(source, headers http.Header, request bool) http.Header {
+	result := ForwardHeaders(source, request)
+	removeConnectionFields(result, headers)
+	return result
+}
+
+func removeConnectionFields(result, headers http.Header) {
+	for _, connection := range headers.Values("Connection") {
+		for _, name := range strings.Split(connection, ",") {
+			result.Del(strings.TrimSpace(name))
+		}
+	}
 }

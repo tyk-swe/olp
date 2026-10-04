@@ -260,20 +260,22 @@ func TestCodeForwardPreservesTrailersAndDoesNotInjectHeaders(t *testing.T) {
 	h, ledger, server := newCodeForwardHarness(t)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
-		if !reflect.DeepEqual(r.Trailer.Values("X-Native-Trailer"), []string{"request-one", "request-two"}) || r.Trailer.Get("Authorization") != "" || r.Header.Get("User-Agent") != "" || r.Header.Get("Accept-Encoding") != "" {
+		if !reflect.DeepEqual(r.Trailer.Values("X-Native-Trailer"), []string{"request-one", "request-two"}) || r.Trailer.Get("Authorization") != "" || r.Trailer.Get("X-Request-Hop") != "" || r.Header.Get("User-Agent") != "" || r.Header.Get("Accept-Encoding") != "" {
 			t.Errorf("request trailers or headers changed: %v %v", r.Header, r.Trailer)
 		}
-		w.Header().Set("Trailer", "X-Native-Trailer")
+		w.Header().Set("Connection", " X-Response-Hop, close ")
+		w.Header().Set("Trailer", "X-Native-Trailer, X-Response-Hop")
 		_, _ = io.WriteString(w, `{"status":"completed","usage":{"total_tokens":0,"input_tokens":0,"output_tokens":0}}`)
 		w.Header()["X-Native-Trailer"] = []string{"response-one", "response-two"}
+		w.Header().Set("X-Response-Hop", "remove")
 	})
 	r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/responses", strings.NewReader(`{"model":"native-model","input":"test"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.Header = http.Header{"Authorization": {"Bearer " + fullKey}, "Session_id": {"root"}, "User-Agent": {}}
+	r.Header = http.Header{"Authorization": {"Bearer " + fullKey}, "Session_id": {"root"}, "User-Agent": {}, "Connection": {" x-request-hop "}}
 	r.ContentLength = -1
-	r.Trailer = http.Header{"X-Native-Trailer": {"request-one", "request-two"}, "Authorization": {"untrusted"}}
+	r.Trailer = http.Header{"X-Native-Trailer": {"request-one", "request-two"}, "Authorization": {"untrusted"}, "X-Request-Hop": {"remove"}}
 	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
 	defer client.CloseIdleConnections()
 	response, err := client.Do(r)
@@ -284,11 +286,105 @@ func TestCodeForwardPreservesTrailersAndDoesNotInjectHeaders(t *testing.T) {
 	if _, err := io.ReadAll(response.Body); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(response.Trailer.Values("X-Native-Trailer"), []string{"response-one", "response-two"}) {
+	if !reflect.DeepEqual(response.Trailer.Values("X-Native-Trailer"), []string{"response-one", "response-two"}) || response.Trailer.Get("X-Response-Hop") != "" {
 		t.Fatalf("response trailers changed: %v", response.Trailer)
 	}
 	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 0 {
 		t.Fatal("reported zero became uncertainty")
+	}
+}
+
+func TestCodeForwardHTTPHealthRequiresSuccessfulGeneration(t *testing.T) {
+	for _, test := range []struct {
+		name, contentType, wire string
+		healthy                 bool
+	}{
+		{"failed SSE", "text/event-stream", "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}\n\n", false},
+		{"incomplete SSE", "text/event-stream", "data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\"}}\n\n", false},
+		{"interrupted SSE", "text/event-stream", "data: {\"type\":\"response.created\"}\n\n", false},
+		{"failed unary", "application/json", `{"object":"response","status":"failed"}`, false},
+		{"incomplete unary", "application/json", `{"object":"response","status":"incomplete"}`, false},
+		{"completed SSE without usage", "text/event-stream", "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n", true},
+		{"completed unary without usage", "application/json", `{"object":"response","status":"completed"}`, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t)
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", test.contentType)
+				_, _ = io.WriteString(w, test.wire)
+			})
+			response := codeDo(t, server, []byte(`{"model":"native-model","input":[]}`), nil)
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusOK || string(body) != test.wire {
+				t.Fatalf("response changed: %d %q %v", response.StatusCode, body, err)
+			}
+			if ledger.wait(t).Total != nil {
+				t.Fatal("missing usage became known")
+			}
+			ledger.mu.Lock()
+			defer ledger.mu.Unlock()
+			var want []string
+			if test.healthy {
+				want = []string{"healthy"}
+			}
+			if !reflect.DeepEqual(ledger.health, want) {
+				t.Fatalf("health=%v want %v", ledger.health, want)
+			}
+			if len(ledger.marks) != 1 || h.mock.count("a") != 1 {
+				t.Fatal("generation was replayed")
+			}
+		})
+	}
+}
+
+func TestCodeForwardRejectedWebSocketHandshakePreservesTrailersAndHealth(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusServiceUnavailable} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t)
+			wire := `{"error":{"message":"native WebSocket refusal"}}`
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Connection", "X-Hop-Trailer")
+				w.Header().Set("Trailer", "X-Native-Trailer, X-Hop-Trailer")
+				w.WriteHeader(status)
+				_, _ = io.WriteString(w, wire)
+				w.Header()["X-Native-Trailer"] = []string{"one", "two"}
+				w.Header().Set("X-Hop-Trailer", "remove")
+			})
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/code/coding/responses", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header = http.Header{
+				"Authorization":         {"Bearer " + fullKey},
+				"Thread-Id":             {"handshake"},
+				"Connection":            {"Upgrade"},
+				"Upgrade":               {"websocket"},
+				"Sec-Websocket-Version": {"13"},
+				"Sec-Websocket-Key":     {"dGhlIHNhbXBsZSBub25jZQ=="},
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != status || string(body) != wire {
+				t.Fatalf("refusal changed: %d %q %v", response.StatusCode, body, err)
+			}
+			if !reflect.DeepEqual(response.Trailer.Values("X-Native-Trailer"), []string{"one", "two"}) || response.Trailer.Get("X-Hop-Trailer") != "" {
+				t.Fatalf("refusal trailers changed: %v", response.Trailer)
+			}
+			ledger.mu.Lock()
+			defer ledger.mu.Unlock()
+			var want []string
+			if status == http.StatusServiceUnavailable {
+				want = []string{"unavailable"}
+			}
+			if !reflect.DeepEqual(ledger.health, want) || len(ledger.inputs) != 0 || len(ledger.marks) != 0 {
+				t.Fatalf("handshake health=%v inputs=%v dispatches=%v", ledger.health, ledger.inputs, ledger.marks)
+			}
+		})
 	}
 }
 

@@ -124,6 +124,40 @@ func codeForwardAwait(t *testing.T, f *codeFixture, state string, count int) {
 	}
 }
 
+func TestCodeForwardingHTTPHealthRequiresSuccessfulGeneration(t *testing.T) {
+	for _, test := range []struct {
+		name, wire, health string
+	}{
+		{"failed", "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}\n\n", "unknown"},
+		{"interrupted", "data: {\"type\":\"response.created\"}\n\n", "unknown"},
+		{"completed without usage", "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n", "healthy"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newCodeFixture(t)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, test.wire)
+			}))
+			defer upstream.Close()
+			server, _, _ := codeForwardServer(t, f, upstream.URL)
+			status, body := codeForwardRequest(t, server, "health-root", "")
+			if status != http.StatusOK || string(body) != test.wire {
+				t.Fatalf("response changed: %d %q", status, body)
+			}
+			codeForwardAwait(t, f, "uncertain", 1)
+			var health string
+			if err := f.h.Pool.QueryRow(t.Context(), `SELECT health FROM olp.code_accounts WHERE id=$1`, f.account).Scan(&health); err != nil || health != test.health {
+				t.Fatalf("health=%s want %s: %v", health, test.health, err)
+			}
+			var reported *int64
+			var finished *time.Time
+			if err := f.h.Pool.QueryRow(t.Context(), `SELECT reported_tokens,finished_at FROM olp.code_attempts`).Scan(&reported, &finished); err != nil || reported != nil || finished == nil {
+				t.Fatalf("uncertain usage or cleanup changed: reported=%v finished=%v: %v", reported, finished, err)
+			}
+		})
+	}
+}
+
 func TestCodeForwardingDurableTreeUsageRateAndRefusals(t *testing.T) {
 	f := newCodeFixture(t)
 	var calls atomic.Int64

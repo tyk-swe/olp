@@ -37,6 +37,8 @@ import {
   userId
 } from './test/fixtures';
 import CodeModeProbe from './test/CodeModeProbe.svelte';
+import ClientConfigurationsProbe from './test/ClientConfigurationsProbe.svelte';
+import { codeKeys } from './codeKeys';
 
 vi.mock('$lib/api/code-mode', async (original) => ({
   ...(await original<typeof import('$lib/api/code-mode')>()),
@@ -418,9 +420,11 @@ it('renders only adapter-generated client configuration and its qualification ga
   await render(load);
   await click('Routes');
   await click('Revisions and client setup');
-  expect(load).toHaveBeenCalledWith(route, expect.any(AbortSignal));
+  expect(load).toHaveBeenCalledWith(route, undefined, expect.any(AbortSignal));
   expect(
-    host.querySelector<HTMLTextAreaElement>('#code-client-configuration')!.value
+    host.querySelector<HTMLTextAreaElement>(
+      `#code-client-configuration-${route.id}`
+    )!.value
   ).toBe('fixture configuration');
   expect(host.textContent).toContain(
     'Fixture gap: no real subscription tested'
@@ -456,9 +460,146 @@ it('reloads client configuration for a changed public gateway with a fresh cache
   await click('Revisions and client setup');
   expect(second).toHaveBeenCalledOnce();
   expect(
-    host.querySelector<HTMLTextAreaElement>('#code-client-configuration')!.value
+    host.querySelector<HTMLTextAreaElement>(
+      `#code-client-configuration-${route.id}`
+    )!.value
   ).toBe(configuration('https://second.example').configuration);
   expect(host.textContent).not.toContain('https://first.example');
+});
+
+it('caches selected published models, preserves selection on URL edits and resets it on publication', async () => {
+  let publishedModels = ['native-model', 'another-native-model'];
+  const load = vi.fn(async (current: api.CodeRoute, model?: string) => ({
+    route_slug: current.slug,
+    base_url: `https://olp.example/code/${current.slug}`,
+    native_models: publishedModels,
+    client: 'codex',
+    client_version: '0.160.0',
+    configuration: `model = "${model ?? publishedModels[0]}"\nX-OLP-Code-Model = "${model ?? publishedModels[0]}"`,
+    qualification_gaps: []
+  }));
+  await render(load);
+  await click('Routes');
+  await click('Revisions and client setup');
+  const modelID = `code-client-model-${route.id}`;
+  const selectedModel = () =>
+    host.querySelector<HTMLSelectElement>(`#${modelID}`)!.value;
+  const configuration = () =>
+    host.querySelector<HTMLTextAreaElement>(
+      `#code-client-configuration-${route.id}`
+    )!.value;
+  expect(selectedModel()).toBe('native-model');
+  host.querySelector<HTMLSelectElement>(`#${modelID}`)!.focus();
+  field(modelID, 'another-native-model');
+  await settle();
+  expect(document.activeElement).toBe(host.querySelector(`#${modelID}`));
+  expect(load).toHaveBeenLastCalledWith(
+    route,
+    'another-native-model',
+    expect.any(AbortSignal)
+  );
+  expect(configuration()).toContain('model = "another-native-model"');
+  expect(configuration()).toContain(
+    'X-OLP-Code-Model = "another-native-model"'
+  );
+  field(modelID, 'native-model');
+  await settle();
+  expect(configuration()).toContain('model = "native-model"');
+  field(modelID, 'another-native-model');
+  await settle();
+  expect(configuration()).toContain('model = "another-native-model"');
+  expect(load.mock.calls.map(([, model]) => model)).toEqual([
+    undefined,
+    'another-native-model',
+    'native-model'
+  ]);
+
+  field('probe-gateway-url', 'https://changed-gateway.example');
+  await settle();
+  expect(load).toHaveBeenCalledTimes(4);
+  expect(selectedModel()).toBe('another-native-model');
+  expect(load).toHaveBeenLastCalledWith(
+    route,
+    'another-native-model',
+    expect.any(AbortSignal)
+  );
+
+  const draft = {
+    ...route,
+    models: ['draft-native-model'],
+    etag: 'draft-etag'
+  };
+  vi.mocked(api.listCodeRoutes).mockResolvedValue({
+    items: [draft],
+    nextCursor: null
+  });
+  await client.invalidateQueries({
+    queryKey: codeKeys.collection('routes', { project_id: projectId })
+  });
+  await settle();
+  expect(selectedModel()).toBe('another-native-model');
+  expect(host.querySelector(`#${modelID}`)!.textContent).not.toContain(
+    'draft-native-model'
+  );
+  expect(load).toHaveBeenCalledTimes(4);
+
+  publishedModels = ['new-published-model'];
+  const published = {
+    ...draft,
+    models: publishedModels,
+    revision_id: '01980000-0000-7000-8000-000000000032',
+    revision: 2
+  };
+  vi.mocked(api.listCodeRoutes).mockResolvedValue({
+    items: [published],
+    nextCursor: null
+  });
+  await client.invalidateQueries({
+    queryKey: codeKeys.collection('routes', { project_id: projectId })
+  });
+  await settle();
+  expect(selectedModel()).toBe('new-published-model');
+  expect(configuration()).toContain('X-OLP-Code-Model = "new-published-model"');
+  expect(load).toHaveBeenLastCalledWith(
+    published,
+    undefined,
+    expect.any(AbortSignal)
+  );
+  expect(
+    load.mock.calls.filter(
+      ([current]) => current.revision_id === published.revision_id
+    )
+  ).toEqual([[published, undefined, expect.any(AbortSignal)]]);
+});
+
+it('associates labels with distinct controls in multiple configuration panels', async () => {
+  const load = vi.fn(async (current: api.CodeRoute) => ({
+    route_slug: current.slug,
+    base_url: `https://olp.example/code/${current.slug}`,
+    native_models: current.models,
+    client: 'codex',
+    client_version: '0.160.0',
+    configuration: `configuration for ${current.slug}`,
+    qualification_gaps: []
+  }));
+  component = mount(ClientConfigurationsProbe, {
+    target: host,
+    props: {
+      client,
+      routes: [route, { ...route, id: 'another-route', slug: 'another-code' }],
+      gatewayURL: 'https://olp.example',
+      load
+    }
+  });
+  flushSync();
+  await settle();
+  const controls = [...host.querySelectorAll('textarea, select')];
+  expect(controls).toHaveLength(4);
+  expect(new Set(controls.map((control) => control.id)).size).toBe(4);
+  for (const label of host.querySelectorAll('label')) {
+    expect(label.control).not.toBeNull();
+    expect(controls).toContain(label.control);
+  }
 });
 
 it('shows each allowance limit and reset independently with provider credits', async () => {
@@ -599,9 +740,11 @@ it('keeps client setup tied to the active publication after saving a disabled dr
   expect(host.textContent).toContain('unpublished-model');
   expect(host.textContent).toContain('Revision 1');
   await click('Revisions and client setup');
-  expect(load).toHaveBeenCalledWith(edited, expect.any(AbortSignal));
+  expect(load).toHaveBeenCalledWith(edited, undefined, expect.any(AbortSignal));
   expect(
-    host.querySelector<HTMLTextAreaElement>('#code-client-configuration')!.value
+    host.querySelector<HTMLTextAreaElement>(
+      `#code-client-configuration-${route.id}`
+    )!.value
   ).toBe('published configuration');
 });
 

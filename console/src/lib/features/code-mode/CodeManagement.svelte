@@ -37,6 +37,7 @@
     gatewayURL: string;
     loadClientConfiguration?: (
       route: CodeRoute,
+      model?: string,
       signal?: AbortSignal
     ) => Promise<CodeClientConfiguration>;
   } = $props();

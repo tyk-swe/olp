@@ -23,6 +23,7 @@ import {
   listCodeRefusals,
   listCodeTokenWindows,
   listCodeRevisions,
+  getCodeClientConfiguration,
   saveCodeAccount,
   saveCodePool,
   saveCodeRoute,
@@ -110,6 +111,39 @@ describe('code-mode collection boundaries', () => {
     expect(new URL(requests[1].url).searchParams.get('cursor')).toBe('older');
   });
 });
+
+it.each([undefined, 'another-native-model'])(
+  'loads the generated client configuration for model %s with an abort signal',
+  async (model) => {
+    const configuration = {
+      route_slug: route.slug,
+      base_url: `https://gateway.example/code/${route.slug}`,
+      native_models: ['native-model', 'another-native-model'],
+      client: 'codex',
+      client_version: '0.160.0',
+      configuration: 'server-generated configuration',
+      qualification_gaps: []
+    };
+    const requests = captureRequests(() => jsonResponse(configuration));
+    const controller = new AbortController();
+    expect(
+      await getCodeClientConfiguration(
+        route,
+        'https://gateway.example',
+        model,
+        controller.signal
+      )
+    ).toEqual(configuration);
+    const url = new URL(requests[0].url);
+    expect(url.pathname).toBe(`/api/v1/code/routes/${route.id}/client-config`);
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      gateway_url: 'https://gateway.example',
+      ...(model ? { model } : {})
+    });
+    controller.abort();
+    expect(requests[0].signal.aborted).toBe(true);
+  }
+);
 
 it('sends safe management mutations through CSRF, idempotency and ETag middleware', async () => {
   const requests = captureRequests(() => jsonResponse(account));

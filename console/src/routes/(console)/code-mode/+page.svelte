@@ -14,6 +14,6 @@
 </div>
 <CodeModePage
   {gatewayURL}
-  loadClientConfiguration={(route, signal) =>
-    getCodeClientConfiguration(route, gatewayURL, signal)}
+  loadClientConfiguration={(route, model, signal) =>
+    getCodeClientConfiguration(route, gatewayURL, model, signal)}
 />

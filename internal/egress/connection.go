@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
 	"net/url"
 	"strings"
@@ -316,18 +317,21 @@ func (p Policy) connectionClient(options *ConnectionOptions, secret []byte, defa
 	}
 	redirect := func(*http.Request, []*http.Request) error { return ErrRedirect }
 	if raw {
+		transport.DialContext = captureConnectionHeaders(dial.DialContext)
+		transport.DialTLSContext = captureConnectionHeaders(dial.DialTLSContext)
 		transport.DisableCompression = true
 		transport.DisableKeepAlives = true
 		transport.ForceAttemptHTTP2 = false
 		transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
 		redirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	}
-	return &http.Client{Transport: &connectionTransport{policy: policy, transport: transport}, CheckRedirect: redirect}, nil
+	return &http.Client{Transport: &connectionTransport{policy: policy, transport: transport, raw: raw}, CheckRedirect: redirect}, nil
 }
 
 type connectionTransport struct {
 	policy    Policy
 	transport *http.Transport
+	raw       bool
 	retired   atomic.Bool
 }
 
@@ -351,12 +355,29 @@ func (t *connectionTransport) RoundTrip(request *http.Request) (*http.Response, 
 	if t.retired.Load() {
 		request.Close = true
 	}
+	var rawConn *connectionHeaderConn
+	if t.raw {
+		request = request.WithContext(httptrace.WithClientTrace(request.Context(), &httptrace.ClientTrace{
+			GotConn: func(info httptrace.GotConnInfo) { rawConn = info.Conn.(*connectionHeaderConn) },
+		}))
+	}
 	response, err := t.transport.RoundTrip(request)
 	if err != nil {
 		if t.retired.Load() {
 			t.transport.CloseIdleConnections()
 		}
 		return nil, err
+	}
+	if t.raw {
+		// net/http removes the entire Connection header when it includes close,
+		// discarding the other field names a forwarding caller must exclude.
+		if len(rawConn.connections) != 0 {
+			response.Header["Connection"] = rawConn.connections
+		}
+		if connection, ok := rawConn.Conn.(*tls.Conn); ok {
+			state := connection.ConnectionState()
+			response.TLS = &state
+		}
 	}
 	if duplex, ok := response.Body.(io.ReadWriteCloser); ok {
 		response.Body = &retiringDuplexBody{ReadWriteCloser: duplex, owner: t}

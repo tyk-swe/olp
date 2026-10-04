@@ -18,11 +18,15 @@ export type CodeClientConfiguration = Schemas['CodeClientConfiguration'];
 export async function getCodeClientConfiguration(
   route: CodeRoute,
   gatewayURL: string,
+  model?: string,
   signal?: AbortSignal
 ): Promise<CodeClientConfiguration> {
   return unwrap(
     await apiClient.GET('/api/v1/code/routes/{id}/client-config', {
-      params: { path: { id: route.id }, query: { gateway_url: gatewayURL } },
+      params: {
+        path: { id: route.id },
+        query: { gateway_url: gatewayURL, model }
+      },
       signal
     })
   );

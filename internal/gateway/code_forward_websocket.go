@@ -104,9 +104,15 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 	httpClient.Transport = &codeHandshakeTransport{base: httpClient.Transport, reject: func(response *http.Response) {
 		forwarded = true
 		maps.Copy(w.Header(), codexwire.ForwardHeaders(response.Header, false))
+		for name := range codexwire.ForwardTrailers(response.Trailer, response.Header, false) {
+			w.Header().Add("Trailer", name)
+		}
 		w.WriteHeader(response.StatusCode)
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 		_, _ = io.Copy(w, response.Body)
+		for name, values := range codexwire.ForwardTrailers(response.Trailer, response.Header, false) {
+			w.Header()[http.TrailerPrefix+name] = values
+		}
 	}}
 	dialCtx, dialCancel := context.WithTimeout(r.Context(), 30*time.Second)
 	upstream, response, err := websocket.Dial(dialCtx, target, &websocket.DialOptions{HTTPClient: httpClient, HTTPHeader: headers, CompressionMode: websocket.CompressionDisabled})

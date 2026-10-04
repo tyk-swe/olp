@@ -18,6 +18,11 @@
   } = $props();
 </script>
 
+<input
+  id="probe-gateway-url"
+  aria-label="Test gateway URL"
+  bind:value={gatewayURL}
+/>
 <QueryClientProvider {client}
   ><CodeModePage {gatewayURL} {loadClientConfiguration} /></QueryClientProvider
 >

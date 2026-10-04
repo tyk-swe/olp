@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
+  import { untrack } from 'svelte';
   import { copyText } from '$lib/clipboard';
   import { errorMessage } from '$lib/api/http';
   import type { CodeClientConfiguration, CodeRoute } from '$lib/api/code-mode';
@@ -14,18 +15,57 @@
     gatewayURL: string;
     load: (
       route: CodeRoute,
+      model?: string,
       signal?: AbortSignal
     ) => Promise<CodeClientConfiguration>;
   } = $props();
   let copied = $state('');
-  const configuration = createQuery(() => ({
-    queryKey: codeKeys.configuration(route.id, route.revision_id, gatewayURL),
-    queryFn: ({ signal }) => load(route, signal)
-  }));
+  let selection = $state<{ revisionId: string; model: string }>();
+  const model = $derived(
+    selection?.revisionId === route.revision_id ? selection.model : undefined
+  );
+  const configurationID = $derived(`code-client-configuration-${route.id}`);
+  const modelID = $derived(`code-client-model-${route.id}`);
+  const configuration = createQuery(() => {
+    const selectedRoute = route;
+    const selectedModel = model;
+    const loader = load;
+    return {
+      queryKey: codeKeys.configuration(
+        selectedRoute.id,
+        selectedRoute.revision_id,
+        gatewayURL,
+        selectedModel
+      ),
+      queryFn: ({ signal }) =>
+        untrack(() => loader(selectedRoute, selectedModel, signal))
+    };
+  });
+  const nativeModels = $derived(
+    configuration.data?.native_models ?? (model ? [model] : [])
+  );
 </script>
 
 <section class="card" aria-label="Official client configuration">
   <h3>Official client configuration</h3>
+  {#if nativeModels.length > 0}
+    <div class="form-field">
+      <label for={modelID}>Client native model</label>
+      <select
+        id={modelID}
+        value={model ?? nativeModels[0]}
+        onchange={(event) =>
+          (selection = {
+            revisionId: route.revision_id,
+            model: event.currentTarget.value
+          })}
+      >
+        {#each nativeModels as nativeModel (nativeModel)}
+          <option value={nativeModel}>{nativeModel}</option>
+        {/each}
+      </select>
+    </div>
+  {/if}
   {#if configuration.isPending}<p role="status">
       Loading supported configuration…
     </p>
@@ -56,9 +96,9 @@
         {#each config.qualification_gaps as gap (gap)}<li>{gap}</li>{/each}
       </ul>{/if}
     <div class="form-field">
-      <label for="code-client-configuration">Generated configuration</label>
+      <label for={configurationID}>Generated configuration</label>
       <textarea
-        id="code-client-configuration"
+        id={configurationID}
         readonly
         value={config.configuration}
         rows="10"></textarea>
