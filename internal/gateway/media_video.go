@@ -46,7 +46,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 
 	localJobID := uuid.Must(uuid.NewV7()).String()
 	x.affinity = []byte(localJobID)
-	if e := s.prepareMedia(x, authority); e != nil {
+	if e := s.prepareMedia(r.Context(), x, authority); e != nil {
 		form.Cleanup()
 		s.mediaFail(x, w, e)
 		return

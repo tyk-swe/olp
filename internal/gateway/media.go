@@ -194,7 +194,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execu
 		x.estimate = 1500
 	}
 	defer s.cleanupUploads(request)
-	if e := s.prepareMedia(x, authority); e != nil {
+	if e := s.prepareMedia(ctx, x, authority); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}
@@ -243,7 +243,7 @@ func (s *Server) cleanupUploads(request *media.Request) {
 
 // prepareMedia resolves the route, the caller's route permission, and the
 // eligible attempt set for one media operation.
-func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
+func (s *Server) prepareMedia(ctx context.Context, x *execution, authority access.Authority) *Error {
 	request := x.media
 	x.mode = request.Mode()
 	snapshot := x.request.release.Snapshot
@@ -254,6 +254,9 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	x.route = &route
 	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+	}
+	if e := s.checkRouteFidelity(ctx, &route); e != nil {
+		return e
 	}
 	if route.Fidelity.Strict() {
 		if e := strictMediaContext(x); e != nil {

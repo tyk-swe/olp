@@ -400,3 +400,6 @@ func registerNativeMock(mux *http.ServeMux) {
 		}
 	})
 }
+
+// This fixture has no asynchronous publication or external database.
+func (*staticRuntime) CheckRouteFidelity(context.Context, runtime.Route) error { return nil }

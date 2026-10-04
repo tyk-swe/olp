@@ -1006,3 +1006,6 @@ func TestClientWriteFailureIsCancellation(t *testing.T) {
 		t.Fatalf("pre-commit transport failure classified as %q, want %q", got, classConnect)
 	}
 }
+
+// This fixture has no asynchronous publication or external database.
+func (*fakeRuntime) CheckRouteFidelity(context.Context, runtime.Route) error { return nil }

@@ -119,6 +119,9 @@ func (s *Server) selectPin(ctx context.Context, x *execution, route *runtime.Rou
 }
 
 func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runtime.Route, operation, surface, mode string, qualified func(*runtime.Provider, string) bool) (*pin, *Error) {
+	if e := s.checkRouteFidelity(ctx, route); e != nil {
+		return nil, e
+	}
 	snapshot := x.request.release.Snapshot
 	options := s.selectionOptions(x)
 	options.Accept = func(p runtime.Provider, t runtime.Target) error {

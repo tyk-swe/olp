@@ -84,6 +84,11 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 		return nil, nil, notFoundError("not_found", "No "+res.Kind+" with this identifier exists for this key.")
 	}
 	if current, published := x.request.release.Snapshot.Routes[res.RouteSlug]; published {
+		if use != retainedHousekeeping {
+			if e := s.checkRouteFidelity(ctx, &current); e != nil {
+				return nil, nil, e
+			}
+		}
 		if strict, known := strictResourceKind(res.Kind); known {
 			if e := retainedContract(strict, current.Fidelity, use); e != nil {
 				return nil, nil, e

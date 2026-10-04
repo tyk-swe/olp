@@ -272,7 +272,12 @@ mapping to the provider-owned object.
 A published slug moves between strict and transformed through an ordinary new
 revision, so clients keep their model name. Restoring an earlier revision
 activates it with that revision's own fidelity, and revision history shows the
-fidelity of each revision.
+fidelity of each revision. New strict admissions check the published route in
+the database before provider work. A gateway still holding a strict revision
+after the slug becomes transformed refuses new work until it refreshes; it
+also refuses strict admissions if that database check fails. This adds an
+authoritative database read to strict admission. Already admitted requests
+retain their pinned contract.
 
 A stored response, file, batch, continuation or video job is served only under
 the fidelity it was created with:
