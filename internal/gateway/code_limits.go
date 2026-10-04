@@ -16,7 +16,9 @@ func (a *Admission) ReserveCodeRate(ctx context.Context, authority access.Author
 	authority.Policy.DailyCostLimit = nil
 	authority.Policy.MonthlyCostLimit = nil
 	authority.BudgetGroupID = nil
-	return a.reserveKey(ctx, authority, estimate, ttl)
+	// Code forwarding preserves upstream allowance headers rather than adding
+	// the synthetic API-key allowance of the inference surfaces.
+	return a.reserveKey(ctx, authority, "code", estimate, ttl)
 }
 
 func (a *Admission) reserveCodeProvider(ctx context.Context, providerID string, configuration runtime.Configuration, estimate int64, ttl time.Duration) (*limits.Lease, *Error) {
@@ -34,7 +36,7 @@ func (a *Admission) reserveCodeProvider(ctx context.Context, providerID string, 
 		return lease, nil
 	}
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
-		return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter)
+		return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
 	}
 	return nil, limitsUnavailable()
 }
