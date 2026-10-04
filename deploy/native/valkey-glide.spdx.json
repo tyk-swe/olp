@@ -2,13 +2,13 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "valkey-glide-go-v2.5.2-ffi-lock-inventory",
-  "documentNamespace": "https://github.com/tyk-swe/olp/sbom/glide/a2165cc9d752818a9912c4aafe1cd7235ed2d5bc",
+  "name": "valkey-glide-go-v2.5.3-ffi-lock-inventory",
+  "documentNamespace": "https://github.com/tyk-swe/olp/sbom/glide/098b8fdf9db6f8beff47d5ec758dffb0e61d04cd",
   "creationInfo": {
     "creators": [
       "Tool: scripts/native-sbom.py"
     ],
-    "created": "2026-09-18T00:00:00Z"
+    "created": "2026-10-04T00:00:00Z"
   },
   "packages": [
     {
@@ -265,10 +265,10 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-aws-lc-rs-1.16.3",
+      "SPDXID": "SPDXRef-aws-lc-rs-1.18.1",
       "name": "aws-lc-rs",
-      "versionInfo": "1.16.3",
-      "downloadLocation": "https://crates.io/api/v1/crates/aws-lc-rs/1.16.3/download",
+      "versionInfo": "1.18.1",
+      "downloadLocation": "https://crates.io/api/v1/crates/aws-lc-rs/1.18.1/download",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
@@ -277,21 +277,21 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:cargo/aws-lc-rs@1.16.3"
+          "referenceLocator": "pkg:cargo/aws-lc-rs@1.18.1"
         }
       ],
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "0ec6fb3fe69024a75fa7e1bfb48aa6cf59706a101658ea01bfd33b2b248a038f"
+          "checksumValue": "b281d307588d634de920874890732659e2e7672f72b5e10e81badc1a8a83621e"
         }
       ]
     },
     {
-      "SPDXID": "SPDXRef-aws-lc-sys-0.40.0",
+      "SPDXID": "SPDXRef-aws-lc-sys-0.45.0",
       "name": "aws-lc-sys",
-      "versionInfo": "0.40.0",
-      "downloadLocation": "https://crates.io/api/v1/crates/aws-lc-sys/0.40.0/download",
+      "versionInfo": "0.45.0",
+      "downloadLocation": "https://crates.io/api/v1/crates/aws-lc-sys/0.45.0/download",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
@@ -300,13 +300,13 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:cargo/aws-lc-sys@0.40.0"
+          "referenceLocator": "pkg:cargo/aws-lc-sys@0.45.0"
         }
       ],
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "f50037ee5e1e41e7b8f9d161680a725bd1626cb6f8c7e901f91f942850852fe7"
+          "checksumValue": "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27"
         }
       ]
     },
@@ -2177,7 +2177,7 @@
       "SPDXID": "SPDXRef-glide-core-0.1.0",
       "name": "glide-core",
       "versionInfo": "0.1.0",
-      "downloadLocation": "git+https://github.com/valkey-io/valkey-glide@a2165cc9d752818a9912c4aafe1cd7235ed2d5bc",
+      "downloadLocation": "git+https://github.com/valkey-io/valkey-glide@098b8fdf9db6f8beff47d5ec758dffb0e61d04cd",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
@@ -2194,7 +2194,7 @@
       "SPDXID": "SPDXRef-glide-ffi-0.1.0",
       "name": "glide-ffi",
       "versionInfo": "0.1.0",
-      "downloadLocation": "git+https://github.com/valkey-io/valkey-glide@a2165cc9d752818a9912c4aafe1cd7235ed2d5bc",
+      "downloadLocation": "git+https://github.com/valkey-io/valkey-glide@098b8fdf9db6f8beff47d5ec758dffb0e61d04cd",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
@@ -3384,7 +3384,7 @@
       "SPDXID": "SPDXRef-logger_core-0.1.0",
       "name": "logger_core",
       "versionInfo": "0.1.0",
-      "downloadLocation": "git+https://github.com/valkey-io/valkey-glide@a2165cc9d752818a9912c4aafe1cd7235ed2d5bc",
+      "downloadLocation": "git+https://github.com/valkey-io/valkey-glide@098b8fdf9db6f8beff47d5ec758dffb0e61d04cd",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
@@ -4689,7 +4689,7 @@
       "SPDXID": "SPDXRef-redis-0.25.2",
       "name": "redis",
       "versionInfo": "0.25.2",
-      "downloadLocation": "git+https://github.com/valkey-io/valkey-glide@a2165cc9d752818a9912c4aafe1cd7235ed2d5bc",
+      "downloadLocation": "git+https://github.com/valkey-io/valkey-glide@098b8fdf9db6f8beff47d5ec758dffb0e61d04cd",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
@@ -5002,10 +5002,10 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-rustls-0.23.40",
+      "SPDXID": "SPDXRef-rustls-0.23.45",
       "name": "rustls",
-      "versionInfo": "0.23.40",
-      "downloadLocation": "https://crates.io/api/v1/crates/rustls/0.23.40/download",
+      "versionInfo": "0.23.45",
+      "downloadLocation": "https://crates.io/api/v1/crates/rustls/0.23.45/download",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
@@ -5014,13 +5014,13 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:cargo/rustls@0.23.40"
+          "referenceLocator": "pkg:cargo/rustls@0.23.45"
         }
       ],
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
+          "checksumValue": "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
         }
       ]
     },
@@ -5117,10 +5117,10 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-rustls-webpki-0.103.13",
+      "SPDXID": "SPDXRef-rustls-webpki-0.103.15",
       "name": "rustls-webpki",
-      "versionInfo": "0.103.13",
-      "downloadLocation": "https://crates.io/api/v1/crates/rustls-webpki/0.103.13/download",
+      "versionInfo": "0.103.15",
+      "downloadLocation": "https://crates.io/api/v1/crates/rustls-webpki/0.103.15/download",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
@@ -5129,13 +5129,13 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:cargo/rustls-webpki@0.103.13"
+          "referenceLocator": "pkg:cargo/rustls-webpki@0.103.15"
         }
       ],
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+          "checksumValue": "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
         }
       ]
     },
@@ -5971,7 +5971,7 @@
       "SPDXID": "SPDXRef-telemetrylib-0.1.0",
       "name": "telemetrylib",
       "versionInfo": "0.1.0",
-      "downloadLocation": "git+https://github.com/valkey-io/valkey-glide@a2165cc9d752818a9912c4aafe1cd7235ed2d5bc",
+      "downloadLocation": "git+https://github.com/valkey-io/valkey-glide@098b8fdf9db6f8beff47d5ec758dffb0e61d04cd",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "NOASSERTION",
@@ -8689,12 +8689,12 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-aws-lc-rs-1.16.3"
+      "relatedSpdxElement": "SPDXRef-aws-lc-rs-1.18.1"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-aws-lc-sys-0.40.0"
+      "relatedSpdxElement": "SPDXRef-aws-lc-sys-0.45.0"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9724,7 +9724,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-rustls-0.23.40"
+      "relatedSpdxElement": "SPDXRef-rustls-0.23.45"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
@@ -9749,7 +9749,7 @@
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
       "relationshipType": "DESCRIBES",
-      "relatedSpdxElement": "SPDXRef-rustls-webpki-0.103.13"
+      "relatedSpdxElement": "SPDXRef-rustls-webpki-0.103.15"
     },
     {
       "spdxElementId": "SPDXRef-DOCUMENT",
