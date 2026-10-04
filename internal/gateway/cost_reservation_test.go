@@ -56,7 +56,7 @@ func budgeted() access.Authority {
 	return admissionAuthority(access.KeyPolicy{DailyCostLimit: costText("5.00")})
 }
 
-func TestCostReservationIsTheMostAnAttemptCouldCost(t *testing.T) {
+func TestCostReservationIsTheMostTheRequestCouldCost(t *testing.T) {
 	const prompt = `[{"role":"user","content":"hello"}]`
 	for _, tc := range []struct {
 		name     string
@@ -93,13 +93,15 @@ func TestCostReservationIsTheMostAnAttemptCouldCost(t *testing.T) {
 			want:     "0.000002",
 		},
 		{
-			name: "failing over reserves the dearest attempt and not their sum", family: openai.FamilyChat, budget: 2,
+			// Settlement bills every attempt that reports usage, so a failover
+			// adds each attempt's bound rather than taking the dearest.
+			name: "failing over reserves the sum of the attempts", family: openai.FamilyChat, budget: 2,
 			body: `{"model":"team-chat","max_tokens":16,"messages":` + prompt + `}`,
 			attempts: []runtime.Attempt{
 				{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("0.5"), OutputPerMillion: costText("5")}}},
 				{Price: costPrice()},
 			},
-			want: "0.000162",
+			want: "0.000243",
 		},
 		{
 			name: "an attempt past the budget cannot be dispatched", family: openai.FamilyChat, budget: 1,
@@ -143,6 +145,27 @@ func TestCostReservationIsTheMostAnAttemptCouldCost(t *testing.T) {
 				t.Fatalf("a request that reserves nothing names %q", hold.requestID)
 			}
 		})
+	}
+}
+
+// TestCredentialSlotRetriesAreEachReserved proves a request that can be
+// retried through another credential slot reserves every dispatch it could
+// bill: a first attempt billed without settling does not refund what a retry
+// will cost, so the bound is the sum over the slots the walk visits.
+func TestCredentialSlotRetriesAreEachReserved(t *testing.T) {
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 2,
+		runtime.Attempt{Price: costPrice()})
+	x.request.id, x.request.minted = uuid.NewString(), true
+	provider := x.snapshot().Providers[x.attempts[0].ProviderID]
+	provider.Slots = append(provider.Slots, runtime.Slot{ID: uuid.NewString(), Enabled: true})
+	x.snapshot().Providers[provider.ID] = provider
+	if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != "0.000324" {
+		t.Fatalf("two billable dispatches reserve %q, want 0.000324", hold.amount)
+	}
+	// A request whose attempt budget is one still reserves a single dispatch.
+	x.budget = 1
+	if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != "0.000162" {
+		t.Fatalf("one dispatch reserves %q, want 0.000162", hold.amount)
 	}
 }
 

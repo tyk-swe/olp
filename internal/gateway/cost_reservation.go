@@ -31,26 +31,19 @@ func costBudgeted(authority access.Authority) bool {
 
 // costReservation prices the request for admission: the most it could cost
 // across the attempts it may dispatch, from the price list the gateway holds,
-// which is the revision accounting will pin it to. It is the largest of the
-// attempts and not their sum, so failing over does not multiply the reservation;
-// settlement replaces it with the cost of what was actually dispatched.
+// which is the revision accounting will pin it to. Settlement bills every
+// attempt that reported usage, a retry through another credential slot
+// included, so the bound is their sum; it is replaced by the cost of what was
+// actually dispatched.
 func (s *Server) costReservation(x *execution, authority access.Authority) costReservation {
 	if !costBudgeted(authority) {
 		return costReservation{}
 	}
 	var bound usage.Cost
-	var visited runtime.Attempt
-	var seen bool
 	s.walkDispatchable(x, func(attempt runtime.Attempt) {
-		// An attempt is visited once for each of its credential slots in turn.
-		if seen && attempt.TargetID == visited.TargetID && attempt.ProviderID == visited.ProviderID &&
-			attempt.UpstreamModel == visited.UpstreamModel {
-			return
-		}
-		visited, seen = attempt, true
-		if cost := x.attemptCostBound(attempt); cost.Cmp(bound) > 0 {
-			bound = cost
-		}
+		// An attempt is visited once for each of its credential slots in turn,
+		// and each visit is a dispatch that may be billed on its own.
+		bound = bound.Add(x.attemptCostBound(attempt))
 	})
 	if bound.IsZero() {
 		return costReservation{}

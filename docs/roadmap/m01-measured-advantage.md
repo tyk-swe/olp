@@ -136,8 +136,8 @@ balance.
   reserves an estimate of its cost in the same Valkey call that checks the
   balance, and is admitted only if accrued spend, plus what requests in flight
   hold, plus the estimate fits every window. The estimate is the most one request
-  could cost across the attempts it may dispatch (the dearest attempt, not their
-  sum), priced from the gateway's pinned price list: input at the highest
+  could cost across the attempts it may dispatch (the sum over every dispatch a
+  failover or credential-slot retry may bill), priced from the gateway's pinned price list: input at the highest
   input-side rate and the reply at the output rate for the tokens the request
   allows. Settlement replaces it with the cost of the attempts that reported
   usage, and accounting removes it when the spend lands. The accrued balance

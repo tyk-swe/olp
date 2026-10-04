@@ -546,9 +546,9 @@ has, whether input, cached input or any cache write, because nothing says
 beforehand whether the provider will read or write its cache. The reply is
 charged at the output rate for the tokens the request allows, which is
 4,096 when it names no bound, times the candidates it asks for. Each division by a
-million rounds up. When a route can fail over, the estimate is the dearest
-attempt, not their sum, and settlement corrects a request that is billed more than
-once.
+million rounds up. Settlement bills every dispatch that reports usage, so when a
+route can fail over or retry through another credential slot the estimate is the
+sum of the dispatches the request may make, not just the dearest single attempt.
 
 A request that ends replaces its estimate with the cost of the attempts that
 reported usage, priced exactly as accounting will price them; one that was never
