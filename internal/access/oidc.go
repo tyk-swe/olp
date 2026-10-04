@@ -3,6 +3,8 @@ package access
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -34,20 +36,21 @@ type oidcRoleClaims struct {
 }
 
 type oidcConfiguration struct {
-	ID              string        `json:"id"`
-	DiscoveryURL    string        `json:"discovery_url"`
-	Issuer          string        `json:"issuer"`
-	ClientID        string        `json:"client_id"`
-	Enabled         bool          `json:"enabled"`
-	Scopes          []string      `json:"scopes"`
-	EmailClaim      string        `json:"email_claim"`
-	GroupsClaim     string        `json:"groups_claim"`
-	DefaultRole     *string       `json:"default_role"`
-	EmailMappings   []roleMapping `json:"email_role_mappings"`
-	GroupMappings   []roleMapping `json:"group_role_mappings"`
-	HasClientSecret bool          `json:"has_client_secret"`
-	ETag            string        `json:"etag"`
-	UpdatedByEmail  string        `json:"updated_by_email"`
+	DiscoveryBinding string        `json:"discovery_binding,omitempty"`
+	ID               string        `json:"id"`
+	DiscoveryURL     string        `json:"discovery_url"`
+	Issuer           string        `json:"issuer"`
+	ClientID         string        `json:"client_id"`
+	Enabled          bool          `json:"enabled"`
+	Scopes           []string      `json:"scopes"`
+	EmailClaim       string        `json:"email_claim"`
+	GroupsClaim      string        `json:"groups_claim"`
+	DefaultRole      *string       `json:"default_role"`
+	EmailMappings    []roleMapping `json:"email_role_mappings"`
+	GroupMappings    []roleMapping `json:"group_role_mappings"`
+	HasClientSecret  bool          `json:"has_client_secret"`
+	ETag             string        `json:"etag"`
+	UpdatedByEmail   string        `json:"updated_by_email"`
 }
 
 func loadOIDC(r *http.Request, q Queryer) (oidcConfiguration, error) {
@@ -62,9 +65,10 @@ func loadOIDC(r *http.Request, q Queryer) (oidcConfiguration, error) {
 }
 func (s *Server) oidcConfiguration(r *http.Request, _ Principal) (Reply, error) {
 	c, err := loadOIDC(r, s.Pool)
+	c.DiscoveryBinding = ""
 	return Detail(c, c.ETag), err
 }
-func (s *Server) discover(ctx context.Context, c oidcConfiguration) (*oidc.Provider, *oauth2.Config, error) {
+func (s *Server) discover(ctx context.Context, c *oidcConfiguration) (*oidc.Provider, *oauth2.Config, error) {
 	if err := oidcURL(c.DiscoveryURL); err != nil {
 		return nil, nil, Invalid("discovery_url", err.Error())
 	}
@@ -109,6 +113,17 @@ func (s *Server) discover(ctx context.Context, c oidcConfiguration) (*oidc.Provi
 	default:
 		return nil, nil, Invalid("discovery_url", "The token endpoint must support client_secret_basic or client_secret_post.")
 	}
+
+	// Bind validated destinations and the selected authentication method to the
+	// saved configuration. Remote rediscovery cannot silently authorize a new
+	// recipient of the client secret, even before a public login flow starts.
+	encoded, _ := json.Marshal([]any{metadata.IssuerURL, metadata.AuthURL, metadata.TokenURL, metadata.JWKSURL, oauth.Endpoint.AuthStyle})
+	digest := sha256.Sum256(encoded)
+	binding := hex.EncodeToString(digest[:])
+	if c.ID != "" && c.DiscoveryBinding != binding {
+		return nil, nil, Fail(422, "oidc_discovery_changed", "OIDC discovery changed or is not bound. An owner must review and save the configuration again.")
+	}
+	c.DiscoveryBinding = binding
 	return provider, oauth, nil
 }
 func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, error) {
@@ -181,7 +196,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, erro
 		return Reply{}, Invalid("client_secret", "Use at most 4096 bytes.")
 	}
 	if c.Enabled {
-		if _, _, err := s.discover(r.Context(), c); err != nil {
+		if _, _, err := s.discover(r.Context(), &c); err != nil {
 			return Reply{}, err
 		}
 	}
@@ -255,6 +270,7 @@ func (s *Server) putOIDCConfiguration(r *http.Request, _ Principal) (Reply, erro
 	if err = Audit(r.Context(), tx, r, p.Actor(), "oidc.configuration.update", "oidc_configuration", c.ID, "success"); err != nil {
 		return Reply{}, err
 	}
+	c.DiscoveryBinding = ""
 	return Commit(r, tx, Detail(c, c.ETag))
 }
 
@@ -304,7 +320,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 	if !c.Enabled {
 		return Reply{}, Fail(403, "oidc_disabled", "OIDC sign-in is disabled.")
 	}
-	_, oauth, err := s.discover(r.Context(), c)
+	_, oauth, err := s.discover(r.Context(), &c)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -441,7 +457,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 	if r.URL.Query().Get("error") != "" || r.URL.Query().Get("code") == "" {
 		return Reply{}, Fail(403, "oidc_authorization_denied", "The identity provider did not authorize sign-in.")
 	}
-	provider, oauth, err := s.discover(r.Context(), c)
+	provider, oauth, err := s.discover(r.Context(), &c)
 	if err != nil {
 		return Reply{}, err
 	}

@@ -268,3 +268,13 @@ Session inventory labels `last_seen_at` as **Last session verification**
 hint helps distinguish sessions without retaining raw user agents. It is
 untrusted display metadata, not authentication evidence; an unrecognized user
 agent shows Unknown browser.
+
+### OIDC discovery binding
+
+Saving enabled OIDC configuration binds its validated authorization, token and
+JWKS endpoints and token authentication method. Sign-in rejects rediscovery
+changes before reading or sending the client secret. An owner must review the
+identity provider and save the configuration again to accept such a change.
+After upgrading an installation without this binding, retain a local owner
+sign-in or an existing owner session to perform that save before relying on
+OIDC sign-in.
