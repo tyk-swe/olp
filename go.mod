@@ -3,7 +3,7 @@ module github.com/tyk-swe/olp
 go 1.27.1
 
 require (
-	cloud.google.com/go/auth v0.23.3
+	cloud.google.com/go/auth v0.24.0
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.2
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.1
 	github.com/HdrHistogram/hdrhistogram-go v1.3.0
