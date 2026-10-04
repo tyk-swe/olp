@@ -218,14 +218,10 @@ func codeAuthority(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *access.A
 
 func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (codemode.Binding, error) {
 	identity := in.Operation.Identity
-	b, err := ScanCodeBinding(tx.QueryRow(ctx, `SELECT `+CodeBindingColumns+` FROM olp.code_bindings b WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.conversation=$3`, in.Route.ID, in.APIKeyID, identity.Conversation))
+	b, err := codeConversation(ctx, tx, in, identity.Conversation)
 	if err == nil {
-		var retired bool
-		if err = tx.QueryRow(ctx, `SELECT retired_at IS NOT NULL FROM olp.code_bindings WHERE id=$1 FOR SHARE`, b.RootID).Scan(&retired); err != nil {
+		if err = liveCodeTree(ctx, tx, b); err != nil {
 			return b, err
-		}
-		if retired || b.RetiredAt != nil {
-			return b, codemode.Refuse(410, "code_binding_retired")
 		}
 		if identity.Parent != "" {
 			var parent string
@@ -241,19 +237,15 @@ func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (code
 	b = codemode.Binding{ID: access.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, APIKeyID: in.APIKeyID, Conversation: identity.Conversation}
 	b.RootID = b.ID
 	if identity.Parent != "" {
-		parent, err := ScanCodeBinding(tx.QueryRow(ctx, `SELECT `+CodeBindingColumns+` FROM olp.code_bindings b WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.conversation=$3`, in.Route.ID, in.APIKeyID, identity.Parent))
+		parent, err := codeConversation(ctx, tx, in, identity.Parent)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return b, codemode.Refuse(409, "code_parent_unresolved")
 		}
 		if err != nil {
 			return b, err
 		}
-		var retired bool
-		if err = tx.QueryRow(ctx, `SELECT retired_at IS NOT NULL FROM olp.code_bindings WHERE id=$1 FOR SHARE`, parent.RootID).Scan(&retired); err != nil {
+		if err = liveCodeTree(ctx, tx, parent); err != nil {
 			return b, err
-		}
-		if retired || parent.RetiredAt != nil {
-			return b, codemode.Refuse(410, "code_binding_retired")
 		}
 		b.ParentID = &parent.ID
 		b.RootID = parent.RootID
@@ -273,6 +265,23 @@ func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (code
 	err = tx.QueryRow(ctx, `INSERT INTO olp.code_bindings(id,project_id,route_id,api_key_id,conversation,parent_id,root_id,account_id,principal)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING created_at`, b.ID, b.ProjectID, b.RouteID, b.APIKeyID, b.Conversation, b.ParentID, b.RootID, b.AccountID, b.Principal).Scan(&b.CreatedAt)
 	return b, err
+}
+
+func codeConversation(ctx context.Context, tx pgx.Tx, in CodeAdmission, conversation string) (codemode.Binding, error) {
+	return ScanCodeBinding(tx.QueryRow(ctx, `SELECT `+CodeBindingColumns+` FROM olp.code_bindings b WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.conversation=$3`, in.Route.ID, in.APIKeyID, conversation))
+}
+
+// liveCodeTree refuses a binding whose tree is retired, and holds its root
+// against retirement until the transaction ends.
+func liveCodeTree(ctx context.Context, tx pgx.Tx, b codemode.Binding) error {
+	var retired bool
+	if err := tx.QueryRow(ctx, `SELECT retired_at IS NOT NULL FROM olp.code_bindings WHERE id=$1 FOR SHARE`, b.RootID).Scan(&retired); err != nil {
+		return err
+	}
+	if retired || b.RetiredAt != nil {
+		return codemode.Refuse(410, "code_binding_retired")
+	}
+	return nil
 }
 
 func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id string) (codemode.Account, error) {
@@ -301,8 +310,6 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id string) (c
 	if err != nil {
 		return a, err
 	}
-	a.Eligible = true
-	a.GrantState = "current"
 	if len(allowance) > 0 {
 		if err = json.Unmarshal(allowance, &a.Allowance); err != nil {
 			return a, err

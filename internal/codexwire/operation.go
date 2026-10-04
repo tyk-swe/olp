@@ -20,7 +20,6 @@ const MaxBody = 16 << 20
 type Request struct {
 	Operation        codemode.Operation
 	PreviousResponse string
-	Prewarm          bool
 	Estimate         int64
 }
 
@@ -28,40 +27,35 @@ func Decode(raw []byte, encoding string, limit int64) ([]byte, error) {
 	if int64(len(raw)) > limit {
 		return nil, codemode.Refuse(413, "code_body_too_large")
 	}
+	var reader io.Reader
 	switch strings.ToLower(strings.TrimSpace(encoding)) {
 	case "", "identity":
 		return raw, nil
 	case "gzip":
-		reader, err := gzip.NewReader(bytes.NewReader(raw))
+		gz, err := gzip.NewReader(bytes.NewReader(raw))
 		if err != nil {
 			return nil, codemode.Refuse(400, "code_encoding_invalid")
 		}
-		defer reader.Close()
-		body, err := io.ReadAll(io.LimitReader(reader, limit+1))
-		if err != nil {
-			return nil, codemode.Refuse(400, "code_encoding_invalid")
-		}
-		if int64(len(body)) > limit {
-			return nil, codemode.Refuse(413, "code_body_too_large")
-		}
-		return body, nil
+		defer gz.Close()
+		reader = gz
 	case "zstd":
-		reader, err := zstd.NewReader(bytes.NewReader(raw), zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(uint64(limit)))
+		zr, err := zstd.NewReader(bytes.NewReader(raw), zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(uint64(limit)))
 		if err != nil {
 			return nil, codemode.Refuse(400, "code_encoding_invalid")
 		}
-		defer reader.Close()
-		body, err := io.ReadAll(io.LimitReader(reader, limit+1))
-		if err != nil {
-			return nil, codemode.Refuse(400, "code_encoding_invalid")
-		}
-		if int64(len(body)) > limit {
-			return nil, codemode.Refuse(413, "code_body_too_large")
-		}
-		return body, nil
+		defer zr.Close()
+		reader = zr
 	default:
 		return nil, codemode.Refuse(415, "code_encoding_unsupported")
 	}
+	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, codemode.Refuse(400, "code_encoding_invalid")
+	}
+	if int64(len(body)) > limit {
+		return nil, codemode.Refuse(413, "code_body_too_large")
+	}
+	return body, nil
 }
 
 func Classify(body []byte, headers http.Header, path string, websocket bool) (Request, error) {
@@ -102,8 +96,7 @@ func Classify(body []byte, headers http.Header, path string, websocket bool) (Re
 		if generate.Kind() != oif.Absent && generate.Kind() != oif.Boolean {
 			return request, codemode.Refuse(400, "code_body_invalid")
 		}
-		request.Prewarm = generate.Raw() == "false"
-		if request.Prewarm {
+		if generate.Raw() == "false" {
 			request.Operation.Name = "prewarm"
 		}
 	}

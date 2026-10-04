@@ -6,10 +6,7 @@
     listCodeRoutes,
     listCodeBudgets,
     publishCodeRoute,
-    type CodeAccount,
-    type CodePool,
     type CodeRoute,
-    type CodeBudget,
     type CodeClientConfiguration
   } from '$lib/api/code-mode';
   import { collectCursorPages } from '$lib/api/pagination';
@@ -19,9 +16,10 @@
     cursorPaginationProps
   } from '$lib/lists/pagination';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { formatDate } from '$lib/format';
   import { codeKeys } from './codeKeys';
-  import { mutationError, tokenCount } from './presentation';
+  import { mutationError, tokenCount, type CodeEditing } from './presentation';
   import ResourceEditor from './ResourceEditor.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';
@@ -42,12 +40,14 @@
       signal?: AbortSignal
     ) => Promise<CodeClientConfiguration>;
   } = $props();
-  type Editing =
-    | { kind: 'accounts'; current?: CodeAccount }
-    | { kind: 'pools'; current?: CodePool }
-    | { kind: 'routes'; current?: CodeRoute }
-    | { kind: 'budgets'; current?: CodeBudget };
-  let editing = $state<Editing | null>(null);
+  const sections = {
+    accounts: { title: 'Subscription accounts', noun: 'account' },
+    pools: { title: 'Account pools', noun: 'pool' },
+    routes: { title: 'Native-model routes', noun: 'route' },
+    budgets: { title: 'Optional hard token budgets', noun: 'budget' }
+  };
+  const section = $derived(sections[kind]);
+  let editing = $state<CodeEditing | null>(null);
   let paging = $state(emptyCursorHistory());
   let busy = $state(false);
   let error = $state('');
@@ -75,31 +75,31 @@
     queryFn: ({ signal }) => listCodeBudgets(filters, signal),
     enabled: kind === 'budgets'
   }));
-  const selected = $derived(
-    kind === 'accounts'
-      ? accounts
-      : kind === 'pools'
-        ? pools
-        : kind === 'routes'
-          ? routes
-          : budgets
-  );
+  const selected = $derived({ accounts, pools, routes, budgets }[kind]);
+  // Each editor chooses references from at most one other collection: pools
+  // assign accounts, routes select a pool and budgets may scope to a route.
   const inventory = createQuery(() => ({
-    queryKey: codeKeys.inventory(projectId),
-    queryFn: async ({ signal }) => {
-      const [allAccounts, allPools, allRoutes] = await Promise.all([
-        collectCursorPages((cursor) =>
-          listCodeAccounts({ project_id: projectId, cursor }, signal)
-        ),
-        collectCursorPages((cursor) =>
-          listCodePools({ project_id: projectId, cursor }, signal)
-        ),
-        collectCursorPages((cursor) =>
-          listCodeRoutes({ project_id: projectId, cursor }, signal)
-        )
-      ]);
-      return { accounts: allAccounts, pools: allPools, routes: allRoutes };
-    },
+    queryKey: codeKeys.inventory(projectId, kind),
+    queryFn: async ({ signal }) => ({
+      accounts:
+        kind === 'pools'
+          ? await collectCursorPages((cursor) =>
+              listCodeAccounts({ project_id: projectId, cursor }, signal)
+            )
+          : [],
+      pools:
+        kind === 'routes'
+          ? await collectCursorPages((cursor) =>
+              listCodePools({ project_id: projectId, cursor }, signal)
+            )
+          : [],
+      routes:
+        kind === 'budgets'
+          ? await collectCursorPages((cursor) =>
+              listCodeRoutes({ project_id: projectId, cursor }, signal)
+            )
+          : []
+    }),
     enabled: !!editing
   }));
   async function saved() {
@@ -137,27 +137,12 @@
 
 <div class="management">
   <div class="actions">
-    <h2>
-      {kind === 'accounts'
-        ? 'Subscription accounts'
-        : kind === 'pools'
-          ? 'Account pools'
-          : kind === 'routes'
-            ? 'Native-model routes'
-            : 'Optional hard token budgets'}
-    </h2>
+    <h2>{section.title}</h2>
     {#if allowed}<button
         type="button"
         class="button button-primary"
         disabled={!!editing || busy}
-        onclick={() => (editing = { kind })}
-        >Create {kind === 'accounts'
-          ? 'account'
-          : kind === 'pools'
-            ? 'pool'
-            : kind === 'routes'
-              ? 'route'
-              : 'budget'}</button
+        onclick={() => (editing = { kind })}>Create {section.noun}</button
       >{/if}
     <button
       type="button"
@@ -166,10 +151,10 @@
       onclick={() => selected.refetch()}>Refresh</button
     >
   </div>
-  {#if !allowed}<p class="muted">
+  {#if !allowed}<ReadOnlyNote>
       Read only. Changes require configure permission and project manager or
       global authority.
-    </p>{/if}
+    </ReadOnlyNote>{/if}
   {#if error}<p role="alert" class="field-error">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if editing}

@@ -47,7 +47,7 @@ func TestIdentityAndOperationObservations(t *testing.T) {
 			if err != nil || request.Operation.Identity.Conversation != test.want || request.Operation.Identity.Parent != test.parent || request.Operation.Model != "gpt-5.4" {
 				t.Fatalf("observation=%+v error=%v", request, err)
 			}
-			if test.name == "prewarm" && (!request.Prewarm || request.Operation.Name != "prewarm") {
+			if test.name == "prewarm" && request.Operation.Name != "prewarm" {
 				t.Fatal("prewarm not classified")
 			}
 		})

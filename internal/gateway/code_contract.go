@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -24,12 +23,6 @@ type CodeLedger interface {
 	RecordRefusal(context.Context, codemode.Route, string, string) error
 }
 
-// CodeTransport owns raw HTTP/SSE and WebSocket forwarding. Composition mounts
-// it only when an implementation is supplied; no inference is simulated here.
-type CodeTransport interface{ RegisterCode(*http.ServeMux, *Server) }
-
-type CodeAuthorization = codemode.Authorization
-
 type CodeAuthorizer interface {
-	AuthorizeCode(context.Context, runtime.Configuration, codemode.Account) (CodeAuthorization, error)
+	AuthorizeCode(context.Context, runtime.Configuration, codemode.Account) (codemode.Authorization, error)
 }

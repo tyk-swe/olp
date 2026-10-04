@@ -121,8 +121,8 @@ func (l *codeTestLedger) wait(t *testing.T) codemode.Usage {
 
 type codeTestAuthorizer struct{ principal string }
 
-func (a codeTestAuthorizer) AuthorizeCode(context.Context, runtime.Configuration, codemode.Account) (CodeAuthorization, error) {
-	return CodeAuthorization{Principal: a.principal, Headers: http.Header{"Authorization": {"Bearer upstream-only"}, "Chatgpt-Account-Id": {"upstream-account"}}}, nil
+func (a codeTestAuthorizer) AuthorizeCode(context.Context, runtime.Configuration, codemode.Account) (codemode.Authorization, error) {
+	return codemode.Authorization{Principal: a.principal, Headers: http.Header{"Authorization": {"Bearer upstream-only"}, "Chatgpt-Account-Id": {"upstream-account"}}}, nil
 }
 
 func newCodeForwardHarness(t *testing.T) (*harness, *codeTestLedger, *httptest.Server) {
@@ -138,7 +138,7 @@ func newCodeForwardHarness(t *testing.T) (*harness, *codeTestLedger, *httptest.S
 	h.gateway.CodeLedger = ledger
 	h.gateway.CodeAuthorizer = codeTestAuthorizer{principal: "principal"}
 	mux := http.NewServeMux()
-	NewCodeForwarder().RegisterCode(mux, h.gateway)
+	h.gateway.RegisterCode(mux)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return h, ledger, server

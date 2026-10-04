@@ -176,17 +176,6 @@ func (b *TokenBound) Validate() error {
 	return nil
 }
 
-type Budget struct {
-	ID            string  `json:"id"`
-	ProjectID     string  `json:"project_id"`
-	RouteID       *string `json:"route_id"`
-	APIKeyID      *string `json:"api_key_id"`
-	DailyTokens   *int64  `json:"daily_tokens"`
-	MonthlyTokens *int64  `json:"monthly_tokens"`
-	Enabled       bool    `json:"enabled"`
-	ETag          string  `json:"etag"`
-}
-
 type Attempt struct {
 	UpstreamStatus    *int       `json:"upstream_status"`
 	OutcomeOrigin     *string    `json:"outcome_origin"`

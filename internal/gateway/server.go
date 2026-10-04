@@ -83,8 +83,9 @@ type Runtime interface {
 
 // Server serves the native OpenAI surface from pinned runtime releases.
 type Server struct {
+	// CodeLedger and CodeAuthorizer enable raw code-mode forwarding. Register
+	// mounts the code routes only when both are set.
 	CodeLedger     CodeLedger
-	CodeTransport  CodeTransport
 	CodeAuthorizer CodeAuthorizer
 	Runtime        Runtime
 	Sink           Sink
@@ -162,8 +163,8 @@ func (s *Server) OpenCircuits() int64 { return s.health.openCircuits() }
 
 // Register mounts the OpenAI surface on the public mux.
 func (s *Server) Register(mux *http.ServeMux) {
-	if s.CodeTransport != nil {
-		s.CodeTransport.RegisterCode(mux, s)
+	if s.CodeLedger != nil && s.CodeAuthorizer != nil {
+		s.RegisterCode(mux)
 	}
 	s.registerNative(mux)
 	s.registerGeminiLifecycle(mux)

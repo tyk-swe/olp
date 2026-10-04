@@ -73,7 +73,7 @@ func codeForwardServer(t *testing.T, f *codeFixture, upstream string) (*httptest
 	limiter := limLimiter(t, c, limNamespace(t, c, "code-forwarding"))
 	f.h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
 	mux := http.NewServeMux()
-	gateway.NewCodeForwarder().RegisterCode(mux, f.h.Gateway)
+	f.h.Gateway.RegisterCode(mux)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return server, limiter, lookup

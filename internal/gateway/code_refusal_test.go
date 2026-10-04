@@ -18,7 +18,7 @@ import (
 
 type codeGrantAuthorizer struct{ calls atomic.Int64 }
 
-func (a *codeGrantAuthorizer) AuthorizeCode(ctx context.Context, cfg runtime.Configuration, account codemode.Account) (CodeAuthorization, error) {
+func (a *codeGrantAuthorizer) AuthorizeCode(ctx context.Context, cfg runtime.Configuration, account codemode.Account) (codemode.Authorization, error) {
 	auth, err := (codeTestAuthorizer{principal: "principal"}).AuthorizeCode(ctx, cfg, account)
 	// Admission on a socket sees a newer token than its handshake used.
 	auth.GrantGeneration = a.calls.Add(1)

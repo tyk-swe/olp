@@ -1,10 +1,10 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -20,17 +20,14 @@ import (
 
 const codeGenerationTimeout = 10 * time.Minute
 
-// CodeForwarder implements raw Codex transport. It never invokes ordinary
-// request preparation, credential failover, response transformation or retries.
-type CodeForwarder struct{}
-
-func NewCodeForwarder() *CodeForwarder { return &CodeForwarder{} }
-
-func (f *CodeForwarder) RegisterCode(mux *http.ServeMux, s *Server) {
-	mux.HandleFunc("/code/{slug}/{operation...}", func(w http.ResponseWriter, r *http.Request) { f.serve(s, w, r) })
+// RegisterCode mounts raw Codex transport, which requires CodeLedger and
+// CodeAuthorizer. It never invokes ordinary request preparation, credential
+// failover, response transformation or retries.
+func (s *Server) RegisterCode(mux *http.ServeMux) {
+	mux.HandleFunc("/code/{slug}/{operation...}", s.serveCode)
 }
 
-func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	if !s.admit(r.Context()) {
 		codeWriteError(w, codemode.Refuse(503, "code_overloaded"))
 		return
@@ -51,13 +48,9 @@ func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request)
 		codeWriteError(w, codemode.Refuse(404, "code_route_unavailable"))
 		return
 	}
+	refuse := func(err error) { s.codeRefuse(w, r, route, authority.ID, err) }
 	if !route.Enabled || !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
-		codeRefuse(s, w, r, route, authority.ID, codemode.Refuse(404, "code_route_unavailable"))
-		return
-	}
-	refuse := func(err error) { codeRefuse(s, w, r, route, authority.ID, err) }
-	if s.CodeLedger == nil || s.CodeAuthorizer == nil {
-		refuse(codemode.Refuse(503, "code_service_unavailable"))
+		refuse(codemode.Refuse(404, "code_route_unavailable"))
 		return
 	}
 	path := r.PathValue("operation")
@@ -66,17 +59,14 @@ func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if r.Method == http.MethodGet && path == "responses" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		f.websocket(s, w, r, release, route, authority.ID)
+		s.codeWebSocket(w, r, release, route, authority.ID)
 		return
 	}
 	if r.Method != http.MethodPost || path != "responses" && path != "responses/compact" {
 		refuse(codemode.Refuse(400, "code_operation_unsupported"))
 		return
 	}
-	limit := int64(codexwire.MaxBody)
-	if s.cfg.MaxBodyBytes > 0 {
-		limit = min(limit, s.cfg.MaxBodyBytes)
-	}
+	limit := s.codeBodyLimit()
 	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
 	raw, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
@@ -100,24 +90,24 @@ func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
-	attempt, err := f.prepare(s, r.WithContext(ctx), release, route, observation)
+	attempt, err := s.prepareCode(r.WithContext(ctx), release, route, observation)
 	if err != nil {
 		refuse(err)
 		return
 	}
 	defer attempt.finish(ctx)
-	client, err := f.client(s, r.Context(), release, attempt.config, attempt.permit.Account.ProviderID)
+	client, err := s.codeClient(r.Context(), release, attempt.config, attempt.permit.Account.ProviderID)
 	if err != nil {
 		refuse(err)
 		return
 	}
 	defer client.CloseIdleConnections()
-	target, err := codeEndpoint(s, attempt.config, path, r.URL.RawQuery)
+	target, err := s.codeEndpoint(attempt.config, path, r.URL.RawQuery)
 	if err != nil {
 		refuse(err)
 		return
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, io.NopCloser(bytes.NewReader(raw)))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, &codeRequestBody{data: raw})
 	if err != nil {
 		refuse(codemode.Refuse(502, "code_connection_invalid"))
 		return
@@ -138,24 +128,42 @@ func (f *CodeForwarder) serve(s *Server, w http.ResponseWriter, r *http.Request)
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		if ctx.Err() == nil {
-			attempt.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
-			attempt.health(ctx, "unavailable")
-		}
+		attempt.transportFailed(ctx)
 		refuse(codemode.Refuse(502, "code_upstream_unavailable"))
 		return
 	}
 	defer response.Body.Close()
 	attempt.response(ctx, response.StatusCode, response.Header)
-	for name, values := range codexwire.ForwardHeaders(response.Header, false) {
-		w.Header()[name] = values
-	}
+	maps.Copy(w.Header(), codexwire.ForwardHeaders(response.Header, false))
 	w.WriteHeader(response.StatusCode)
-	f.copyResponse(ctx, w, response, attempt)
+	attempt.copyResponse(ctx, w, response)
 	for name, values := range codexwire.ForwardHeaders(response.Trailer, false) {
 		w.Header()[http.TrailerPrefix+name] = values
 	}
 }
+
+func (s *Server) codeBodyLimit() int64 {
+	if s.cfg.MaxBodyBytes > 0 {
+		return min(codexwire.MaxBody, s.cfg.MaxBodyBytes)
+	}
+	return codexwire.MaxBody
+}
+
+// codeRequestBody drops the sent request bytes at EOF: the response keeps the
+// outbound request reachable for the whole stream. It is never rewound.
+type codeRequestBody struct{ data []byte }
+
+func (b *codeRequestBody) Read(p []byte) (int, error) {
+	if len(b.data) == 0 {
+		b.data = nil
+		return 0, io.EOF
+	}
+	n := copy(p, b.data)
+	b.data = b.data[n:]
+	return n, nil
+}
+
+func (b *codeRequestBody) Close() error { return nil }
 
 type codeAttempt struct {
 	server        *Server
@@ -171,7 +179,7 @@ type codeAttempt struct {
 	prewarm       bool
 }
 
-func (f *CodeForwarder) prepare(s *Server, r *http.Request, release *runtime.Release, route codemode.Route, observation codexwire.Request) (*codeAttempt, error) {
+func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codexwire.Request) (*codeAttempt, error) {
 	authority, failure := s.authenticate(r, "inference")
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_authentication_refused")
@@ -188,7 +196,7 @@ func (f *CodeForwarder) prepare(s *Server, r *http.Request, release *runtime.Rel
 		settleKey(r.Context(), lease, false, nil, s.log)
 		return nil, err
 	}
-	a := &codeAttempt{server: s, permit: permit, lease: lease, prewarm: observation.Prewarm}
+	a := &codeAttempt{server: s, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
 	ok := false
 	defer func() {
 		if !ok {
@@ -325,6 +333,15 @@ func (a *codeAttempt) outcome(ctx context.Context, outcome codemode.Outcome) {
 	}
 }
 
+// transportFailed records a gateway transport failure, which also cools the
+// account down. A canceled or expired request is not the account's failure.
+func (a *codeAttempt) transportFailed(ctx context.Context) {
+	if ctx.Err() == nil {
+		a.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
+		a.health(ctx, "unavailable")
+	}
+}
+
 func (a *codeAttempt) allowance(ctx context.Context, allowance codemode.Allowance) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
@@ -359,7 +376,7 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 	}
 }
 
-func codeEndpoint(s *Server, cfg runtime.Configuration, path, query string) (string, error) {
+func (s *Server) codeEndpoint(cfg runtime.Configuration, path, query string) (string, error) {
 	u, err := url.Parse(cfg.Endpoint)
 	if err != nil || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 		return "", codemode.Refuse(502, "code_connection_invalid")
@@ -373,7 +390,7 @@ func codeEndpoint(s *Server, cfg runtime.Configuration, path, query string) (str
 	return u.String(), nil
 }
 
-func (f *CodeForwarder) client(s *Server, ctx context.Context, release *runtime.Release, cfg runtime.Configuration, providerID string) (*http.Client, error) {
+func (s *Server) codeClient(ctx context.Context, release *runtime.Release, cfg runtime.Configuration, providerID string) (*http.Client, error) {
 	var secret []byte
 	if network := cfg.Options.Network; network != nil && network.CredentialID != "" {
 		var err error
@@ -389,7 +406,7 @@ func (f *CodeForwarder) client(s *Server, ctx context.Context, release *runtime.
 	return client, nil
 }
 
-func (f *CodeForwarder) copyResponse(ctx context.Context, w http.ResponseWriter, response *http.Response, a *codeAttempt) {
+func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, response *http.Response) {
 	streaming := strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream")
 	encoded := response.Header.Get("Content-Encoding")
 	stream := codexwire.NewStream(codexwire.MaxBody, a.observe)
@@ -443,23 +460,28 @@ func (f *CodeForwarder) copyResponse(ctx context.Context, w http.ResponseWriter,
 	}
 }
 
-func codeWriteError(w http.ResponseWriter, err error) {
-	var refusal *codemode.Refusal
-	if !errors.As(err, &refusal) {
-		refusal = &codemode.Refusal{Status: 503, Code: "code_service_unavailable"}
+// codeRefusal is the refusal a client sees for err; failures that are not
+// refusals do not leak their detail.
+func codeRefusal(err error) *codemode.Refusal {
+	if refusal, ok := errors.AsType[*codemode.Refusal](err); ok {
+		return refusal
 	}
+	return &codemode.Refusal{Status: 503, Code: "code_service_unavailable"}
+}
+
+func codeWriteError(w http.ResponseWriter, err error) {
+	refusal := codeRefusal(err)
 	writeError(w, &Error{Status: refusal.Status, Code: refusal.Code, Type: "code_mode_error", Message: refusal.Code})
 }
 
-func codeRefuse(s *Server, w http.ResponseWriter, r *http.Request, route codemode.Route, keyID string, err error) {
-	var refusal *codemode.Refusal
-	if !errors.As(err, &refusal) {
-		refusal = &codemode.Refusal{Status: 503, Code: "code_service_unavailable"}
-	}
-	if s.CodeLedger != nil {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 3*time.Second)
-		_ = s.CodeLedger.RecordRefusal(ctx, route, keyID, refusal.Code)
-		cancel()
-	}
+func (s *Server) codeRefuse(w http.ResponseWriter, r *http.Request, route codemode.Route, keyID string, err error) {
+	refusal := codeRefusal(err)
+	s.recordCodeRefusal(r.Context(), route, keyID, refusal.Code)
 	codeWriteError(w, refusal)
+}
+
+func (s *Server) recordCodeRefusal(ctx context.Context, route codemode.Route, keyID, code string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	_ = s.CodeLedger.RecordRefusal(ctx, route, keyID, code)
 }

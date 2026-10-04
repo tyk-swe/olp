@@ -17,17 +17,16 @@
     saveCodeBudget,
     type CodeAccount,
     type CodePool,
-    type CodeRoute,
-    type CodeBudget
+    type CodeRoute
   } from '$lib/api/code-mode';
-  import { nativeModels, tokenLimit, mutationError } from './presentation';
+  import {
+    nativeModels,
+    tokenLimit,
+    mutationError,
+    type CodeEditing
+  } from './presentation';
   import AccountEnrollment from './AccountEnrollment.svelte';
 
-  type Editing =
-    | { kind: 'accounts'; current?: CodeAccount }
-    | { kind: 'pools'; current?: CodePool }
-    | { kind: 'routes'; current?: CodeRoute }
-    | { kind: 'budgets'; current?: CodeBudget };
   let {
     editing,
     projectId,
@@ -38,7 +37,7 @@
     onSaved,
     onCancel
   }: {
-    editing: Editing;
+    editing: CodeEditing;
     projectId: string;
     accounts: CodeAccount[];
     pools: CodePool[];

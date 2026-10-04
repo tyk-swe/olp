@@ -71,13 +71,12 @@
     enabled: kind === 'token-windows'
   }));
   const selected = $derived(
-    kind === 'bindings'
-      ? bindings
-      : kind === 'attempts'
-        ? attempts
-        : kind === 'refusals'
-          ? refusals
-          : windows
+    {
+      bindings,
+      attempts,
+      refusals,
+      'token-windows': windows
+    }[kind]
   );
 
   function apply(event: SubmitEvent) {

@@ -13,9 +13,6 @@ export type CodeBudget = Schemas['CodeBudget'];
 export type CodeBudgetWrite = Schemas['CodeBudgetWrite'];
 export type CodeBinding = Schemas['CodeBinding'];
 export type CodeAttempt = Schemas['CodeAttempt'];
-export type CodeRefusal = Schemas['CodeRefusal'];
-export type CodeTokenWindows = Schemas['CodeTokenWindows'];
-export type CodeRevision = Schemas['CodeRevision'];
 export type CodeClientConfiguration = Schemas['CodeClientConfiguration'];
 
 export async function getCodeClientConfiguration(

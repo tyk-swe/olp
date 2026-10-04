@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -52,46 +53,47 @@ func codeClosePeer(peer *websocket.Conn, err error) {
 	}
 }
 
-func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, keyID string) {
+func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, keyID string) {
+	reject := func(err error) { s.codeRefuse(w, r, route, keyID, err) }
 	if r.Header.Get("Sec-Websocket-Protocol") != "" {
-		codeRefuse(s, w, r, route, keyID, codemode.Refuse(400, "code_protocol_unsupported"))
+		reject(codemode.Refuse(400, "code_protocol_unsupported"))
 		return
 	}
 	identity, err := codexwire.ConnectionIdentity(r.Header)
 	if err != nil {
-		codeRefuse(s, w, r, route, keyID, err)
+		reject(err)
 		return
 	}
 	models := r.Header.Values("X-OLP-Code-Model")
 	if len(models) > 1 || len(models) == 1 && strings.TrimSpace(models[0]) == "" {
-		codeRefuse(s, w, r, route, keyID, codemode.Refuse(400, "code_model_invalid"))
+		reject(codemode.Refuse(400, "code_model_invalid"))
 		return
 	}
 	permit, err := s.CodeLedger.BindConnection(r.Context(), route, keyID, identity, r.Header.Get("X-OLP-Code-Model"))
 	if err != nil {
-		codeRefuse(s, w, r, route, keyID, err)
+		reject(err)
 		return
 	}
 	config, ok := release.Snapshot.CodeConnection(route, permit.Account.ProviderID)
 	if !ok {
-		codeRefuse(s, w, r, route, keyID, codemode.Refuse(503, "code_connection_unpublished"))
+		reject(codemode.Refuse(503, "code_connection_unpublished"))
 		return
 	}
 	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), config, permit.Account)
 	if err != nil || auth.Principal == "" || auth.Principal != permit.Binding.Principal {
-		codeRefuse(s, w, r, route, keyID, codemode.Refuse(503, "code_account_unavailable"))
+		reject(codemode.Refuse(503, "code_account_unavailable"))
 		return
 	}
 	connection := &codeAttempt{server: s, permit: permit, config: config, auth: auth}
-	httpClient, err := f.client(s, r.Context(), release, config, permit.Account.ProviderID)
+	httpClient, err := s.codeClient(r.Context(), release, config, permit.Account.ProviderID)
 	if err != nil {
-		codeRefuse(s, w, r, route, keyID, err)
+		reject(err)
 		return
 	}
 	defer httpClient.CloseIdleConnections()
-	target, err := codeEndpoint(s, config, "responses", r.URL.RawQuery)
+	target, err := s.codeEndpoint(config, "responses", r.URL.RawQuery)
 	if err != nil {
-		codeRefuse(s, w, r, route, keyID, err)
+		reject(err)
 		return
 	}
 	headers := connection.headers(r.Header)
@@ -101,9 +103,7 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 	forwarded := false
 	httpClient.Transport = &codeHandshakeTransport{base: httpClient.Transport, reject: func(response *http.Response) {
 		forwarded = true
-		for name, values := range codexwire.ForwardHeaders(response.Header, false) {
-			w.Header()[name] = values
-		}
+		maps.Copy(w.Header(), codexwire.ForwardHeaders(response.Header, false))
 		w.WriteHeader(response.StatusCode)
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 		_, _ = io.Copy(w, response.Body)
@@ -116,7 +116,7 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 	}
 	if err != nil {
 		if !forwarded {
-			codeRefuse(s, w, r, route, keyID, codemode.Refuse(502, "code_upstream_unavailable"))
+			reject(codemode.Refuse(502, "code_upstream_unavailable"))
 		}
 		return
 	}
@@ -125,19 +125,13 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 	for _, name := range []string{"Sec-Websocket-Accept", "Sec-Websocket-Extensions", "Sec-Websocket-Protocol", "Content-Length"} {
 		responseHeaders.Del(name)
 	}
-	for name, values := range responseHeaders {
-		w.Header()[name] = values
-	}
+	maps.Copy(w.Header(), responseHeaders)
 	client, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		return
 	}
 	defer client.CloseNow()
-	limit := int64(codexwire.MaxBody)
-	if s.cfg.MaxBodyBytes > 0 {
-		limit = min(limit, s.cfg.MaxBodyBytes)
-	}
-	client.SetReadLimit(limit)
+	client.SetReadLimit(s.codeBodyLimit())
 	ctx, cancel := context.WithTimeout(r.Context(), time.Hour)
 	defer cancel()
 	clientMessages := codeRead(ctx, client)
@@ -161,13 +155,8 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 		if active != nil {
 			active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "rejected"})
 		}
-		var refusal *codemode.Refusal
-		if !errors.As(err, &refusal) {
-			refusal = &codemode.Refusal{Code: "code_service_unavailable"}
-		}
-		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-		_ = s.CodeLedger.RecordRefusal(finishCtx, route, keyID, refusal.Code)
-		finishCancel()
+		refusal := codeRefusal(err)
+		s.recordCodeRefusal(ctx, route, keyID, refusal.Code)
 		_ = client.Close(websocket.StatusPolicyViolation, refusal.Code)
 	}
 	for {
@@ -201,7 +190,7 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 				refuse(codemode.Refuse(409, "code_identity_changed"))
 				return
 			}
-			active, err = f.prepare(s, r.WithContext(ctx), release, route, observation)
+			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation)
 			if err != nil {
 				refuse(err)
 				return
@@ -228,10 +217,7 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 				return
 			}
 			if err := codeWrite(ctx, upstream, message.kind, message.body); err != nil {
-				if ctx.Err() == nil {
-					active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
-					active.health(ctx, "unavailable")
-				}
+				active.transportFailed(ctx)
 				return
 			}
 			generationTimer = time.NewTimer(codeGenerationTimeout)
@@ -241,9 +227,8 @@ func (f *CodeForwarder) websocket(s *Server, w http.ResponseWriter, r *http.Requ
 				return
 			}
 			if message.err != nil {
-				if active != nil && ctx.Err() == nil {
-					active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
-					active.health(ctx, "unavailable")
+				if active != nil {
+					active.transportFailed(ctx)
 				}
 				codeClosePeer(client, message.err)
 				return

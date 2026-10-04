@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -50,6 +52,20 @@ func (c Credits) Validate() error {
 		return fmt.Errorf("invalid provider credits")
 	}
 	return nil
+}
+
+// Normalize orders windows by limit and window, and mirrors the Codex
+// primary window into the top-level remaining percentage and reset time.
+func (a *Allowance) Normalize() {
+	slices.SortFunc(a.Windows, func(x, y AllowanceWindow) int {
+		return strings.Compare(x.LimitID+":"+x.Window, y.LimitID+":"+y.Window)
+	})
+	for _, w := range a.Windows {
+		if w.LimitID == "codex" && w.Window == "primary" {
+			remaining := w.RemainingPercent
+			a.RemainingPercent, a.ResetsAt = &remaining, w.ResetsAt
+		}
+	}
 }
 
 func (a Allowance) validateObservations() error {

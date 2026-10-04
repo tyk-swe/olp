@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	codexfixture "github.com/tyk-swe/olp/tests/fixtures/codex-qualified"
@@ -52,7 +51,7 @@ func TestCodeWebSocketRechecksRevokedConnectionCredentials(t *testing.T) {
 			h.Gateway.CodeLedger = &resources.CodeStore{Pool: h.Pool}
 			h.Gateway.CodeAuthorizer = &providers.CodeAuthorizer{Pool: h.Pool, Credentials: h.Runtime, Plugins: grantRefresher(t, h).Plugins}
 			mux := http.NewServeMux()
-			gateway.NewCodeForwarder().RegisterCode(mux, h.Gateway)
+			h.Gateway.RegisterCode(mux)
 			server := httptest.NewServer(mux)
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)

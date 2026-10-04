@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"math"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -253,15 +252,7 @@ func eventAllowance(root oif.Value, now time.Time) *codemode.Allowance {
 }
 
 func finishAllowance(a *codemode.Allowance) *codemode.Allowance {
-	slices.SortFunc(a.Windows, func(a, b codemode.AllowanceWindow) int {
-		return strings.Compare(a.LimitID+":"+a.Window, b.LimitID+":"+b.Window)
-	})
-	for _, w := range a.Windows {
-		if w.LimitID == "codex" && w.Window == "primary" {
-			remaining := w.RemainingPercent
-			a.RemainingPercent, a.ResetsAt = &remaining, w.ResetsAt
-		}
-	}
+	a.Normalize()
 	if len(a.Windows) == 0 && a.Credits == nil || a.Validate() != nil {
 		return nil
 	}

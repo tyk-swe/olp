@@ -3,7 +3,6 @@ package resources
 import (
 	"context"
 	"slices"
-	"strings"
 
 	"github.com/tyk-swe/olp/internal/codemode"
 )
@@ -33,15 +32,7 @@ func mergeCodeAllowance(current, incoming codemode.Allowance) codemode.Allowance
 			result.Windows[index] = w
 		}
 	}
-	slices.SortFunc(result.Windows, func(a, b codemode.AllowanceWindow) int {
-		return strings.Compare(a.LimitID+":"+a.Window, b.LimitID+":"+b.Window)
-	})
-	for _, w := range result.Windows {
-		if w.LimitID == "codex" && w.Window == "primary" {
-			remaining := w.RemainingPercent
-			result.RemainingPercent, result.ResetsAt = &remaining, w.ResetsAt
-		}
-	}
+	result.Normalize()
 	if incoming.Credits != nil && (current.Credits == nil || incoming.Credits.ObservedAt.After(current.Credits.ObservedAt)) {
 		result.Credits = incoming.Credits
 	}

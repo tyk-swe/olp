@@ -1,8 +1,22 @@
-import type { CodeAttempt } from '$lib/api/code-mode';
-import { ApiProblem, errorMessage, fieldIssues } from '$lib/api/http';
+import type {
+  CodeAccount,
+  CodeAttempt,
+  CodeBudget,
+  CodePool,
+  CodeRoute
+} from '$lib/api/code-mode';
+import { errorMessage, fieldIssues, isEtagMismatch } from '$lib/api/http';
+import { formatInteger } from '$lib/format';
+
+/** The resource an editor creates, or updates when `current` is set. */
+export type CodeEditing =
+  | { kind: 'accounts'; current?: CodeAccount }
+  | { kind: 'pools'; current?: CodePool }
+  | { kind: 'routes'; current?: CodeRoute }
+  | { kind: 'budgets'; current?: CodeBudget };
 
 export function tokenCount(value: number | null | undefined): string {
-  return value == null ? 'Unknown' : value.toLocaleString('en-US');
+  return value == null ? 'Unknown' : formatInteger(value);
 }
 
 export function nativeModels(value: string): string[] {
@@ -37,7 +51,7 @@ export function tokenLimit(value: string): number | null {
 }
 
 export function mutationError(error: unknown): string {
-  if (error instanceof ApiProblem && error.problem.status === 412) {
+  if (isEtagMismatch(error)) {
     return 'This resource changed. Your edits have been kept. Cancel and reopen the latest version before saving again.';
   }
   const fields = fieldIssues(error);

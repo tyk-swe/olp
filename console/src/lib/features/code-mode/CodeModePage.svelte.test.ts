@@ -305,7 +305,11 @@ it('keeps native-model edits on stale ETag refusal and separates save from publi
   await click('Edit draft');
   field('code-models', 'vendor/native-v2');
   vi.mocked(api.saveCodeRoute).mockRejectedValueOnce(
-    new ApiProblem({ status: 412, title: 'Conflict' })
+    new ApiProblem({
+      status: 412,
+      title: 'Conflict',
+      type: 'https://openllmproxy.dev/problems/etag_mismatch'
+    })
   );
   await submit();
   expect(host.textContent).toContain('Your edits have been kept');

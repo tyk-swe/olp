@@ -37,7 +37,13 @@ describe('native-model and token-budget inputs', () => {
   });
   it('preserves draft-conflict guidance and field-specific validation', () => {
     expect(
-      mutationError(new ApiProblem({ title: 'Conflict', status: 412 }))
+      mutationError(
+        new ApiProblem({
+          title: 'Conflict',
+          status: 412,
+          type: 'https://openllmproxy.dev/problems/etag_mismatch'
+        })
+      )
     ).toContain('Your edits have been kept');
     expect(
       mutationError(
