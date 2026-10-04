@@ -36,6 +36,8 @@ const source: PricingSource = {
 const changed: PricingSource = {
   ...source,
   name: 'Vendor prices (renamed)',
+  url: 'https://prices.example/current.json',
+  enabled: false,
   etag: 'e2'
 };
 const mismatch = new ApiProblem({
@@ -104,18 +106,24 @@ it('refreshes the source after a refused toggle so a retry sends its ETag', asyn
   await vi.waitFor(() => expect(button('Disable')).toBeDefined());
   button('Disable').click();
   await refused();
-  button('Disable').click();
+  button('Enable').click();
   await vi.waitFor(() => expect(updatePricingSource).toHaveBeenCalledTimes(2));
   expect(vi.mocked(updatePricingSource).mock.calls[1]![0].etag).toBe('e2');
 });
 
-it('refreshes the source after a refused edit so a retry sends its ETag', async () => {
+it('requires reopening a conflicted edit with current values and ETag', async () => {
   await vi.waitFor(() => expect(button('Edit')).toBeDefined());
   button('Edit').click();
   flushSync();
   button('Save').click();
   await refused();
+  expect(button('Save')).toBeUndefined();
+  button('Edit').click();
+  flushSync();
   button('Save').click();
   await vi.waitFor(() => expect(updatePricingSource).toHaveBeenCalledTimes(2));
-  expect(vi.mocked(updatePricingSource).mock.calls[1]![0].etag).toBe('e2');
+  expect(vi.mocked(updatePricingSource).mock.calls[1]).toEqual([
+    changed,
+    { name: changed.name, url: changed.url, enabled: changed.enabled }
+  ]);
 });
