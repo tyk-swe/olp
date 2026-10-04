@@ -3,7 +3,7 @@
 import os
 import re
 
-from openai import OpenAI
+from openai import OpenAI, __version__
 
 
 with OpenAI(base_url=f"{os.environ['OLP_VIDEO_BASE']}/v1", api_key=os.environ['OLP_VIDEO_KEY'], max_retries=0, timeout=15.0) as client:
@@ -26,4 +26,4 @@ with OpenAI(base_url=f"{os.environ['OLP_VIDEO_BASE']}/v1", api_key=os.environ['O
     deleted = client.videos.delete(created.id)
     assert deleted.id == created.id and deleted.deleted is True
 
-print('openai-python-3.8.0: strict video create, retrieve, binary content and delete passed')
+print(f'openai-python-{__version__}: strict video create, retrieve, binary content and delete passed')

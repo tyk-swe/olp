@@ -1,7 +1,7 @@
 # Negotiated tool continuation client
 
 These small helpers use the public `chat-anthropic-tools-v1` carrier with the
-official OpenAI JavaScript **7.4.0** and Python **3.8.0** SDKs. They are for an
+official OpenAI JavaScript **7.4.0** and Python **3.22.1** SDKs. They are for an
 explicit strict OpenAI Chat route to a qualified direct Anthropic Messages
 profile with native reasoning and tool defaults. Native Anthropic SDK requests
 send complete history through the native API and need no OLP helper.

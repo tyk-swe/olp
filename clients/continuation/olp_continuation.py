@@ -48,8 +48,8 @@ def _extension(value: Any) -> dict[str, Any]:
 
 
 def _check_sdk(client: Any) -> None:
-    if openai.__version__ != "3.8.0" or not isinstance(client, openai.OpenAI):
-        raise ValueError("This helper supports the qualified OpenAI Python SDK 3.8.0 only")
+    if openai.__version__ != "3.22.1" or not isinstance(client, openai.OpenAI):
+        raise ValueError("This helper supports the qualified OpenAI Python SDK 3.22.1 only")
 
 
 def stream_turn(
