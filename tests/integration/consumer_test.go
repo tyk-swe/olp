@@ -266,9 +266,10 @@ func TestRequestMetadataConsumerRecordsUnusableDeliveriesAsGaps(t *testing.T) {
 
 	// A payload that is not an event at all.
 	acctPublish(t, valkey, stream, []byte("{not json"))
-	// Payloads from another envelope version, or without one, are not events
-	// this build can account for.
-	acctPublish(t, valkey, stream, []byte(`{"version":99,"event_id":"unknown"}`))
+	// A future envelope must remain pending for a compatible consumer; a
+	// payload without a version is permanently malformed.
+	const futurePayload = `{"version":99,"event_id":"unknown"}`
+	futureID := acctPublish(t, valkey, stream, []byte(futurePayload))
 	versioned, err := usage.Encode(acctBillableEvent(t, fixture))
 	if err != nil {
 		t.Fatalf("encode unversioned event: %v", err)
@@ -302,12 +303,18 @@ func TestRequestMetadataConsumerRecordsUnusableDeliveriesAsGaps(t *testing.T) {
 	acctEventually(t, "the good delivery to become usage", func() bool {
 		return acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`) == 1
 	})
-	acctEventually(t, "every unusable delivery to be resolved", func() bool {
-		return acctStreamLength(t, valkey, stream) == 0
+	acctEventually(t, "only the unsupported version to remain", func() bool {
+		return acctStreamLength(t, valkey, stream) == 1
 	})
+	if payloads := fleetPayloads(t, valkey, stream); len(payloads) != 1 || payloads[0] != futurePayload {
+		t.Fatalf("future accounting evidence changed: %v", payloads)
+	}
+	if pending := do(t, valkey, "XPENDING", stream, usage.Group); !strings.Contains(fmt.Sprint(pending), futureID) {
+		t.Fatalf("unsupported version was acknowledged: %v", pending)
+	}
 
-	if count := acctGapCount(t, fixture, "malformed_stream_event"); count != 3 {
-		t.Fatalf("malformed gaps = %d, want three", count)
+	if count := acctGapCount(t, fixture, "malformed_stream_event"); count != 2 {
+		t.Fatalf("malformed gaps = %d, want two (future versions are retained)", count)
 	}
 	// One for the entry without a payload, one for the destroyed entry the
 	// reclaim marker named.

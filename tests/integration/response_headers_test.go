@@ -511,7 +511,15 @@ func TestRateLimitRejectionsCarryTheWindowAndTheRetryHint(t *testing.T) {
 				t.Fatalf("first request: status %d %s", resp.StatusCode, rhDrain(t, resp))
 			}
 			rhDrain(t, resp)
-			glEventually(t, "the first request to settle", func() bool { _, tokens := rhWindow(t, f, rateKey); return tokens == 10 })
+			// The low usage reported by the provider cannot refund this request's
+			// admission reservation. The next rejection must leave that floor intact.
+			reserved := int64(100_000) - rhInt(t, resp.Header, remainingTokens)
+			if reserved <= 10 {
+				t.Fatalf("request unexpectedly reserved only %d tokens", reserved)
+			}
+			if _, held := rhWindow(t, f, rateKey); held != reserved {
+				t.Fatalf("provider usage changed reservation from %d to %d", reserved, held)
+			}
 
 			before := limServerTimeMS(t, f.valkey)
 			resp = f.open(t, surface, f.slug(surface), secret, false)
@@ -525,7 +533,7 @@ func TestRateLimitRejectionsCarryTheWindowAndTheRetryHint(t *testing.T) {
 			}
 			requests, tokens := rhWindow(t, f, rateKey)
 			// The refusal reserved nothing, so what it states is what the window holds.
-			if requests != 1 || tokens != 10 {
+			if requests != 1 || tokens != reserved {
 				t.Fatalf("a refused request changed the window to %d requests and %d tokens", requests, tokens)
 			}
 			if got := rhInt(t, resp.Header, limitRequests); got != 1 {
