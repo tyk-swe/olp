@@ -72,6 +72,9 @@ func (s *Server) validateDraft(r *http.Request, _ access.Principal) (access.Repl
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
+	if err = reserveOrdinarySlug(r.Context(), tx, current.Slug); err != nil {
+		return access.Reply{}, err
+	}
 	live, err := resolve(r.Context(), tx, current.Targets)
 	if err != nil {
 		return access.Reply{}, err
@@ -134,6 +137,9 @@ func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Repl
 		return access.Commit(r, tx, *replayed)
 	}
 	if err = access.Match(r, current.ETag); err != nil {
+		return access.Reply{}, err
+	}
+	if err = reserveOrdinarySlug(r.Context(), tx, current.Slug); err != nil {
 		return access.Reply{}, err
 	}
 	live, err := resolve(r.Context(), tx, current.Targets)

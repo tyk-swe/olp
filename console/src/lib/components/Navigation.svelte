@@ -71,6 +71,12 @@
           href: resolve('/routes'),
           icon: 'route',
           route: 'GET /api/v1/routes'
+        },
+        {
+          label: 'Code mode',
+          href: resolve('/code-mode'),
+          icon: 'route',
+          route: 'GET /api/v1/code/routes'
         }
       ]
     },

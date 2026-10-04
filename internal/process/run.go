@@ -273,6 +273,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		if c.Mode.Inference() {
 			gw.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
 			if pool != nil {
+				gw.CodeLedger = &resources.CodeStore{Pool: pool}
+				gw.CodeAuthorizer = &providers.CodeAuthorizer{Pool: pool, Credentials: rt, Plugins: pluginHost}
 				gw.Resources = resources.NewEncrypted(pool, installation, keys)
 				gw.Resolver = resources.NewResolver(pool)
 			}

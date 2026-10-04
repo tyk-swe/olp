@@ -301,12 +301,13 @@ func retireGrants(ctx context.Context, tx pgx.Tx, digest string) ([]string, erro
 	return retired, err
 }
 
-// pinningProviders names the providers whose draft or any published
-// revision pins a plugin digest as its profile revision, or returns "".
+// pinningProviders names the providers whose draft, published provider revision
+// or frozen code-route connection pins a plugin digest, or returns "".
 func pinningProviders(ctx context.Context, q access.Queryer, digest string) (string, error) {
 	rows, err := q.Query(ctx, `SELECT p.name FROM olp.providers p
 		WHERE p.kind='plugin' AND p.configuration->>'profile_revision'=$1
 		   OR EXISTS (SELECT 1 FROM olp.provider_revisions r WHERE r.provider_id=p.id AND r.configuration->>'kind'='plugin' AND r.configuration->>'profile_revision'=$1)
+		   OR EXISTS (SELECT 1 FROM olp.code_route_revisions r WHERE r.connections->p.id::text->>'kind'='plugin' AND r.connections->p.id::text->>'profile_revision'=$1)
 		ORDER BY lower(p.name), p.id`, digest)
 	if err != nil {
 		return "", err
