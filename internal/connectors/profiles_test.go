@@ -42,7 +42,7 @@ func profileConfig(t *testing.T, id string) Config {
 		if p.Hosting == "vertex-anthropic" {
 			publisher = "anthropic"
 		}
-		c.Endpoint = "https://provider.example/v1/projects/fixture-project/locations/us-central1/publishers/" + publisher
+		c.Endpoint = "https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/" + publisher
 	case "bedrock":
 		c.Endpoint = "https://bedrock.example"
 		c.CloudRegion = "us-east-1"
@@ -65,8 +65,8 @@ func TestVersionedProfilesSelectIndependentCloudAddresses(t *testing.T) {
 		{"azure-legacy-responses", openai.FamilyResponses, false, "https://resource.example/openai/responses?api-version=2025-04-01-preview"},
 		{"azure-v1-chat", openai.FamilyChat, false, "https://resource.example/openai/v1/chat/completions"},
 		{"azure-v1-responses", openai.FamilyResponses, false, "https://resource.example/openai/v1/responses"},
-		{"vertex-gemini", openai.FamilyGemini, false, "https://provider.example/v1/projects/fixture-project/locations/us-central1/publishers/google/models/model-a:generateContent"},
-		{"vertex-anthropic", openai.FamilyAnthropic, true, "https://provider.example/v1/projects/fixture-project/locations/us-central1/publishers/anthropic/models/model-a:streamRawPredict"},
+		{"vertex-gemini", openai.FamilyGemini, false, "https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/google/models/model-a:generateContent"},
+		{"vertex-anthropic", openai.FamilyAnthropic, true, "https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/anthropic/models/model-a:streamRawPredict"},
 		{"bedrock-converse", openai.FamilyBedrock, false, "https://bedrock.example/model/model-a/converse"},
 		{"bedrock-anthropic-invoke", openai.FamilyAnthropic, true, "https://bedrock.example/model/model-a/invoke-with-response-stream"},
 	} {

@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -104,6 +105,7 @@ func TestGoogleServiceAccountRefreshADCBoundsAndPublicTokenEgress(t *testing.T) 
 	}
 	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", path)
 	cfg.AuthMode = "adc"
+	req, _ = http.NewRequest("POST", "https://aiplatform.googleapis.com/v1/projects/project/locations/global", nil)
 	if _, e = a.Apply(context.Background(), req, cfg, nil, nil); e != nil {
 		t.Fatal("ADC", e)
 	}
@@ -191,5 +193,16 @@ func TestAWSStaticProcessAndSSOCredentialsSignOnce(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatal("SSO token was not cached")
+	}
+}
+
+func TestVertexADCRejectsUntrustedDestinationsBeforeTokenAcquisition(t *testing.T) {
+	a := NewAuth(localPolicy())
+	cfg := Config{Kind: "vertex_ai", AuthMode: "adc", CloudRegion: "global", CloudProject: "project"}
+	for _, endpoint := range []string{"https://attacker.example/v1", "https://aiplatform.googleapis.com.attacker.example/v1", "http://aiplatform.googleapis.com/v1", "https://aiplatform.googleapis.com:8443/v1"} {
+		req, _ := http.NewRequest("POST", endpoint, nil)
+		if _, err := a.Apply(t.Context(), req, cfg, nil, nil); !errors.Is(err, ErrAuthentication) || req.Header.Get("Authorization") != "" {
+			t.Fatalf("unsafe ADC destination %q: %v", endpoint, err)
+		}
 	}
 }

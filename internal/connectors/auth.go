@@ -210,6 +210,9 @@ func (b *boundedAuthBody) Read(p []byte) (int, error) {
 //
 // It returns the values to redact wherever upstream text is recorded.
 func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, body []byte) (egress.Sensitive, error) {
+	if c.Kind == "vertex_ai" && c.AuthMode == "adc" && !c.vertexDestination(req.URL) {
+		return egress.Sensitive{}, ErrAuthentication
+	}
 	placed, err := c.host(req, secret)
 	if err != nil {
 		return egress.Sensitive{}, err

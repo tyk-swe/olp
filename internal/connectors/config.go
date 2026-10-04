@@ -88,6 +88,9 @@ func (c Config) Validate(policy *egress.Policy) error {
 	if e != nil {
 		return e
 	}
+	if c.Kind == "vertex_ai" && c.AuthMode == "adc" && !c.vertexDestination(u) {
+		return errors.New("Vertex ADC credentials require the Google endpoint for the configured location")
+	}
 	if err := c.validateProfileEndpoint(u); err != nil {
 		return err
 	}
@@ -395,4 +398,14 @@ func (c Config) RealtimeURL(model string) (string, error) {
 		return "ws://" + strings.TrimPrefix(endpoint, "http://"), nil
 	}
 	return "", errors.New("realtime endpoint requires HTTP(S) hosting")
+}
+
+// Ambient credentials have no explicit enrollment into an arbitrary endpoint.
+func (c Config) vertexDestination(u *url.URL) bool {
+	if vertexTestDestination(u) {
+		return true
+	}
+	expected, err := url.Parse(DefaultEndpoint("vertex_ai", c.CloudRegion, c.CloudProject))
+	return (c.Network == nil || c.Network.TrustRootsPEM == "") && err == nil && cloudIdentifier.MatchString(c.CloudRegion) && u.Scheme == "https" &&
+		u.User == nil && strings.EqualFold(u.Hostname(), expected.Hostname()) && (u.Port() == "" || u.Port() == "443")
 }

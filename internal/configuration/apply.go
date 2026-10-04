@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -71,6 +72,9 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			providerID = existing.ID
 			current, err := s.currentProviderEntry(ctx, tx, existing, state.projectOf(existing.ProjectID))
 			if err != nil {
+				return err
+			}
+			if err := providers.PreserveCredentialBoundary(ctx, tx, providerID, &current.Configuration, &entry.Configuration); err != nil {
 				return err
 			}
 			if !canonicalEqualProvider(entry, current) {

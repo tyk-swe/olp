@@ -47,8 +47,8 @@ func TestPublishedSlotsUseOnlyCredentialsRequiredByAuthMode(t *testing.T) {
 // name.
 func TestCredentialVersionsFitOnlyProvidersThatAuthenticateWithThem(t *testing.T) {
 	enrolling, other := strings.Repeat("a", 64), strings.Repeat("b", 64)
-	grant := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileRevision: enrolling}
-	static := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileRevision: enrolling}
+	grant := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileRevision: enrolling, ProfileID: "profile"}
+	static := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileRevision: enrolling, ProfileID: "profile"}
 	for _, tc := range []struct {
 		cfg     *Configuration
 		plugin  string
@@ -60,7 +60,7 @@ func TestCredentialVersionsFitOnlyProvidersThatAuthenticateWithThem(t *testing.T
 		{cfg: grant, refusal: "Enroll a grant"},
 		{cfg: static, plugin: enrolling, refusal: "Rotate its credential"},
 	} {
-		row := slotRow{Name: "Default", CredentialID: new("credential"), CredentialPlugin: tc.plugin}
+		row := slotRow{Name: "Default", CredentialID: new("credential"), CredentialPlugin: tc.plugin, CredentialProfile: "profile"}
 		err := row.credentialFits(tc.cfg)
 		problem, refused := errors.AsType[*access.Problem](err)
 		if (err != nil) != (tc.refusal != "") || refused && (problem.Code != "credential_mismatch" || !strings.Contains(problem.Detail, tc.refusal)) {
@@ -105,5 +105,16 @@ func TestActivationPublishesTheOnePrincipalItsSlotsObserve(t *testing.T) {
 	static := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential}
 	if err := onePrincipal([]slotRow{{Name: "Default"}, {Name: "Backup"}}, static); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGrantCredentialCannotCrossProfilesWithinTheSameBuild(t *testing.T) {
+	cfg := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileRevision: strings.Repeat("a", 64), ProfileID: "receiving-profile"}
+	for _, profile := range []string{"enrolling-profile", "", "receiving-profile"} {
+		row := slotRow{Name: "default", CredentialID: new("credential"), CredentialPlugin: cfg.ProfileRevision, CredentialProfile: profile}
+		err := row.credentialFits(cfg)
+		if (err == nil) != (profile == cfg.ProfileID) {
+			t.Fatalf("profile %q: %v", profile, err)
+		}
 	}
 }

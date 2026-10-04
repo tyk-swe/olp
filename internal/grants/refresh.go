@@ -183,15 +183,15 @@ func (r *Refresher) refresh(ctx context.Context, conn *pgx.Conn, credentialID st
 // configuration or retained resource uses the grant, which is then retired.
 const using = `coalesce(
 	(SELECT r.configuration FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id
-		WHERE p.id=c.provider_id AND r.configuration->>'profile_revision'=c.plugin_digest
+		WHERE p.id=c.provider_id AND r.configuration->>'profile_revision'=c.plugin_digest AND r.configuration->>'profile_id'=c.profile_id
 		AND r.slots @> jsonb_build_array(jsonb_build_object('credential_id',c.id))),
-	(SELECT p.configuration FROM olp.providers p WHERE p.id=c.provider_id AND p.configuration->>'profile_revision'=c.plugin_digest
+	(SELECT p.configuration FROM olp.providers p WHERE p.id=c.provider_id AND p.configuration->>'profile_revision'=c.plugin_digest AND p.configuration->>'profile_id'=c.profile_id
 		AND EXISTS (SELECT 1 FROM olp.provider_slots s WHERE s.provider_id=p.id AND s.credential_id=c.id)),
 	(SELECT r.configuration FROM olp.provider_resources x
 		JOIN olp.provider_revisions r ON r.id=x.provider_revision_id AND r.provider_id=x.provider_id
 		WHERE x.provider_id=c.provider_id AND x.credential_id=c.id
 		AND (x.expires_at IS NULL OR x.expires_at>now())
-		AND r.configuration->>'profile_revision'=c.plugin_digest
+		AND r.configuration->>'profile_revision'=c.plugin_digest AND r.configuration->>'profile_id'=c.profile_id
 		AND r.slots @> jsonb_build_array(jsonb_build_object('id',x.slot_id,'credential_id',c.id))
 		ORDER BY x.created_at DESC,x.id DESC LIMIT 1))`
 

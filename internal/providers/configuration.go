@@ -275,15 +275,15 @@ func (c *Configuration) CredentialRequired() bool { return connectors.SecretRequ
 func (c *Configuration) Grant() bool { return c.AuthMode == connectors.AuthGrant }
 
 // Authenticates reports whether a provider that takes a credential can
-// authenticate with a credential version recording pluginDigest: the plugin
-// build whose grant enrollment created it, or "" for a pasted credential. A
-// grant serves only a provider that pins the build that enrolled it, since a
+// authenticate with a credential version recording pluginDigest and profileID:
+// the build and profile whose grant enrollment created it, or empty for a
+// pasted credential. A grant serves only its enrolling build and profile, since a
 // plugin gets only its own grant and a build's name is only what its manifest
 // claims; moving a provider to another build therefore takes a new grant
 // enrollment for each of its slots.
-func (c *Configuration) Authenticates(pluginDigest string) bool {
+func (c *Configuration) Authenticates(pluginDigest, profileID string) bool {
 	if c.Grant() {
-		return pluginDigest == c.ProfileRevision
+		return profileID != "" && pluginDigest == c.ProfileRevision && profileID == c.ProfileID
 	}
 	return pluginDigest == ""
 }
@@ -316,4 +316,20 @@ func value(v *string) string {
 }
 func (c *Configuration) transport() connectors.Config {
 	return connectors.Config{Network: c.Options.Network, Plugin: c.plugin, PluginOptions: c.Options.PluginOptions, ProfileID: c.ProfileID, ProfileRevision: c.ProfileRevision, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Kind: c.Kind, AuthMode: c.AuthMode, Endpoint: value(c.Endpoint), CloudRegion: value(c.CloudRegion), CloudProject: value(c.CloudProject), Deployment: value(c.Deployment), APIVersion: value(c.APIVersion), VendorID: value(c.Options.VendorID), CredentialHeaders: c.Options.CredentialHeaders, Models: c.Options.Models}
+}
+
+// credentialBoundary includes destination and authentication inputs, including
+// plugin options and TLS settings that can alter the recipient of a secret.
+// Quotas, models and operation defaults may change without rebinding secrets.
+func (c *Configuration) credentialBoundary() string {
+	encoded, _ := json.Marshal([]any{c.Kind, c.AuthMode, c.Endpoint, c.CloudRegion, c.CloudProject,
+		c.ProfileID, c.ProfileRevision, c.Options.CredentialHeaders, c.credentialNetwork(), c.Options.PluginOptions})
+	return string(encoded)
+}
+
+func (c *Configuration) credentialNetwork() [2]string {
+	if c.Options.Network == nil {
+		return [2]string{}
+	}
+	return [2]string{c.Options.Network.ProxyURL, c.Options.Network.TrustRootsPEM}
 }

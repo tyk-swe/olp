@@ -441,7 +441,7 @@ func TestPlanNoopProviderAndRoute(t *testing.T) {
 	stubs := []queryStub{
 		{match: "FROM olp.providers WHERE", row: []any{configuration}},
 		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "draft", "edge-id", nil}}},
-		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", ""}}},
+		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", "", ""}}},
 		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, "cred-id", []byte(`{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`), []byte(`{}`)}}},
 		{match: "FROM olp.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
 		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil, []byte(`{"mode":"strict"}`)}},
@@ -559,7 +559,7 @@ func TestPlanMarksGrantSlotsForGrantEnrollment(t *testing.T) {
 		return []queryStub{
 			{match: "FROM olp.providers WHERE", row: []any{configuration}},
 			{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "plugin", "draft", "edge-id", nil}}},
-			{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", pluginDigest}, {"provider-id", "backup", "backup-id", "backup-cred-id", backup}}},
+			{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", pluginDigest, "reference-chat"}, {"provider-id", "backup", "backup-id", "backup-cred-id", backup, "reference-chat"}}},
 			{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge"}}},
 		}
 	}
@@ -591,7 +591,7 @@ func TestPlanRequiresABindingForAStaticSlotHoldingAGrant(t *testing.T) {
 	stubs := []queryStub{
 		{match: "FROM olp.providers WHERE", row: []any{configuration}},
 		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "plugin", "draft", "edge-id", nil}}},
-		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", pluginDigest}}},
+		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", pluginDigest, "reference-chat"}}},
 		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge"}}},
 	}
 	result, err := testServer().plan(t.Context(), mapQueryer{t: t, stub: stubs}, doc, nil, nil)
@@ -617,7 +617,7 @@ func TestExportsReferenceEveryCredentialSlotAGrantBacks(t *testing.T) {
 	stubs := []queryStub{
 		{match: "FROM olp.providers WHERE", row: []any{configuration}},
 		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "plugin", "draft", "edge-id", nil}}},
-		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", nil, ""}, {"provider-id", "backup", "backup-id", nil, ""}}},
+		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", nil, "", ""}, {"provider-id", "backup", "backup-id", nil, "", ""}}},
 		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, nil, restrictions, []byte(`{}`)}, {"backup", false, 1, true, 0, 1, nil, restrictions, []byte(`{}`)}}},
 		{match: "FROM olp.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
 		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge"}}},
