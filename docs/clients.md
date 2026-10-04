@@ -517,7 +517,9 @@ prove:
   host. A host with neither fails them.
 - The Codex suite runs its shell tool in Codex's own read-only sandbox, so the
   environment must allow that sandbox. One that does not fails the suite
-  instead of skipping it.
+  instead of skipping it. CI's integration job uses Ubuntu 26.04 for its
+  distribution-provided bubblewrap support; qualification does not disable the
+  sandbox or change host security policy.
 
 `OLP_CLIENTS_READY_TIMEOUT_SECONDS` (60), `OLP_CLIENTS_SUITE_TIMEOUT_SECONDS`
 (900) and `OLP_CLIENTS_TEST_TIMEOUT_SECONDS` (180) bound the gateway start, a
