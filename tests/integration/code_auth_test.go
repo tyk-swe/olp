@@ -152,6 +152,8 @@ func newCodexAuthorityWithPeer(t *testing.T, accountID string, peer http.Handler
 	return f
 }
 
+var codexDispatch = codemode.Dispatch{Adapter: codemode.AdapterCodex, Protocol: codemode.ProtocolResponses}
+
 func TestCodeAuthDeviceEnrollmentRefreshRotationAndPrincipalLapse(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -200,7 +202,7 @@ func TestCodeAuthDeviceEnrollmentRefreshRotationAndPrincipalLapse(t *testing.T) 
 	worker := grantRefresher(t, h)
 	authorizer := &providers.CodeAuthorizer{Pool: h.Pool, Credentials: h.Runtime, Plugins: worker.Plugins}
 	h.refresh()
-	auth, err := authorizer.AuthorizeCode(t.Context(), cfg, account)
+	auth, err := authorizer.AuthorizeCode(t.Context(), cfg, account, codexDispatch)
 	if err != nil || auth.Principal != principal || auth.CredentialID != credentialID || auth.GrantGeneration != 1 || auth.Headers.Get("ChatGPT-Account-ID") != "fixture-account" || len(auth.Headers) != 2 {
 		t.Fatalf("enrolled authorization: %v", err)
 	}
@@ -243,7 +245,7 @@ func TestCodeAuthDeviceEnrollmentRefreshRotationAndPrincipalLapse(t *testing.T) 
 		t.Fatalf("new refresh token not encrypted under refresh purpose: %v", err)
 	}
 	h.refresh()
-	auth, err = authorizer.AuthorizeCode(t.Context(), cfg, account)
+	auth, err = authorizer.AuthorizeCode(t.Context(), cfg, account, codexDispatch)
 	if err != nil || auth.Principal != principal || auth.GrantGeneration != 2 || auth.Headers.Get("Authorization") == before {
 		t.Fatalf("refreshed authorization: %v", err)
 	}
@@ -265,7 +267,7 @@ func TestCodeAuthDeviceEnrollmentRefreshRotationAndPrincipalLapse(t *testing.T) 
 	if lapsed.lapsed == nil || lapsed.generation != 2 {
 		t.Fatal("changed principal replaced authorization instead of lapsing")
 	}
-	if _, err := authorizer.AuthorizeCode(t.Context(), cfg, account); err == nil {
+	if _, err := authorizer.AuthorizeCode(t.Context(), cfg, account, codexDispatch); err == nil {
 		t.Fatal("lapsed account remained authorized")
 	}
 	accounts := h.want(owner, "GET", "/api/v1/code/accounts?project_id="+project, nil, nil, 200)["items"].([]any)

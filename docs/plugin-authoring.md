@@ -383,6 +383,20 @@ whose base URL is elsewhere: probing or certifying the provider reports why,
 and the gateway treats the attempt as a credential failure. Only one fact may
 appear in the address, and only at its start.
 
+An upstream that issues API keys rather than signing operators in sets the
+grant's `Input` to `abi.GrantInputSecret`. Its `StartGrant` returns the `URL` of
+the page that issues the key, never a device authorization; the operator pastes
+the key, which the console masks, and `ExchangeGrant` returns it as the grant's
+`AccessToken` with no `ExpiresIn` or `RefreshToken`, so it never expires and
+nothing refreshes it. Without an account identifier to observe, report a
+fingerprint of the key as the `Principal`, so another key is another account.
+OLP's code-mode plugins `plugins/opencode-go` and `plugins/zai-coding` work this
+way:
+
+```go
+Grant: &plugin.GrantAuthentication{Input: abi.GrantInputSecret},
+```
+
 A plugin with such a profile implements `plugin.GrantEnroller`; one that
 declares a grant profile without it reports no manifest, so OLP refuses to
 install it. OLP runs its steps in control when an operator enrolls a grant from

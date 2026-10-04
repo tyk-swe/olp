@@ -265,6 +265,11 @@ page:
    stages it on the draft's default credential slot like a rotated credential,
    and the wizard tests the connection with it.
 
+A profile that enrolls a pasted secret, such as the OpenCode Go and GLM Coding
+Plan code-mode plugins, shows its key page instead and masks the field: the
+operator creates an API key there and pastes it. The enrollment's `input` is
+then `secret`.
+
 With device authorization, as in RFC 8628 or an upstream's own variant, such
 as ChatGPT Codex's device login:
 
@@ -281,7 +286,7 @@ Through the management API, which needs the `configure` scope:
 | Operation | Request |
 | --- | --- |
 | Start | `POST /api/v1/providers/{id}/grant-enrollments` with the draft's ETag in `If-Match`, and optionally `{"slot_id": "<credential slot>"}` for a slot other than the default; returns the enrollment's `id`, `slot_id`, `expires_at`, and either its `authorization_url` or its `device` authorization: `verification_url`, `user_code` and the polling `interval` in seconds. |
-| Continue | `POST /api/v1/providers/{id}/grant-enrollments/{enrollment_id}/continue` with `{"input": "<callback URL or code>"}`, for an enrollment with an authorization URL; returns the new `credential_id`, `credential_version` and observed `principal`. |
+| Continue | `POST /api/v1/providers/{id}/grant-enrollments/{enrollment_id}/continue` with `{"input": "<callback URL, code or pasted secret>"}`, for an enrollment with an authorization URL; returns the new `credential_id`, `credential_version` and observed `principal`. |
 | Poll | `POST /api/v1/providers/{id}/grant-enrollments/{enrollment_id}/poll`, for a device authorization; returns its `status`, with the `interval` to wait while `pending`, or the `completion`, like a continuation's, once `completed`. |
 | Cancel | `DELETE /api/v1/providers/{id}/grant-enrollments/{enrollment_id}` |
 

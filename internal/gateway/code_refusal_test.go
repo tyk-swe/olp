@@ -18,8 +18,8 @@ import (
 
 type codeGrantAuthorizer struct{ calls atomic.Int64 }
 
-func (a *codeGrantAuthorizer) AuthorizeCode(ctx context.Context, cfg runtime.Configuration, account codemode.Account) (codemode.Authorization, error) {
-	auth, err := (codeTestAuthorizer{principal: "principal"}).AuthorizeCode(ctx, cfg, account)
+func (a *codeGrantAuthorizer) AuthorizeCode(ctx context.Context, cfg runtime.Configuration, account codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
+	auth, err := (codeTestAuthorizer{principal: "principal"}).AuthorizeCode(ctx, cfg, account, dispatch)
 	// Admission on a socket sees a newer token than its handshake used.
 	auth.GrantGeneration = a.calls.Add(1)
 	auth.CredentialID = fmt.Sprintf("credential-%d", auth.GrantGeneration)

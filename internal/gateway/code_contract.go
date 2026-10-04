@@ -23,6 +23,9 @@ type CodeLedger interface {
 	RecordRefusal(context.Context, codemode.Route, string, string) error
 }
 
+// CodeAuthorizer returns the upstream authorization of one request: its
+// adapter and protocol, on an account whose provider connection the route
+// revision froze.
 type CodeAuthorizer interface {
-	AuthorizeCode(context.Context, runtime.Configuration, codemode.Account) (codemode.Authorization, error)
+	AuthorizeCode(context.Context, runtime.Configuration, codemode.Account, codemode.Dispatch) (codemode.Authorization, error)
 }

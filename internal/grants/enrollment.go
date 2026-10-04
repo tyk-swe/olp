@@ -50,6 +50,9 @@ type Enrollment struct {
 	// Device, instead of AuthorizationURL, is the device authorization the
 	// operator approves upstream.
 	Device *abi.DeviceAuthorization
+	// Input is the profile's grant input: abi.GrantInputSecret when the
+	// operator continues with a secret the authorization URL's page issues.
+	Input string
 	// session is the plugin's state for its next step.
 	session string
 	// interval is how long a device authorization waits between polls.
@@ -72,7 +75,14 @@ func Start(ctx context.Context, host *plugins.Host, e Enrollment, options map[st
 		return e, refused("its session state exceeds 16 KiB")
 	}
 	e.ID, e.ExpiresAt, e.session = access.NewID(), time.Now().Add(SessionTTL), authorization.Session
+	for _, profile := range manifest.Profiles {
+		if profile.ID == e.ProfileID && profile.Grant != nil {
+			e.Input = profile.Grant.Input
+		}
+	}
 	switch {
+	case e.Input == abi.GrantInputSecret && authorization.Device != nil:
+		return e, refused("its profile continues with a pasted secret but it returned a device authorization")
 	case authorization.Device != nil && authorization.URL == "":
 		return e, e.authorizeDevice(manifest, *authorization.Device)
 	case authorization.Device != nil || !approved(manifest, authorization.URL):

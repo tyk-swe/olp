@@ -9,10 +9,16 @@ import (
 
 func TestOfClassifiesEveryPublicSurface(t *testing.T) {
 	for path, want := range map[string]Surface{
-		"/v1/chat/completions":    {Name: "openai", Inference: true},
-		"/native/gemini/models/x": {Name: "openai", Inference: true},
-		"/anthropic/v1/messages":  {Name: "anthropic", Inference: true},
-		"/gemini/v1beta/models/x": {Name: "gemini", Inference: true},
+		"/v1/chat/completions":                {Name: "openai", Inference: true},
+		"/native/gemini/models/x":             {Name: "openai", Inference: true},
+		"/anthropic/v1/messages":              {Name: "anthropic", Inference: true},
+		"/code/team/responses":                {Name: "openai", Inference: true},
+		"/code/team/v1/messages":              {Name: "anthropic", Inference: true},
+		"/code/team/v1/messages/count_tokens": {Name: "anthropic", Inference: true},
+		"/code/team/v1/chat/completions":      {Name: "openai", Inference: true},
+		"/code/team/v1/messagesx":             {Name: "openai", Inference: true},
+		"/code/v1/messages":                   {Name: "openai", Inference: true},
+		"/gemini/v1beta/models/x":             {Name: "gemini", Inference: true},
 		"/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent": {Name: "gemini", Inference: true},
 		"/bedrock/model/x/converse": {Name: "bedrock", Inference: true},
 		"/api/v1/playground":        Management,

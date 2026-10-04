@@ -1,9 +1,13 @@
 package routes
 
 import (
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 )
 
@@ -12,6 +16,9 @@ func TestCodexClientConfigurationPreservesNativeModelsAndUsesOnlyOLPKey(t *testi
 	config, err := CodexClientConfiguration(route, "https://gateway.example/olp/", "gpt-5.3-codex")
 	if err != nil || config.BaseURL != "https://gateway.example/olp/code/team-code" || config.ClientVersion != "0.160.0" || len(config.NativeModels) != 2 {
 		t.Fatalf("configuration: %+v %v", config, err)
+	}
+	if config.Adapter != codemode.AdapterCodex || config.Client != "codex" || config.Format != "toml" || *config.File != "$CODEX_HOME/config.toml" || config.Model != "gpt-5.3-codex" || config.SmallModel != nil || !reflect.DeepEqual(config.SupportedClients, []string{"codex"}) {
+		t.Fatalf("selection: %+v", config)
 	}
 	for _, want := range []string{`model = "gpt-5.3-codex"`, `env_key = "OLP_API_KEY"`, `requires_openai_auth = false`, `supports_websockets = true`, `name = "OpenAI"`, `http_headers = { "X-OLP-Code-Model" = "gpt-5.3-codex" }`} {
 		if !strings.Contains(config.Configuration, want) {
@@ -41,5 +48,111 @@ func TestCodexClientConfigurationPreservesNativeModelsAndUsesOnlyOLPKey(t *testi
 	route.RevisionID = ""
 	if _, err := CodexClientConfiguration(route, "https://gateway.example", ""); err == nil {
 		t.Fatal("unpublished draft got client configuration")
+	}
+}
+
+func TestClaudeCodeConfigurationKeepsEveryModelOnTheRoute(t *testing.T) {
+	route := codemode.Route{Slug: "team-glm", Enabled: true, RevisionID: "published", Models: []string{"glm-5.3", "glm-5.3-flash"}}
+	config, err := ClientConfiguration(route, codemode.AdapterZAICoding, ClientRequest{GatewayURL: "https://gateway.example/o'lp/", SmallModel: "glm-5.3-flash"})
+	if err != nil || config.Client != "claude-code" || config.Format != "shell" || config.File != nil || config.ClientVersion != "2.1.286" || config.Model != "glm-5.3" || *config.SmallModel != "glm-5.3-flash" {
+		t.Fatalf("configuration: %+v %v", config, err)
+	}
+	want := `# Claude Code 2.1.286 for OLP code-mode route team-glm (GLM Coding Plan).
+# Source this file in a POSIX shell, such as bash or zsh, before starting claude.
+# Set OLP_API_KEY to your OLP inference key first. No Anthropic login or vendor
+# key belongs on this machine. To select other models, regenerate this file.
+unset ANTHROPIC_API_KEY CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
+export ANTHROPIC_BASE_URL='https://gateway.example/o%27lp/code/team-glm'
+export ANTHROPIC_AUTH_TOKEN="${OLP_API_KEY:?Set OLP_API_KEY to your OLP inference key}"
+export ANTHROPIC_MODEL='glm-5.3'
+export ANTHROPIC_DEFAULT_OPUS_MODEL='glm-5.3'
+export ANTHROPIC_DEFAULT_SONNET_MODEL='glm-5.3'
+export ANTHROPIC_DEFAULT_HAIKU_MODEL='glm-5.3-flash'
+export CLAUDE_CODE_SUBAGENT_MODEL='glm-5.3'
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+`
+	if config.Configuration != want {
+		t.Fatalf("configuration:\n%s", config.Configuration)
+	}
+	if shellQuote(`it's`) != `'it'\''s'` {
+		t.Fatal("shell quoting is unsafe")
+	}
+	if !reflect.DeepEqual(config.SupportedClients, []string{"claude-code", "opencode"}) || len(config.QualificationGaps) < 5 {
+		t.Fatalf("clients %v gaps %v", config.SupportedClients, config.QualificationGaps)
+	}
+}
+
+func TestOpenCodeConfigurationOverridesTheBuiltInProvider(t *testing.T) {
+	route := codemode.Route{Slug: "team-go", Enabled: true, RevisionID: "published", Models: []string{"kimi-k3", "minimax-m3"}}
+	config, err := ClientConfiguration(route, codemode.AdapterOpenCodeGo, ClientRequest{GatewayURL: "https://gateway.example", Model: "minimax-m3"})
+	if err != nil || config.Client != "opencode" || config.Format != "json" || *config.File != "opencode.json" || config.ClientVersion != "1.18.34" || *config.SmallModel != "minimax-m3" {
+		t.Fatalf("configuration: %+v %v", config, err)
+	}
+	want := `{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode-go/minimax-m3",
+  "small_model": "opencode-go/minimax-m3",
+  "enabled_providers": [
+    "opencode-go"
+  ],
+  "provider": {
+    "opencode-go": {
+      "options": {
+        "baseURL": "https://gateway.example/code/team-go/v1",
+        "apiKey": "{env:OLP_API_KEY}"
+      },
+      "whitelist": [
+        "kimi-k3",
+        "minimax-m3"
+      ]
+    }
+  }
+}
+`
+	if config.Configuration != want {
+		t.Fatalf("configuration:\n%s", config.Configuration)
+	}
+	zai, err := ClientConfiguration(codemode.Route{Slug: "team-glm", Enabled: true, RevisionID: "published", Models: []string{"glm-5.3"}}, codemode.AdapterZAICoding, ClientRequest{GatewayURL: "https://gateway.example", Client: "opencode"})
+	if err != nil || !strings.Contains(zai.Configuration, `"zai-coding-plan/glm-5.3"`) || !strings.Contains(zai.Configuration, `"baseURL": "https://gateway.example/code/team-glm/v1"`) {
+		t.Fatalf("GLM OpenCode configuration: %v\n%s", err, zai.Configuration)
+	}
+}
+
+func TestClientConfigurationRefusesUnsupportedSelections(t *testing.T) {
+	route := codemode.Route{Slug: "team", Enabled: true, RevisionID: "published", Models: []string{"glm-5.3"}}
+	for _, test := range []struct {
+		adapter codemode.Adapter
+		request ClientRequest
+		field   string
+	}{
+		{codemode.AdapterZAICoding, ClientRequest{Client: "codex"}, "client"},
+		{codemode.AdapterCodex, ClientRequest{Client: "claude-code"}, "client"},
+		{codemode.AdapterOpenCodeGo, ClientRequest{Client: "cline"}, "client"},
+		{codemode.AdapterCodex, ClientRequest{SmallModel: "glm-5.3"}, "small_model"},
+		{codemode.AdapterZAICoding, ClientRequest{SmallModel: "glm-4.7"}, "small_model"},
+		{codemode.AdapterZAICoding, ClientRequest{Model: "claude-sonnet-4-6"}, "model"},
+	} {
+		test.request.GatewayURL = "https://gateway.example"
+		_, err := ClientConfiguration(route, test.adapter, test.request)
+		if problem, ok := errors.AsType[*access.Problem](err); !ok || problem.Field != test.field {
+			t.Fatalf("%s %+v: %v", test.adapter, test.request, err)
+		}
+	}
+	if _, err := ClientConfiguration(route, "unknown", ClientRequest{GatewayURL: "https://gateway.example"}); err == nil {
+		t.Fatal("unknown adapter generated configuration")
+	}
+	for _, adapter := range []codemode.Adapter{codemode.AdapterCodex, codemode.AdapterOpenCodeGo, codemode.AdapterZAICoding} {
+		v, _ := codeadapter.Lookup(adapter)
+		for _, client := range v.Clients {
+			config, err := ClientConfiguration(route, adapter, ClientRequest{GatewayURL: "https://gateway.example", Client: client})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, forbidden := range []string{"olp_", "api.z.ai", "open.bigmodel.cn", "opencode.ai/zen", "chatgpt.com", "refresh_token"} {
+				if strings.Contains(config.Configuration, forbidden) {
+					t.Fatalf("%s %s configuration contains %s", adapter, client, forbidden)
+				}
+			}
+		}
 	}
 }

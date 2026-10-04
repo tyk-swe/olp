@@ -26,8 +26,9 @@ behavior. Component tests use jsdom and browser exports.
 ### Code-mode qualification
 
 `./scripts/code-mode-qualification.sh cli` installs the exact-integrity official
-Codex 0.160.0 package and runs controlled HTTP/SSE and WebSocket journeys without
-a provider account. It passes only an OLP fixture key into an isolated client
+Codex 0.160.0, Claude Code 2.1.286 and OpenCode 1.18.34 packages and runs
+controlled Codex HTTP/SSE and WebSocket journeys without a provider account.
+`install codex|claude-code|opencode` prints one client's verified binary. It passes only an OLP fixture key into an isolated client
 home; local tool execution, continuation/resume and cancellation are exercised
 by the real CLI. The fixtures are not live subscription qualification.
 
@@ -42,7 +43,10 @@ After the supported transport/authorizer and Codex enrollment fixture are
 integrated, `./scripts/code-mode-qualification.sh process` runs the real gateway
 fleet suite. It requires `OLP_TEST_DATABASE_URL`, `OLP_TEST_VALKEY_URL` and
 `OLP_TEST_BINARY`; missing prerequisites fail rather than skip. It uses the
-additional `codecli` build tag. `all` runs both CLI and process suites.
+additional `codecli` build tag, and includes the Claude Code and OpenCode
+journeys through the OpenCode Go and GLM Coding Plan adapters, which also need
+`OLP_CLAUDE_CODE_BINARY` and `OLP_OPENCODE_BINARY`. `all` runs both CLI and
+process suites.
 
 See [qualification evidence and integration prerequisites](../docs/qualification/code-mode.md)
 for the exact upstream source/package pins and unrun release gates. The foundation

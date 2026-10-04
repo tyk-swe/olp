@@ -19,3 +19,10 @@ semantic versioning and take their source from root `package.json`;
   0.160.0 is qualified against controlled peers; live subscription compatibility,
   positive hard-token bounds and the remaining client scenarios are tracked in
   [the qualification matrix](docs/qualification/code-mode.md).
+- OpenCode Go and Z.ai GLM Coding Plan code-mode adapters. The `opencode-go`
+  and `zai-coding` plugins enroll a pasted API key, fingerprinted as the
+  principal and fenced from ordinary routes. Routes serve Anthropic Messages,
+  Chat Completions and, for OpenCode Go, the Responses API, and derive their
+  adapter from their accounts. Client configuration generates Claude Code 2.1.286
+  and OpenCode 1.18.34 setup, which is qualified against controlled peers.
+- Plugin grant profiles can declare a `secret` input, which the console masks.

@@ -1,4 +1,4 @@
-import type { CodeFilters } from '$lib/api/code-mode';
+import type { CodeClientSelection, CodeFilters } from '$lib/api/code-mode';
 
 const root = ['code-mode'] as const;
 export const codeKeys = {
@@ -13,7 +13,6 @@ export const codeKeys = {
     id: string,
     revision: string,
     gatewayURL: string,
-    model?: string
-  ) =>
-    [...root, 'configuration', id, revision, gatewayURL, model ?? ''] as const
+    selection: CodeClientSelection
+  ) => [...root, 'configuration', id, revision, gatewayURL, selection] as const
 };

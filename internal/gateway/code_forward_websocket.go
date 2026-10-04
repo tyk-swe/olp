@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/codexwire"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -79,12 +80,13 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 		reject(codemode.Refuse(503, "code_connection_unpublished"))
 		return
 	}
-	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), config, permit.Account)
+	dispatch := codemode.Dispatch{Adapter: codemode.AdapterCodex, Protocol: codemode.ProtocolResponses}
+	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), config, permit.Account, dispatch)
 	if err != nil || auth.Principal == "" || auth.Principal != permit.Binding.Principal {
 		reject(codemode.Refuse(503, "code_account_unavailable"))
 		return
 	}
-	connection := &codeAttempt{server: s, permit: permit, config: config, auth: auth}
+	connection := &codeAttempt{server: s, permit: permit, config: config, auth: auth, allowance: true}
 	httpClient, err := s.codeClient(r.Context(), release, config, permit.Account.ProviderID)
 	if err != nil {
 		reject(err)
@@ -103,14 +105,14 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 	forwarded := false
 	httpClient.Transport = &codeHandshakeTransport{base: httpClient.Transport, reject: func(response *http.Response) {
 		forwarded = true
-		maps.Copy(w.Header(), codexwire.ForwardHeaders(response.Header, false))
-		for name := range codexwire.ForwardTrailers(response.Trailer, response.Header, false) {
+		maps.Copy(w.Header(), codewire.ForwardHeaders(response.Header, false))
+		for name := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 			w.Header().Add("Trailer", name)
 		}
 		w.WriteHeader(response.StatusCode)
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 		_, _ = io.Copy(w, response.Body)
-		for name, values := range codexwire.ForwardTrailers(response.Trailer, response.Header, false) {
+		for name, values := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 			w.Header()[http.TrailerPrefix+name] = values
 		}
 	}}
@@ -127,7 +129,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 		return
 	}
 	defer upstream.CloseNow()
-	responseHeaders := codexwire.ForwardHeaders(response.Header, false)
+	responseHeaders := codewire.ForwardHeaders(response.Header, false)
 	for _, name := range []string{"Sec-Websocket-Accept", "Sec-Websocket-Extensions", "Sec-Websocket-Protocol", "Content-Length"} {
 		responseHeaders.Del(name)
 	}
@@ -141,7 +143,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 	ctx, cancel := context.WithTimeout(r.Context(), time.Hour)
 	defer cancel()
 	clientMessages := codeRead(ctx, client)
-	upstream.SetReadLimit(codexwire.MaxBody)
+	upstream.SetReadLimit(codewire.MaxBody)
 	upstreamMessages := codeRead(ctx, upstream)
 	var active *codeAttempt
 	defer func() {
@@ -196,7 +198,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				refuse(codemode.Refuse(409, "code_identity_changed"))
 				return
 			}
-			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation)
+			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation, dispatch)
 			if err != nil {
 				refuse(err)
 				return
@@ -243,7 +245,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 			if active != nil {
 				active.observe(observation)
 			} else if observation.Allowance != nil {
-				connection.allowance(ctx, *observation.Allowance)
+				connection.observeAllowance(ctx, *observation.Allowance)
 			}
 			if err := codeWrite(ctx, client, message.kind, message.body); err != nil {
 				if active != nil {

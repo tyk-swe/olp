@@ -284,6 +284,9 @@ func liveCodeTree(ctx context.Context, tx pgx.Tx, b codemode.Binding) error {
 	return nil
 }
 
+// codeAccount selects the pool account that serves an admission: an eligible
+// one whose provider connection the route's revision froze, so it is one of
+// the revision's adapter and the gateway can reach it.
 func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id string) (codemode.Account, error) {
 	var a codemode.Account
 	var models, allowance []byte
@@ -303,7 +306,8 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id string) (c
 		JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
 		WHERE pa.pool_id=$1 AND a.project_id=$2 AND a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id
 		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
-		AND a.models @> $3::jsonb AND ($4='' OR a.id::text=$4) AND olp.code_account_available(a) ORDER BY a.id LIMIT 1`, in.Route.PoolID, in.Route.ProjectID, requiredJSON, id).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &models, &a.Name, &a.Enabled, &a.ETag, &a.Health, &allowance)
+		AND a.models @> $3::jsonb AND ($4='' OR a.id::text=$4) AND olp.code_account_available(a)
+		AND EXISTS(SELECT 1 FROM olp.code_route_revisions v WHERE v.id=$5 AND v.connections ? a.provider_id::text) ORDER BY a.id LIMIT 1`, in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Route.RevisionID).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &models, &a.Name, &a.Enabled, &a.ETag, &a.Health, &allowance)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, codemode.Refuse(503, "code_account_unavailable")
 	}

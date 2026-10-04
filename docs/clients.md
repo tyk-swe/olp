@@ -108,6 +108,13 @@ model name. The base URL is the gateway origin plus `/v1` for OpenAI,
 [compatibility matrix](compatibility.md). A route that translates between
 dialects must be transformed; a strict route preserves the native invocation.
 
+Code mode is a separate contract: a `/code/<slug>` base URL, native model names
+and a subscription account behind the route. Codex, Claude Code and OpenCode
+take the configuration its management API generates for Codex, OpenCode Go and
+GLM Coding Plan routes; see [code mode](features/code-mode.md#client-configuration).
+The pins and evidence for that are in the
+[code-mode qualification](qualification/code-mode.md), not in the tables below.
+
 ### Claude Code
 
 Claude Code treats `ANTHROPIC_BASE_URL` as the Anthropic API and sends the beta

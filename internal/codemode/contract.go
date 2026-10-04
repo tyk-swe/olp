@@ -12,6 +12,32 @@ import (
 
 const BasePath = "/code/"
 
+// Adapter names the subscription family a published route forwards to. It is
+// derived from the plugin profiles of the revision's frozen connections and
+// selects the ingress paths, upstream authorization and supported clients.
+type Adapter string
+
+const (
+	AdapterCodex      Adapter = "codex"
+	AdapterOpenCodeGo Adapter = "opencode_go"
+	AdapterZAICoding  Adapter = "zai_coding"
+)
+
+// Protocol is the wire API one forwarded request speaks.
+type Protocol string
+
+const (
+	ProtocolResponses Protocol = "responses"
+	ProtocolMessages  Protocol = "messages"
+	ProtocolChat      Protocol = "chat"
+)
+
+// Dispatch is what an authorizer needs to know about the request it signs.
+type Dispatch struct {
+	Adapter  Adapter
+	Protocol Protocol
+}
+
 // Authorization contains the qualified adapter's upstream auth headers and the
 // credential generation that supplied them, for generation-safe early refresh.
 type Authorization struct {
@@ -78,12 +104,21 @@ func (a Allowance) Validate() error {
 	return a.validateObservations()
 }
 
+// ClientConfiguration is the generated setup of one coding client for a
+// published route. Configuration is text in Format, saved as File, or sourced
+// in a shell when File is nil. It never contains an OLP key.
 type ClientConfiguration struct {
 	RouteSlug         string   `json:"route_slug"`
 	BaseURL           string   `json:"base_url"`
 	NativeModels      []string `json:"native_models"`
+	Adapter           Adapter  `json:"adapter"`
 	Client            string   `json:"client"`
+	SupportedClients  []string `json:"supported_clients"`
 	ClientVersion     string   `json:"client_version"`
+	Model             string   `json:"model"`
+	SmallModel        *string  `json:"small_model"`
+	Format            string   `json:"format"`
+	File              *string  `json:"file"`
 	Configuration     string   `json:"configuration"`
 	QualificationGaps []string `json:"qualification_gaps"`
 }
@@ -146,6 +181,13 @@ type Operation struct {
 	Name     string
 	Model    string
 	Identity Identity
+}
+
+// Request is what OLP reads from a forwarded request body without rewriting it.
+type Request struct {
+	Operation        Operation
+	PreviousResponse string
+	Estimate         int64
 }
 
 func ValidateModels(models []string) error {

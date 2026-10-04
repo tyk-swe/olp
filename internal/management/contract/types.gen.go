@@ -165,6 +165,30 @@ func (e BudgetWindowKind) Valid() bool {
 	}
 }
 
+// Defines values for CodeAccountAdapter.
+const (
+	CodeAccountAdapterCodex       CodeAccountAdapter = "codex"
+	CodeAccountAdapterLessThannil CodeAccountAdapter = "<nil>"
+	CodeAccountAdapterOpencodeGo  CodeAccountAdapter = "opencode_go"
+	CodeAccountAdapterZaiCoding   CodeAccountAdapter = "zai_coding"
+)
+
+// Valid indicates whether the value is a known member of the CodeAccountAdapter enum.
+func (e CodeAccountAdapter) Valid() bool {
+	switch e {
+	case CodeAccountAdapterCodex:
+		return true
+	case CodeAccountAdapterLessThannil:
+		return true
+	case CodeAccountAdapterOpencodeGo:
+		return true
+	case CodeAccountAdapterZaiCoding:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAccountGrantState.
 const (
 	CodeAccountGrantStateCurrent CodeAccountGrantState = "current"
@@ -321,6 +345,90 @@ func (e CodeAttemptState) Valid() bool {
 	}
 }
 
+// Defines values for CodeClientConfigurationAdapter.
+const (
+	CodeClientConfigurationAdapterCodex      CodeClientConfigurationAdapter = "codex"
+	CodeClientConfigurationAdapterOpencodeGo CodeClientConfigurationAdapter = "opencode_go"
+	CodeClientConfigurationAdapterZaiCoding  CodeClientConfigurationAdapter = "zai_coding"
+)
+
+// Valid indicates whether the value is a known member of the CodeClientConfigurationAdapter enum.
+func (e CodeClientConfigurationAdapter) Valid() bool {
+	switch e {
+	case CodeClientConfigurationAdapterCodex:
+		return true
+	case CodeClientConfigurationAdapterOpencodeGo:
+		return true
+	case CodeClientConfigurationAdapterZaiCoding:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeClientConfigurationClient.
+const (
+	CodeClientConfigurationClientClaudeCode CodeClientConfigurationClient = "claude-code"
+	CodeClientConfigurationClientCodex      CodeClientConfigurationClient = "codex"
+	CodeClientConfigurationClientOpencode   CodeClientConfigurationClient = "opencode"
+)
+
+// Valid indicates whether the value is a known member of the CodeClientConfigurationClient enum.
+func (e CodeClientConfigurationClient) Valid() bool {
+	switch e {
+	case CodeClientConfigurationClientClaudeCode:
+		return true
+	case CodeClientConfigurationClientCodex:
+		return true
+	case CodeClientConfigurationClientOpencode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeClientConfigurationFormat.
+const (
+	Json  CodeClientConfigurationFormat = "json"
+	Shell CodeClientConfigurationFormat = "shell"
+	Toml  CodeClientConfigurationFormat = "toml"
+)
+
+// Valid indicates whether the value is a known member of the CodeClientConfigurationFormat enum.
+func (e CodeClientConfigurationFormat) Valid() bool {
+	switch e {
+	case Json:
+		return true
+	case Shell:
+		return true
+	case Toml:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeClientConfigurationSupportedClients.
+const (
+	CodeClientConfigurationSupportedClientsClaudeCode CodeClientConfigurationSupportedClients = "claude-code"
+	CodeClientConfigurationSupportedClientsCodex      CodeClientConfigurationSupportedClients = "codex"
+	CodeClientConfigurationSupportedClientsOpencode   CodeClientConfigurationSupportedClients = "opencode"
+)
+
+// Valid indicates whether the value is a known member of the CodeClientConfigurationSupportedClients enum.
+func (e CodeClientConfigurationSupportedClients) Valid() bool {
+	switch e {
+	case CodeClientConfigurationSupportedClientsClaudeCode:
+		return true
+	case CodeClientConfigurationSupportedClientsCodex:
+		return true
+	case CodeClientConfigurationSupportedClientsOpencode:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodePoolKind.
 const (
 	CodePoolKindPersonal CodePoolKind = "personal"
@@ -351,6 +459,27 @@ func (e CodePoolWriteKind) Valid() bool {
 	case CodePoolWriteKindPersonal:
 		return true
 	case CodePoolWriteKindShared:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeRouteAdapter.
+const (
+	CodeRouteAdapterCodex      CodeRouteAdapter = "codex"
+	CodeRouteAdapterOpencodeGo CodeRouteAdapter = "opencode_go"
+	CodeRouteAdapterZaiCoding  CodeRouteAdapter = "zai_coding"
+)
+
+// Valid indicates whether the value is a known member of the CodeRouteAdapter enum.
+func (e CodeRouteAdapter) Valid() bool {
+	switch e {
+	case CodeRouteAdapterCodex:
+		return true
+	case CodeRouteAdapterOpencodeGo:
+		return true
+	case CodeRouteAdapterZaiCoding:
 		return true
 	default:
 		return false
@@ -534,6 +663,21 @@ func (e CredentialRequirement) Valid() bool {
 	case CredentialRequirementGrant:
 		return true
 	case CredentialRequirementRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GrantEnrollmentInput.
+const (
+	Secret GrantEnrollmentInput = "secret"
+)
+
+// Valid indicates whether the value is a known member of the GrantEnrollmentInput enum.
+func (e GrantEnrollmentInput) Valid() bool {
+	switch e {
+	case Secret:
 		return true
 	default:
 		return false
@@ -1515,6 +1659,27 @@ func (e UserResponseAccessScope) Valid() bool {
 	}
 }
 
+// Defines values for GetCodeClientConfigurationParamsClient.
+const (
+	GetCodeClientConfigurationParamsClientClaudeCode GetCodeClientConfigurationParamsClient = "claude-code"
+	GetCodeClientConfigurationParamsClientCodex      GetCodeClientConfigurationParamsClient = "codex"
+	GetCodeClientConfigurationParamsClientOpencode   GetCodeClientConfigurationParamsClient = "opencode"
+)
+
+// Valid indicates whether the value is a known member of the GetCodeClientConfigurationParamsClient enum.
+func (e GetCodeClientConfigurationParamsClient) Valid() bool {
+	switch e {
+	case GetCodeClientConfigurationParamsClientClaudeCode:
+		return true
+	case GetCodeClientConfigurationParamsClientCodex:
+		return true
+	case GetCodeClientConfigurationParamsClientOpencode:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DownloadMediaJobContentParamsVariant.
 const (
 	DownloadMediaJobContentParamsVariantSpritesheet DownloadMediaJobContentParamsVariant = "spritesheet"
@@ -1923,20 +2088,25 @@ type ChangePasswordRequest struct {
 
 // CodeAccount defines model for CodeAccount.
 type CodeAccount struct {
-	Allowance    nullable.Nullable[CodeAllowance] `json:"allowance"`
-	CredentialId openapi_types.UUID               `json:"credential_id"`
-	Eligible     bool                             `json:"eligible"`
-	Enabled      bool                             `json:"enabled"`
-	Etag         openapi_types.UUID               `json:"etag"`
-	GrantState   CodeAccountGrantState            `json:"grant_state"`
-	Health       CodeAccountHealth                `json:"health"`
-	Id           openapi_types.UUID               `json:"id"`
-	Models       []string                         `json:"models"`
-	Name         string                           `json:"name"`
-	Principal    string                           `json:"principal"`
-	ProjectId    openapi_types.UUID               `json:"project_id"`
-	ProviderId   openapi_types.UUID               `json:"provider_id"`
+	// Adapter The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool holds accounts of one adapter.
+	Adapter      nullable.Nullable[CodeAccountAdapter] `json:"adapter"`
+	Allowance    nullable.Nullable[CodeAllowance]      `json:"allowance"`
+	CredentialId openapi_types.UUID                    `json:"credential_id"`
+	Eligible     bool                                  `json:"eligible"`
+	Enabled      bool                                  `json:"enabled"`
+	Etag         openapi_types.UUID                    `json:"etag"`
+	GrantState   CodeAccountGrantState                 `json:"grant_state"`
+	Health       CodeAccountHealth                     `json:"health"`
+	Id           openapi_types.UUID                    `json:"id"`
+	Models       []string                              `json:"models"`
+	Name         string                                `json:"name"`
+	Principal    string                                `json:"principal"`
+	ProjectId    openapi_types.UUID                    `json:"project_id"`
+	ProviderId   openapi_types.UUID                    `json:"provider_id"`
 }
+
+// CodeAccountAdapter The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool holds accounts of one adapter.
+type CodeAccountAdapter string
 
 // CodeAccountGrantState defines model for CodeAccount.GrantState.
 type CodeAccountGrantState string
@@ -2006,7 +2176,9 @@ type CodeAttempt struct {
 	Id            openapi_types.UUID           `json:"id"`
 	InputTokens   nullable.Nullable[int64]     `json:"input_tokens"`
 	Model         string                       `json:"model"`
-	Operation     string                       `json:"operation"`
+
+	// Operation The operation the request performed: `responses`, `compact` or `prewarm` on the Responses API, `messages` on Anthropic Messages, or `chat` on Chat Completions.
+	Operation string `json:"operation"`
 
 	// Outcome Bounded transport or generation result, independent of usage settlement and durable uncertainty.
 	Outcome           nullable.Nullable[CodeAttemptOutcome]       `json:"outcome"`
@@ -2092,14 +2264,44 @@ type CodeBudgetWrite struct {
 
 // CodeClientConfiguration defines model for CodeClientConfiguration.
 type CodeClientConfiguration struct {
-	BaseUrl           string   `json:"base_url"`
-	Client            string   `json:"client"`
-	ClientVersion     string   `json:"client_version"`
-	Configuration     string   `json:"configuration"`
+	Adapter CodeClientConfigurationAdapter `json:"adapter"`
+	BaseUrl string                         `json:"base_url"`
+
+	// Client The client the configuration is for.
+	Client        CodeClientConfigurationClient `json:"client"`
+	ClientVersion string                        `json:"client_version"`
+	Configuration string                        `json:"configuration"`
+
+	// File Where to save the configuration, or null for a shell file to source.
+	File nullable.Nullable[string] `json:"file"`
+
+	// Format The configuration's format: Codex TOML, a POSIX shell file to source, or OpenCode JSON.
+	Format CodeClientConfigurationFormat `json:"format"`
+
+	// Model The native model the client uses for its main conversation.
+	Model             string   `json:"model"`
 	NativeModels      []string `json:"native_models"`
 	QualificationGaps []string `json:"qualification_gaps"`
 	RouteSlug         string   `json:"route_slug"`
+
+	// SmallModel The native model for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.
+	SmallModel nullable.Nullable[string] `json:"small_model"`
+
+	// SupportedClients The clients this route's adapter has configurations for; the first is the default.
+	SupportedClients []CodeClientConfigurationSupportedClients `json:"supported_clients"`
 }
+
+// CodeClientConfigurationAdapter defines model for CodeClientConfiguration.Adapter.
+type CodeClientConfigurationAdapter string
+
+// CodeClientConfigurationClient The client the configuration is for.
+type CodeClientConfigurationClient string
+
+// CodeClientConfigurationFormat The configuration's format: Codex TOML, a POSIX shell file to source, or OpenCode JSON.
+type CodeClientConfigurationFormat string
+
+// CodeClientConfigurationSupportedClients defines model for CodeClientConfiguration.SupportedClients.
+type CodeClientConfigurationSupportedClients string
 
 // CodeCountObservation Observation and reset of one provider count limit, independent of other counts and percentage windows.
 type CodeCountObservation struct {
@@ -2181,6 +2383,8 @@ type CodeRevisionList struct {
 
 // CodeRoute Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
 type CodeRoute struct {
+	// Adapter The adapter the latest published revision serves, derived from the provider connections it froze. It selects the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan serves `v1/messages` and `v1/chat/completions`. Absent before publication or when the revision's accounts name no adapter.
+	Adapter     *CodeRouteAdapter            `json:"adapter,omitempty"`
 	Enabled     bool                         `json:"enabled"`
 	Etag        openapi_types.UUID           `json:"etag"`
 	Id          openapi_types.UUID           `json:"id"`
@@ -2192,6 +2396,9 @@ type CodeRoute struct {
 	RevisionId  string                       `json:"revision_id"`
 	Slug        string                       `json:"slug"`
 }
+
+// CodeRouteAdapter The adapter the latest published revision serves, derived from the provider connections it froze. It selects the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan serves `v1/messages` and `v1/chat/completions`. Absent before publication or when the revision's accounts name no adapter.
+type CodeRouteAdapter string
 
 // CodeRouteList defines model for CodeRouteList.
 type CodeRouteList struct {
@@ -2776,13 +2983,19 @@ type GrantEnrollment struct {
 	Device *GrantDeviceAuthorization `json:"device,omitempty"`
 
 	// ExpiresAt When the enrollment expires: 10 minutes after it starts, or when a device authorization's user code expires, within 30 minutes.
-	ExpiresAt  time.Time          `json:"expires_at"`
-	Id         openapi_types.UUID `json:"id"`
-	ProviderId openapi_types.UUID `json:"provider_id"`
+	ExpiresAt time.Time          `json:"expires_at"`
+	Id        openapi_types.UUID `json:"id"`
+
+	// Input How the operator continues an enrollment that has an authorization URL. `secret` means the page issues an upstream secret, such as an API key, which the operator pastes; OLP stores it encrypted and never returns it. Absent means the callback URL or code the upstream returns.
+	Input      *GrantEnrollmentInput `json:"input,omitempty"`
+	ProviderId openapi_types.UUID    `json:"provider_id"`
 
 	// SlotId The credential slot the grant will back.
 	SlotId openapi_types.UUID `json:"slot_id"`
 }
+
+// GrantEnrollmentInput How the operator continues an enrollment that has an authorization URL. `secret` means the page issues an upstream secret, such as an API key, which the operator pastes; OLP stores it encrypted and never returns it. Absent means the callback URL or code the upstream returns.
+type GrantEnrollmentInput string
 
 // GrantEnrollmentCompletion The credential version grant enrollment created, with the grant beneath it, staged on the enrollment's credential slot of the provider draft like a rotated credential.
 type GrantEnrollmentCompletion struct {
@@ -5697,9 +5910,20 @@ type ReplaceCodeRouteParams struct {
 
 // GetCodeClientConfigurationParams defines parameters for GetCodeClientConfiguration.
 type GetCodeClientConfigurationParams struct {
-	GatewayUrl string  `form:"gateway_url" json:"gateway_url"`
-	Model      *string `form:"model,omitempty" json:"model,omitempty"`
+	GatewayUrl string `form:"gateway_url" json:"gateway_url"`
+
+	// Model The native model for the main conversation; defaults to the route's first model.
+	Model *string `form:"model,omitempty" json:"model,omitempty"`
+
+	// Client The client to configure; defaults to the first of the adapter's supported clients.
+	Client *GetCodeClientConfigurationParamsClient `form:"client,omitempty" json:"client,omitempty"`
+
+	// SmallModel The native model for background requests; defaults to model. Codex takes none.
+	SmallModel *string `form:"small_model,omitempty" json:"small_model,omitempty"`
 }
+
+// GetCodeClientConfigurationParamsClient defines parameters for GetCodeClientConfiguration.
+type GetCodeClientConfigurationParamsClient string
 
 // PublishCodeRouteParams defines parameters for PublishCodeRoute.
 type PublishCodeRouteParams struct {

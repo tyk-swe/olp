@@ -3,8 +3,15 @@
   import { untrack } from 'svelte';
   import { copyText } from '$lib/clipboard';
   import { errorMessage } from '$lib/api/http';
-  import type { CodeClientConfiguration, CodeRoute } from '$lib/api/code-mode';
+  import SegmentedRadioGroup from '$lib/components/SegmentedRadioGroup.svelte';
+  import type {
+    CodeClient,
+    CodeClientConfiguration,
+    CodeClientSelection,
+    CodeRoute
+  } from '$lib/api/code-mode';
   import { codeKeys } from './codeKeys';
+  import { adapterLabel, clientLabel } from './presentation';
 
   let {
     route,
@@ -15,73 +22,136 @@
     gatewayURL: string;
     load: (
       route: CodeRoute,
-      model?: string,
+      selection: CodeClientSelection,
       signal?: AbortSignal
     ) => Promise<CodeClientConfiguration>;
   } = $props();
   let copied = $state('');
-  let selection = $state<{ revisionId: string; model: string }>();
-  const model = $derived(
-    selection?.revisionId === route.revision_id ? selection.model : undefined
+  // A selection belongs to the publication it was made for; a new
+  // publication starts again from its defaults.
+  let chosen = $state<{ revisionId: string; selection: CodeClientSelection }>();
+  const selection = $derived<CodeClientSelection>(
+    chosen?.revisionId === route.revision_id ? chosen.selection : {}
   );
-  const configurationID = $derived(`code-client-configuration-${route.id}`);
-  const modelID = $derived(`code-client-model-${route.id}`);
+  // The publication's last configuration keeps the pickers in place, and
+  // focused, while another selection loads or after the server refuses one.
+  let shown = $state<{
+    revisionId: string;
+    config: CodeClientConfiguration;
+  }>();
+  const ids = $derived({
+    client: `code-client-${route.id}`,
+    model: `code-client-model-${route.id}`,
+    smallModel: `code-client-small-model-${route.id}`,
+    configuration: `code-client-configuration-${route.id}`
+  });
   const configuration = createQuery(() => {
     const selectedRoute = route;
-    const selectedModel = model;
+    const selected = selection;
     const loader = load;
     return {
       queryKey: codeKeys.configuration(
         selectedRoute.id,
         selectedRoute.revision_id,
         gatewayURL,
-        selectedModel
+        selected
       ),
       queryFn: ({ signal }) =>
-        untrack(() => loader(selectedRoute, selectedModel, signal))
+        untrack(async () => {
+          const result = await loader(selectedRoute, selected, signal);
+          shown = { revisionId: selectedRoute.revision_id, config: result };
+          return result;
+        })
     };
   });
-  const nativeModels = $derived(
-    configuration.data?.native_models ?? (model ? [model] : [])
+  const config = $derived(
+    configuration.data ??
+      (shown?.revisionId === route.revision_id ? shown.config : undefined)
   );
+
+  function select(change: CodeClientSelection) {
+    copied = '';
+    chosen = {
+      revisionId: route.revision_id,
+      selection: { ...selection, ...change }
+    };
+  }
 </script>
 
-<section class="card" aria-label="Official client configuration">
-  <h3>Official client configuration</h3>
-  {#if nativeModels.length > 0}
-    <div class="form-field">
-      <label for={modelID}>Client native model</label>
-      <select
-        id={modelID}
-        value={model ?? nativeModels[0]}
-        onchange={(event) =>
-          (selection = {
-            revisionId: route.revision_id,
-            model: event.currentTarget.value
-          })}
-      >
-        {#each nativeModels as nativeModel (nativeModel)}
-          <option value={nativeModel}>{nativeModel}</option>
-        {/each}
-      </select>
+<section class="card" aria-label="Client configuration">
+  <h3>Client configuration</h3>
+  {#if config}
+    <div class="selection" aria-busy={configuration.isFetching}>
+      {#if config.supported_clients.length > 1}
+        <SegmentedRadioGroup
+          label="Client"
+          name={ids.client}
+          value={config.client}
+          items={config.supported_clients.map((client) => ({
+            value: client,
+            label: clientLabel(client)
+          }))}
+          onChange={(client) => select({ client: client as CodeClient })}
+        />
+      {/if}
+      <div class="form-field">
+        <label for={ids.model}>Client native model</label>
+        <select
+          id={ids.model}
+          value={config.model}
+          onchange={(event) => select({ model: event.currentTarget.value })}
+        >
+          {#each config.native_models as model (model)}<option value={model}
+              >{model}</option
+            >{/each}
+        </select>
+      </div>
+      {#if config.small_model != null}
+        <div class="form-field">
+          <label for={ids.smallModel}>Background model</label>
+          <select
+            id={ids.smallModel}
+            aria-describedby="{ids.smallModel}-help"
+            value={config.small_model}
+            onchange={(event) =>
+              select({ small_model: event.currentTarget.value })}
+          >
+            {#each config.native_models as model (model)}<option value={model}
+                >{model}</option
+              >{/each}
+          </select>
+          <small id="{ids.smallModel}-help"
+            >{config.client === 'claude-code'
+              ? 'Haiku-class and other background requests.'
+              : 'Session titles and other small tasks.'}</small
+          >
+        </div>
+      {/if}
     </div>
   {/if}
-  {#if configuration.isPending}<p role="status">
-      Loading supported configuration…
-    </p>
-  {:else if configuration.isError}<p role="alert">
+  {#if configuration.isError}<p role="alert">
       {errorMessage(configuration.error)}
       <button
         type="button"
         class="text-button"
         onclick={() => configuration.refetch()}>Retry</button
       >
+      {#if Object.keys(selection).length}<button
+          type="button"
+          class="text-button"
+          onclick={() => (chosen = undefined)}>Use defaults</button
+        >{/if}
     </p>
-  {:else if configuration.data}
-    {@const config = configuration.data}
+  {:else if !config}<p role="status">Loading supported configuration…</p>
+  {:else}
     <dl>
+      <dt>Subscription</dt>
+      <dd><span class="badge">{adapterLabel(config.adapter)}</span></dd>
       <dt>Client release</dt>
-      <dd>{config.client} · {config.client_version || 'Unqualified'}</dd>
+      <dd>
+        {clientLabel(config.client)}
+        {config.client_version || 'Unqualified'}
+      </dd>
       <dt>Route base URL</dt>
       <dd><code>{config.base_url}</code></dd>
       <dt>Native models</dt>
@@ -96,12 +166,20 @@
         {#each config.qualification_gaps as gap (gap)}<li>{gap}</li>{/each}
       </ul>{/if}
     <div class="form-field">
-      <label for={configurationID}>Generated configuration</label>
+      <label for={ids.configuration}
+        >Generated configuration · {config.format.toUpperCase()}</label
+      >
       <textarea
-        id={configurationID}
+        id={ids.configuration}
+        aria-describedby="{ids.configuration}-help"
         readonly
         value={config.configuration}
-        rows="10"></textarea>
+        rows="12"></textarea>
+      <small id="{ids.configuration}-help"
+        >{config.file
+          ? `Save as ${config.file}.`
+          : 'Source this file in your shell before starting the client.'}</small
+      >
     </div>
     <button
       class="button button-secondary"
@@ -127,13 +205,18 @@
   dt {
     font-weight: 600;
   }
+  .selection {
+    display: grid;
+    gap: 0.75rem;
+  }
   dl {
     display: grid;
     gap: 0.4rem;
   }
   dd,
   p,
-  li {
+  li,
+  small {
     color: var(--foreground-subtle);
     overflow-wrap: anywhere;
     line-height: 1.6;

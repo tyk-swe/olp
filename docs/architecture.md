@@ -19,7 +19,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Admission, request execution, retries, cancellation | `internal/gateway/` |
 | Code-mode contracts, conversation pins, hard-token reservations | `internal/codemode/`, `internal/resources/code_mode.go`, `internal/limits/` |
 | Code-mode public management and immutable publication | Code-mode files in `internal/providers/`, `internal/access/`, `internal/routes/`, `internal/runtime/`, `internal/usage/` |
-| Official coding-client qualification and controlled wire peers | `tests/codecli/`, `tests/fixtures/codex-qualified/`, `tests/integration/code_qualification*_test.go` |
+| Official coding-client qualification and controlled wire peers | `tests/codecli/`, `tests/fixtures/codex-qualified/`, `tests/fixtures/coding-plans/`, `tests/integration/code_qualification*_test.go`, `tests/integration/code_coding_plans_test.go`, `tests/integration/code_client_journeys_test.go` |
 | Upstream failure classes and upstream acceptance | `internal/upstream/` |
 | Immutable operation sources, envelopes, provenance and codec linking | `internal/oif/` |
 | Ordered generation views and independent operation contracts | `internal/operations/` |

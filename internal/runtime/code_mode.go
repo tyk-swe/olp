@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 )
 
@@ -46,6 +48,23 @@ func compileCodeMode(ctx context.Context, tx pgx.Tx, s *Snapshot) error {
 func (s *Snapshot) CodeConnection(route codemode.Route, providerID string) (Configuration, bool) {
 	configuration, ok := s.CodeConnections[route.RevisionID+":"+providerID]
 	return configuration, ok
+}
+
+// CodeAdapter returns the adapter of a published route, derived from the
+// connections its revision froze. It is "" when they name no single adapter,
+// such as a revision that mixed adapters before publication refused that.
+func (s *Snapshot) CodeAdapter(route codemode.Route) codemode.Adapter {
+	var connections []codeadapter.Connection
+	for key, c := range s.CodeConnections {
+		if revision, _, _ := strings.Cut(key, ":"); revision == route.RevisionID {
+			connections = append(connections, codeadapter.Connection{Kind: c.Kind, AuthMode: c.AuthMode, ProfileID: c.ProfileID})
+		}
+	}
+	adapter, err := codeadapter.Derive(connections)
+	if err != nil {
+		return ""
+	}
+	return adapter
 }
 
 func (s *Snapshot) validateCodeMode() error {

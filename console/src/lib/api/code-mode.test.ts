@@ -130,7 +130,7 @@ it.each([undefined, 'another-native-model'])(
       await getCodeClientConfiguration(
         route,
         'https://gateway.example',
-        model,
+        model ? { model } : {},
         controller.signal
       )
     ).toEqual(configuration);

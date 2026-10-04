@@ -1,0 +1,60 @@
+{
+  "evidence_class": "controlled-fixture-only",
+  "clients": {
+    "claude-code": {
+      "client": "official Anthropic Claude Code",
+      "version": "2.1.286",
+      "gateway_reference": "https://code.claude.com/docs/en/llm-gateway-protocol",
+      "packages": {
+        "linux-x64": {
+          "url": "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64/-/claude-code-linux-x64-2.1.286.tgz",
+          "integrity": "sha512-PnVL8ZCEev3IexLeOc9/QRfqRDUZRgnsaMLdpjlBN0VaieeTrf7mZ2JJi29ue2KAqHvq6SsOadU5G/shnFE4MA=="
+        },
+        "linux-arm64": {
+          "url": "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-arm64/-/claude-code-linux-arm64-2.1.286.tgz",
+          "integrity": "sha512-dHQ/ObyC4jaGHVk+gFE8P8PALMIVLhQSyhiC3y3kkuLp0H0MHgLxHt/srQ3zJs892ClDbtl1swxv4bw1ioruZA=="
+        }
+      }
+    },
+    "opencode": {
+      "client": "official OpenCode CLI",
+      "version": "1.18.34",
+      "source_repository": "https://github.com/anomalyco/opencode",
+      "session_headers": "https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/session/llm/request.ts",
+      "configuration_reference": "https://opencode.ai/docs/config/",
+      "packages": {
+        "linux-x64": {
+          "url": "https://registry.npmjs.org/opencode-linux-x64/-/opencode-linux-x64-1.18.34.tgz",
+          "integrity": "sha512-RTAMjCve4euxP2QKLuvRmdoW5J5DQK1DiZqt+7slfixyjAEi79QC2Df2oYKogibaAI4IEU8uzenoJeEl3k+UEw=="
+        },
+        "linux-arm64": {
+          "url": "https://registry.npmjs.org/opencode-linux-arm64/-/opencode-linux-arm64-1.18.34.tgz",
+          "integrity": "sha512-ZSjqcH0MEbAzLEmkRC9Aop1PbWZxe2NuKONAE/x8MRQdjKdOepX7M50UpjbsNoiLMkP584Z98Mg4a42fJhouvA=="
+        }
+      }
+    }
+  },
+  "adapters": {
+    "zai_coding": {
+      "reference": "https://docs.z.ai/devpack/overview",
+      "upstreams": [
+        "https://api.z.ai/api/anthropic",
+        "https://api.z.ai/api/coding/paas/v4",
+        "https://open.bigmodel.cn/api/anthropic",
+        "https://open.bigmodel.cn/api/coding/paas/v4"
+      ]
+    },
+    "opencode_go": {
+      "reference": "https://opencode.ai/docs/go/",
+      "upstreams": ["https://opencode.ai/zen/go/v1"]
+    }
+  },
+  "subscription_account_qualified": false,
+  "hard_token_bound_qualified": false,
+  "notes": [
+    "No live coding-plan key is used by these fixtures; enrollment pastes fictional keys.",
+    "The clients generate real request bytes from OLP's generated configuration; a scripted vendor behind fixed-host TLS peers answers.",
+    "Native model identifiers prove neither entitlement nor which endpoint a vendor serves them on.",
+    "OpenCode asks for registry.npmjs.org at startup to install its own dependencies; the proxy trap refuses it and no model traffic goes there."
+  ]
+}

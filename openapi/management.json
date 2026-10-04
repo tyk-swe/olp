@@ -2737,6 +2737,13 @@
             "format": "uuid",
             "type": "string"
           },
+          "input": {
+            "description": "How the operator continues an enrollment that has an authorization URL. `secret` means the page issues an upstream secret, such as an API key, which the operator pastes; OLP stores it encrypted and never returns it. Absent means the callback URL or code the upstream returns.",
+            "enum": [
+              "secret"
+            ],
+            "type": "string"
+          },
           "provider_id": {
             "format": "uuid",
             "type": "string"
@@ -11644,6 +11651,19 @@
                 "type": "null"
               }
             ]
+          },
+          "adapter": {
+            "description": "The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool holds accounts of one adapter.",
+            "enum": [
+              "codex",
+              "opencode_go",
+              "zai_coding",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -11659,7 +11679,8 @@
           "health",
           "eligible",
           "grant_state",
-          "allowance"
+          "allowance",
+          "adapter"
         ],
         "type": "object"
       },
@@ -11838,7 +11859,8 @@
           },
           "operation": {
             "maxLength": 100,
-            "type": "string"
+            "type": "string",
+            "description": "The operation the request performed: `responses`, `compact` or `prewarm` on the Responses API, `messages` on Anthropic Messages, or `chat` on Chat Completions."
           },
           "output_tokens": {
             "format": "int64",
@@ -12185,17 +12207,53 @@
       "CodeClientConfiguration": {
         "additionalProperties": false,
         "properties": {
+          "adapter": {
+            "enum": [
+              "codex",
+              "opencode_go",
+              "zai_coding"
+            ],
+            "type": "string"
+          },
           "base_url": {
             "format": "uri",
             "type": "string"
           },
           "client": {
+            "description": "The client the configuration is for.",
+            "enum": [
+              "codex",
+              "claude-code",
+              "opencode"
+            ],
             "type": "string"
           },
           "client_version": {
             "type": "string"
           },
           "configuration": {
+            "type": "string"
+          },
+          "file": {
+            "description": "Where to save the configuration, or null for a shell file to source.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "format": {
+            "description": "The configuration's format: Codex TOML, a POSIX shell file to source, or OpenCode JSON.",
+            "enum": [
+              "toml",
+              "shell",
+              "json"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "description": "The native model the client uses for its main conversation.",
+            "maxLength": 200,
+            "minLength": 1,
             "type": "string"
           },
           "native_models": {
@@ -12217,14 +12275,40 @@
           },
           "route_slug": {
             "type": "string"
+          },
+          "small_model": {
+            "description": "The native model for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "supported_clients": {
+            "description": "The clients this route's adapter has configurations for; the first is the default.",
+            "items": {
+              "enum": [
+                "codex",
+                "claude-code",
+                "opencode"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
           }
         },
         "required": [
           "route_slug",
           "base_url",
           "native_models",
+          "adapter",
           "client",
+          "supported_clients",
           "client_version",
+          "model",
+          "small_model",
+          "format",
+          "file",
           "configuration",
           "qualification_gaps"
         ],
@@ -12475,6 +12559,15 @@
         "additionalProperties": false,
         "description": "Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.",
         "properties": {
+          "adapter": {
+            "description": "The adapter the latest published revision serves, derived from the provider connections it froze. It selects the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan serves `v1/messages` and `v1/chat/completions`. Absent before publication or when the revision's accounts name no adapter.",
+            "enum": [
+              "codex",
+              "opencode_go",
+              "zai_coding"
+            ],
+            "type": "string"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -29046,12 +29139,36 @@
             "required": false,
             "schema": {
               "type": "string"
+            },
+            "description": "The native model for the main conversation; defaults to the route's first model."
+          },
+          {
+            "description": "The client to configure; defaults to the first of the adapter's supported clients.",
+            "in": "query",
+            "name": "client",
+            "required": false,
+            "schema": {
+              "enum": [
+                "codex",
+                "claude-code",
+                "opencode"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The native model for background requests; defaults to model. Codex takes none.",
+            "in": "query",
+            "name": "small_model",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Published route's official client configuration",
+            "description": "Published route's client configuration",
             "content": {
               "application/json": {
                 "schema": {
@@ -29061,7 +29178,7 @@
             }
           },
           "400": {
-            "description": "Invalid gateway URL or model",
+            "description": "Malformed route identifier",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -29102,6 +29219,16 @@
           },
           "409": {
             "description": "Publish an enabled route first",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid gateway URL, or a client or model the route does not support",
             "content": {
               "application/problem+json": {
                 "schema": {

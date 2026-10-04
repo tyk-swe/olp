@@ -7,7 +7,8 @@
     listCodeBudgets,
     publishCodeRoute,
     type CodeRoute,
-    type CodeClientConfiguration
+    type CodeClientConfiguration,
+    type CodeClientSelection
   } from '$lib/api/code-mode';
   import { collectCursorPages } from '$lib/api/pagination';
   import { errorMessage } from '$lib/api/http';
@@ -19,7 +20,12 @@
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { formatDate } from '$lib/format';
   import { codeKeys } from './codeKeys';
-  import { mutationError, tokenCount, type CodeEditing } from './presentation';
+  import {
+    adapterLabel,
+    mutationError,
+    tokenCount,
+    type CodeEditing
+  } from './presentation';
   import ResourceEditor from './ResourceEditor.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';
@@ -37,7 +43,7 @@
     gatewayURL: string;
     loadClientConfiguration?: (
       route: CodeRoute,
-      model?: string,
+      selection: CodeClientSelection,
       signal?: AbortSignal
     ) => Promise<CodeClientConfiguration>;
   } = $props();
@@ -216,6 +222,8 @@
               >{/if}
           </div>
           <dl>
+            <dt>Subscription</dt>
+            <dd><span class="badge">{adapterLabel(account.adapter)}</span></dd>
             <dt>Account / principal</dt>
             <dd>{account.id} / {account.principal}</dd>
             <dt>Eligibility</dt>
@@ -314,8 +322,9 @@
     {:else if kind === 'routes'}
       <p>
         Route base paths select policy; the client sends native models
-        unchanged. Connection edits require route republish. Pool/account/key
-        permissions remain live.
+        unchanged. A route serves the clients of its pool's subscription family:
+        Codex, OpenCode Go or GLM Coding Plan. Connection edits require route
+        republish. Pool/account/key permissions remain live.
       </p>
       {#each routes.data?.items ?? [] as route (route.id)}
         <article class="card">
@@ -343,6 +352,13 @@
           <dl>
             <dt>Base path</dt>
             <dd><code>/code/{route.slug}</code></dd>
+            <dt>Published subscription</dt>
+            <dd>
+              {#if route.adapter}<span class="badge"
+                  >{adapterLabel(route.adapter)}</span
+                >{:else if route.published_at}No adapter: its accounts serve no
+                supported client{:else}Set at publication{/if}
+            </dd>
             <dt>Draft models</dt>
             <dd>{route.models.join(', ')}</dd>
             <dt>Draft pool</dt>

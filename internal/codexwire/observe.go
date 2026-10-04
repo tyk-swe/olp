@@ -1,7 +1,6 @@
 package codexwire
 
 import (
-	"bytes"
 	"math"
 	"net/http"
 	"strconv"
@@ -9,18 +8,11 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
-type Observation struct {
-	Terminal   bool
-	Successful bool
-	Outcome    *codemode.Outcome
-	Usage      codemode.Usage
-	ResponseID string
-	Status     int
-	Allowance  *codemode.Allowance
-}
+type Observation = codemode.Observation
 
 func Observe(body []byte, unary bool) Observation {
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: MaxBody})
@@ -100,50 +92,10 @@ func Observe(body []byte, unary bool) Observation {
 }
 
 // Stream observes bounded SSE events independently of the forwarded byte stream.
-type Stream struct {
-	line           []byte
-	data           []byte
-	overflow       bool
-	carriageReturn bool
-	limit          int
-	Emit           func(Observation)
-}
+type Stream struct{ *codewire.Events }
 
-func NewStream(limit int, emit func(Observation)) *Stream { return &Stream{limit: limit, Emit: emit} }
-
-func (s *Stream) Write(data []byte) {
-	for _, b := range data {
-		if s.carriageReturn && b == '\n' {
-			s.carriageReturn = false
-			continue
-		}
-		s.carriageReturn = b == '\r'
-		if b != '\n' && b != '\r' {
-			if len(s.line) < s.limit {
-				s.line = append(s.line, b)
-			} else {
-				s.overflow = true
-			}
-			continue
-		}
-		line := bytes.TrimSuffix(s.line, []byte{'\r'})
-		if len(line) == 0 {
-			if !s.overflow && len(s.data) > 0 {
-				s.Emit(Observe(bytes.TrimSuffix(s.data, []byte{'\n'}), false))
-			}
-			s.data = s.data[:0]
-			s.overflow = false
-		} else if bytes.HasPrefix(line, []byte("data:")) && !s.overflow {
-			value := bytes.TrimPrefix(line[5:], []byte{' '})
-			if len(s.data)+len(value)+1 > s.limit {
-				s.overflow = true
-			} else {
-				s.data = append(s.data, value...)
-				s.data = append(s.data, '\n')
-			}
-		}
-		s.line = s.line[:0]
-	}
+func NewStream(limit int, emit func(Observation)) *Stream {
+	return &Stream{codewire.NewEvents(limit, func(data []byte) { emit(Observe(data, false)) })}
 }
 
 func Allowance(headers http.Header, now time.Time) *codemode.Allowance {
@@ -261,36 +213,11 @@ func finishAllowance(a *codemode.Allowance) *codemode.Allowance {
 
 // ForwardHeaders excludes authentication, OLP controls and hop-by-hop fields.
 func ForwardHeaders(source http.Header, request bool) http.Header {
-	result := source.Clone()
-	removeConnectionFields(result, source)
-	for _, name := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade"} {
-		result.Del(name)
-	}
-	for name := range result {
-		if strings.HasPrefix(strings.ToLower(name), "x-olp-") {
-			result.Del(name)
-		}
-	}
-	if request {
-		for _, name := range []string{"Authorization", "Chatgpt-Account-Id", "Cookie", "X-Api-Key", "X-Goog-Api-Key"} {
-			result.Del(name)
-		}
-	}
-	return result
+	return codewire.ForwardHeaders(source, request)
 }
 
 // ForwardTrailers also excludes fields nominated by the original message's
 // Connection headers, which are absent from its trailer map.
 func ForwardTrailers(source, headers http.Header, request bool) http.Header {
-	result := ForwardHeaders(source, request)
-	removeConnectionFields(result, headers)
-	return result
-}
-
-func removeConnectionFields(result, headers http.Header) {
-	for _, connection := range headers.Values("Connection") {
-		for _, name := range strings.Split(connection, ",") {
-			result.Del(strings.TrimSpace(name))
-		}
-	}
+	return codewire.ForwardTrailers(source, headers, request)
 }

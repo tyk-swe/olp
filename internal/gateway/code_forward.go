@@ -8,12 +8,15 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/coder/websocket"
 
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/codexwire"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -22,32 +25,33 @@ import (
 
 const codeGenerationTimeout = 10 * time.Minute
 
-// RegisterCode mounts raw Codex transport, which requires CodeLedger and
-// CodeAuthorizer. It never invokes ordinary request preparation, credential
-// failover, response transformation or retries.
+// RegisterCode mounts raw code-mode transport, which requires CodeLedger and
+// CodeAuthorizer. Each route's adapter decides the paths it serves. It never
+// invokes ordinary request preparation, credential failover, response
+// transformation or retries.
 func (s *Server) RegisterCode(mux *http.ServeMux) {
 	mux.HandleFunc("/code/{slug}/{operation...}", s.serveCode)
 }
 
 func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	if !s.admit(r.Context()) {
-		codeWriteError(w, codemode.Refuse(503, "code_overloaded"))
+		codeWriteError(w, r, codemode.Refuse(503, "code_overloaded"))
 		return
 	}
 	defer s.release(r.Context())
 	authority, failure := s.authenticate(r, "inference")
 	if failure != nil {
-		codeWriteError(w, codemode.Refuse(failure.Status, "code_authentication_refused"))
+		codeWriteError(w, r, codemode.Refuse(failure.Status, "code_authentication_refused"))
 		return
 	}
 	release := s.Runtime.Release()
 	if release == nil || release.Snapshot == nil {
-		codeWriteError(w, codemode.Refuse(503, "code_runtime_unavailable"))
+		codeWriteError(w, r, codemode.Refuse(503, "code_runtime_unavailable"))
 		return
 	}
 	route, ok := release.Snapshot.CodeRoutes[r.PathValue("slug")]
 	if !ok {
-		codeWriteError(w, codemode.Refuse(404, "code_route_unavailable"))
+		codeWriteError(w, r, codemode.Refuse(404, "code_route_unavailable"))
 		return
 	}
 	refuse := func(err error) { s.codeRefuse(w, r, route, authority.ID, err) }
@@ -60,11 +64,21 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(400, "code_operation_unsupported"))
 		return
 	}
-	if r.Method == http.MethodGet && path == "responses" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+	adapter := release.Snapshot.CodeAdapter(route)
+	if adapter == "" {
+		refuse(codemode.Refuse(503, "code_adapter_unavailable"))
+		return
+	}
+	if adapter == codemode.AdapterCodex && r.Method == http.MethodGet && path == "responses" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		s.codeWebSocket(w, r, release, route, authority.ID)
 		return
 	}
-	if r.Method != http.MethodPost || path != "responses" && path != "responses/compact" {
+	ingress, ok := codeIngressFor(adapter, r.Method, path)
+	if !ok {
+		if codeProbe(adapter, r.Method, path) {
+			codeWriteError(w, r, codemode.Refuse(404, "code_operation_unsupported"))
+			return
+		}
 		refuse(codemode.Refuse(400, "code_operation_unsupported"))
 		return
 	}
@@ -80,23 +94,24 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(415, "code_encoding_unsupported"))
 		return
 	}
-	body, err := codexwire.Decode(raw, r.Header.Get("Content-Encoding"), limit)
+	body, err := codewire.Decode(raw, r.Header.Get("Content-Encoding"), limit)
 	if err != nil {
 		refuse(err)
 		return
 	}
-	observation, err := codexwire.Classify(body, r.Header, path, false)
+	observation, err := ingress.classify(body, r.Header)
 	if err != nil {
 		refuse(err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
-	attempt, err := s.prepareCode(r.WithContext(ctx), release, route, observation)
+	attempt, err := s.prepareCode(r.WithContext(ctx), release, route, observation, codemode.Dispatch{Adapter: adapter, Protocol: ingress.protocol})
 	if err != nil {
 		refuse(err)
 		return
 	}
+	attempt.observer = ingress.observer()
 	defer attempt.finish(ctx)
 	client, err := s.codeClient(r.Context(), release, attempt.config, attempt.permit.Account.ProviderID)
 	if err != nil {
@@ -104,7 +119,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer client.CloseIdleConnections()
-	target, err := s.codeEndpoint(attempt.config, path, r.URL.RawQuery)
+	target, err := s.codeEndpoint(attempt.config, ingress.upstream, r.URL.RawQuery)
 	if err != nil {
 		refuse(err)
 		return
@@ -116,7 +131,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	request.ContentLength = int64(len(raw))
 	request.Header = attempt.headers(r.Header)
-	request.Trailer = codexwire.ForwardTrailers(r.Trailer, r.Header, true)
+	request.Trailer = codewire.ForwardTrailers(r.Trailer, r.Header, true)
 	if len(request.Trailer) != 0 {
 		request.ContentLength = -1
 		request.Header.Del("Content-Length")
@@ -136,22 +151,22 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	defer response.Body.Close()
 	attempt.response(ctx, response.StatusCode, response.Header)
-	maps.Copy(w.Header(), codexwire.ForwardHeaders(response.Header, false))
-	for name := range codexwire.ForwardTrailers(response.Trailer, response.Header, false) {
+	maps.Copy(w.Header(), codewire.ForwardHeaders(response.Header, false))
+	for name := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 		w.Header().Add("Trailer", name)
 	}
 	w.WriteHeader(response.StatusCode)
 	attempt.copyResponse(ctx, w, response)
-	for name, values := range codexwire.ForwardTrailers(response.Trailer, response.Header, false) {
+	for name, values := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 		w.Header()[http.TrailerPrefix+name] = values
 	}
 }
 
 func (s *Server) codeBodyLimit() int64 {
 	if s.cfg.MaxBodyBytes > 0 {
-		return min(codexwire.MaxBody, s.cfg.MaxBodyBytes)
+		return min(codewire.MaxBody, s.cfg.MaxBodyBytes)
 	}
-	return codexwire.MaxBody
+	return codewire.MaxBody
 }
 
 // codeRequestBody drops the sent request bytes at EOF: the response keeps the
@@ -177,14 +192,17 @@ type codeAttempt struct {
 	auth          codemode.Authorization
 	lease         *limits.Lease
 	providerLease *limits.Lease
-	dispatched    bool
-	usage         codemode.Usage
-	terminal      bool
-	conflicting   bool
-	prewarm       bool
+	observer      codewire.Observer
+	// allowance reads subscription allowance from response headers.
+	allowance   bool
+	dispatched  bool
+	usage       codemode.Usage
+	terminal    bool
+	conflicting bool
+	prewarm     bool
 }
 
-func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codexwire.Request) (*codeAttempt, error) {
+func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, dispatch codemode.Dispatch) (*codeAttempt, error) {
 	authority, failure := s.authenticate(r, "inference")
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_authentication_refused")
@@ -201,7 +219,7 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 		settleKey(r.Context(), lease, false, nil, s.log)
 		return nil, err
 	}
-	a := &codeAttempt{server: s, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
+	a := &codeAttempt{server: s, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm", allowance: dispatch.Adapter == codemode.AdapterCodex}
 	ok := false
 	defer func() {
 		if !ok {
@@ -227,19 +245,24 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
-	a.auth, err = s.CodeAuthorizer.AuthorizeCode(r.Context(), configuration, permit.Account)
+	a.auth, err = s.CodeAuthorizer.AuthorizeCode(r.Context(), configuration, permit.Account, dispatch)
 	if err != nil {
 		return nil, codemode.Refuse(503, "code_account_unavailable")
 	}
 	if a.auth.Principal == "" || a.auth.Principal != permit.Binding.Principal {
 		return nil, codemode.Refuse(409, "code_principal_mismatch")
 	}
+	// The authorization carries exactly the adapter's credential header for
+	// this protocol, and only the other headers the adapter declares.
+	vendor, _ := codeadapter.Lookup(dispatch.Adapter)
+	credential := codeadapter.CredentialHeader(dispatch.Adapter, dispatch.Protocol)
 	for name, values := range a.auth.Headers {
-		if !strings.EqualFold(name, "Authorization") && !strings.EqualFold(name, "Chatgpt-Account-Id") || len(values) != 1 || strings.ContainsAny(values[0], "\r\n") {
+		declared := strings.EqualFold(name, credential) || slices.ContainsFunc(vendor.Extra, func(extra string) bool { return strings.EqualFold(name, extra) })
+		if !declared || len(values) != 1 || strings.ContainsAny(values[0], "\r\n") {
 			return nil, codemode.Refuse(503, "code_authorization_invalid")
 		}
 	}
-	if a.auth.Headers.Get("Authorization") == "" {
+	if a.auth.Headers.Get(credential) == "" {
 		return nil, codemode.Refuse(503, "code_authorization_invalid")
 	}
 	ok = true
@@ -247,7 +270,7 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 }
 
 func (a *codeAttempt) headers(source http.Header) http.Header {
-	h := codexwire.ForwardHeaders(source, true)
+	h := codewire.ForwardHeaders(source, true)
 	for name, values := range a.auth.Headers {
 		h[name] = append([]string(nil), values...)
 	}
@@ -265,7 +288,7 @@ func (a *codeAttempt) dispatch(ctx context.Context) error {
 	return nil
 }
 
-func (a *codeAttempt) observe(o codexwire.Observation) {
+func (a *codeAttempt) observe(o codemode.Observation) {
 	if o.ResponseID != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		_ = a.server.CodeLedger.ObserveReference(ctx, a.permit.Attempt.ID, o.ResponseID)
@@ -275,7 +298,7 @@ func (a *codeAttempt) observe(o codexwire.Observation) {
 		a.response(context.Background(), o.Status, nil)
 	}
 	if o.Allowance != nil {
-		a.allowance(context.Background(), *o.Allowance)
+		a.observeAllowance(context.Background(), *o.Allowance)
 	}
 	if o.Outcome != nil {
 		a.outcome(context.Background(), *o.Outcome)
@@ -360,7 +383,7 @@ func codeUnavailableClose(err error) bool {
 	return code >= websocket.StatusInternalError && code <= websocket.StatusBadGateway
 }
 
-func (a *codeAttempt) allowance(ctx context.Context, allowance codemode.Allowance) {
+func (a *codeAttempt) observeAllowance(ctx context.Context, allowance codemode.Allowance) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	_ = a.server.CodeLedger.ObserveAllowance(ctx, a.permit.Account.ID, allowance)
@@ -387,8 +410,11 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 	case status == 401 || status == 403 || status >= 500:
 		a.health(ctx, "unavailable")
 	}
+	if !a.allowance {
+		return
+	}
 	if allowance := codexwire.Allowance(headers, a.server.now()); allowance != nil {
-		a.allowance(ctx, *allowance)
+		a.observeAllowance(ctx, *allowance)
 	}
 }
 
@@ -425,7 +451,7 @@ func (s *Server) codeClient(ctx context.Context, release *runtime.Release, cfg r
 func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, response *http.Response) {
 	streaming := strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream")
 	encoded := response.Header.Get("Content-Encoding")
-	stream := codexwire.NewStream(codexwire.MaxBody, a.observe)
+	events := codewire.NewEvents(codewire.MaxBody, func(data []byte) { a.observe(a.observer.Event(data)) })
 	var observed []byte
 	overflow := false
 	buffer := make([]byte, 32<<10)
@@ -435,9 +461,9 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 		if n > 0 {
 			part := buffer[:n]
 			if streaming && (encoded == "" || encoded == "identity") {
-				stream.Write(part)
+				events.Write(part)
 			} else if !overflow {
-				if len(observed)+n <= codexwire.MaxBody {
+				if len(observed)+n <= codewire.MaxBody {
 					observed = append(observed, part...)
 				} else {
 					overflow = true
@@ -456,12 +482,17 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 		}
 		if err != nil {
 			if err == io.EOF && !overflow && (!streaming || encoded != "" && encoded != "identity") {
-				if decoded, err := codexwire.Decode(observed, encoded, codexwire.MaxBody); err == nil {
+				if decoded, err := codewire.Decode(observed, encoded, codewire.MaxBody); err == nil {
 					if streaming {
-						stream.Write(decoded)
+						events.Write(decoded)
 					} else {
-						a.observe(codexwire.Observe(decoded, true))
+						a.observe(a.observer.Unary(decoded))
 					}
+				}
+			}
+			if err == io.EOF && !a.terminal {
+				if o, ok := a.observer.Finish(); ok {
+					a.observe(o)
 				}
 			}
 			if !a.terminal && ctx.Err() == nil {
@@ -485,15 +516,28 @@ func codeRefusal(err error) *codemode.Refusal {
 	return &codemode.Refusal{Status: 503, Code: "code_service_unavailable"}
 }
 
-func codeWriteError(w http.ResponseWriter, err error) {
+// codeWriteError writes a refusal in the envelope of the request's surface:
+// Anthropic's for a route's Messages paths, OpenAI's otherwise.
+func codeWriteError(w http.ResponseWriter, r *http.Request, err error) {
 	refusal := codeRefusal(err)
-	writeError(w, &Error{Status: refusal.Status, Code: refusal.Code, Type: "code_mode_error", Message: refusal.Code})
+	surface, kind := requestSurface(r), "code_mode_error"
+	if surface == "anthropic" {
+		switch refusal.Status {
+		case 400, 409, 413, 415, 422:
+			kind = "invalid_request_error"
+		case 401:
+			kind = "authentication_error"
+		case 403:
+			kind = "permission_error"
+		}
+	}
+	writeSurfaceError(w, &Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: refusal.Code}, surface)
 }
 
 func (s *Server) codeRefuse(w http.ResponseWriter, r *http.Request, route codemode.Route, keyID string, err error) {
 	refusal := codeRefusal(err)
 	s.recordCodeRefusal(r.Context(), route, keyID, refusal.Code)
-	codeWriteError(w, refusal)
+	codeWriteError(w, r, refusal)
 }
 
 func (s *Server) recordCodeRefusal(ctx context.Context, route codemode.Route, keyID, code string) {

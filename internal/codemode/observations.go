@@ -92,6 +92,18 @@ func (a Allowance) validateObservations() error {
 	return nil
 }
 
+// Observation is what one upstream event or unary body reports, read from a
+// copy of the forwarded bytes.
+type Observation struct {
+	Terminal   bool
+	Successful bool
+	Outcome    *Outcome
+	Usage      Usage
+	ResponseID string
+	Status     int
+	Allowance  *Allowance
+}
+
 // Outcome is bounded diagnostic metadata, independent of token settlement.
 type Outcome struct {
 	Origin         string
