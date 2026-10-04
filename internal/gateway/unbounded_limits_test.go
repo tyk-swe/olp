@@ -68,3 +68,54 @@ func TestCostAdmissionFailsClosedOnAccountingLoss(t *testing.T) {
 		}
 	}
 }
+
+func TestCostAccountingChecksOnlyBudgetedAdmissionBeforeReservation(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		key, group, rate bool
+		wantChecks       int
+	}{
+		{name: "unlimited"},
+		{name: "rate only", rate: true},
+		{name: "key budget", key: true, wantChecks: 1},
+		{name: "group budget", group: true, wantChecks: 1},
+		{name: "both budgets", key: true, group: true, wantChecks: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			authority := access.Authority{ID: benchOwner, LookupID: "lookup_test"}
+			var requests int64
+			if tc.rate {
+				requests = 600
+				authority.Policy.RequestsPerMinute = &requests
+			}
+			if tc.key {
+				authority.Policy.DailyCostLimit = stringptr("1.00")
+			}
+			if tc.group {
+				id := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"
+				authority.BudgetGroupID = &id
+				authority.BudgetGroupMonthlyCostLimit = stringptr("1.00")
+			}
+			client := newAllowing(requests, 0, 100, false)
+			admission := newAdmission(t, client)
+			checks := 0
+			admission.CostAccountingReady = func(ctx context.Context) error {
+				checks++
+				if client.calls.Load() != 0 {
+					t.Fatal("reserved cost before checking accounting")
+				}
+				if _, ok := ctx.Deadline(); !ok {
+					t.Fatal("accounting check has no deadline")
+				}
+				return nil
+			}
+			_, e := admission.reserveKeyCosted(t.Context(), authority, "openai", 100, time.Minute, costReservation{amount: "0.01", requestID: benchOwner})
+			if e != nil {
+				t.Fatal(e)
+			}
+			if checks != tc.wantChecks {
+				t.Fatalf("accounting checks=%d, want%d", checks, tc.wantChecks)
+			}
+		})
+	}
+}

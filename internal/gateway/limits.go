@@ -193,6 +193,21 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 	return a.reserveKeyCosted(ctx, authority, surface, estimate, ttl, costReservation{})
 }
 
+// checkCostAccounting runs only for a cost budget, before its reservation.
+// Keeping it off the unlimited path avoids inspecting cost policy and creating
+// a deadline for keys whose admission does not depend on accounting.
+func (a *Admission) checkCostAccounting(ctx context.Context) *Error {
+	if a == nil || a.CostAccountingReady == nil {
+		return nil
+	}
+	check, cancel := context.WithTimeout(ctx, reserveTimeout)
+	defer cancel()
+	if err := a.CostAccountingReady(check); err != nil {
+		return serverError(http.StatusServiceUnavailable, "cost_accounting_incomplete", "Cost budgets cannot admit work while accounting is incomplete.")
+	}
+	return nil
+}
+
 // reserveKeyCosted admits one request against the API key budgets and, for a
 // request that can be priced, reserves its estimated cost against the cost
 // budgets of the key and its budget group beside the spend already accrued. The
@@ -200,16 +215,11 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 // key's, so the one handle the request keeps finishes both. A budget that
 // refuses the request after the group's was taken gives the group's back.
 func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
-	if costBudgeted(authority) && a != nil && a.CostAccountingReady != nil {
-		check, cancel := context.WithTimeout(ctx, reserveTimeout)
-		err := a.CostAccountingReady(check)
-		cancel()
-		if err != nil {
-			return nil, serverError(http.StatusServiceUnavailable, "cost_accounting_incomplete", "Cost budgets cannot admit work while accounting is incomplete.")
-		}
-	}
 	var group *limits.Lease
 	if request := groupRequest(authority, ttl); request != nil {
+		if e := a.checkCostAccounting(ctx); e != nil {
+			return nil, e
+		}
 		if !a.ready() {
 			return nil, limitsUnavailable()
 		}
@@ -236,6 +246,11 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Autho
 		// Nothing to enforce, so nothing to store: a key without hard limits
 		// reaches Valkey only for the group it belongs to.
 		return group, nil
+	}
+	if group == nil && request.HasCostBudget() {
+		if e := a.checkCostAccounting(ctx); e != nil {
+			return nil, e
+		}
 	}
 	if !a.ready() {
 		return nil, limitsUnavailable()
