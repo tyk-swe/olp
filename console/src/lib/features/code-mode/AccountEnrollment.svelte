@@ -13,7 +13,7 @@
     type GrantEnrollmentCompletion
   } from '$lib/features/providers/api/grants';
   import GrantEnrollmentPanel from '$lib/features/providers/GrantEnrollmentPanel.svelte';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage, unanswered } from '$lib/api/http';
 
   let {
     providerId,
@@ -82,7 +82,12 @@
     let interval: number | null = null;
     await run('poll', async () => {
       if (!enrollment) return;
-      const result = await pollGrantEnrollment(enrollment);
+      const result = await pollGrantEnrollment(enrollment).catch(
+        (e: unknown) => {
+          if (!unanswered(e)) enrollment = null;
+          throw e;
+        }
+      );
       if (result.completion) await completed(result.completion);
       else if (result.status === 'pending')
         interval = result.interval ?? enrollment.device?.interval ?? null;

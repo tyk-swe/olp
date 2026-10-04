@@ -762,6 +762,53 @@ it.each(['automatic', 'manual'])(
   }
 );
 
+it.each([
+  [404, 'not_found'],
+  [409, 'grant_enrollment_used'],
+  [410, 'grant_enrollment_expired'],
+  [422, 'grant_enrollment_failed']
+])('stops device polling after %s %s', async (status, code) => {
+  vi.mocked(startGrantEnrollment).mockResolvedValue({
+    id: 'device-enrollment',
+    provider_id: provider.id,
+    slot_id: 'slot',
+    device: {
+      verification_url: 'https://login.example/device',
+      user_code: 'WDJB-MJHT',
+      interval: 5
+    },
+    expires_at: '2026-10-02T23:00:00Z'
+  });
+  vi.mocked(pollGrantEnrollment).mockRejectedValue(
+    new ApiProblem({
+      status,
+      type: `https://openllmproxy.dev/problems/${code}`,
+      title: 'This enrollment ended. Start another.'
+    })
+  );
+  await render();
+  await click('Create account');
+  field('code-provider', provider.id);
+  await settle();
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  button('Enroll subscription account').click();
+  await vi.advanceTimersByTimeAsync(5000);
+  flushSync();
+
+  expect(pollGrantEnrollment).toHaveBeenCalledOnce();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+    'This enrollment ended. Start another.'
+  );
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(pollGrantEnrollment).toHaveBeenCalledOnce();
+  expect(button('Enroll subscription account').disabled).toBe(false);
+  button('Enroll subscription account').click();
+  await vi.advanceTimersByTimeAsync(0);
+  flushSync();
+  expect(startGrantEnrollment).toHaveBeenCalledTimes(2);
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+
 it('retains explicit pool memberships and makes ownership immutable', async () => {
   await render();
   await click('Pools');
