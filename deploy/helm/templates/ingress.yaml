@@ -32,7 +32,7 @@ spec:
           # Kubernetes Prefix matching chooses these inference routes before the
           # root console route. No rewrite is used: the gateway receives its public
           # protocol paths unchanged.
-          {{- range $path := list "/v1" "/v1beta" "/native" "/anthropic" "/gemini" "/bedrock" "/ws" }}
+          {{- range $path := list "/v1" "/v1beta" "/native" "/anthropic" "/gemini" "/bedrock" "/ws" "/code" }}
           - path: {{ $path }}
             pathType: Prefix
             backend:

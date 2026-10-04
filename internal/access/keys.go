@@ -492,7 +492,7 @@ func checkKeyRoutes(r *http.Request, q Queryer, routes []string, projectID *stri
 		return nil
 	}
 	var mismatched bool
-	if err := q.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.routes WHERE slug=ANY($1::text[]) AND project_id IS DISTINCT FROM $2::uuid)", routes, projectID).Scan(&mismatched); err != nil {
+	if err := q.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM (SELECT slug,project_id FROM olp.routes UNION ALL SELECT slug,project_id FROM olp.code_routes) r WHERE slug=ANY($1::text[]) AND project_id IS DISTINCT FROM $2::uuid)", routes, projectID).Scan(&mismatched); err != nil {
 		return err
 	}
 	if mismatched {

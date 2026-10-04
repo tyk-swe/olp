@@ -182,11 +182,19 @@ func (r *Refresher) refresh(ctx context.Context, conn *pgx.Conn, credentialID st
 // slots, the provider's active revision before its draft. It is NULL when no
 // configuration uses the grant, which is then retired.
 const using = `coalesce(
+	(SELECT (v.connections->c.provider_id::text)::json
+	 FROM olp.code_routes r JOIN olp.code_route_revisions v ON v.id=r.latest_revision_id
+	 WHERE EXISTS (SELECT 1 FROM olp.code_accounts a WHERE a.credential_id=c.id
+	   AND a.provider_id=c.provider_id AND a.principal=c.principal AND a.project_id=r.project_id)
+	 AND v.connections->c.provider_id::text->>'profile_revision'=c.plugin_digest
+	 ORDER BY v.published_at DESC,v.id DESC LIMIT 1),
 	(SELECT r.configuration FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id
 		WHERE p.id=c.provider_id AND r.configuration->>'profile_revision'=c.plugin_digest
 		AND r.slots @> jsonb_build_array(jsonb_build_object('credential_id',c.id))),
 	(SELECT p.configuration FROM olp.providers p WHERE p.id=c.provider_id AND p.configuration->>'profile_revision'=c.plugin_digest
-		AND EXISTS (SELECT 1 FROM olp.provider_slots s WHERE s.provider_id=p.id AND s.credential_id=c.id)))`
+		AND (EXISTS (SELECT 1 FROM olp.provider_slots s WHERE s.provider_id=p.id AND s.credential_id=c.id)
+		OR EXISTS (SELECT 1 FROM olp.code_accounts a WHERE a.credential_id=c.id
+		  AND a.provider_id=c.provider_id AND a.principal=c.principal AND a.project_id=p.project_id))))`
 
 // dueCondition is what makes a grant g, over its credential version c, due: it
 // holds a refresh token, its credential version is not revoked, and it is
