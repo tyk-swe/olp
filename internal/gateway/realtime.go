@@ -228,6 +228,10 @@ func realtimeMember(object oif.Value, name string) (oif.Value, bool) {
 	found := false
 	for _, member := range object.Members() {
 		if strings.EqualFold(member.Name, name) {
+			if found {
+				// An alias must not hide an earlier malformed accounting field.
+				return oif.Value{}, true
+			}
 			value, found = member.Value, true
 		}
 	}
