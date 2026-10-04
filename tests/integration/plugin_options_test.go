@@ -74,11 +74,19 @@ func TestPluginOptionsPlaceTheUpstreamAddress(t *testing.T) {
 	}
 	serve("acme")
 
-	// Moving the provider to another workspace is a new revision.
+	// Moving to another workspace requires revoking and explicitly replacing
+	// credentials before publishing a new revision.
 	detail := h.want(owner, "GET", path, nil, nil, 200)
 	moved := detail["configuration"].(map[string]any)
 	moved["options"].(map[string]any)["plugin_options"] = map[string]any{"workspace": "beta"}
+	refusal := h.want(owner, "PATCH", path, map[string]any{"name": "Workspace", "configuration": moved}, etagHeader(detail), 422)
+	if problemCode(t, refusal) != "credential_destination_changed" {
+		t.Fatalf("destination change retained credentials: %v", refusal)
+	}
+	revokePluginCredentials(t, h, owner, path)
+	detail = h.want(owner, "GET", path, nil, nil, 200)
 	h.want(owner, "PATCH", path, map[string]any{"name": "Workspace", "configuration": moved}, etagHeader(detail), 200)
+	replacePluginCredential(t, h, owner, path)
 	certifyPluginProvider(t, h, owner, path)
 	diff := h.want(owner, "GET", path+"/revisions/diff?from=1&to=2", nil, nil, 200)
 	if diff["plugin_options_changed"] != true || diff["endpoint_changed"] != true || diff["plugin_changed"] != false || diff["profile_changed"] != false {
@@ -96,14 +104,16 @@ func TestPluginOptionsPlaceTheUpstreamAddress(t *testing.T) {
 		t.Fatalf("exported options %v", options)
 	}
 	options["plugin_options"] = map[string]any{"workspace": "gamma"}
-	planned := h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 200)
+	revokePluginCredentials(t, h, owner, path)
+	importBody := map[string]any{"document": document, "secret_bindings": map[string]any{"Workspace/default": pluginCredential}}
+	planned := h.want(owner, "POST", "/api/v1/configuration/plan", importBody, nil, 200)
 	if !slices.ContainsFunc(planned["actions"].([]any), func(action any) bool {
 		item := action.(map[string]any)
 		return item["kind"] == "provider" && item["key"] == "Workspace" && item["action"] == "replace"
 	}) || len(planned["blockers"].([]any)) != 0 || len(planned["conflicts"].([]any)) != 0 {
 		t.Fatalf("import plan %v", planned)
 	}
-	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem(uuid.NewString()), 200)
+	h.want(owner, "POST", "/api/v1/configuration/apply", importBody, idem(uuid.NewString()), 200)
 	imported := h.want(owner, "GET", path, nil, nil, 200)["configuration"].(map[string]any)
 	if imported["endpoint"] != upstream.URL+"/v1/workspaces/gamma" || fmt.Sprint(imported["options"].(map[string]any)["plugin_options"]) != "map[workspace:gamma]" {
 		t.Fatalf("imported %v", imported)

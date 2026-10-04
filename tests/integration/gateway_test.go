@@ -592,7 +592,9 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 
 	// Draft edits never change serving traffic until activation.
 	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
-	edited := h.want(owner, "PATCH", providerPath, map[string]any{"name": "Fixture vendor (edited)", "configuration": configuration(up.URL + "/elsewhere/v1")}, etagHeader(detail), 200)
+	draftConfiguration := detail["configuration"].(map[string]any)
+	draftConfiguration["options"].(map[string]any)["parameter_defaults"] = map[string]any{"temperature": 0.2}
+	edited := h.want(owner, "PATCH", providerPath, map[string]any{"name": "Fixture vendor (edited)", "configuration": draftConfiguration}, etagHeader(detail), 200)
 	if edited["pending_activation"] != true || edited["certified_capability_count"] != float64(0) {
 		t.Fatalf("transport change must invalidate evidence: %v", edited)
 	}
