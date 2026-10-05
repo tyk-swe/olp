@@ -7,7 +7,7 @@ on:
         type: choice
         required: true
         default: openai
-        options: [openai, anthropic, gemini, azure_openai, vertex, bedrock, sagemaker, watsonx]
+        options: [openai, anthropic, gemini, azure_openai, vertex, vertex-openai, bedrock, bedrock-rerank, bedrock-image, sagemaker, watsonx, mistral-fim, cohere-chat]
 permissions:
   contents: read
 jobs:
@@ -42,7 +42,7 @@ jobs:
           OLP_AZURE_OPENAI_LIVE_API_VERSION: ${{ vars.OLP_AZURE_OPENAI_LIVE_API_VERSION }}
           OLP_AZURE_OPENAI_LIVE_API_KEY: ${{ secrets.OLP_AZURE_OPENAI_LIVE_API_KEY }}
         run: go test -tags=liveproviders -count=1 -timeout=2m ./internal/connectors -run TestLiveProvider
-      - if: inputs.provider == 'vertex'
+      - if: inputs.provider == 'vertex' || inputs.provider == 'vertex-openai'
         env:
           OLP_VERTEX_LIVE_PROJECT: ${{ vars.OLP_VERTEX_LIVE_PROJECT }}
           OLP_VERTEX_LIVE_LOCATION: ${{ vars.OLP_VERTEX_LIVE_LOCATION }}
@@ -54,7 +54,7 @@ jobs:
           printf '%s' "$OLP_GOOGLE_CREDENTIALS_JSON" > "$GOOGLE_APPLICATION_CREDENTIALS"
           trap 'rm -f "$GOOGLE_APPLICATION_CREDENTIALS"' EXIT
           go test -tags=liveproviders -count=1 -timeout=2m ./internal/connectors -run TestLiveProvider
-      - if: inputs.provider == 'bedrock'
+      - if: inputs.provider == 'bedrock' || inputs.provider == 'bedrock-rerank' || inputs.provider == 'bedrock-image'
         env:
           OLP_BEDROCK_LIVE_REGION: ${{ vars.OLP_BEDROCK_LIVE_REGION }}
           OLP_BEDROCK_LIVE_MODEL: ${{ vars.OLP_BEDROCK_LIVE_MODEL }}
@@ -75,4 +75,9 @@ jobs:
           OLP_WATSONX_LIVE_REGION: ${{ vars.OLP_WATSONX_LIVE_REGION }}
           OLP_WATSONX_LIVE_PROJECT: ${{ vars.OLP_WATSONX_LIVE_PROJECT }}
           OLP_WATSONX_LIVE_API_KEY: ${{ secrets.OLP_WATSONX_LIVE_API_KEY }}
+        run: go test -tags=liveproviders -count=1 -timeout=2m ./internal/connectors -run TestLiveProvider
+      - if: inputs.provider == 'mistral-fim' || inputs.provider == 'cohere-chat'
+        env:
+          OLP_LIVE_MISTRAL_API_KEY: ${{ secrets.OLP_LIVE_MISTRAL_API_KEY }}
+          OLP_LIVE_COHERE_API_KEY: ${{ secrets.OLP_LIVE_COHERE_API_KEY }}
         run: go test -tags=liveproviders -count=1 -timeout=2m ./internal/connectors -run TestLiveProvider

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -82,10 +83,57 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 		c.CloudRegion = require("OLP_SAGEMAKER_LIVE_REGION")
 		// The endpoint, or endpoint/inference-component.
 		model = require("OLP_SAGEMAKER_LIVE_MODEL")
+	case "vertex-openai":
+		c.Kind, c.AuthMode, c.ProfileID, c.ProfileRevision = "vertex_ai", "adc", "vertex-openai", ProfileRevision
+		c.CloudProject = require("OLP_VERTEX_LIVE_PROJECT")
+		c.CloudRegion = require("OLP_VERTEX_LIVE_LOCATION")
+		c.Endpoint = DefaultProfileEndpoint(c.Kind, c.ProfileID, c.CloudRegion, c.CloudProject)
+		if model == "" {
+			model = "google/gemini-2.5-flash"
+		}
+	case "mistral-fim":
+		c.Kind, c.ProfileID, c.ProfileRevision, c.VendorID = "openai_compatible", "mistral-fim", ProfileRevision, "mistral"
+		c.Endpoint = "https://api.mistral.ai/v1"
+		secret = require("OLP_LIVE_MISTRAL_API_KEY")
+		wire = openai.FamilyMistralFIM
+		if model == "" {
+			model = "codestral-latest"
+		}
+	case "cohere-chat":
+		c.Kind, c.ProfileID, c.ProfileRevision, c.VendorID = "openai_compatible", "cohere-v2", ProfileRevision, "cohere-native-v2"
+		c.Endpoint = "https://api.cohere.ai/v2"
+		secret = require("OLP_LIVE_COHERE_API_KEY")
+		wire = openai.FamilyCohereChat
+		if model == "" {
+			model = "command-a-03-2025"
+		}
+	case "bedrock-rerank":
+		c.Kind, c.AuthMode, c.VendorID = "bedrock", "default_chain", "amazon-bedrock"
+		c.CloudRegion = require("OLP_BEDROCK_LIVE_REGION")
+		wire = openai.FamilyBedrockRerank
+		if model == "" {
+			model = "cohere.rerank-v3-5:0"
+		}
+	case "bedrock-image":
+		c.Kind, c.AuthMode, c.VendorID = "bedrock", "default_chain", "amazon-bedrock"
+		c.CloudRegion = require("OLP_BEDROCK_LIVE_REGION")
+		if model == "" {
+			model = "stability.stable-image-core-v1:1"
+		}
 	default:
 		t.Fatalf("unsupported provider %q", provider)
 	}
 	body["model"] = model
+	switch provider {
+	case "mistral-fim":
+		body = map[string]any{"model": model, "prompt": "def add(a, b):\n    return ", "suffix": "\n", "max_tokens": 16}
+	case "bedrock-rerank":
+		body = map[string]any{"queries": []any{map[string]any{"type": "TEXT", "textQuery": map[string]string{"text": "What is Amazon Bedrock?"}}},
+			"sources":                []any{map[string]any{"type": "INLINE", "inlineDocumentSource": map[string]any{"type": "TEXT", "textDocument": map[string]string{"text": "Amazon Bedrock is a managed service for foundation models."}}}},
+			"rerankingConfiguration": map[string]any{"type": "BEDROCK_RERANKING_MODEL", "bedrockRerankingConfiguration": map[string]any{"modelConfiguration": map[string]string{"modelArn": c.BedrockModelARN(model)}}}}
+	case "bedrock-image":
+		body = map[string]any{"prompt": "A small blue square."}
+	}
 	if wire == openai.FamilyGemini {
 		body = map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": "Reply with the word hello."}}}}, "generationConfig": map[string]int{"maxOutputTokens": 32}}
 	}
@@ -100,6 +148,9 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	endpoint, err := c.URL(wire, model, false)
+	if provider == "bedrock-image" {
+		endpoint, err = c.MediaURL("model/"+url.PathEscape(model)+"/invoke", model, nil)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
