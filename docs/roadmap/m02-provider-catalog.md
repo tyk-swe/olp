@@ -142,6 +142,7 @@ Reviewed on 2026-10-05 against each vendor's own documentation.
 
 | Target | Outcome | Source |
 | --- | --- | --- |
+| Azure OpenAI media | Image generation, speech and transcription through deployments, certified by the smallest real call, as Vertex and Bedrock images are; Azure offers no costless proof. Azure Sora video is declined: its only remaining version retires on 2026-10-15. | [Azure OpenAI preview reference](https://learn.microsoft.com/en-us/azure/foundry/openai/reference-preview), [retirement schedule](https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/model-retirement-schedule) |
 | Jina AI | A `jina` preset for embeddings and rerank; `encoding_format` reaches Jina as `embedding_type`. | [Jina API](https://api.jina.ai/openapi.json) |
 | Together AI rerank | The `together` preset serves rerank on dedicated endpoints, metered by its token usage. | [Together rerank](https://docs.together.ai/reference/rerank-1) |
 | Infinity | An `infinity` self-hosted preset for embeddings and Cohere-protocol rerank. | [Infinity API](https://github.com/michaelfeil/infinity/blob/main/docs/assets/openapi.json) |

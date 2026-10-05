@@ -83,7 +83,6 @@ func TestMediaCertificationDoesNotBorrowChatEvidence(t *testing.T) {
 		{Kind: KindOpenAI, AuthMode: AuthNone},
 		{Kind: KindOpenAI, AuthMode: AuthAPIKey, Endpoint: new("https://api.openai.com/custom")},
 		{Kind: KindOpenAICompatible, AuthMode: AuthAPIKey, Endpoint: new(DefaultOpenAIEndpoint)},
-		{Kind: KindAzure, AuthMode: AuthAPIKey, Endpoint: new("https://example.openai.azure.com")},
 	} {
 		t.Run(cfg.Kind+"/"+cfg.AuthMode+"/"+value(cfg.Endpoint), func(t *testing.T) {
 			cfg.Normalize()
@@ -105,9 +104,60 @@ func TestMediaCertificationDoesNotBorrowChatEvidence(t *testing.T) {
 				if kind != KindAzure {
 					t.Errorf("%s advertises un-certifiable tuple %v", kind, tuple)
 				}
+			case "image_generation", "speech", "transcription":
+				// An Azure deployment certifies these by its own minimal call.
+				if kind != KindAzure || tuple.Mode != ModeUnary {
+					t.Errorf("%s advertises un-certifiable tuple %v", kind, tuple)
+				}
 			default:
 				t.Errorf("%s advertises un-certifiable tuple %v", kind, tuple)
 			}
 		}
 	}
 }
+
+// TestAzureMediaCertifiesThroughTheDeployment covers Azure OpenAI's media
+// certification: the smallest real call of each operation to the
+// deployment, and no media through the v1 API, which serves none.
+func TestAzureMediaCertifiesThroughTheDeployment(t *testing.T) {
+	cfg := Configuration{Kind: KindAzure, AuthMode: AuthAPIKey, Endpoint: new("https://example.openai.azure.com"), Deployment: new("media"), APIVersion: new("2025-04-01-preview")}
+	cfg.Normalize()
+	s := New(nil, &egress.Policy{}, nil)
+	seen := map[string]string{}
+	s.client.Transport = mediaProbeTransport(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		seen[r.URL.Path] = string(body)
+		if r.Header.Get("Api-Key") != "test-credential" || r.URL.Query().Get("api-version") != "2025-04-01-preview" {
+			t.Errorf("probe %s lacks the key or API version", r.URL)
+		}
+		reply := `{"created":1,"data":[{"b64_json":"aW1hZ2U="}]}`
+		contentType := "application/json"
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/audio/speech"):
+			reply, contentType = "audio", "audio/mpeg"
+		case strings.HasSuffix(r.URL.Path, "/audio/transcriptions"):
+			reply = `{"text":""}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(reply)), Request: r}, nil
+	})
+	for _, operation := range []string{"image_generation", "speech", "transcription"} {
+		if err := s.certifyTuple(t.Context(), &cfg, []byte("test-credential"), "media", CapabilityInput{operation, "openai", "unary"}, 4096); err != nil {
+			t.Fatalf("certify %s: %v", operation, err)
+		}
+	}
+	if image := seen["/openai/deployments/media/images/generations"]; !strings.Contains(image, `"quality":"low"`) || !strings.Contains(image, `"n":1`) {
+		t.Fatalf("image probe = %s", image)
+	}
+	if speech := seen["/openai/deployments/media/audio/speech"]; !strings.Contains(speech, `"input":"OK"`) {
+		t.Fatalf("speech probe = %s", speech)
+	}
+	if transcription := seen["/openai/deployments/media/audio/transcriptions"]; !strings.Contains(transcription, "RIFF") || !strings.Contains(transcription, `name="model"`) {
+		t.Fatalf("transcription probe = %q", transcription)
+	}
+	v1 := Configuration{Kind: KindAzure, AuthMode: AuthAPIKey, ProfileID: "azure-v1-chat", ProfileRevision: "1", Endpoint: new("https://example.openai.azure.com")}
+	v1.Normalize()
+	if err := s.certifyAzureMedia(t.Context(), &v1, []byte("test-credential"), "media", "speech"); err == nil {
+		t.Fatal("Azure v1 certified speech")
+	}
+}
+

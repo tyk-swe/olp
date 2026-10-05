@@ -279,8 +279,8 @@ func certifiable(kind, vendor string, c CapabilityInput) bool {
 	case "bedrock_invoke":
 		return kind == KindBedrock
 	case "image_generation":
-		return kind == KindOpenAI || kind == KindVertex || kind == KindBedrock || reviewedMedia(kind, vendor, c.Operation) && c.Mode == ModeUnary
+		return kind == KindOpenAI || kind == KindVertex || kind == KindBedrock || (reviewedMedia(kind, vendor, c.Operation) || azureMedia(kind, c.Operation)) && c.Mode == ModeUnary
 	default:
-		return kind == KindOpenAI || reviewedMedia(kind, vendor, c.Operation) && c.Mode == ModeUnary
+		return kind == KindOpenAI || (reviewedMedia(kind, vendor, c.Operation) || azureMedia(kind, c.Operation)) && c.Mode == ModeUnary
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"slices"
@@ -77,6 +78,11 @@ func classify(err error) *probeError {
 // call performs one bounded upstream request. The body is capped and never
 // retained beyond the caller's parsing.
 func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte) (int, []byte, error) {
+	return s.callAs(ctx, cfg, credential, method, path, body, "application/json")
+}
+
+// callAs is call with a body of another content type, such as a form.
+func (s *Server) callAs(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte, contentType string) (int, []byte, error) {
 	base, err := s.Egress.ValidateEndpoint(*cfg.Endpoint)
 	if err != nil {
 		return 0, nil, &probeError{Code: "invalid_endpoint", Detail: err.Error()}
@@ -115,7 +121,7 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 	}
 	req.Header.Set("User-Agent", "olp/probe")
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 	transport := cfg.transport()
 	sensitive, err := s.auth.Apply(ctx, req, transport, credential, body)
@@ -759,6 +765,9 @@ func (s *Server) certifyNativeMedia(ctx context.Context, cfg *Configuration, cre
 	if tuple.Operation == "image_generation" && (cfg.Kind == KindVertex || cfg.Kind == KindBedrock) {
 		return s.certifyNativeImage(ctx, cfg, credential, model)
 	}
+	if azureMedia(cfg.Kind, tuple.Operation) {
+		return s.certifyAzureMedia(ctx, cfg, credential, model, tuple.Operation)
+	}
 	if vendor := value(cfg.Options.VendorID); reviewedMedia(cfg.Kind, vendor, tuple.Operation) {
 		return s.certifyVendorMedia(ctx, cfg, credential, vendor)
 	}
@@ -778,6 +787,78 @@ func (s *Server) certifyNativeMedia(ctx context.Context, cfg *Configuration, cre
 		return nil
 	}
 	return &probeError{Code: "model_unavailable", Detail: "The credential cannot discover the requested media model."}
+}
+
+// azureMediaOperations are the media operations an Azure OpenAI deployment
+// certifies: the minimum set that unblocks most deployments.
+var azureMediaOperations = []string{"image_generation", "speech", "transcription"}
+
+func azureMedia(kind, operation string) bool {
+	return kind == KindAzure && slices.Contains(azureMediaOperations, operation)
+}
+
+// certifyAzureMedia proves an Azure OpenAI deployment serves a media
+// operation the only way Azure allows: by the smallest real call, as Vertex
+// and Bedrock image certification does. It bills a low-quality image, two
+// characters of speech, or a tenth of a second of silence.
+func (s *Server) certifyAzureMedia(ctx context.Context, cfg *Configuration, credential []byte, model, operation string) error {
+	transport := cfg.transport()
+	if transport.Hosting() == "azure-v1" {
+		return &probeError{Code: "capability_unavailable", Detail: "Azure OpenAI serves media through deployments; its v1 API offers none."}
+	}
+	one, low := int64(1), "low"
+	request := &media.Request{Op: operation, Route: "certification", Prompt: "A small blue square.", Count: &one, Quality: &low, Input: "OK", Voice: "alloy"}
+	var body []byte
+	contentType := "application/json"
+	if operation == "transcription" {
+		var form bytes.Buffer
+		writer := multipart.NewWriter(&form)
+		_ = writer.WriteField("model", transport.Model(model))
+		part, _ := writer.CreateFormFile("file", "silence.wav")
+		_, _ = part.Write(media.SilentWAV(100))
+		_ = writer.Close()
+		body, contentType = form.Bytes(), writer.FormDataContentType()
+		request.File = &media.Part{}
+	}
+	call, failure := media.Encode(request, cfg.Kind, transport.Model(model))
+	if failure != nil {
+		return &probeError{Code: "capability_unavailable", Detail: failure.Message}
+	}
+	if call.JSON != nil {
+		body = call.JSON
+	}
+	endpoint, err := transport.MediaURL(call.Path, model, call.Query)
+	if err != nil {
+		return &probeError{Code: "capability_unavailable", Detail: "The media probe endpoint could not be built."}
+	}
+	status, data, err := s.callAs(ctx, cfg, credential, http.MethodPost, endpoint, body, contentType)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return statusError(cfg, status, data)
+	}
+	switch operation {
+	case "image_generation":
+		_, mErr := media.DecodeImageResponse(data, func(b64 string, index int) (*media.Artifact, *media.Error) {
+			if _, err := base64.StdEncoding.DecodeString(b64); err != nil {
+				return nil, media.Fail(502, "provider_protocol_error", "The provider image payload is not valid base64.")
+			}
+			return &media.Artifact{}, nil
+		})
+		if mErr != nil {
+			return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
+		}
+	case "transcription":
+		if _, mErr := media.DecodeTranscriptionJSON(data); mErr != nil {
+			return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
+		}
+	default:
+		if len(data) == 0 {
+			return &probeError{Code: "provider_protocol_error", Detail: "The upstream returned no audio."}
+		}
+	}
+	return nil
 }
 
 // certifyVendorMedia proves a reviewed vendor's media operation without

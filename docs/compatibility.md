@@ -368,7 +368,8 @@ preset; Voyage, Jina, Together and Infinity rerank post to the configured base
 plus `/rerank`, and refuse `truncation` except at Voyage. Jina receives the
 OpenAI `encoding_format` as its `embedding_type`. Azure OpenAI supports generation and token
 counting on OpenAI, Anthropic, and Gemini surfaces, plus OpenAI-surface
-embeddings and moderation. It also supports the qualified file, batch, realtime,
+embeddings, moderation, and unary image generation, speech and transcription
+through deployments; see [Azure media](providers/azure.md#media). It also supports the qualified file, batch, realtime,
 and stored-response paths above; image, audio, and video operations remain
 uncertifiable. See [certification eligibility](../internal/providers/kinds.go).
 
