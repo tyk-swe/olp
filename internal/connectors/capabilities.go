@@ -21,6 +21,11 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 		// surfaces reach through translation.
 		return operation == "generation" && surface != "bedrock" && (mode == "unary" || mode == "streaming")
 	}
+	if kind == KindSageMaker {
+		// An endpoint's container serves chat completions; like any generic
+		// OpenAI-compatible server, it gains no native surface of its own.
+		return operation == "generation" && surface == "openai" && (mode == "unary" || mode == "streaming") && vendors.Serves(vendor, operation)
+	}
 	if kind != "openai" && kind != "openai_compatible" && kind != "anthropic" && kind != "gemini" && kind != "vertex_ai" && kind != "azure_openai" && kind != "bedrock" {
 		return false
 	}

@@ -88,8 +88,13 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 			h := newAccessHarness(t)
 			owner := h.owner()
 			model := vendorModel
-			if profile.ID == "bedrock-invoke" {
+			switch profile.Hosting {
+			case "bedrock-invoke":
 				model = "amazon.titan-embed-text-v2:0"
+			case "vertex-openai":
+				model = "meta/" + vendorModel
+			case "sagemaker-openai":
+				model = "fixture-endpoint/fixture-component"
 			}
 			type invocation struct {
 				path    string
@@ -151,8 +156,11 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 					return
 				}
 				kind := profile.Kind
-				if profile.Dialect == "anthropic-messages" {
+				switch profile.Dialect {
+				case "anthropic-messages":
 					kind = "anthropic"
+				case "openai-chat":
+					kind = "openai"
 				}
 				kindGeneration(w, kind, stream)
 			}))
@@ -172,17 +180,25 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 				cfg["cloud_project"] = "fixture-project"
 				cfg["cloud_region"] = "us-central1"
 				cfg["auth_mode"] = "adc"
-				publisher := "google"
-				if profile.ID == "vertex-anthropic" {
-					publisher = "anthropic"
+				address := "/publishers/google"
+				switch profile.ID {
+				case "vertex-anthropic":
+					address = "/publishers/anthropic"
+				case "vertex-openai":
+					address = "/endpoints/openapi"
 				}
-				cfg["endpoint"] = upstream.URL + "/v1/projects/fixture-project/locations/us-central1/publishers/" + publisher
+				cfg["endpoint"] = upstream.URL + "/v1/projects/fixture-project/locations/us-central1" + address
 				credential = nil
 			case "bedrock":
 				cfg["endpoint"] = upstream.URL
 				cfg["cloud_region"] = "us-east-1"
 				cfg["auth_mode"] = "static"
 				credential = `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789","session_token":"bedrock-session-token"}`
+			case "sagemaker":
+				cfg["endpoint"] = upstream.URL
+				cfg["cloud_region"] = "us-west-2"
+				cfg["auth_mode"] = "static"
+				credential = `{"access_key_id":"SAGEMAKERKEY12345678","secret_access_key":"sagemaker-secret-123456789"}`
 			}
 			input := map[string]any{"name": "Profile " + profile.ID, "configuration": cfg, "model": model}
 			if credential != nil {
@@ -243,6 +259,10 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 				expectedPath = "/v1/projects/fixture-project/locations/us-central1/publishers/google/models/" + model + ":generateContent"
 			case "vertex-anthropic":
 				expectedPath = "/v1/projects/fixture-project/locations/us-central1/publishers/anthropic/models/" + model + ":rawPredict"
+			case "vertex-openai":
+				expectedPath = "/v1/projects/fixture-project/locations/us-central1/endpoints/openapi/chat/completions"
+			case "sagemaker-openai":
+				expectedPath = "/endpoints/fixture-endpoint/inference-components/fixture-component/openai/v1/chat/completions"
 			case "bedrock-anthropic-invoke":
 				expectedPath = "/model/" + model + "/invoke"
 			}
@@ -273,6 +293,10 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 				if _, exists := expected["model"]; exists {
 					expected["model"], _ = json.Marshal(model)
 				}
+				if profile.Hosting == "sagemaker-openai" {
+					// The URL selects the model.
+					expected["model"] = json.RawMessage(`""`)
+				}
 				if profile.Hosting == "vertex-anthropic" || profile.Hosting == "bedrock-anthropic-invoke" {
 					delete(expected, "model")
 					expected["anthropic_version"], _ = json.Marshal(profile.DialectRevision)
@@ -294,6 +318,9 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 			}
 			if profile.Kind == "vertex_ai" && actual.headers.Get("Authorization") != "Bearer profile-adc-token" {
 				t.Fatal("Vertex access token lost")
+			}
+			if profile.Kind == "sagemaker" && !strings.HasPrefix(actual.headers.Get("Authorization"), "Bearer sagemaker-api-key-") {
+				t.Fatal("SageMaker invocation lost its bearer token")
 			}
 			if profile.Kind == "bedrock" && (!strings.Contains(actual.headers.Get("Authorization"), "/us-east-1/bedrock/aws4_request") || actual.headers.Get("X-Amz-Security-Token") != "bedrock-session-token") {
 				t.Fatal("completed Bedrock invocation was not signed")

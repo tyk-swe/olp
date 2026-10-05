@@ -36,10 +36,10 @@ func golden(t *testing.T, name string, got []byte) {
 
 // goldenVendors are the vendor identifiers the matrix is pinned for: every
 // reviewed vendor, the kinds' own identifiers, and one nobody reviewed.
-var goldenVendors = []string{"", "unreviewed", "openai", "openai_compatible", "anthropic", "google", "google-vertex", "amazon-bedrock", "azure",
+var goldenVendors = []string{"", "unreviewed", "openai", "openai_compatible", "anthropic", "google", "google-vertex", "amazon-bedrock", "amazon-sagemaker", "azure",
 	"groq", "mistral", "openrouter", "together", "vllm", "deepseek", "fireworks", "deepinfra", "huggingface", "cohere", "cohere-native-v2", "voyage"}
 
-var goldenKinds = []string{"openai", "openai_compatible", "anthropic", "gemini", "azure_openai", "vertex_ai", "bedrock", KindPlugin}
+var goldenKinds = []string{"openai", "openai_compatible", "anthropic", "gemini", "azure_openai", "vertex_ai", "bedrock", KindSageMaker, KindPlugin}
 
 var goldenOperations = []string{"generation", "token_count", "embeddings", "moderation", "rerank", "batch", "realtime", "bedrock_invoke",
 	"image_generation", "image_edit", "image_variation", "speech", "transcription", "translation",

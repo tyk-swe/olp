@@ -6557,6 +6557,7 @@
           "gemini",
           "vertex_ai",
           "bedrock",
+          "sagemaker",
           "azure_openai",
           "openai_compatible",
           "plugin"

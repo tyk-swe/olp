@@ -19,6 +19,7 @@ const (
 	KindAzure            = "azure_openai"
 	KindVertex           = "vertex_ai"
 	KindBedrock          = "bedrock"
+	KindSageMaker        = connectors.KindSageMaker
 	KindPlugin           = connectors.KindPlugin
 )
 
@@ -131,6 +132,11 @@ var kinds = withPresets([]kindCapability{
 		AuthModes: []authCapability{{Mode: "adc", Label: "Application default credentials", Credential: "forbidden"}, {Mode: "service_account", Label: "Service account JSON", Credential: "required"}},
 		Fields:    []fieldCapability{{Field: "cloud_project", Label: "Project", Required: true}, {Field: "cloud_region", Label: "Location", Required: true}, endpoint}},
 	{Kind: KindBedrock, Label: "Amazon Bedrock", Description: "Converse, ConverseStream and CountTokens.", DefaultAuthMode: "default_chain",
+		AuthModes: []authCapability{{Mode: "default_chain", Label: "AWS credential chain", Credential: "forbidden"}, {Mode: "static", Label: "AWS credential JSON", Credential: "required"}},
+		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint}},
+	// A SageMaker provider's models are its endpoints, or endpoint/component
+	// for inference components, which operators declare.
+	{Kind: KindSageMaker, Label: "Amazon SageMaker AI", Description: "Real-time endpoints serving OpenAI Chat Completions.", DefaultAuthMode: "default_chain",
 		AuthModes: []authCapability{{Mode: "default_chain", Label: "AWS credential chain", Credential: "forbidden"}, {Mode: "static", Label: "AWS credential JSON", Credential: "required"}},
 		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint}},
 	// A plugin profile supplies the address, credential placement, model

@@ -82,6 +82,7 @@ var profileRegistry = []Profile{
 	{ID: "bedrock-converse", Label: "Bedrock Converse", Kind: "bedrock", Dialect: "bedrock-converse", Hosting: "bedrock-converse"},
 	{ID: "bedrock-anthropic-invoke", Label: "Bedrock Anthropic Invoke", Kind: "bedrock", Dialect: "anthropic-messages", DialectRevision: "bedrock-2023-05-31", Hosting: "bedrock-anthropic-invoke"},
 	{ID: "bedrock-invoke", Label: "Bedrock model-specific Invoke", Kind: "bedrock", Dialect: "bedrock-invoke", Hosting: "bedrock-invoke"},
+	{ID: "sagemaker-openai-chat", Label: "SageMaker OpenAI-compatible Chat Completions", Kind: KindSageMaker, Dialect: "openai-chat", DialectRevision: "v1", Hosting: "sagemaker-openai"},
 }
 
 func init() {
@@ -133,6 +134,10 @@ func init() {
 				p.SemanticHeaders = []string{"Anthropic-Beta"}
 				p.Documentation = "https://platform.claude.com/docs/en/build-with-claude/claude-on-vertex-ai"
 			}
+		case KindSageMaker:
+			p.Authentication = []string{"static", "default_chain"}
+			p.Operations = []string{"generation"}
+			p.Documentation = "https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html"
 		case "bedrock":
 			p.Authentication = []string{"static", "default_chain"}
 			p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html"

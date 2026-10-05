@@ -686,8 +686,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	fact.Status = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
-		f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw))}
-		class := st.rejected(resp.StatusCode, f.upstream)
+		status, raw := cfg.Rejection(resp.StatusCode, raw)
+		f := &attemptFailure{status: status, upstream: x.redacted(openai.ParseErrorBody(raw))}
+		class := st.rejected(status, f.upstream)
 		if class == classRateLimit {
 			f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.now())
 		}

@@ -27,6 +27,9 @@ surfaces. Current protocol, connector, SDK, and media tests are described in
 | `qualified` | Restricted to the provider, model family, or resource policy described below; exact capabilities still require certification. |
 | `reviewed` | Available only through the named compatible-vendor profiles and certified models. |
 
+The `sagemaker` kind serves only generation on the OpenAI surface, as the
+`openai_compatible` column shows; see [SageMaker AI](providers/sagemaker.md).
+
 `native` means the upstream speaks the incoming wire protocol. Bedrock Converse
 is native on the Bedrock surface and translated on OpenAI, Anthropic, and Gemini
 surfaces. Native traffic still undergoes gateway validation and rewriting.

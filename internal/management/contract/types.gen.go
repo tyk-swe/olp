@@ -1377,6 +1377,7 @@ const (
 	ProviderKindOpenai           ProviderKind = "openai"
 	ProviderKindOpenaiCompatible ProviderKind = "openai_compatible"
 	ProviderKindPlugin           ProviderKind = "plugin"
+	ProviderKindSagemaker        ProviderKind = "sagemaker"
 	ProviderKindVertexAi         ProviderKind = "vertex_ai"
 )
 
@@ -1396,6 +1397,8 @@ func (e ProviderKind) Valid() bool {
 	case ProviderKindOpenaiCompatible:
 		return true
 	case ProviderKindPlugin:
+		return true
+	case ProviderKindSagemaker:
 		return true
 	case ProviderKindVertexAi:
 		return true

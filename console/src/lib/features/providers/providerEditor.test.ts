@@ -27,6 +27,7 @@ import {
   providerStatusTone,
   requiresCredential,
   requiresGrant,
+  probeModelPrompt,
   requiresProbeModel,
   requiresSeedModel,
   selectPluginProfile,
@@ -252,6 +253,35 @@ describe('provider editor capability policy', () => {
     expect(requiresProbeModel(draft, compatibleSpec)).toBe(false);
     selectProviderPreset(draft, compatibleSpec, 'exact');
     expect(requiresProbeModel(draft, compatibleSpec)).toBe(true);
+  });
+
+  it('requires a probe model for a kind whose vendor lists no models', () => {
+    const vendors = [
+      { id: 'amazon-sagemaker', discovery: false },
+      { id: 'openai', discovery: true }
+    ];
+    const sagemaker = {
+      kind: 'sagemaker' as const,
+      presetId: '',
+      options: { ...emptyProviderOptions(), vendor_id: 'amazon-sagemaker' }
+    };
+    const openai = {
+      kind: 'openai' as const,
+      presetId: '',
+      options: { ...emptyProviderOptions(), vendor_id: 'openai' }
+    };
+    expect(requiresProbeModel(sagemaker, openAiSpec, undefined, vendors)).toBe(
+      true
+    );
+    expect(requiresProbeModel(openai, openAiSpec, undefined, vendors)).toBe(
+      false
+    );
+    expect(requiresProbeModel(sagemaker, openAiSpec)).toBe(false);
+    expect(probeModelPrompt('sagemaker')).toEqual({
+      label: 'SageMaker endpoint',
+      placeholder: 'endpoint or endpoint/inference-component'
+    });
+    expect(probeModelPrompt('openai').label).toBe('Probe model');
   });
 
   it('clears the console-only preset selection when provider kind changes', () => {

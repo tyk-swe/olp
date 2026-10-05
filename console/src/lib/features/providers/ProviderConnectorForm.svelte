@@ -13,6 +13,7 @@
   import type { ProviderKindCapability } from '$lib/features/providers/api/models';
   import {
     emptyProviderOptions,
+    probeModelPrompt,
     requiresCredential,
     requiresGrant,
     requiresProbeModel,
@@ -90,8 +91,9 @@
   const grantRequired = $derived(requiresGrant(selectedSpec, draft.authMode));
   const signInNext = $derived(grantRequired && !grantEnrolled);
   const seedModelRequired = $derived(
-    requiresProbeModel(draft, selectedSpec, profiles.data)
+    requiresProbeModel(draft, selectedSpec, profiles.data, vendors.data)
   );
+  const probePrompt = $derived(probeModelPrompt(draft.kind));
   const plugin = $derived(draft.kind === 'plugin');
   const selectedPreset = $derived(
     selectedSpec.presets.find((preset) => preset.id === draft.presetId)
@@ -238,20 +240,14 @@
     <div class="form-field">
       <label for="initial-model"
         >{seedModelRequired
-          ? draft.kind === 'vertex_ai'
-            ? 'Vertex probe model'
-            : 'Probe model'
+          ? probePrompt.label
           : 'Seed model (optional)'}</label
       ><input
         id="initial-model"
         aria-describedby="initial-model-help"
         autocomplete="off"
         bind:value={draft.model}
-        placeholder={seedModelRequired
-          ? draft.kind === 'vertex_ai'
-            ? 'publishers/google/models/gemini-2.5-pro'
-            : 'Exact upstream model ID'
-          : 'gpt-5.4'}
+        placeholder={seedModelRequired ? probePrompt.placeholder : 'gpt-5.4'}
         required={seedModelRequired}
       /><small id="initial-model-help"
         >{plugin && seedModelRequired

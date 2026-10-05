@@ -23,6 +23,9 @@ type hostingTraits struct {
 	awsService string
 	// eventStream reports AWS event-stream framed streaming responses.
 	eventStream bool
+	// awsBearer authenticates with a bearer token the AWS credentials sign,
+	// instead of signing each request.
+	awsBearer bool
 	// model is the syntax of the hosting's upstream model names, where it
 	// differs from its kind's.
 	model *regexp.Regexp
@@ -37,6 +40,7 @@ var hostings = map[string]hostingTraits{
 	"bedrock-converse":         {awsService: "bedrock", eventStream: true},
 	"bedrock-anthropic-invoke": {awsService: "bedrock", eventStream: true},
 	"bedrock-invoke":           {awsService: "bedrock"},
+	"sagemaker-openai":         {awsService: "sagemaker", awsBearer: true},
 	// Vertex's OpenAI-compatible endpoint serves Google, partner and open
 	// models by publisher/model name.
 	"vertex-openai": {model: regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}/[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$`)},
@@ -46,6 +50,7 @@ var hostings = map[string]hostingTraits{
 var automaticHostings = map[string]hostingTraits{
 	"azure_openai": {deployment: true, apiVersion: true, azureScope: cognitiveServicesScope},
 	"bedrock":      {awsService: "bedrock"},
+	KindSageMaker:  {awsService: "sagemaker", awsBearer: true},
 }
 
 // traits are the hosting traits of the connector: its profile's hosting, or

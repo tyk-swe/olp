@@ -187,6 +187,10 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		if input.Configuration.ProfileID != "" {
 			profile, _ := input.Configuration.transport().Profile()
 			switch profile.Dialect {
+			case "openai-chat", "openai-responses":
+				// Vertex's OpenAI-compatible profile speaks OpenAI, whatever
+				// its kind's native surface.
+				surface = "openai"
 			case "anthropic-messages":
 				surface = "anthropic"
 			case "gemini-generate-content":

@@ -808,6 +808,37 @@
       "presets": []
     },
     {
+      "kind": "sagemaker",
+      "label": "Amazon SageMaker AI",
+      "description": "Real-time endpoints serving OpenAI Chat Completions.",
+      "default_auth_mode": "default_chain",
+      "auth_modes": [
+        {
+          "mode": "default_chain",
+          "label": "AWS credential chain",
+          "credential": "forbidden"
+        },
+        {
+          "mode": "static",
+          "label": "AWS credential JSON",
+          "credential": "required"
+        }
+      ],
+      "fields": [
+        {
+          "field": "cloud_region",
+          "label": "Region",
+          "required": true
+        },
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        }
+      ],
+      "presets": []
+    },
+    {
       "kind": "plugin",
       "label": "Provider plugin",
       "description": "A profile an installed provider plugin supplies around a built-in dialect.",

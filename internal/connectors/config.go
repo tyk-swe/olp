@@ -75,6 +75,9 @@ func DefaultEndpoint(kind, region, project string) string {
 	case "bedrock":
 		endpoint, _ := BedrockEndpoint(region, false)
 		return endpoint
+	case KindSageMaker:
+		endpoint, _ := SageMakerEndpoint(region)
+		return endpoint
 	}
 	return ""
 }
@@ -84,6 +87,9 @@ var cloudIdentifier = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
 var bedrockModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 
 func ModelValid(kind, model string) bool {
+	if kind == KindSageMaker {
+		return sagemakerModelValid(model)
+	}
 	if kind == "bedrock" {
 		return len(model) <= 2048 && bedrockModel.MatchString(model) && !strings.Contains(model, "..")
 	}
@@ -131,6 +137,13 @@ func (c Config) Validate(policy *egress.Policy) error {
 		}
 		if c.Deployment != "" || c.APIVersion != "" {
 			return errors.New("Vertex deployment and API version belong in the native endpoint")
+		}
+	case KindSageMaker:
+		if !cloudIdentifier.MatchString(c.CloudRegion) {
+			return errors.New("SageMaker requires an AWS region")
+		}
+		if u.Path != "" || c.CloudProject != "" || c.Deployment != "" || c.APIVersion != "" {
+			return errors.New("SageMaker uses a runtime endpoint origin and region; models name the endpoint")
 		}
 	case "bedrock":
 		if !cloudIdentifier.MatchString(c.CloudRegion) {
@@ -207,6 +220,9 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 	base := c.profileBase()
 	if !c.ValidModel(model) {
 		return "", errors.New("invalid upstream model identifier")
+	}
+	if c.Kind == KindSageMaker {
+		return sagemakerURL(base, wire, model)
 	}
 	path := "/chat/completions"
 	switch wire {

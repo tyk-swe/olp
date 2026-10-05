@@ -53,6 +53,7 @@ listing; otherwise operators declare its providers' models.
 | `bedrock-converse` | `/model/{model}/converse` or `/converse-stream`. |
 | `bedrock-anthropic-invoke` | `/model/{model}/invoke` or `/invoke-with-response-stream`; body version `bedrock-2023-05-31`. |
 | `bedrock-invoke` | Qualified model-specific native Invoke surface; no generation/Chat fallback. |
+| `sagemaker-openai-chat` | `/endpoints/{endpoint}[/inference-components/{component}]/openai/v1/chat/completions`; see [SageMaker AI](providers/sagemaker.md). |
 
 Each built-in composition currently has OLP profile revision `1`. This identifies
 OLP's component composition, not an immutable provider/model release. Undated

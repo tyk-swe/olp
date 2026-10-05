@@ -69,6 +69,11 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 		c.CloudRegion = require("OLP_BEDROCK_LIVE_REGION")
 		model = require("OLP_BEDROCK_LIVE_MODEL")
 		wire = openai.Family("bedrock")
+	case "sagemaker":
+		c.AuthMode = "default_chain"
+		c.CloudRegion = require("OLP_SAGEMAKER_LIVE_REGION")
+		// The endpoint, or endpoint/inference-component.
+		model = require("OLP_SAGEMAKER_LIVE_MODEL")
 	default:
 		t.Fatalf("unsupported provider %q", provider)
 	}
@@ -91,6 +96,7 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoded, _ := json.Marshal(body)
+	encoded = c.WrapRequest(encoded, model)
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(encoded))

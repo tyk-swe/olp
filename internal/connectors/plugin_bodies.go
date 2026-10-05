@@ -190,9 +190,13 @@ func (c Config) envelopeValues(model string) map[string]string {
 }
 
 // WrapRequest returns the body OLP sends for a dialect request body to model:
-// the body in the envelope a plugin profile declares, or the body as it is.
+// the body in the envelope a plugin profile declares, a SageMaker body without
+// the model its URL selects, or the body as it is.
 // Apply signs what it returns.
 func (c Config) WrapRequest(body []byte, model string) []byte {
+	if c.Kind == KindSageMaker {
+		return sagemakerBody(body)
+	}
 	e := c.envelope()
 	if e == nil || e.request == "" {
 		return body

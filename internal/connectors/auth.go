@@ -348,11 +348,19 @@ func (a *Auth) authenticateAzure(ctx context.Context, req *http.Request, c Confi
 }
 
 // authenticateAWS resolves AWS credentials, which sign the finished request
-// with SigV4.
-func (a *Auth) authenticateAWS(ctx context.Context, _ *http.Request, c Config, secret []byte) (authorization, error) {
+// with SigV4, or sign the bearer token a hosting accepts instead.
+func (a *Auth) authenticateAWS(ctx context.Context, req *http.Request, c Config, secret []byte) (authorization, error) {
 	creds, err := a.awsCredentials(ctx, c, secret)
 	if err != nil {
 		return authorization{}, err
+	}
+	if c.traits().awsBearer {
+		token, err := sagemakerToken(ctx, creds, c.CloudRegion, time.Now())
+		if err != nil {
+			return authorization{}, ErrAuthentication
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		return authorization{sensitive: []string{creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, token}}, nil
 	}
 	sign := func(ctx context.Context, req *http.Request, body []byte) ([]string, error) {
 		hash := sha256.Sum256(body)

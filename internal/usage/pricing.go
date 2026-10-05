@@ -27,7 +27,7 @@ const MaxRevisionPrices = 10000
 // providerKinds are the connector kinds a price may be scoped to. They match
 // the database CHECK, so an unknown kind is refused with a field error rather
 // than a constraint violation.
-var providerKinds = []string{"openai", "anthropic", "gemini", "vertex_ai", "bedrock",
+var providerKinds = []string{"openai", "anthropic", "gemini", "vertex_ai", "bedrock", "sagemaker",
 	"azure_openai", "openai_compatible", "plugin"}
 
 // priceOperations are the operations a price may be scoped to, and the

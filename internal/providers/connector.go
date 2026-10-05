@@ -156,6 +156,7 @@ func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte
 // declares. It reports only local codes and text: upstream error fields may
 // echo credentials and must never enter persistent probe diagnostics.
 func statusError(cfg *Configuration, status int, body []byte) *probeError {
+	status, body = cfg.transport().Rejection(status, body)
 	detail := fmt.Sprintf("The upstream answered HTTP %d.", status)
 	code := "upstream_rejected"
 	evidence := upstream.Evidence{Status: status, Error: openai.ParseErrorBody(body)}

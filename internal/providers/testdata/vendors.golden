@@ -277,6 +277,44 @@
     "unsupported_parameters": []
   },
   {
+    "id": "amazon-sagemaker",
+    "name": "Amazon SageMaker AI",
+    "connector": "sagemaker",
+    "discovery": false,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "default_chain",
+      "static"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html",
+    "endpoint": null,
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
     "id": "azure",
     "name": "Azure OpenAI",
     "connector": "azure_openai",
