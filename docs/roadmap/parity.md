@@ -5,7 +5,8 @@ OLP and is the authoritative parity scope of the [roadmap](README.md). The
 milestones also add OLP-original capabilities, which have no row here. The
 LiteLLM column links its documentation as reviewed on 2026-10-01; the OLP
 column describes this repository at 0.1.0, updated for what a milestone in
-progress has delivered so far ([M1](m01-measured-advantage.md#delivered)).
+progress has delivered so far ([M1](m01-measured-advantage.md#delivered),
+[M2](m02-provider-catalog.md#delivered)).
 
 | Status | Meaning |
 | --- | --- |
@@ -31,12 +32,12 @@ of [M3](m03-routing-resilience.md).
 | Bedrock Converse and InvokeModel | [/converse](https://docs.litellm.ai/docs/bedrock_converse), [/invoke](https://docs.litellm.ai/docs/bedrock_invoke) | Native Bedrock surface | `Parity` | |
 | Certified native fidelity | Translation with optional [drop_params](https://docs.litellm.ai/docs/completion/drop_params) | Strict routes compile an interaction contract per target and refuse lossy translation | `Ahead` | |
 | Legacy text completions | [/completions](https://docs.litellm.ai/docs/text_completion) | Not served | `Gap` | M9.1 |
-| Embeddings across providers | [Embeddings](https://docs.litellm.ai/docs/embedding/supported_embedding) | OpenAI, Azure, Gemini, Vertex, Bedrock Titan, compatible endpoints, Cohere v2, Voyage, TEI | `Partial` | M2.3 |
-| Rerank across providers | [/rerank](https://docs.litellm.ai/docs/rerank) | Cohere, Voyage, TEI | `Partial` | M2.3 |
+| Embeddings across providers | [Embeddings](https://docs.litellm.ai/docs/embedding/supported_embedding) | OpenAI, Azure, Gemini, Vertex, Bedrock Titan, compatible endpoints, Cohere v2, Voyage, Jina, Mistral, NVIDIA NIM, Together, Infinity, TEI and the embedding presets | `Parity` | |
+| Rerank across providers | [/rerank](https://docs.litellm.ai/docs/rerank) | Cohere, Voyage, Jina, Together, Infinity, TEI and Bedrock rerank models | `Parity` | |
 | Moderation | [/moderations](https://docs.litellm.ai/docs/moderation) | OpenAI, Azure, compatible endpoints | `Parity` | |
-| Image generation, edits and variations | [Image generation](https://docs.litellm.ai/docs/image_generation), [edits](https://docs.litellm.ai/docs/image_edits) | OpenAI; Vertex Imagen and Bedrock Titan generation | `Partial` | M2.3 |
-| Speech, transcription and translation | [Speech](https://docs.litellm.ai/docs/text_to_speech), [transcription](https://docs.litellm.ai/docs/audio_transcription) | OpenAI only | `Partial` | M2.3 |
-| Video generation | [/videos](https://docs.litellm.ai/docs/videos) | OpenAI, as durable jobs | `Partial` | M2.3 |
+| Image generation, edits and variations | [Image generation](https://docs.litellm.ai/docs/image_generation), [edits](https://docs.litellm.ai/docs/image_edits) | OpenAI and Azure OpenAI; Gemini image models on the Gemini API and Vertex, and Vertex Imagen until its retirement; Bedrock Titan and Stability; Stability AI, Recraft, Black Forest Labs and xAI. Variations are OpenAI's alone | `Parity` | |
+| Speech, transcription and translation | [Speech](https://docs.litellm.ai/docs/text_to_speech), [transcription](https://docs.litellm.ai/docs/audio_transcription) | Speech from OpenAI, Azure OpenAI, Gemini, ElevenLabs, Deepgram and Amazon Polly; transcription from OpenAI, Azure OpenAI, Gemini, Groq, ElevenLabs, Deepgram and AssemblyAI; translation from OpenAI, Azure OpenAI and Groq | `Parity` | |
+| Video generation | [/videos](https://docs.litellm.ai/docs/videos) | OpenAI and Runway, including Runway's Veo models, as durable jobs. Vendors whose video models are ending are declined ([M2.3](m02-provider-catalog.md#settled-during-implementation-1)) | `Parity` | |
 | Files and batches | [/files](https://docs.litellm.ai/docs/files_endpoints), [/batches](https://docs.litellm.ai/docs/batches) across providers | OpenAI and Azure, with gateway-owned identifiers | `Partial` | M9.2 |
 | Batch result cost tracking | [Enterprise](https://docs.litellm.ai/docs/batches) | Batch calls are accounted; per-line output usage is not settled | `Gap` | M9.2 |
 | Cross-provider managed batches | [Managed batches](https://docs.litellm.ai/docs/proxy/managed_batches) (beta) | Not available | `Gap` | M9.2 |
@@ -56,11 +57,11 @@ of [M3](m03-routing-resilience.md).
 
 | Capability | LiteLLM | OLP today | Status | Milestone |
 | --- | --- | --- | --- | --- |
-| Provider breadth | [About 170 provider pages](https://docs.litellm.ai/docs/providers) | Seven native connector kinds, provider plugins, and 13 OpenAI-compatible presets | `Gap` | M2.1, M2.2 |
-| Self-hosted runtimes | Ollama, vLLM, LM Studio, Triton, llamafile and more | vLLM preset, custom endpoints, TEI native operations | `Partial` | M2.1 |
-| Cloud AI platforms | Azure AI Foundry, Vertex partner models, SageMaker, watsonx, Databricks, Snowflake, OCI | Azure OpenAI, Vertex Gemini and Anthropic publishers, Bedrock | `Partial` | M2.2 |
-| Media providers | ElevenLabs, Deepgram, Stability, Black Forest Labs, fal, Runway and more | OpenAI, Vertex Imagen, Bedrock Titan | `Gap` | M2.3 |
-| Model facts and price map | [Model cost map](https://docs.litellm.ai/docs/proxy/sync_models_github), synced from GitHub | Operator model facts; operator-registered pricing sources | `Gap` | M2.4 |
+| Provider breadth | [About 170 provider pages](https://docs.litellm.ai/docs/providers) | Nine native connector kinds, first-party profiles and native dialects, provider plugins with authoring templates, and 50 reviewed OpenAI-compatible presets | `Parity` | |
+| Self-hosted runtimes | Ollama, vLLM, LM Studio, Triton, llamafile and more | vLLM, Ollama, LM Studio, llama.cpp, Docker Model Runner and Infinity presets, custom endpoints, TEI native operations | `Parity` | |
+| Cloud AI platforms | Azure AI Foundry, Vertex partner models, SageMaker, watsonx, Databricks, Snowflake, OCI | Azure OpenAI and AI Foundry, Vertex Gemini, Anthropic and OpenAI-compatible partner models, Bedrock, SageMaker AI, watsonx.ai, Databricks, Snowflake Cortex; OCI through a plugin built from the signed-request template | `Parity` | |
+| Media providers | ElevenLabs, Deepgram, Stability, Black Forest Labs, fal, Runway and more | ElevenLabs, Deepgram, AssemblyAI, Stability AI, Black Forest Labs, Recraft, Runway, Amazon Polly and the media of Azure OpenAI, Gemini, Groq and xAI. fal is declined ([M2.3](m02-provider-catalog.md#settled-during-implementation-1)) | `Parity` | |
+| Model facts and price map | [Model cost map](https://docs.litellm.ai/docs/proxy/sync_models_github), synced from GitHub | A [signed reference catalog](../catalog.md) of model facts, list prices and lifecycle dates with provenance, refreshed as a reviewed pricing source and offered to discovery | `Parity` | |
 | Custom pricing | [Custom pricing](https://docs.litellm.ai/docs/proxy/custom_pricing) | Immutable decimal pricing revisions scoped by connection, vendor or kind | `Parity` | |
 | Model discovery | [Model discovery](https://docs.litellm.ai/docs/proxy/model_discovery) for wildcard models | Discovery from upstream lists or declared identifiers | `Parity` | |
 | Capability certification | Not a serving gate | Exact-tuple live certification before activation | `Ahead` | |
@@ -226,4 +227,4 @@ of [M3](m03-routing-resilience.md).
 | --- | --- | --- | --- | --- |
 | Published overhead | [Benchmarks](https://docs.litellm.ai/docs/benchmarks): 8 ms P95 at 1k RPS; 3,000 RPS large-prompt profile | The benchmark harness, LiteLLM comparison and CI regression gate are built and smoke-tested at reduced rates; no full-rate results are published ([performance](../performance.md#status-of-the-numbers)) | `Partial` | M1.1 |
 | Compiled data plane | [Rust gateway](https://docs.litellm.ai/docs/proxy/rust_gateway) (beta, per model) | Go data plane on every path, with hot-path benchmarks gated in CI; overhead measured at reduced rates only | `Partial` | M1.1 |
-| Accurate token counting | Rust token counting in the [high-throughput profile](https://docs.litellm.ai/docs/proxy/high_throughput) | Exact in-repository counts for the OpenAI `o200k_base` and `cl100k_base` encodings, bounded for long prompts; Anthropic, Gemini and other families use the four-characters-per-token heuristic until per-family factors ship ([estimates](../gateway.md#how-the-prompt-is-estimated)) | `Partial` | M2.4 |
+| Accurate token counting | Rust token counting in the [high-throughput profile](https://docs.litellm.ai/docs/proxy/high_throughput) | Exact in-repository counts for the OpenAI `o200k_base` and `cl100k_base` encodings, bounded for long prompts; Anthropic, Gemini and other families use the four-characters-per-token heuristic, scaled by a per-family factor from the signed catalog once one is measured; none is yet ([estimates](../gateway.md#how-the-prompt-is-estimated)) | `Partial` | M2.4 |

@@ -85,7 +85,7 @@ parallel.
 | ID | Milestone | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- |
 | M1 | [Measured advantage](m01-measured-advantage.md) | Published, regression-gated overhead and client compatibility; accurate admission token estimates; standard response metadata. | None | In progress |
-| M2 | [Provider and catalog breadth](m02-provider-catalog.md) | LiteLLM's production provider families reachable through certified tiers; media providers; a signed reference catalog of model facts and prices. | None | Planned |
+| M2 | [Provider and catalog breadth](m02-provider-catalog.md) | LiteLLM's production provider families reachable through certified tiers; media providers; a signed reference catalog of model facts and prices. | None | In progress |
 | M3 | [Adaptive routing and resilience](m03-routing-resilience.md) | Cross-route fallbacks, capacity-aware selection, priority admission, supply-side budgets, active and fleet-shared health, shadow traffic, explainable request selectors. | M1 | Planned |
 | M4 | [Tenancy, identity and budgets](m04-tenancy-identity.md) | End users, a budget hierarchy with flexible windows, limit templates, route groups, workload JWTs, SAML, SCIM, MFA, organizations and caller-supplied credentials. | None | Planned |
 | M5 | [Observability, export and alerting](m05-observability.md) | Durable export sinks, opt-in payload capture, OpenTelemetry GenAI conventions, business metrics, alert channels and events. | M4 | Planned |
