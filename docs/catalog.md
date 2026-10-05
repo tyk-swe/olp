@@ -92,6 +92,30 @@ release. Installations on older binaries keep trusting the compromised key until
 they upgrade; the anti-rollback check and the human publish step for prices
 bound what a forged catalog can do meanwhile.
 
+## Coverage
+
+The catalog lists every model with a published US-dollar list price that OLP
+serves through a priced operation, for these vendors: OpenAI, Anthropic, the
+Gemini API, Vertex AI, Amazon Bedrock (including Amazon Polly's engines), IBM
+watsonx.ai, Mistral, DeepSeek, Groq, xAI, Cohere, Voyage, Cerebras, Moonshot,
+Jina AI, ElevenLabs, Deepgram, AssemblyAI, Stability AI, Recraft, Black Forest
+Labs, Runway, SambaNova, Nebius, Novita, Baseten, Alibaba Cloud Model Studio
+(international), Z.ai, MiniMax, BytePlus ModelArk and Cloudflare Workers AI.
+Each price is in the unit OLP meters for its operation: tokens, images,
+seconds of audio or video, characters of speech input, or search units.
+
+Other vendors are left to operator prices:
+
+| Vendors | Reason |
+| --- | --- |
+| Azure OpenAI | Prices match by model, but an Azure provider calls a deployment the operator names. |
+| OpenRouter, Together AI, Fireworks AI, DeepInfra, Hugging Face, Vercel AI Gateway | Aggregators whose large catalogs change daily; their own model listings carry prices. |
+| vLLM, Ollama, LM Studio, llama.cpp, Docker Model Runner, Infinity and custom endpoints | Self-hosted, with no list price. |
+| Amazon SageMaker AI, Databricks, Snowflake Cortex | Billed by instance, DBU or credit, not by token. |
+| Moonshot China, DashScope China, Zhipu, MiniMax China, Volcengine Ark, Scaleway, OVHcloud | Priced in yuan or euros; the catalog has one currency, US dollars. |
+| NVIDIA NIM, Featherless, Nscale | No public per-token list price: NVIDIA's hosted endpoints are a free trial, Featherless sells subscriptions, and Nscale shows prices only in its console. |
+| Deepgram Aura voices | Each voice is its own model, `aura-2-{voice}-{language}`; Aura-2 costs $0.030 per 1,000 characters. |
+
 ## Maintenance
 
 Prices and facts come only from each vendor's own pricing, model and

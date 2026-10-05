@@ -86,7 +86,7 @@
         "provenance": { "$ref": "#/$defs/provenance" }
       }
     },
-    "modelId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$" },
+    "modelId": { "type": "string", "pattern": "^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$" },
     "price": {
       "type": "object",
       "additionalProperties": false,

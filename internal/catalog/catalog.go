@@ -125,7 +125,7 @@ type Unrepresentable struct {
 
 var (
 	vendorID    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
-	modelID     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$`)
+	modelID     = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$`)
 	canonical   = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	component   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	operation   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
