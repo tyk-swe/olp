@@ -81,6 +81,9 @@ func (c Config) AzureScope() string {
 
 // awsService is the SigV4 signing name of the connector's requests.
 func (c Config) awsService() string {
+	if c.SigningService != "" {
+		return c.SigningService
+	}
 	if service := c.traits().awsService; service != "" {
 		return service
 	}

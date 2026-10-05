@@ -78,11 +78,13 @@ func classify(err error) *probeError {
 // call performs one bounded upstream request. The body is capped and never
 // retained beyond the caller's parsing.
 func (s *Server) call(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte) (int, []byte, error) {
-	return s.callAs(ctx, cfg, credential, method, path, body, "application/json")
+	return s.callAs(ctx, cfg, credential, method, path, body, "application/json", "")
 }
 
-// callAs is call with a body of another content type, such as a form.
-func (s *Server) callAs(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte, contentType string) (int, []byte, error) {
+// callAs is call with a body of another content type, such as a form, signed
+// for another AWS service of the connector's cloud when signingService names
+// one.
+func (s *Server) callAs(ctx context.Context, cfg *Configuration, credential []byte, method, path string, body []byte, contentType, signingService string) (int, []byte, error) {
 	base, err := s.Egress.ValidateEndpoint(*cfg.Endpoint)
 	if err != nil {
 		return 0, nil, &probeError{Code: "invalid_endpoint", Detail: err.Error()}
@@ -124,6 +126,7 @@ func (s *Server) callAs(ctx context.Context, cfg *Configuration, credential []by
 		req.Header.Set("Content-Type", contentType)
 	}
 	transport := cfg.transport()
+	transport.SigningService = signingService
 	sensitive, err := s.auth.Apply(ctx, req, transport, credential, body)
 	switch {
 	case errors.Is(err, connectors.ErrSigningUnavailable):
@@ -799,7 +802,7 @@ func (s *Server) certifyListedModel(ctx context.Context, cfg *Configuration, cre
 // minimum set that unblocks most Azure OpenAI deployments.
 var mediaByCallOperations = map[string][]string{
 	KindVertex:  {"image_generation", "speech", "transcription"},
-	KindBedrock: {"image_generation"},
+	KindBedrock: {"image_generation", "speech"},
 	KindAzure:   {"image_generation", "speech", "transcription"},
 }
 
@@ -824,6 +827,10 @@ func (s *Server) certifyMediaCall(ctx context.Context, cfg *Configuration, crede
 	if cfg.Kind == KindAzure && operation == "image_generation" {
 		low := "low"
 		request.Quality = &low
+	}
+	if cfg.Kind == KindBedrock && operation == "speech" {
+		// Polly speaks with an engine its model names, in one of its voices.
+		request.Voice = "Joanna"
 	}
 	if cfg.Kind == KindVertex && operation == "speech" {
 		// Gemini speech speaks in one of its prebuilt voices, as WAV.
@@ -861,10 +868,13 @@ func (s *Server) certifyMediaCall(ctx context.Context, cfg *Configuration, crede
 		body, contentType = form.Bytes(), writer.FormDataContentType()
 	}
 	endpoint, err := transport.MediaURL(call.Path, model, call.Query)
+	if call.URL != "" {
+		endpoint, err = call.URL, nil
+	}
 	if err != nil {
 		return &probeError{Code: "capability_unavailable", Detail: "The media probe endpoint could not be built."}
 	}
-	status, data, err := s.callAs(ctx, cfg, credential, call.Method, endpoint, body, contentType)
+	status, data, err := s.callAs(ctx, cfg, credential, call.Method, endpoint, body, contentType, call.SigningService)
 	if err != nil {
 		return err
 	}

@@ -28,7 +28,7 @@ func EncodeConfigured(request *Request, cfg connectors.Config, model string) (*U
 		if defaults, _, err := cfg.DefaultsFor(request.Op, model); cfg.ProfileID != "" && (err != nil || len(defaults) > 0) {
 			return nil, nil, invalidMedia("Native media defaults do not apply to the vendor's translated media API.")
 		}
-		call, _, failure := encodeVendor(effective, cfg.VendorID, cfg.Model(model))
+		call, _, failure := encodeVendor(effective, cfg, cfg.Model(model))
 		return call, effective, failure
 	}
 	if cfg.ProfileID == "" {

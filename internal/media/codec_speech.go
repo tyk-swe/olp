@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 // The elevenlabs and deepgram wires are ElevenLabs' and Deepgram's speech
@@ -234,4 +236,46 @@ func encodeDeepgramTranscription(r *Request, model string) (*UpstreamCall, *Erro
 			}
 			return vendorTranscript(format, *best.Transcript, language, wire.Metadata.Duration, words), nil
 		}}, nil
+}
+
+// The polly wire is Amazon Polly's SynthesizeSpeech, which a Bedrock
+// provider reaches in its region with its AWS credentials, signed for
+// Polly. The model is the Polly engine and the voice a Polly voice ID.
+//
+// https://docs.aws.amazon.com/polly/latest/dg/API_SynthesizeSpeech.html
+func init() {
+	registerCodec("polly", codec{encodeFor: map[string]func(*Request, connectors.Config, string) (*UpstreamCall, *Error){
+		OpSpeech: encodePollySpeech,
+	}})
+}
+
+// pollyFormats are Polly's output formats for the OpenAI ones it serves:
+// its PCM is 16 kHz, not OpenAI's 24 kHz, and it makes no WAV.
+var pollyFormats = map[string]string{"mp3": "mp3", "opus": "ogg_opus"}
+
+func encodePollySpeech(r *Request, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
+	if failure := refuseSpeechControls(r, "Amazon Polly"); failure != nil {
+		return nil, failure
+	}
+	format, ok := pollyFormats[speechFormat(r)]
+	switch {
+	case !ok:
+		return nil, invalidMedia("Amazon Polly returns speech as mp3 or opus.")
+	case r.Speed != nil:
+		return nil, invalidMedia("Amazon Polly paces speech through SSML, not a speed.")
+	case !slices.Contains([]string{"standard", "neural", "long-form", "generative"}, model):
+		return nil, invalidMedia("The model names a Polly engine: standard, neural, long-form or generative.")
+	case r.Voice == "":
+		return nil, invalidMedia("Amazon Polly speech names a Polly voice ID, such as Joanna.")
+	}
+	endpoint, err := connectors.PollyEndpoint(cfg.CloudRegion)
+	if err != nil {
+		return nil, invalidMedia(err.Error())
+	}
+	body, err := json.Marshal(map[string]string{"Text": r.Input, "VoiceId": r.Voice, "Engine": model, "OutputFormat": format})
+	if err != nil {
+		return nil, invalidMedia("The speech request could not be encoded.")
+	}
+	return &UpstreamCall{Method: http.MethodPost, URL: endpoint + "/v1/speech", SigningService: "polly", JSON: body, Kind: ResponseBinary, Ambiguous: true,
+		CharacterHeader: "X-Amzn-Requestcharacters"}, nil
 }

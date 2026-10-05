@@ -115,8 +115,17 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		return nil, &Failure{Class: ClassConnect, Detail: "provider endpoint rejected by egress policy"}
 	}
 	endpoint, err := target.Config.MediaURL(call.Path, target.Model, call.Query)
+	if call.URL != "" {
+		endpoint, err = call.URL, nil
+		if _, e := t.Egress.ValidateEndpoint(call.URL); e != nil {
+			err = e
+		}
+	}
 	if err != nil {
 		return nil, &Failure{Class: ClassProtocol, Detail: "media endpoint could not be built"}
+	}
+	if call.SigningService != "" {
+		target.Config.SigningService = call.SigningService
 	}
 
 	var body io.Reader = http.NoBody

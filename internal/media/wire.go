@@ -74,10 +74,15 @@ type Field struct {
 type UpstreamCall struct {
 	Method string
 	Path   string
-	Query  url.Values
-	Accept string
-	JSON   []byte
-	Fields []Field
+	// URL addresses a call at another service of the connector's cloud, in
+	// place of Path under its endpoint; SigningService signs it for that
+	// service.
+	URL            string
+	SigningService string
+	Query          url.Values
+	Accept         string
+	JSON           []byte
+	Fields         []Field
 	// Upload is a staged file sent as the whole request body, for vendors
 	// that take raw audio rather than a multipart form.
 	Upload    *Part

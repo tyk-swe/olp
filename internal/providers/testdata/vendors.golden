@@ -249,7 +249,8 @@
       "embeddings",
       "bedrock_invoke",
       "image_generation",
-      "rerank"
+      "rerank",
+      "speech"
     ],
     "authentication": [
       "default_chain",

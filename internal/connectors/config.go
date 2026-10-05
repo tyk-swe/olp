@@ -30,8 +30,11 @@ type Config struct {
 	OperationDefaults                                                                     map[string]DefaultSet
 	Bindings                                                                              map[string]Binding
 	Kind, AuthMode, Endpoint, CloudRegion, CloudProject, Deployment, APIVersion, VendorID string
-	CredentialHeaders                                                                     []string
-	Models                                                                                map[string]json.RawMessage
+	// SigningService overrides the SigV4 signing name of one call to an AWS
+	// service beside the connector's own, such as Amazon Polly's.
+	SigningService    string `json:"-"`
+	CredentialHeaders []string
+	Models            map[string]json.RawMessage
 	// ObservedPrincipal is the upstream principal that grant enrollment
 	// observed for every credential slot of a provider authenticated by a
 	// grant, or empty.

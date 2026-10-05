@@ -58,6 +58,20 @@ func SageMakerEndpoint(region string) (string, error) {
 	return "https://runtime.sagemaker." + region + "." + domain, nil
 }
 
+// PollyEndpoint is the Amazon Polly endpoint of an AWS region, in the domain
+// of the region's partition.
+func PollyEndpoint(region string) (string, error) {
+	bedrock, err := BedrockEndpoint(region, false)
+	if err != nil {
+		return "", err
+	}
+	domain, ok := strings.CutPrefix(bedrock, "https://bedrock-runtime."+region+".")
+	if !ok || domain == "" || strings.Contains(domain, "/") {
+		return "", fmt.Errorf("AWS region %s has no Amazon Polly endpoint", region)
+	}
+	return "https://polly." + region + "." + domain, nil
+}
+
 func sagemakerURL(base string, wire openai.Family, model string) (string, error) {
 	if wire != openai.FamilyChat {
 		return "", errors.New("SageMaker endpoints serve the Chat Completions schema only")

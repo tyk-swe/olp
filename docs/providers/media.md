@@ -39,6 +39,7 @@ defaults do not apply to it.
 | [Black Forest Labs](https://docs.bfl.ai/api_integration/integration_guidelines) | `image_generation` | `bfl`: polled | `GET /v1/credits` |
 | [Gemini API](https://ai.google.dev/gemini-api/docs/image-generation) | `image_generation`, `speech`, `transcription` | `gemini` | model listing |
 | [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/image-generation) | `image_generation`, `speech`, `transcription` | `gemini` | real call |
+| [Amazon Polly](https://docs.aws.amazon.com/polly/latest/dg/API_SynthesizeSpeech.html), through Bedrock | `speech` | `polly` | real call |
 
 ### xAI
 
@@ -127,6 +128,16 @@ language hint and timestamps are refused: `generateContent` has no place for
 them. Gemini's dedicated transcription model serves only the Interactions
 API, which OLP does not translate.
 
+### Amazon Polly
+
+A Bedrock provider speaks through Amazon Polly in its region, at
+`polly.{region}`, with its AWS credentials signed for Polly; the identity
+needs `polly:SynthesizeSpeech`. The model is the Polly engine, `standard`,
+`neural`, `long-form` or `generative`, and the voice a Polly voice ID, such
+as `Joanna`. Polly serves `mp3` and `opus`: its PCM is 16 kHz rather than
+OpenAI's 24 kHz, and it makes no WAV. Usage is the characters Polly reports
+billing in `x-amzn-RequestCharacters`.
+
 ### Declined
 
 fal offers no costless authenticated request for ordinary API keys: its
@@ -136,4 +147,9 @@ plugins and custom endpoints.
 
 Imagen on the Gemini API shut down on 2026-08-17, so Gemini API image
 generation serves Gemini image models only; Vertex keeps Imagen.
+
+Google Cloud Text-to-Speech is declined: Gemini speech models already serve
+Google speech on Vertex and the Gemini API, while Cloud Text-to-Speech sits
+on its own host, which a Vertex provider's address does not reach, and its
+voices need a language that OpenAI's speech request does not carry.
 
