@@ -14,6 +14,7 @@ openai_compatible cohere-native-v2: embeddings/openai/unary rerank/openai/unary
 openai_compatible jina: embeddings/openai/unary rerank/openai/unary
 openai_compatible elevenlabs: speech/openai/unary transcription/openai/unary
 openai_compatible deepgram: speech/openai/unary transcription/openai/unary
+openai_compatible assemblyai: transcription/openai/unary
 openai_compatible stability: image_generation/openai/unary image_edit/openai/unary
 openai_compatible recraft: image_generation/openai/unary
 openai_compatible bfl: image_generation/openai/unary

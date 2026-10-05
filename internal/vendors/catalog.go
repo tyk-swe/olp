@@ -121,6 +121,9 @@ var contracts = []Contract{
 	compatiblePreset("deepgram", "Deepgram", "Deepgram", "Deepgram speech recognition and synthesis.", "https://api.deepgram.com/v1", Link{"Deepgram API reference", "https://developers.deepgram.com/reference/deepgram-api-overview"}, Contract{
 		Operations: []string{"speech", "transcription"}, ProbeOperation: "transcription", Parameters: []string{"voice", "response_format", "language"},
 		MediaWires: map[string]string{"speech": "deepgram", "transcription": "deepgram"}, Credential: &Credential{Header: "Authorization", Scheme: "Token "}, AccountProbe: "projects"}, nil),
+	compatiblePreset("assemblyai", "AssemblyAI", "AssemblyAI", "AssemblyAI speech recognition.", "https://api.assemblyai.com", Link{"AssemblyAI transcript API", "https://www.assemblyai.com/docs/pre-recorded-audio/api-reference/transcripts/submit"}, Contract{
+		Operations: []string{"transcription"}, ProbeOperation: "transcription", Parameters: []string{"language", "response_format"},
+		MediaWires: map[string]string{"transcription": "assemblyai"}, Credential: &Credential{Header: "Authorization"}, AccountProbe: "v2/transcript?limit=1"}, nil),
 	compatiblePreset("stability", "Stability AI", "Stability AI", "Stability AI image generation and inpainting.", "https://api.stability.ai", Link{"Stability AI API reference", "https://platform.stability.ai/docs/api-reference"}, Contract{
 		Operations: []string{"image_generation", "image_edit"}, ProbeOperation: "image_generation", Parameters: []string{"size", "output_format", "response_format"},
 		MediaWires: map[string]string{"image_generation": "stability", "image_edit": "stability"}, AccountProbe: "v1/user/balance",

@@ -34,6 +34,7 @@ defaults do not apply to it.
 | [Groq](https://console.groq.com/docs/speech-to-text) | `transcription`, `translation` | `groq-audio`: `json` is served from `verbose_json` | `GET /openai/v1/models` |
 | [ElevenLabs](https://elevenlabs.io/docs/api-reference/introduction) | `speech`, `transcription` | `elevenlabs` | `GET /v1/user` |
 | [Deepgram](https://developers.deepgram.com/reference/deepgram-api-overview) | `speech`, `transcription` | `deepgram` | `GET /v1/projects` |
+| [AssemblyAI](https://www.assemblyai.com/docs/pre-recorded-audio/api-reference/transcripts/submit) | `transcription` | `assemblyai`: polled | `GET /v2/transcript?limit=1` |
 | [Stability AI](https://platform.stability.ai/docs/api-reference) | `image_generation`, `image_edit` | `stability` | `GET /v1/user/balance` |
 | [Recraft](https://www.recraft.ai/docs/api-reference/endpoints) | `image_generation` | `recraft` | `GET /v1/users/me` |
 | [Black Forest Labs](https://docs.bfl.ai/api_integration/integration_guidelines) | `image_generation` | `bfl`: polled | `GET /v1/credits` |
@@ -81,6 +82,17 @@ Deepgram bills by.
 
 Neither vendor translates speech to English, so `translation` is declined for
 both, and for AssemblyAI.
+
+### AssemblyAI
+
+API keys travel in `Authorization` without a scheme. Transcription works
+asynchronously within the attempt's deadline: the audio is uploaded, a
+transcript submitted for it with the model as its speech model, and polled
+each second until complete; the transcript is then deleted, so AssemblyAI
+keeps no copy of the audio or its words. It is served as `json`,
+`verbose_json` with the language, the duration AssemblyAI bills by and the
+timed words, or `text`; it takes `language` and refuses a prompt and a
+temperature. The EU region is `https://api.eu.assemblyai.com`.
 
 ### Stability AI
 
@@ -152,4 +164,3 @@ Google Cloud Text-to-Speech is declined: Gemini speech models already serve
 Google speech on Vertex and the Gemini API, while Cloud Text-to-Speech sits
 on its own host, which a Vertex provider's address does not reach, and its
 voices need a language that OpenAI's speech request does not carry.
-

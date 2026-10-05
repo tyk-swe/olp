@@ -104,10 +104,10 @@ type UpstreamCall struct {
 	// CharacterHeader names the response header in which a vendor reports
 	// the characters a speech call bills.
 	CharacterHeader string
-	// Next continues a vendor's asynchronous image work from each JSON
-	// response, its submission's first: the next request, until a step
-	// fetches the image itself. A step's URL must be on the provider
-	// endpoint's host or under one of StepDomains.
+	// Next continues a vendor's asynchronous work from each JSON response,
+	// its submission's first: the next request, until a step fetches the
+	// image itself or marks the response its result. A step's URL must be
+	// on the provider endpoint's host or under one of StepDomains.
 	Next        func(body []byte) (*Step, *Error)
 	StepDomains []string
 	// Inject carries W3C trace-context headers the caller allows upstream.
@@ -123,16 +123,22 @@ type AudioResult struct {
 	Tokens      *ImageUsage
 }
 
-// Step is the next request of a vendor's asynchronous image work: a GET of an
-// absolute URL after Wait, with the provider's credential only when the
-// vendor requires it there.
+// Step is the next request of a vendor's asynchronous work: a request of an
+// absolute URL after Wait, GET unless Method names another, with JSON as its
+// body and the provider's credential only when the vendor requires it there.
 type Step struct {
+	Method      string
 	URL         string
+	JSON        []byte
 	Wait        time.Duration
 	Credentials bool
 	// Image marks the step that fetches the generated image, which ends the
 	// work.
 	Image bool
+	// Done marks the response just read as the work's result, which the
+	// call's decoder reads; Cleanup, if any, then deletes the vendor's copy.
+	Done    bool
+	Cleanup *Step
 }
 
 // Request is a validated media operation bound for upstream dispatch. Staged

@@ -425,6 +425,12 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		if failure := retainJSON(body); failure != nil {
 			return nil, failure
 		}
+		if call.Next != nil {
+			var failure *Failure
+			if _, body, failure = t.follow(ctx, call, body, send, target, nil); failure != nil {
+				return nil, failure
+			}
+		}
 		decode := DecodeTranscriptionJSON
 		if call.DecodeTranscription != nil {
 			decode = call.DecodeTranscription
@@ -472,7 +478,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		var mErr *Error
 		if call.Next != nil {
 			var failure *Failure
-			decoded, failure = t.follow(ctx, call, body, send, target, stage)
+			decoded, _, failure = t.follow(ctx, call, body, send, target, stage)
 			if failure != nil {
 				for _, handle := range stagedHandles {
 					t.Spool.Remove(handle)

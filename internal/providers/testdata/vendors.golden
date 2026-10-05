@@ -985,6 +985,28 @@
     "unsupported_parameters": []
   },
   {
+    "id": "assemblyai",
+    "name": "AssemblyAI",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "transcription"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "language",
+      "response_format"
+    ],
+    "documentation_url": "https://www.assemblyai.com/docs/pre-recorded-audio/api-reference/transcripts/submit",
+    "endpoint": "https://api.assemblyai.com",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
     "id": "stability",
     "name": "Stability AI",
     "connector": "openai_compatible",

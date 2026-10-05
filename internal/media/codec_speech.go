@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/connectors"
 )
@@ -278,4 +279,92 @@ func encodePollySpeech(r *Request, cfg connectors.Config, model string) (*Upstre
 	}
 	return &UpstreamCall{Method: http.MethodPost, URL: endpoint + "/v1/speech", SigningService: "polly", JSON: body, Kind: ResponseBinary, Ambiguous: true,
 		CharacterHeader: "X-Amzn-Requestcharacters"}, nil
+}
+
+// The assemblyai wire is AssemblyAI's asynchronous transcription: the audio
+// is uploaded, a transcript submitted for it and polled until complete, and
+// the transcript then deleted, so AssemblyAI keeps no copy of the audio or
+// its words.
+//
+// https://www.assemblyai.com/docs/pre-recorded-audio/api-reference/transcripts/submit
+func init() {
+	registerCodec("assemblyai", codec{encodeFor: map[string]func(*Request, connectors.Config, string) (*UpstreamCall, *Error){
+		OpTranscription: encodeAssemblyAI,
+	}})
+}
+
+// assemblyAIPoll is how long a transcript waits between polls.
+const assemblyAIPoll = time.Second
+
+func encodeAssemblyAI(r *Request, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
+	format := "json"
+	if r.Format != nil {
+		format = *r.Format
+	}
+	switch {
+	case format != "json" && format != "verbose_json" && format != "text":
+		return nil, invalidMedia("AssemblyAI transcripts are served as json, verbose_json or text.")
+	case r.Stream, r.TextPrompt != nil, r.Temperature != nil, len(r.Include) > 0, len(r.ChunkingStrategy) > 0, len(r.KnownSpeakerNames) > 0, len(r.Extra) > 0,
+		slices.ContainsFunc(r.TimestampGranularities, func(granularity string) bool { return granularity != "word" }):
+		return nil, invalidMedia("AssemblyAI transcription does not support the requested transcription parameters.")
+	}
+	base := strings.TrimRight(cfg.Endpoint, "/")
+	submission := map[string]any{"speech_models": []string{model}}
+	if r.Language != nil {
+		submission["language_code"] = *r.Language
+	}
+	var transcript string
+	next := func(body []byte) (*Step, *Error) {
+		var wire struct {
+			UploadURL string `json:"upload_url"`
+			ID        string `json:"id"`
+			Status    string `json:"status"`
+		}
+		if json.Unmarshal(body, &wire) != nil {
+			return nil, protocolError("The provider's transcription answered with invalid JSON.")
+		}
+		switch {
+		case wire.UploadURL != "" && wire.Status == "":
+			submission["audio_url"] = wire.UploadURL
+			submit, err := json.Marshal(submission)
+			if err != nil {
+				return nil, invalidMedia("The transcription request could not be encoded.")
+			}
+			return &Step{Method: http.MethodPost, URL: base + "/v2/transcript", JSON: submit, Credentials: true}, nil
+		case wire.ID == "" || strings.ContainsAny(wire.ID, "/?#"):
+			return nil, protocolError("The provider's transcript names no identity.")
+		case wire.Status == "completed":
+			return &Step{Done: true, Cleanup: &Step{Method: http.MethodDelete, URL: base + "/v2/transcript/" + url.PathEscape(wire.ID), Credentials: true}}, nil
+		case wire.Status == "error":
+			return nil, Fail(http.StatusBadRequest, "transcription_failed", "The provider could not transcribe the audio.")
+		case transcript == "":
+			// The submission answers with the queued transcript to poll.
+			transcript = base + "/v2/transcript/" + url.PathEscape(wire.ID)
+			return &Step{URL: transcript, Wait: assemblyAIPoll, Credentials: true}, nil
+		}
+		return nil, nil
+	}
+	return &UpstreamCall{Method: http.MethodPost, Path: "v2/upload", Accept: "application/json", Upload: r.File, Kind: ResponseTranscription, Ambiguous: true,
+		Next: next, StepDomains: []string{"assemblyai.com"},
+		DecodeTranscription: func(body []byte) (*TranscriptionResult, *Error) {
+			var wire struct {
+				Text     *string  `json:"text"`
+				Language *string  `json:"language_code"`
+				Duration *float64 `json:"audio_duration"`
+				Words    []struct {
+					Text  string  `json:"text"`
+					Start float64 `json:"start"`
+					End   float64 `json:"end"`
+				} `json:"words"`
+			}
+			if json.Unmarshal(body, &wire) != nil || wire.Text == nil {
+				return nil, protocolError("The provider transcript is malformed.")
+			}
+			words := []transcriptWord{}
+			for _, word := range wire.Words {
+				// AssemblyAI times words in milliseconds.
+				words = append(words, transcriptWord{Word: word.Text, Start: word.Start / 1000, End: word.End / 1000})
+			}
+			return vendorTranscript(format, *wire.Text, wire.Language, wire.Duration, words), nil
+		}}, nil
 }
