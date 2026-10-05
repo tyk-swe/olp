@@ -1199,6 +1199,9 @@ func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage f
 		} `json:"predictions"`
 		Images []string `json:"images"`
 		Error  *string  `json:"error"`
+		// FinishReasons is a Stability model's verdict on each image; any but
+		// null reports a filtered request or an inference error.
+		FinishReasons []*string `json:"finish_reasons"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
@@ -1221,6 +1224,15 @@ func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage f
 			encoded = append(encoded, prediction.BytesBase64Encoded)
 		}
 	case "bedrock":
+		for _, reason := range wire.FinishReasons {
+			switch {
+			case reason == nil:
+			case strings.HasPrefix(*reason, "Filter reason:"):
+				return nil, Fail(http.StatusBadRequest, "content_filter", "The provider's content filter refused the image request.")
+			default:
+				return nil, protocolError("The provider reported an image inference error.")
+			}
+		}
 		if wire.Images == nil {
 			return nil, protocolError("The provider image response has no images.")
 		}
@@ -1835,9 +1847,16 @@ func encodeVertexImage(r *Request, model string) (*UpstreamCall, *Error) {
 		JSON: body, Kind: ResponseImages, Native: "vertex_ai", Ambiguous: true}, nil
 }
 
+// bedrockStabilityImageModels are the Stability text-to-image models Bedrock
+// serves through InvokeModel, each returning one image per call.
+var bedrockStabilityImageModels = []string{"stability.sd3-5-large-", "stability.stable-image-core-", "stability.stable-image-ultra-"}
+
 func encodeBedrockImage(r *Request, model string) (*UpstreamCall, *Error) {
+	if slices.ContainsFunc(bedrockStabilityImageModels, func(prefix string) bool { return strings.HasPrefix(model, prefix) }) {
+		return encodeBedrockStabilityImage(r, model)
+	}
 	if !strings.HasPrefix(model, "amazon.titan-image-generator-") {
-		return nil, invalidMedia("The configured model is not a qualified Bedrock Titan image model.")
+		return nil, invalidMedia("The configured model is not a qualified Bedrock Titan or Stability image model.")
 	}
 	if err := rejectNativeImageFields(r); err != nil {
 		return nil, err
@@ -1873,6 +1892,41 @@ func encodeBedrockImage(r *Request, model string) (*UpstreamCall, *Error) {
 			"height":         height,
 		},
 	})
+	if err != nil {
+		return nil, invalidMedia("The native image request could not be encoded.")
+	}
+	return &UpstreamCall{Method: http.MethodPost, Path: "model/" + url.PathEscape(model) + "/invoke",
+		JSON: body, Kind: ResponseImages, Native: "bedrock", Ambiguous: true}, nil
+}
+
+// encodeBedrockStabilityImage requests one image from a Stability model on
+// Bedrock, at the aspect ratio of the requested size.
+//
+// https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-diffusion-3-5-large.html
+func encodeBedrockStabilityImage(r *Request, model string) (*UpstreamCall, *Error) {
+	generic := *r
+	generic.OutputFormat = nil
+	if err := rejectNativeImageFields(&generic); err != nil {
+		return nil, err
+	}
+	if r.Count != nil && *r.Count != 1 {
+		return nil, invalidMedia("Stability models on Bedrock generate one image per request.")
+	}
+	fields := map[string]any{"prompt": r.Prompt}
+	if r.Size != nil {
+		aspect, ok := map[string]string{"1024x1024": "1:1", "1536x1024": "3:2", "1024x1536": "2:3"}[*r.Size]
+		if !ok {
+			return nil, invalidMedia("The size is not supported by the Bedrock Stability target.")
+		}
+		fields["aspect_ratio"] = aspect
+	}
+	if r.OutputFormat != nil {
+		if !slices.Contains([]string{"png", "jpeg", "webp"}, *r.OutputFormat) {
+			return nil, invalidMedia("The output format is not supported by the Bedrock Stability target.")
+		}
+		fields["output_format"] = *r.OutputFormat
+	}
+	body, err := json.Marshal(fields)
 	if err != nil {
 		return nil, invalidMedia("The native image request could not be encoded.")
 	}

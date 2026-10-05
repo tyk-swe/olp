@@ -89,7 +89,7 @@ Use a base URL ending in `/v1` for native OpenAI SDK requests.
 
 `rerank` is certified only for the reviewed OpenAI-compatible vendors Cohere and
 Voyage; other vendors are refused. Vertex `image_generation` qualifies
-`imagen-*` models and Bedrock qualifies `amazon.titan-image-generator-*` models;
+`imagen-*` models and Bedrock qualifies `amazon.titan-image-generator-*` and Stability text-to-image models;
 other models and every edit/variation/audio/video operation remain refused.
 Native embeddings accept only the canonical input shapes described per provider
 below.
