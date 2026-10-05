@@ -2,6 +2,7 @@ package routes
 
 import (
 	"errors"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -61,7 +62,7 @@ func TestClaudeCodeConfigurationKeepsEveryModelOnTheRoute(t *testing.T) {
 # Source this file in a POSIX shell, such as bash or zsh, before starting claude.
 # Set OLP_API_KEY to your OLP inference key first. No Anthropic login or vendor
 # key belongs on this machine. To select other models, regenerate this file.
-unset ANTHROPIC_API_KEY CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
+unset ANTHROPIC_API_KEY ANTHROPIC_SMALL_FAST_MODEL CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
 export ANTHROPIC_BASE_URL='https://gateway.example/o%27lp/code/team-glm'
 export ANTHROPIC_AUTH_TOKEN="${OLP_API_KEY:?Set OLP_API_KEY to your OLP inference key}"
 export ANTHROPIC_MODEL='glm-5.3'
@@ -73,6 +74,15 @@ export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 `
 	if config.Configuration != want {
 		t.Fatalf("configuration:\n%s", config.Configuration)
+	}
+	cmd := exec.Command("sh", "-c", `. /dev/stdin
+printf '%s\n' "${ANTHROPIC_SMALL_FAST_MODEL-unset}" "$ANTHROPIC_DEFAULT_HAIKU_MODEL"
+`)
+	cmd.Stdin = strings.NewReader(config.Configuration)
+	cmd.Env = []string{"OLP_API_KEY=olp-test", "ANTHROPIC_SMALL_FAST_MODEL=stale-model"}
+	output, err := cmd.CombinedOutput()
+	if err != nil || string(output) != "unset\nglm-5.3-flash\n" {
+		t.Fatalf("inherited background model override: %s (%v)", output, err)
 	}
 	if shellQuote(`it's`) != `'it'\''s'` {
 		t.Fatal("shell quoting is unsafe")

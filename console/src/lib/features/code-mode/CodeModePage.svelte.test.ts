@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import { ApiProblem } from '$lib/api/http';
 import { formatDate } from '$lib/format';
+import * as clipboard from '$lib/clipboard';
 import {
   listProjectMemberships,
   listAllProjectMembers
@@ -584,6 +585,63 @@ it('caches selected published models, preserves selection on URL edits and reset
     )
   ).toEqual([[published, {}, expect.any(AbortSignal)]]);
 });
+
+it.each(['gateway', 'client', 'model', 'background model'])(
+  'hides generated text and copying while a changed %s loads',
+  async (change) => {
+    const copy = vi.spyOn(clipboard, 'copyText').mockResolvedValue(true);
+    const initial = clientConfiguration({
+      client: 'claude-code',
+      supported_clients: ['claude-code', 'opencode'],
+      native_models: ['native-model', 'another-native-model'],
+      small_model: 'native-model',
+      configuration: 'previous query configuration'
+    });
+    let resolve!: (value: api.CodeClientConfiguration) => void;
+    const pending = new Promise<api.CodeClientConfiguration>((done) => {
+      resolve = done;
+    });
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce(initial)
+      .mockReturnValueOnce(pending);
+    await render(load);
+    await click('Routes');
+    await click('Revisions and client setup');
+    await click('Copy configuration');
+    expect(copy).toHaveBeenLastCalledWith(initial.configuration);
+    const modelID = `code-client-model-${route.id}`;
+    const picker = host.querySelector<HTMLSelectElement>(`#${modelID}`)!;
+    picker.focus();
+    if (change === 'gateway')
+      field('probe-gateway-url', 'https://changed-gateway.example');
+    else if (change === 'client') {
+      host
+        .querySelectorAll<HTMLInputElement>(
+          `input[name="code-client-${route.id}"]`
+        )[1]
+        .click();
+      flushSync();
+    } else
+      field(
+        change === 'model' ? modelID : `code-client-small-model-${route.id}`,
+        'another-native-model'
+      );
+    await settle();
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(host.querySelector(`#${modelID}`)).toBe(picker);
+    expect(document.activeElement).toBe(picker);
+    expect(
+      host.querySelector(`#code-client-configuration-${route.id}`)
+    ).toBeNull();
+    expect(host.textContent).toContain('Loading supported configuration');
+    expect(host.textContent).not.toContain('Copy configuration');
+    resolve({ ...initial, configuration: 'current query configuration' });
+    await settle();
+    await click('Copy configuration');
+    expect(copy).toHaveBeenLastCalledWith('current query configuration');
+  }
+);
 
 it('associates labels with distinct controls in multiple configuration panels', async () => {
   const load = vi.fn(async (current: api.CodeRoute) =>

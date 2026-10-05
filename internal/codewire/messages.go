@@ -14,6 +14,7 @@ type Messages struct {
 	input, cacheRead, cacheWrite, output *int64
 	stop                                 string
 	terminal                             bool
+	finalOutput, invalidUsage            bool
 }
 
 func NewMessages() *Messages { return &Messages{} }
@@ -25,9 +26,9 @@ func (m *Messages) Event(data []byte) codemode.Observation {
 	}
 	switch kind, _ := field(root, "type").Text(); kind {
 	case "message_start":
-		m.record(field(field(root, "message"), "usage"))
+		m.record(field(field(root, "message"), "usage"), false)
 	case "message_delta":
-		m.record(field(root, "usage"))
+		m.record(field(root, "usage"), true)
 		if stop, ok := field(field(root, "delta"), "stop_reason").Text(); ok && stop != "" {
 			m.stop = stop
 		}
@@ -47,7 +48,7 @@ func (m *Messages) Unary(body []byte) codemode.Observation {
 	}
 	switch kind, _ := field(root, "type").Text(); kind {
 	case "message":
-		m.record(field(root, "usage"))
+		m.record(field(root, "usage"), true)
 		m.stop, _ = field(root, "stop_reason").Text()
 		return m.finish()
 	case "error":
@@ -67,10 +68,20 @@ func (m *Messages) Finish() (codemode.Observation, bool) {
 	return m.finish(), true
 }
 
-func (m *Messages) record(usage oif.Value) {
+func (m *Messages) record(usage oif.Value, final bool) {
 	for target, name := range map[**int64]string{&m.input: "input_tokens", &m.cacheRead: "cache_read_input_tokens", &m.cacheWrite: "cache_creation_input_tokens", &m.output: "output_tokens"} {
-		if n := count(field(usage, name)); n != nil {
-			*target = n
+		value, present := usage.Lookup(name)
+		if !present {
+			continue
+		}
+		n := count(value)
+		if n == nil {
+			m.invalidUsage = true
+			continue
+		}
+		*target = n
+		if final && name == "output_tokens" {
+			m.finalOutput = true
 		}
 	}
 }
@@ -84,7 +95,7 @@ func (m *Messages) finish() codemode.Observation {
 		kind = "incomplete"
 	}
 	var usage codemode.Usage
-	if m.input != nil && m.output != nil {
+	if !m.invalidUsage && m.finalOutput && m.input != nil && m.output != nil {
 		input := *m.input
 		for _, n := range []*int64{m.cacheRead, m.cacheWrite} {
 			if n != nil {

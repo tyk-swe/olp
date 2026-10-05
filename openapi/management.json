@@ -4744,6 +4744,13 @@
             },
             "maxItems": 16,
             "type": "array"
+          },
+          "input": {
+            "description": "The operator continues enrollment with a pasted upstream secret, such as an API key. When absent, enrollment accepts a callback URL or code.",
+            "enum": [
+              "secret"
+            ],
+            "type": "string"
           }
         },
         "type": "object"

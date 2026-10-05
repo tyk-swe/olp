@@ -671,13 +671,13 @@ func (e CredentialRequirement) Valid() bool {
 
 // Defines values for GrantEnrollmentInput.
 const (
-	Secret GrantEnrollmentInput = "secret"
+	GrantEnrollmentInputSecret GrantEnrollmentInput = "secret"
 )
 
 // Valid indicates whether the value is a known member of the GrantEnrollmentInput enum.
 func (e GrantEnrollmentInput) Valid() bool {
 	switch e {
-	case Secret:
+	case GrantEnrollmentInputSecret:
 		return true
 	default:
 		return false
@@ -1143,6 +1143,21 @@ func (e PluginFailureRuleClass) Valid() bool {
 	case PluginFailureRuleClassRetryable:
 		return true
 	case PluginFailureRuleClassTerminal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PluginGrantAuthenticationInput.
+const (
+	PluginGrantAuthenticationInputSecret PluginGrantAuthenticationInput = "secret"
+)
+
+// Valid indicates whether the value is a known member of the PluginGrantAuthenticationInput enum.
+func (e PluginGrantAuthenticationInput) Valid() bool {
+	switch e {
+	case PluginGrantAuthenticationInputSecret:
 		return true
 	default:
 		return false
@@ -3781,7 +3796,13 @@ type PluginFailureRuleClass string
 type PluginGrantAuthentication struct {
 	// Facts The grant facts the plugin reports for every grant it enrolls, which header and query parameter templates use as {grant.<name>}, and with which the address may begin when the fact holds the upstream's base URL.
 	Facts *[]string `json:"facts,omitempty"`
+
+	// Input The operator continues enrollment with a pasted upstream secret, such as an API key. When absent, enrollment accepts a callback URL or code.
+	Input *PluginGrantAuthenticationInput `json:"input,omitempty"`
 }
+
+// PluginGrantAuthenticationInput The operator continues enrollment with a pasted upstream secret, such as an API key. When absent, enrollment accepts a callback URL or code.
+type PluginGrantAuthenticationInput string
 
 // PluginHosting A profile's hosting adaptation, which OLP runs: the address the dialect's paths extend, the declared headers and query parameters, the upstream's model listing, the classification of its failures, any envelope and rewrites of the dialect's bodies, and whether the upstream serves only streaming requests. The address and header and query values are templates in which {credential} stands for the provider's static credential or its grant's current access token and {options.<name>} for its value of one of the profile's required options; header and query values may also use {grant.<name>} for a grant fact the profile declares, and the address may begin with one that holds the upstream's base URL. A profile with an envelope or rewrites, or that forces streaming, serves transformed routes only.
 type PluginHosting struct {

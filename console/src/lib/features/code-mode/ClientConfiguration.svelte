@@ -33,8 +33,8 @@
   const selection = $derived<CodeClientSelection>(
     chosen?.revisionId === route.revision_id ? chosen.selection : {}
   );
-  // The publication's last configuration keeps the pickers in place, and
-  // focused, while another selection loads or after the server refuses one.
+  // Keep the pickers in place and focused while another selection loads or
+  // after the server refuses one. Generated text uses only the current query.
   let shown = $state<{
     revisionId: string;
     config: CodeClientConfiguration;
@@ -64,8 +64,9 @@
         })
     };
   });
-  const config = $derived(
-    configuration.data ??
+  const config = $derived(configuration.data);
+  const pickerConfig = $derived(
+    config ??
       (shown?.revisionId === route.revision_id ? shown.config : undefined)
   );
 
@@ -80,14 +81,14 @@
 
 <section class="card" aria-label="Client configuration">
   <h3>Client configuration</h3>
-  {#if config}
+  {#if pickerConfig}
     <div class="selection" aria-busy={configuration.isFetching}>
-      {#if config.supported_clients.length > 1}
+      {#if pickerConfig.supported_clients.length > 1}
         <SegmentedRadioGroup
           label="Client"
           name={ids.client}
-          value={config.client}
-          items={config.supported_clients.map((client) => ({
+          value={pickerConfig.client}
+          items={pickerConfig.supported_clients.map((client) => ({
             value: client,
             label: clientLabel(client)
           }))}
@@ -98,30 +99,30 @@
         <label for={ids.model}>Client native model</label>
         <select
           id={ids.model}
-          value={config.model}
+          value={pickerConfig.model}
           onchange={(event) => select({ model: event.currentTarget.value })}
         >
-          {#each config.native_models as model (model)}<option value={model}
-              >{model}</option
+          {#each pickerConfig.native_models as model (model)}<option
+              value={model}>{model}</option
             >{/each}
         </select>
       </div>
-      {#if config.small_model != null}
+      {#if pickerConfig.small_model != null}
         <div class="form-field">
           <label for={ids.smallModel}>Background model</label>
           <select
             id={ids.smallModel}
             aria-describedby="{ids.smallModel}-help"
-            value={config.small_model}
+            value={pickerConfig.small_model}
             onchange={(event) =>
               select({ small_model: event.currentTarget.value })}
           >
-            {#each config.native_models as model (model)}<option value={model}
-                >{model}</option
+            {#each pickerConfig.native_models as model (model)}<option
+                value={model}>{model}</option
               >{/each}
           </select>
           <small id="{ids.smallModel}-help"
-            >{config.client === 'claude-code'
+            >{pickerConfig.client === 'claude-code'
               ? 'Haiku-class and other background requests.'
               : 'Session titles and other small tasks.'}</small
           >

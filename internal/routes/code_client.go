@@ -170,7 +170,7 @@ func claudeCodeConfiguration(slug, plan, baseURL, model, small string) string {
 # Source this file in a POSIX shell, such as bash or zsh, before starting claude.
 # Set OLP_API_KEY to your OLP inference key first. No Anthropic login or vendor
 # key belongs on this machine. To select other models, regenerate this file.
-unset ANTHROPIC_API_KEY CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
+unset ANTHROPIC_API_KEY ANTHROPIC_SMALL_FAST_MODEL CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
 export ANTHROPIC_BASE_URL=%s
 export ANTHROPIC_AUTH_TOKEN="${OLP_API_KEY:?Set OLP_API_KEY to your OLP inference key}"
 export ANTHROPIC_MODEL=%s

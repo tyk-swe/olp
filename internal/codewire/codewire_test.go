@@ -131,6 +131,102 @@ func TestMessagesUsageIncludesCacheTrafficAndEndsOnStop(t *testing.T) {
 	}
 }
 
+func TestMessagesUsageNeedsFinalOutput(t *testing.T) {
+	start := "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n" +
+		"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"more content\"}}\n\n"
+	stop := "data: {\"type\":\"message_stop\"}\n\n"
+	for _, test := range []struct {
+		name, ending string
+		known        bool
+	}{
+		{name: "message stop only", ending: stop},
+		{name: "delta without output", ending: "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":10}}\n\n" + stop},
+		{name: "inferred stop without usage", ending: "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"},
+		{name: "final zero output", ending: "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\n" + stop, known: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			observed := stream(NewMessages(), start+test.ending)
+			if len(observed) != 1 || !observed[0].Terminal || !observed[0].Successful {
+				t.Fatalf("observations: %+v", observed)
+			}
+			usage := observed[0].Usage
+			if test.known {
+				if usage.Total == nil || *usage.Total != 10 || usage.Output == nil || *usage.Output != 0 {
+					t.Fatalf("final zero usage: %+v", usage)
+				}
+			} else if usage != (codemode.Usage{}) {
+				t.Fatalf("preliminary usage became known: %+v", usage)
+			}
+		})
+	}
+}
+
+func TestMessagesMalformedCountersKeepUsageUnknown(t *testing.T) {
+	valid := `{"input_tokens":10,"output_tokens":3,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}`
+	for counter, value := range map[string]string{"input_tokens": "10", "output_tokens": "3", "cache_read_input_tokens": "0", "cache_creation_input_tokens": "0"} {
+		for _, invalid := range []string{"-1", "1.5", `"3"`, "null", "true", "9007199254740992"} {
+			t.Run(counter+"/"+invalid, func(t *testing.T) {
+				malformed := strings.Replace(valid, fmt.Sprintf(`%q:%s`, counter, value), fmt.Sprintf(`%q:%s`, counter, invalid), 1)
+				unary := NewMessages().Unary([]byte(fmt.Sprintf(`{"type":"message","stop_reason":"end_turn","usage":%s}`, malformed)))
+				messages := NewMessages()
+				messages.Event([]byte(fmt.Sprintf(`{"type":"message_start","message":{"usage":%s}}`, valid)))
+				messages.Event([]byte(fmt.Sprintf(`{"type":"message_delta","usage":%s}`, malformed)))
+				messages.Event([]byte(fmt.Sprintf(`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":%s}`, valid)))
+				stopped := messages.Event([]byte(`{"type":"message_stop"}`))
+				for name, observed := range map[string]codemode.Observation{"unary": unary, "stream": stopped} {
+					if !observed.Terminal || !observed.Successful || observed.Usage != (codemode.Usage{}) {
+						t.Fatalf("%s accepted malformed usage: %+v", name, observed)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestChatDerivesOnlyAbsentTotals(t *testing.T) {
+	for _, test := range []struct {
+		name, total string
+		known       bool
+	}{
+		{name: "absent", known: true},
+		{name: "valid", total: `,"total_tokens":26`, known: true},
+		{name: "negative", total: `,"total_tokens":-1`},
+		{name: "fractional", total: `,"total_tokens":1.5`},
+		{name: "text", total: `,"total_tokens":"bad"`},
+		{name: "numeric text", total: `,"total_tokens":"26"`},
+		{name: "null", total: `,"total_tokens":null`},
+		{name: "boolean", total: `,"total_tokens":true`},
+		{name: "too large", total: `,"total_tokens":9007199254740992`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":6%s}}`, test.total)
+			check := func(t *testing.T, observed codemode.Observation) {
+				t.Helper()
+				if !observed.Terminal || !observed.Successful {
+					t.Fatalf("observation: %+v", observed)
+				}
+				if test.known {
+					if observed.Usage.Total == nil || *observed.Usage.Total != 26 {
+						t.Fatalf("known total: %+v", observed.Usage)
+					}
+				} else if observed.Usage.Total != nil {
+					t.Fatalf("malformed total became known: %+v", observed.Usage)
+				}
+			}
+			t.Run("unary", func(t *testing.T) {
+				check(t, NewChat().Unary([]byte(body)))
+			})
+			t.Run("SSE", func(t *testing.T) {
+				observed := stream(NewChat(), "data: "+body+"\n\ndata: [DONE]\n\n")
+				if len(observed) != 1 {
+					t.Fatalf("observations: %+v", observed)
+				}
+				check(t, observed[0])
+			})
+		})
+	}
+}
+
 func TestChatUsageNeedsTheFinalChunkAndEndsOnDone(t *testing.T) {
 	chunk := func(s string) string { return "data: " + s + "\n\n" }
 	body := chunk(`{"id":"c1","choices":[{"index":0,"delta":{"content":"private"},"finish_reason":null}]}`) +

@@ -70,9 +70,10 @@ func (c *Chat) read(root oif.Value) {
 		}
 	}
 	if usage := field(root, "usage"); usage.Kind() == oif.Object {
-		u := codemode.Usage{Total: count(field(usage, "total_tokens")), Input: count(field(usage, "prompt_tokens")), Output: count(field(usage, "completion_tokens")),
+		total, present := usage.Lookup("total_tokens")
+		u := codemode.Usage{Total: count(total), Input: count(field(usage, "prompt_tokens")), Output: count(field(usage, "completion_tokens")),
 			Cached: count(field(field(usage, "prompt_tokens_details"), "cached_tokens")), Reasoning: count(field(field(usage, "completion_tokens_details"), "reasoning_tokens"))}
-		if u.Total == nil && u.Input != nil && u.Output != nil {
+		if !present && u.Input != nil && u.Output != nil {
 			u.Total = new(*u.Input + *u.Output)
 		}
 		if u.Validate() != nil {
