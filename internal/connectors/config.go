@@ -293,6 +293,8 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 		path = "/model/" + url.PathEscape(model) + "/" + operation
 	case openai.FamilyBedrockEmbeddings:
 		path = "/model/" + url.PathEscape(model) + "/invoke"
+	case openai.FamilyBedrockRerank:
+		return c.bedrockAgentRuntime(base)
 	case openai.FamilyRerank:
 		if endpoint, ok := c.operationEndpoint("rerank", base); ok {
 			return endpoint, nil

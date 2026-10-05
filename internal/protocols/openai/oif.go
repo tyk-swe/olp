@@ -13,7 +13,7 @@ var wireDialects = map[Family]string{
 	FamilyChat: "openai-chat", FamilyResponses: "openai-responses", FamilyInputTokens: "openai-input-tokens",
 	FamilyAnthropic: "anthropic-messages", FamilyAnthropicCount: "anthropic-count-tokens",
 	FamilyGemini: "gemini-generate-content", FamilyGeminiStream: "gemini-generate-content", FamilyGeminiCount: "gemini-count-tokens",
-	FamilyEmbeddings: "openai-embeddings", FamilyModeration: "openai-moderation", FamilyRerank: "rerank",
+	FamilyEmbeddings: "openai-embeddings", FamilyModeration: "openai-moderation", FamilyRerank: "rerank", FamilyBedrockRerank: "bedrock-rerank",
 	FamilyGeminiEmbeddings: "gemini-embeddings", FamilyGeminiEmbeddingsBatch: "gemini-embeddings-batch",
 	FamilyVertexEmbeddings: "vertex-embeddings", FamilyBedrockEmbeddings: "bedrock-embeddings",
 	FamilyBedrock: "bedrock-converse", "bedrock_count": "bedrock-count-tokens",

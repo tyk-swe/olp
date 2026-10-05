@@ -66,9 +66,9 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 		return surface == "openai" && mode == "unary" && (openaiFamily || nativeEmbeddings)
 	case "rerank":
 		// Rerank has no common wire: only a vendor whose contract reviews
-		// its rerank shape serves it.
+		// its rerank shape serves it, through the connector it reviews.
 		contract, reviewed := vendors.Lookup(vendor)
-		return surface == "openai" && mode == "unary" && kind == "openai_compatible" && reviewed && contract.Serves("rerank")
+		return surface == "openai" && mode == "unary" && (kind == "openai_compatible" || kind == "bedrock") && reviewed && contract.Connector == kind && contract.Serves("rerank")
 	case "moderation", "image_variation", "translation":
 		return surface == "openai" && mode == "unary" && openaiFamily
 	case "image_generation":

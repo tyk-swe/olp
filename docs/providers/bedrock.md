@@ -12,6 +12,16 @@ Beyond Converse, two InvokeModel families qualify by model prefix:
 `TEXT_IMAGE` task. Both normalize to the OpenAI surface and are described in
 [the compatibility matrix](../compatibility.md).
 
+Rerank models, such as `amazon.rerank-v1:0` and `cohere.rerank-v3-5:0`, serve
+`/v1/rerank` through the Bedrock Agent Runtime's
+[Rerank API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Rerank.html)
+at `bedrock-agent-runtime.{region}`, which OLP reaches only from the region's
+default Bedrock Runtime endpoint. The request names the model by its regional
+foundation-model ARN, `truncation` is refused, and documents return from the
+request when `return_documents` asks for them. AWS bills a query for every
+hundred documents, which is the usage OLP records. Inference needs
+`bedrock:Rerank` and `bedrock:InvokeModel` on the model.
+
 ## Bedrock SDK ingress
 
 AWS SDK clients can also call the gateway's Bedrock surface directly under

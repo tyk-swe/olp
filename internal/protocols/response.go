@@ -107,6 +107,8 @@ func decodeTransformed(wire, target openai.Family, body []byte, route, encoding 
 		c, err = decodeBedrockEmbedding(body, route, encoding)
 	case openai.FamilyRerank:
 		c, err = decodeRerank(body, route, request)
+	case openai.FamilyBedrockRerank:
+		c, err = decodeBedrockRerank(body, route, request)
 	case openai.FamilyModeration:
 		f, e := object(body)
 		if e != nil {

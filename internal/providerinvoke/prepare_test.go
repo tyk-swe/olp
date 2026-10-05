@@ -199,3 +199,20 @@ func TestPluginRewritesPreserveAuthorizedProviderStateOrDisableIt(t *testing.T) 
 		})
 	}
 }
+
+// TestBedrockRerankNamesItsModelByARN covers the transformed rerank path of an
+// automatic Bedrock provider: the model reaches the body as its regional ARN.
+func TestBedrockRerankNamesItsModelByARN(t *testing.T) {
+	request, err := openai.Parse(openai.FamilyRerank, []byte(`{"model":"route","query":"q","documents":["a","b"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := connectors.Config{Kind: "bedrock", AuthMode: "default_chain", CloudRegion: "eu-central-1", VendorID: "amazon-bedrock"}
+	result, err := Prepare(request, cfg, "cohere.rerank-v3-5:0", nil)
+	if err != nil || result.Wire != openai.FamilyBedrockRerank {
+		t.Fatal(result.Wire, err)
+	}
+	if body := string(result.Prepared.Document().Bytes()); !strings.Contains(body, `"modelArn":"arn:aws:bedrock:eu-central-1::foundation-model/cohere.rerank-v3-5:0"`) || strings.Contains(body, `"model"`) {
+		t.Fatalf("prepared body = %s", body)
+	}
+}

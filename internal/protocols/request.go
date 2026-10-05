@@ -187,6 +187,9 @@ func WireFamily(kind, vendor string, source openai.Family) openai.Family {
 		if source.Operation() == "embeddings" {
 			return openai.FamilyBedrockEmbeddings
 		}
+		if source == openai.FamilyRerank {
+			return openai.FamilyBedrockRerank
+		}
 		return "bedrock"
 	}
 	if count {
@@ -297,6 +300,10 @@ func encodeTransformed(r *openai.Request, wire openai.Family, kind, vendor, mode
 	}
 	if r.Family == openai.FamilyEmbeddings {
 		return encodeNativeEmbeddings(wire, f, model)
+	}
+	if r.Family == openai.FamilyRerank && wire == openai.FamilyBedrockRerank {
+		encoded, err := encodeBedrockRerank(f, model)
+		return encoded, wire, err
 	}
 	c, err := decodeCanonical(r.Family, f)
 	if err != nil {

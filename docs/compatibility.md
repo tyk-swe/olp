@@ -57,7 +57,7 @@ Use a base URL ending in `/v1` for native OpenAI SDK requests.
 | `POST /v1/responses` | generation | native | translated | translated | translated | translated | native | native |
 | `POST /v1/responses/input_tokens` | token_count | native | translated | translated | translated | translated | native | native |
 | `POST /v1/embeddings` | embeddings | native | — | translated | translated | translated | native | native |
-| `POST /v1/rerank` | rerank | — | — | — | — | — | — | reviewed |
+| `POST /v1/rerank` | rerank | — | — | — | — | qualified | — | reviewed |
 | `POST /v1/moderations` | moderation | native | — | — | — | — | native | native |
 | `POST /v1/files` | file | qualified | — | — | — | — | qualified | — |
 | `GET /v1/files` | file | qualified | — | — | — | — | qualified | — |

@@ -43,6 +43,7 @@ const (
 	FamilyVertexEmbeddings      Family = "vertex_embeddings"
 	FamilyBedrockEmbeddings     Family = "bedrock_embeddings"
 	FamilyRerank                Family = "rerank"
+	FamilyBedrockRerank         Family = "bedrock_rerank"
 	// Media families name their operation tag directly so the accounting
 	// envelope and selection registry agree on the operation string.
 	FamilyImageGeneration Family = "image_generation"
@@ -73,7 +74,7 @@ func (f Family) Operation() string {
 		return "embeddings"
 	case FamilyModeration:
 		return "moderation"
-	case FamilyRerank:
+	case FamilyRerank, FamilyBedrockRerank:
 		return "rerank"
 	case FamilyImageGeneration, FamilyImageEdit, FamilyImageVariation, FamilySpeech,
 		FamilyTranscription, FamilyTranslation, FamilyVideoCreate, FamilyVideoList, FamilyVideoGet,

@@ -26,7 +26,7 @@ const inspectMaxDepth = 64
 func InputInspectable(family openai.Family) bool {
 	switch family {
 	case openai.FamilyChat, openai.FamilyResponses, openai.FamilyInputTokens,
-		openai.FamilyEmbeddings, openai.FamilyModeration, openai.FamilyRerank,
+		openai.FamilyEmbeddings, openai.FamilyModeration, openai.FamilyRerank, openai.FamilyBedrockRerank,
 		openai.FamilyAnthropic, openai.FamilyAnthropicCount,
 		openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyGeminiCount,
 		openai.FamilyBedrock, "bedrock_count",
