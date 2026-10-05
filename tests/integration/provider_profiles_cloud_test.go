@@ -19,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/protocols"
 )
 
 // Every built-in composition reaches a real local provider through public
@@ -78,6 +79,11 @@ func testPublishedProviderProfilesPreserveCloudInvocation(t *testing.T, strict b
 		// strict_operations_test.go; retain the
 		// existing Bedrock Invoke coverage in the non-strict run.
 		if (!slices.Contains(profile.Operations, "generation") && profile.ID != "bedrock-invoke") || profile.ID == "gemini-interactions" {
+			continue
+		}
+		// Native generation dialects have their own suite in
+		// native_generation_test.go.
+		if _, native := protocols.NativeGenerationFamily(profile.OperationDialect("generation")); native {
 			continue
 		}
 		if strict && profile.ID == "bedrock-invoke" {
