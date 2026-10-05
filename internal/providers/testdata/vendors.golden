@@ -552,7 +552,8 @@
     "discovery": false,
     "operations": [
       "generation",
-      "embeddings"
+      "embeddings",
+      "rerank"
     ],
     "authentication": [
       "api_key",
@@ -588,7 +589,8 @@
       "metadata",
       "prediction",
       "service_tier",
-      "store"
+      "store",
+      "truncation"
     ]
   },
   {
@@ -894,6 +896,38 @@
       "cohere-chat-v2"
     ],
     "unsupported_parameters": []
+  },
+  {
+    "id": "jina",
+    "name": "Jina AI",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "embeddings",
+      "rerank"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "task",
+      "dimensions",
+      "embedding_type",
+      "normalized",
+      "late_chunking",
+      "truncate",
+      "top_n",
+      "return_documents",
+      "max_doc_length"
+    ],
+    "documentation_url": "https://api.jina.ai/openapi.json",
+    "endpoint": "https://api.jina.ai/v1",
+    "dialects": [],
+    "unsupported_parameters": [
+      "truncation"
+    ]
   },
   {
     "id": "voyage",
@@ -2080,6 +2114,34 @@
       "openai-responses"
     ],
     "unsupported_parameters": []
+  },
+  {
+    "id": "infinity",
+    "name": "Infinity",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "embeddings",
+      "rerank"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "dimensions",
+      "encoding_format",
+      "top_n",
+      "return_documents",
+      "raw_scores"
+    ],
+    "documentation_url": "https://github.com/michaelfeil/infinity/blob/main/docs/assets/openapi.json",
+    "endpoint": "https://infinity.example.internal",
+    "dialects": [],
+    "unsupported_parameters": [
+      "truncation"
+    ]
   },
   {
     "id": "docker-model-runner",

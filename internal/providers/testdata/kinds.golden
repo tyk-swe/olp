@@ -216,6 +216,20 @@
           "profile_revision": "1"
         },
         {
+          "id": "jina",
+          "label": "Jina AI",
+          "description": "Jina AI embeddings and reranking.",
+          "endpoint": "https://api.jina.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Jina AI",
+          "documentation_label": "Jina AI API",
+          "documentation_url": "https://api.jina.ai/openapi.json",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
           "id": "voyage",
           "label": "Voyage AI",
           "description": "Voyage AI compatible API.",
@@ -616,6 +630,20 @@
           "maintainer": "llama.cpp server",
           "documentation_label": "llama.cpp server API",
           "documentation_url": "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
+          "discovery": true,
+          "placeholder": true,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "infinity",
+          "label": "Infinity",
+          "description": "Self-hosted Infinity embedding and reranking server; port 7997 by default.",
+          "endpoint": "https://infinity.example.internal",
+          "auth_mode": "none",
+          "maintainer": "Infinity",
+          "documentation_label": "Infinity API",
+          "documentation_url": "https://github.com/michaelfeil/infinity/blob/main/docs/assets/openapi.json",
           "discovery": true,
           "placeholder": true,
           "profile_id": null,

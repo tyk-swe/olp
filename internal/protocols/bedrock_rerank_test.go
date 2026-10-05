@@ -94,3 +94,16 @@ func sameJSON(t *testing.T, got []byte, want string) string {
 	}
 	return ""
 }
+
+// TestJinaEmbeddingsNameTheirEncodingType covers Jina's spelling of the
+// OpenAI encoding format, which the official SDK sends by default.
+func TestJinaEmbeddingsNameTheirEncodingType(t *testing.T) {
+	r, err := Parse(openai.FamilyEmbeddings, []byte(`{"model":"route","input":["a"],"encoding_format":"base64","dimensions":256}`), "route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, wire, err := Encode(r, "openai_compatible", "jina", "jina-embeddings-v3", nil)
+	if err != nil || wire != openai.FamilyEmbeddings || sameJSON(t, body, `{"model":"jina-embeddings-v3","input":["a"],"embedding_type":"base64","dimensions":256}`) != "" {
+		t.Fatalf("Jina body = %s, %v", body, err)
+	}
+}

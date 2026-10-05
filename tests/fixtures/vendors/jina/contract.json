@@ -1,0 +1,40 @@
+{
+  "vendor": "jina",
+  "documentation_url": "https://api.jina.ai/openapi.json",
+  "reviewed_at": "2026-10-05",
+  "notes": "Embeddings take embedding_type for encoding_format; GET /v1/models answers without a credential, so models are declared. Rerank has no truncation control. Errors carry detail, code and request_id.",
+  "endpoints": {
+    "embeddings": "https://api.jina.ai/v1/embeddings",
+    "rerank": "https://api.jina.ai/v1/rerank"
+  },
+  "unsupported_parameters": [
+    "truncation"
+  ],
+  "responses": {
+    "embeddings": {
+      "file": "embeddings.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 8,
+        "output_tokens": 0,
+        "total_tokens": 8
+      }
+    },
+    "rerank": {
+      "file": "rerank.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 40,
+        "output_tokens": 0,
+        "total_tokens": 40
+      }
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "schema",
+    "status": 401,
+    "envelope": null,
+    "class": "credential"
+  }
+}

@@ -149,7 +149,7 @@ file; leave them empty to keep the binary defaults.
 
 The release-owned wizard catalog resolves a reviewed HTTPS endpoint and
 `api_key` authentication into ordinary `openai_compatible` fields. Self-hosted
-runtimes (`vllm`, `ollama`, `lmstudio`, `llamacpp`, `docker-model-runner`) are
+runtimes (`vllm`, `ollama`, `lmstudio`, `llamacpp`, `infinity`, `docker-model-runner`) are
 the exception: they start unauthenticated, with a placeholder endpoint to
 replace with the operator's server. Account-scoped platforms (`databricks`,
 `snowflake-cortex`, `cloudflare-workers-ai`) also start at a placeholder whose
@@ -181,6 +181,7 @@ selects the `compatible-chat` profile, so it can serve strict routes; choose
 | `huggingface` | Hugging Face | `https://router.huggingface.co/v1` |  |
 | `cohere` | Cohere | `https://api.cohere.ai/compatibility/v1` |  |
 | `cohere-native-v2` | Cohere native v2 | `https://api.cohere.ai/v2` | `cohere-v2` |
+| `jina` | Jina AI | `https://api.jina.ai/v1` |  |
 | `voyage` | Voyage AI | `https://api.voyageai.com/v1` |  |
 | `xai` | xAI | `https://api.x.ai/v1` | `compatible-chat` |
 | `cerebras` | Cerebras | `https://api.cerebras.ai/v1` | `compatible-chat` |
@@ -210,6 +211,7 @@ selects the `compatible-chat` profile, so it can serve strict routes; choose
 | `ollama` | Ollama | `https://ollama.example.internal/v1` (placeholder) |  |
 | `lmstudio` | LM Studio | `https://lmstudio.example.internal/v1` (placeholder) |  |
 | `llamacpp` | llama.cpp server | `https://llamacpp.example.internal/v1` (placeholder) |  |
+| `infinity` | Infinity | `https://infinity.example.internal` (placeholder) |  |
 | `docker-model-runner` | Docker Model Runner | `https://model-runner.example.internal/engines/v1` (placeholder) |  |
 
 A preset is not provider or model certification. Creation and edits still run

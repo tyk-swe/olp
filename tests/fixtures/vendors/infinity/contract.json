@@ -1,0 +1,40 @@
+{
+  "vendor": "infinity",
+  "documentation_url": "https://github.com/michaelfeil/infinity/blob/main/docs/assets/openapi.json",
+  "reviewed_at": "2026-10-05",
+  "notes": "Self-hosted; paths sit at the server root without /v1. Rerank follows Cohere's protocol with raw_scores in place of truncation. Validation errors use FastAPI's detail list.",
+  "endpoints": {
+    "embeddings": "https://infinity.example.internal/embeddings",
+    "rerank": "https://infinity.example.internal/rerank"
+  },
+  "unsupported_parameters": [
+    "truncation"
+  ],
+  "responses": {
+    "embeddings": {
+      "file": "embeddings.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 5,
+        "output_tokens": 0,
+        "total_tokens": 5
+      }
+    },
+    "rerank": {
+      "file": "rerank.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 21,
+        "output_tokens": 0,
+        "total_tokens": 21
+      }
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "schema",
+    "status": 422,
+    "envelope": null,
+    "class": "upstream_client"
+  }
+}

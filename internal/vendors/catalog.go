@@ -84,7 +84,8 @@ var contracts = []Contract{
 	compatiblePreset("mistral", "Mistral", "Mistral AI", "Mistral La Plateforme.", "https://api.mistral.ai/v1", Link{"Mistral chat API", "https://docs.mistral.ai/api/endpoint/chat"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: []string{"openai-chat", "mistral-fim"},
 		Requests: map[string]RequestShape{"generation": {Rewrites: []Rewrite{maxTokens, {From: "seed", To: "random_seed"}}}}}, nil),
 	compatiblePreset("openrouter", "OpenRouter", "OpenRouter", "OpenRouter unified API.", "https://openrouter.ai/api/v1", Link{"OpenRouter API reference", "https://openrouter.ai/docs/api/reference/overview"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects}, exactChat),
-	compatiblePreset("together", "Together AI", "Together AI", "Together AI inference.", "https://api.together.ai/v1", Link{"Together OpenAI compatibility", "https://docs.together.ai/docs/openai-api-compatibility"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Unsupported: []string{"logit_bias", "metadata", "prediction", "service_tier", "store"}, Requests: chatTokenLimit}, nil),
+	compatiblePreset("together", "Together AI", "Together AI", "Together AI inference.", "https://api.together.ai/v1", Link{"Together OpenAI compatibility", "https://docs.together.ai/docs/openai-api-compatibility"}, Contract{Operations: []string{"generation", "embeddings", "rerank"}, Dialects: chatDialect, Unsupported: []string{"logit_bias", "metadata", "prediction", "service_tier", "store"},
+		Requests: map[string]RequestShape{"generation": chatTokenLimit["generation"], "rerank": {Unsupported: []string{"truncation"}}}}, nil),
 	selfHostedPreset("vllm", "vLLM", "Self-hosted vLLM OpenAI server.", "https://vllm.example.internal/v1", Link{"vLLM OpenAI-compatible server", "https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects, Unsupported: []string{"user"}}),
 	compatiblePreset("deepseek", "DeepSeek", "DeepSeek", "DeepSeek compatible API.", "https://api.deepseek.com", Link{"DeepSeek chat completion API", "https://api-docs.deepseek.com/api/create-chat-completion"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect, Unsupported: []string{"frequency_penalty", "presence_penalty"}, Requests: chatTokenLimit}, nil),
 	compatiblePreset("fireworks", "Fireworks", "Fireworks", "Fireworks compatible API.", "https://api.fireworks.ai/inference/v1", Link{"Fireworks OpenAI compatibility", "https://docs.fireworks.ai/tools-sdks/openai-compatibility"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: chatDialect}, exactChat),
@@ -105,6 +106,13 @@ var contracts = []Contract{
 		Operations: []string{"embeddings", "rerank", "generation"}, Dialects: []string{"cohere-chat-v2"}, ProbeOperation: "embeddings",
 		Parameters: []string{"input_type", "texts", "images", "inputs", "embedding_types", "output_dimension", "truncate", "max_tokens", "top_n", "max_tokens_per_doc", "priority",
 			"messages", "documents", "citation_options", "tools", "tool_choice", "strict_tools", "response_format", "safety_mode", "temperature", "p", "k", "seed", "stop_sequences", "frequency_penalty", "presence_penalty", "logprobs", "thinking"}}, &ProfileRef{ID: "cohere-v2", Revision: "1"}),
+	compatiblePreset("jina", "Jina AI", "Jina AI", "Jina AI embeddings and reranking.", "https://api.jina.ai/v1", Link{"Jina AI API", "https://api.jina.ai/openapi.json"}, Contract{
+		Operations: []string{"embeddings", "rerank"}, ProbeOperation: "embeddings",
+		Parameters: []string{"task", "dimensions", "embedding_type", "normalized", "late_chunking", "truncate", "top_n", "return_documents", "max_doc_length"},
+		Requests: map[string]RequestShape{
+			"embeddings": {Rewrites: []Rewrite{{From: "encoding_format", To: "embedding_type"}}},
+			"rerank":     {Unsupported: []string{"truncation"}},
+		}}, nil),
 	compatiblePreset("voyage", "Voyage AI", "Voyage AI", "Voyage AI compatible API.", "https://api.voyageai.com/v1", Link{"Voyage AI embeddings API", "https://docs.voyageai.com/reference/embeddings-api"}, Contract{
 		Operations: []string{"embeddings", "rerank"}, ProbeOperation: "embeddings",
 		Parameters: []string{"dimensions", "input_type", "truncation", "output_dtype", "encoding_format"},
@@ -156,6 +164,9 @@ var contracts = []Contract{
 		Unsupported: []string{"logit_bias", "logprobs", "n", "tool_choice", "top_logprobs", "user"}, Requests: chatTokenLimit}),
 	selfHostedPreset("lmstudio", "LM Studio", "Self-hosted LM Studio server; port 1234 in its examples.", "https://lmstudio.example.internal/v1", Link{"LM Studio OpenAI compatibility", "https://lmstudio.ai/docs/developer/openai-compat"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects, Requests: chatTokenLimit}),
 	selfHostedPreset("llamacpp", "llama.cpp server", "Self-hosted llama-server; port 8080 by default.", "https://llamacpp.example.internal/v1", Link{"llama.cpp server API", "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects}),
+	selfHostedPreset("infinity", "Infinity", "Self-hosted Infinity embedding and reranking server; port 7997 by default.", "https://infinity.example.internal", Link{"Infinity API", "https://github.com/michaelfeil/infinity/blob/main/docs/assets/openapi.json"}, Contract{
+		Discovery: true, Operations: []string{"embeddings", "rerank"}, ProbeOperation: "embeddings", Parameters: []string{"dimensions", "encoding_format", "top_n", "return_documents", "raw_scores"},
+		Requests: map[string]RequestShape{"rerank": {Unsupported: []string{"truncation"}}}}),
 	selfHostedPreset("docker-model-runner", "Docker Model Runner", "Docker Model Runner; port 12434 on the host by default.", "https://model-runner.example.internal/engines/v1", Link{"Docker Model Runner API", "https://docs.docker.com/ai/model-runner/api-reference/"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Requests: chatTokenLimit}),
 }
 

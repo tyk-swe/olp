@@ -3,7 +3,7 @@ openai_compatible openai_compatible: generation/openai/unary generation/openai/s
 openai_compatible groq: generation/openai/unary generation/openai/streaming translation/openai/unary transcription/openai/unary
 openai_compatible mistral: generation/openai/unary generation/openai/streaming embeddings/openai/unary
 openai_compatible openrouter: generation/openai/unary generation/openai/streaming embeddings/openai/unary
-openai_compatible together: generation/openai/unary generation/openai/streaming embeddings/openai/unary
+openai_compatible together: generation/openai/unary generation/openai/streaming embeddings/openai/unary rerank/openai/unary
 openai_compatible vllm: generation/openai/unary generation/openai/streaming embeddings/openai/unary
 openai_compatible deepseek: generation/openai/unary generation/openai/streaming
 openai_compatible fireworks: generation/openai/unary generation/openai/streaming embeddings/openai/unary
@@ -11,6 +11,7 @@ openai_compatible deepinfra: generation/openai/unary generation/openai/streaming
 openai_compatible huggingface: generation/openai/unary generation/openai/streaming
 openai_compatible cohere: generation/openai/unary generation/openai/streaming embeddings/openai/unary rerank/openai/unary
 openai_compatible cohere-native-v2: embeddings/openai/unary rerank/openai/unary
+openai_compatible jina: embeddings/openai/unary rerank/openai/unary
 openai_compatible voyage: embeddings/openai/unary rerank/openai/unary
 openai_compatible xai: generation/openai/unary generation/openai/streaming image_generation/openai/unary
 openai_compatible cerebras: generation/openai/unary generation/openai/streaming
@@ -40,6 +41,7 @@ openai_compatible vercel-ai-gateway: generation/openai/unary generation/openai/s
 openai_compatible ollama: generation/openai/unary generation/openai/streaming embeddings/openai/unary
 openai_compatible lmstudio: generation/openai/unary generation/openai/streaming embeddings/openai/unary
 openai_compatible llamacpp: generation/openai/unary generation/openai/streaming embeddings/openai/unary
+openai_compatible infinity: embeddings/openai/unary rerank/openai/unary
 openai_compatible docker-model-runner: generation/openai/unary generation/openai/streaming embeddings/openai/unary
 anthropic anthropic: generation/openai/unary generation/openai/streaming token_count/openai/unary generation/anthropic/unary generation/anthropic/streaming token_count/anthropic/unary generation/gemini/unary generation/gemini/streaming token_count/gemini/unary
 gemini google: generation/openai/unary generation/openai/streaming token_count/openai/unary generation/anthropic/unary generation/anthropic/streaming token_count/anthropic/unary generation/gemini/unary generation/gemini/streaming token_count/gemini/unary embeddings/openai/unary

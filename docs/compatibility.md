@@ -94,8 +94,10 @@ Use a base URL ending in `/v1` for native OpenAI SDK requests.
 | `GET /v1/models` | model_list | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
 | `GET /v1/models/{id}` | model_get | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
 
-`rerank` is certified only for the reviewed OpenAI-compatible vendors Cohere and
-Voyage; other vendors are refused. Vertex `image_generation` qualifies
+`rerank` is certified only for the reviewed OpenAI-compatible vendors Cohere,
+Voyage, Jina, Together and Infinity, and for Bedrock's rerank models; other
+vendors are refused. Echoed documents must be the request's own, as text or
+as an object holding it. Vertex `image_generation` qualifies
 `imagen-*` models and Bedrock qualifies `amazon.titan-image-generator-*` and Stability text-to-image models;
 other models and every edit/variation/audio/video operation remain refused.
 Native embeddings accept only the canonical input shapes described per provider
@@ -359,10 +361,12 @@ retry policy, deadlines, and live tests.
 Both are native on the OpenAI surface, but their certification path is narrower
 than OpenAI's own. An OpenAI-compatible provider can only be certified for
 generation, embeddings, token counting, and moderation on the OpenAI surface,
-plus rerank for the reviewed Cohere and Voyage vendors, so the other surfaces
-and every media operation are refused. Cohere rerank resolves to the official
-`/v2/rerank` endpoint for the reviewed preset; Voyage rerank posts to the
-configured base plus `/rerank`. Azure OpenAI supports generation and token
+plus rerank for the reviewed rerank vendors and the media operations of the
+[reviewed media vendors](providers/media.md); the other surfaces are refused.
+Cohere rerank resolves to the official `/v2/rerank` endpoint for the reviewed
+preset; Voyage, Jina, Together and Infinity rerank post to the configured base
+plus `/rerank`, and refuse `truncation` except at Voyage. Jina receives the
+OpenAI `encoding_format` as its `embedding_type`. Azure OpenAI supports generation and token
 counting on OpenAI, Anthropic, and Gemini surfaces, plus OpenAI-surface
 embeddings and moderation. It also supports the qualified file, batch, realtime,
 and stored-response paths above; image, audio, and video operations remain

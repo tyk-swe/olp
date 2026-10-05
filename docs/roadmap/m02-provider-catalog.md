@@ -136,6 +136,19 @@ durable job model that [video creation](../gateway.md#media-and-durable-video-jo
 already provides: the job pins its route, provider, slot, credential and price
 revisions, and the media reconciler settles it.
 
+#### Settled during implementation
+
+Reviewed on 2026-10-05 against each vendor's own documentation.
+
+| Target | Outcome | Source |
+| --- | --- | --- |
+| Jina AI | A `jina` preset for embeddings and rerank; `encoding_format` reaches Jina as `embedding_type`. | [Jina API](https://api.jina.ai/openapi.json) |
+| Together AI rerank | The `together` preset serves rerank on dedicated endpoints, metered by its token usage. | [Together rerank](https://docs.together.ai/reference/rerank-1) |
+| Infinity | An `infinity` self-hosted preset for embeddings and Cohere-protocol rerank. | [Infinity API](https://github.com/michaelfeil/infinity/blob/main/docs/assets/openapi.json) |
+| Mistral embeddings | Served by the `mistral` preset since M2.1. Mistral has no rerank API, so its rerank is declined. | [Mistral API](https://docs.mistral.ai/api/) |
+| NVIDIA NIM rerank | Declined. NVIDIA's hosted rerankers sit at a model-specific address each and score with raw logits, which OLP's rerank result, a relevance score from 0 to 1, cannot carry without rescaling. NIM embeddings are served by the `nvidia-nim` preset. | [NVIDIA reranking API](https://docs.api.nvidia.com/nim/reference/nvidia-llama-3_2-nv-rerankqa-1b-v2-infer) |
+| Bedrock Cohere embeddings | Declined; see M2.2. | |
+
 ### M2.4 Reference catalog
 
 A first-party catalog, `openllmproxy.dev/catalog/v1`, describes models by

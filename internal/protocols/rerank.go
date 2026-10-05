@@ -86,6 +86,16 @@ func decodeRerank(body []byte, route string, request *openai.Request) (*openai.C
 				return nil, protocolError("invalid rerank usage")
 			}
 		}
+		// Token-billed rerankers, such as Jina's, Together's and Infinity's,
+		// report usage beside their results.
+		if c.Usage == nil && present(f["usage"]) {
+			usage, err := rerankTokenUsage(f["usage"])
+			if err != nil {
+				return nil, err
+			}
+			c.Usage = usage
+			out["usage"] = raw(Object{"total_tokens": raw(usage.TotalTokens)})
+		}
 	} else if present(f["data"]) {
 		results, err := rerankResults(arr(f["data"]), documents, texts, wantDocuments)
 		if err != nil {
@@ -93,22 +103,31 @@ func decodeRerank(body []byte, route string, request *openai.Request) (*openai.C
 		}
 		out["results"] = raw(results)
 		if present(f["usage"]) {
-			usage, e := optionalObject(f["usage"])
-			if e != nil {
-				return nil, e
+			usage, err := rerankTokenUsage(f["usage"])
+			if err != nil {
+				return nil, err
 			}
-			n, ok := count(usage["total_tokens"])
-			if !ok {
-				return nil, protocolError("invalid rerank usage")
-			}
-			c.Usage = &openai.Usage{InputTokens: n, TotalTokens: n}
-			out["usage"] = raw(Object{"total_tokens": raw(n)})
+			c.Usage = usage
+			out["usage"] = raw(Object{"total_tokens": raw(usage.TotalTokens)})
 		}
 	} else {
 		return nil, protocolError("missing rerank results")
 	}
 	c.Body = raw(out)
 	return c, nil
+}
+
+// rerankTokenUsage reads the tokens a reranker reports reading.
+func rerankTokenUsage(raw json.RawMessage) (*openai.Usage, error) {
+	usage, err := optionalObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	n, ok := count(usage["total_tokens"])
+	if !ok {
+		return nil, protocolError("invalid rerank usage")
+	}
+	return &openai.Usage{InputTokens: n, TotalTokens: n}, nil
 }
 
 func rerankResults(items []json.RawMessage, documents int, texts []string, wantDocuments bool) ([]Object, error) {
@@ -133,9 +152,17 @@ func rerankResults(items []json.RawMessage, documents int, texts []string, wantD
 		}
 		entry := Object{"index": raw(index), "relevance_score": raw(score)}
 		if wantDocuments && present(item["document"]) {
+			// A reranker echoes a document as its text, or as an object
+			// holding the text the request sent.
 			var document string
 			if err := json.Unmarshal(item["document"], &document); err != nil {
-				return nil, protocolError("invalid rerank document")
+				var echoed struct {
+					Text *string `json:"text"`
+				}
+				if json.Unmarshal(item["document"], &echoed) != nil || echoed.Text == nil || index >= int64(len(texts)) || *echoed.Text != texts[index] {
+					return nil, protocolError("invalid rerank document")
+				}
+				document = *echoed.Text
 			}
 			entry["document"] = raw(document)
 		} else if wantDocuments && index < int64(len(texts)) {

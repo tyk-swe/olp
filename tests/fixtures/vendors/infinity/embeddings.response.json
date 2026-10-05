@@ -1,0 +1,20 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "embedding",
+      "embedding": [
+        0.031,
+        -0.022
+      ],
+      "index": 0
+    }
+  ],
+  "model": "BAAI/bge-small-en-v1.5",
+  "usage": {
+    "prompt_tokens": 5,
+    "total_tokens": 5
+  },
+  "id": "infinity-1c8b",
+  "created": 1759680000
+}

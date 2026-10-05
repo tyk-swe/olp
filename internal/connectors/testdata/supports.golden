@@ -35,7 +35,7 @@ openai_compatible "azure": generation/openai/unary generation/openai/streaming t
 openai_compatible "groq": generation/openai/unary generation/openai/streaming transcription/openai/unary transcription/openai/streaming translation/openai/unary
 openai_compatible "mistral": generation/openai/unary generation/openai/streaming embeddings/openai/unary
 openai_compatible "openrouter": generation/openai/unary generation/openai/streaming embeddings/openai/unary
-openai_compatible "together": generation/openai/unary generation/openai/streaming embeddings/openai/unary
+openai_compatible "together": generation/openai/unary generation/openai/streaming embeddings/openai/unary rerank/openai/unary
 openai_compatible "vllm": generation/openai/unary generation/openai/streaming embeddings/openai/unary
 openai_compatible "deepseek": generation/openai/unary generation/openai/streaming
 openai_compatible "fireworks": generation/openai/unary generation/openai/streaming embeddings/openai/unary
