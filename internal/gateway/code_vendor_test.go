@@ -22,6 +22,9 @@ func newCodeVendorHarness(t *testing.T, profile string) (*harness, *codeTestLedg
 	t.Helper()
 	h, ledger, server := newCodeForwardHarness(t)
 	h.rt.release.Snapshot.CodeConnections = map[string]runtime.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: profile, Endpoint: h.upstream.URL + "/a"}}
+	if err := h.rt.release.Snapshot.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	return h, ledger, server
 }
 

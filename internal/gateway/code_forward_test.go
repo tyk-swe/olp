@@ -138,12 +138,16 @@ func newCodeForwardHarness(t *testing.T) (*harness, *codeTestLedger, *httptest.S
 	t.Helper()
 	h := newHarness(t, Config{})
 	ledger := &codeTestLedger{done: make(chan codemode.Usage, 100)}
-	route := codemode.Route{ID: "route", Slug: "coding", ProjectID: "project", RevisionID: "revision", Enabled: true, Models: []string{"native-model"}}
+	publishedAt := time.Now()
+	route := codemode.Route{ID: "route", Slug: "coding", ProjectID: "project", PoolID: "pool", RevisionID: "revision", Revision: 1, PublishedAt: &publishedAt, Enabled: true, Models: []string{"native-model"}}
 	authority := h.rt.keys[fullKey]
 	authority.ProjectID = &route.ProjectID
 	h.rt.keys[fullKey] = authority
 	h.rt.release.Snapshot.CodeRoutes = map[string]codemode.Route{"coding": route}
 	h.rt.release.Snapshot.CodeConnections = map[string]runtime.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codexauth.ProfileID, Endpoint: h.upstream.URL + "/a"}}
+	if err := h.rt.release.Snapshot.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	h.gateway.CodeLedger = ledger
 	h.gateway.CodeAuthorizer = codeTestAuthorizer{principal: "principal"}
 	mux := http.NewServeMux()

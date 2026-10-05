@@ -50,21 +50,11 @@ func (s *Snapshot) CodeConnection(route codemode.Route, providerID string) (Conf
 	return configuration, ok
 }
 
-// CodeAdapter returns the adapter of a published route, derived from the
-// connections its revision froze. It is "" when they name no single adapter,
+// CodeAdapter returns the adapter validation derived from a published route's
+// frozen connections. It is "" when they name no single adapter,
 // such as a revision that mixed adapters before publication refused that.
 func (s *Snapshot) CodeAdapter(route codemode.Route) codemode.Adapter {
-	var connections []codeadapter.Connection
-	for key, c := range s.CodeConnections {
-		if revision, _, _ := strings.Cut(key, ":"); revision == route.RevisionID {
-			connections = append(connections, codeadapter.Connection{Kind: c.Kind, AuthMode: c.AuthMode, ProfileID: c.ProfileID})
-		}
-	}
-	adapter, err := codeadapter.Derive(connections)
-	if err != nil {
-		return ""
-	}
-	return adapter
+	return s.codeAdapters[route.RevisionID]
 }
 
 func (s *Snapshot) validateCodeMode() error {
@@ -77,6 +67,17 @@ func (s *Snapshot) validateCodeMode() error {
 		}
 		if _, exists := s.Routes[slug]; exists {
 			return fmt.Errorf("code route slug conflicts with ordinary route %s", slug)
+		}
+	}
+	connections := make(map[string][]codeadapter.Connection)
+	for key, c := range s.CodeConnections {
+		revision, _, _ := strings.Cut(key, ":")
+		connections[revision] = append(connections[revision], codeadapter.Connection{Kind: c.Kind, AuthMode: c.AuthMode, ProfileID: c.ProfileID})
+	}
+	s.codeAdapters = make(map[string]codemode.Adapter, len(connections))
+	for revision, configs := range connections {
+		if adapter, err := codeadapter.Derive(configs); err == nil {
+			s.codeAdapters[revision] = adapter
 		}
 	}
 	return nil
