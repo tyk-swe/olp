@@ -83,6 +83,13 @@ type UpstreamCall struct {
 	Native    string
 	Strict    bool // local decoding contract; never an upstream wire member
 	Ambiguous bool // the request is not idempotent; post-dispatch failure is ambiguous
+	// DecodeImages and DecodeTranscription read a vendor wire's JSON result
+	// in place of the OpenAI decoders.
+	DecodeImages        func(body []byte, stage func(b64 string, index int) (*Artifact, *Error)) (*ImageResult, *Error)
+	DecodeTranscription func(body []byte) (*TranscriptionResult, *Error)
+	// CharacterHeader names the response header in which a vendor reports
+	// the characters a speech call bills.
+	CharacterHeader string
 	// Inject carries W3C trace-context headers the caller allows upstream.
 	// Only request-path calls set it; reconciliation traffic does not
 	// propagate client trace context.
@@ -1632,6 +1639,9 @@ func EncodeVideoDeleteResponse(result *VideoDeleteResult, localID string) ([]byt
 
 // TranscriptionResult is a decoded transcription.
 type TranscriptionResult struct {
+	// TextOnly renders the transcript as OpenAI's json format, its text
+	// alone, for a client that asked for json of a vendor sent verbose_json.
+	TextOnly        bool
 	Text            string
 	Language        *string
 	DurationSeconds *float64
@@ -1722,6 +1732,13 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 // EncodeTranscriptionJSON renders the client transcription JSON document.
 func EncodeTranscriptionJSON(result *TranscriptionResult) ([]byte, *Error) {
 	doc := map[string]any{"text": result.Text}
+	if result.TextOnly {
+		body, err := json.Marshal(doc)
+		if err != nil {
+			return nil, protocolError("The provider transcription could not be encoded.")
+		}
+		return body, nil
+	}
 	if result.Language != nil {
 		doc["language"] = *result.Language
 	}

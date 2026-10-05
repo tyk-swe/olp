@@ -423,7 +423,9 @@
     "connector": "openai_compatible",
     "discovery": true,
     "operations": [
-      "generation"
+      "generation",
+      "transcription",
+      "translation"
     ],
     "authentication": [
       "api_key",
@@ -925,7 +927,8 @@
     "connector": "openai_compatible",
     "discovery": true,
     "operations": [
-      "generation"
+      "generation",
+      "image_generation"
     ],
     "authentication": [
       "api_key",

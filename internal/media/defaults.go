@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // EncodeConfigured fills omitted operation members from the selected profile
@@ -21,6 +22,15 @@ func EncodeConfigured(request *Request, cfg connectors.Config, model string) (*U
 		return nil, nil, invalidMedia("The media request is required.")
 	}
 	effective := cloneConfiguredRequest(request)
+	if vendors.MediaWire(cfg.VendorID, request.Op) != "" {
+		// A vendor's own media API is translated, so a profile's native
+		// media defaults have no place in it.
+		if defaults, _, err := cfg.DefaultsFor(request.Op, model); cfg.ProfileID != "" && (err != nil || len(defaults) > 0) {
+			return nil, nil, invalidMedia("Native media defaults do not apply to the vendor's translated media API.")
+		}
+		call, _, failure := encodeVendor(effective, cfg.VendorID, cfg.Model(model))
+		return call, effective, failure
+	}
 	if cfg.ProfileID == "" {
 		call, failure := Encode(effective, cfg.Kind, cfg.Model(model))
 		return call, effective, failure

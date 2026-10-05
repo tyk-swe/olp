@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 const maxDocumentBytes = 64 << 20
@@ -58,6 +59,9 @@ func Compile(c Config) (*Template, error) {
 		!slices.Contains(p.Operations, c.Operation) ||
 		!slices.Contains([]string{"direct-openai", "direct-compatible", "azure-v1", "azure-deployment"}, p.Hosting) {
 		return nil, reject("target_capability", "/operation", "native_media_contract", "This media operation and hosting combination has no strict native contract.")
+	}
+	if vendors.MediaWire(c.Provider.VendorID, c.Operation) != "" {
+		return nil, reject("target_capability", "/operation", "native_media_contract", "This vendor's media API is translated; it serves transformed routes only.")
 	}
 	if strings.HasPrefix(c.Operation, "video_") && !slices.Contains([]string{"direct-openai", "direct-compatible"}, p.Hosting) {
 		return nil, reject("target_capability", "/profile", "video_hosting", "This video hosting has no qualified native lifecycle contract.")

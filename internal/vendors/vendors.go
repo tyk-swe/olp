@@ -50,9 +50,24 @@ type Contract struct {
 	// ProbeOperation is the unary operation that certifies a declared model
 	// when the upstream cannot list models; empty means generation.
 	ProbeOperation string
+	// Credential places an API key where the vendor reads it, when that is
+	// not an Authorization bearer token.
+	Credential *Credential
+	// MediaWires name the vendor's own API for each media operation whose
+	// wire is not OpenAI's; the media codec of the same name translates it.
+	// Such an operation serves transformed routes only.
+	MediaWires map[string]string
+	// AccountProbe is an authenticated GET, relative to the endpoint, that
+	// costs nothing and succeeds only for a valid credential. A media
+	// operation's certification rests on it and the reviewed codec, since
+	// proving a media model by generating with it would be billed.
+	AccountProbe string
 	// Preset makes the vendor an onboarding preset of its connector kind.
 	Preset *Preset
 }
+
+// Credential is the header an API key travels in, after Scheme.
+type Credential struct{ Header, Scheme string }
 
 // Link is a labelled documentation URL.
 type Link struct{ Label, URL string }
@@ -94,6 +109,25 @@ type Rewrite struct {
 
 // Serves reports whether the contract lists operation.
 func (c Contract) Serves(operation string) bool { return slices.Contains(c.Operations, operation) }
+
+// MediaWire is the vendor's own wire for a media operation, or "" when the
+// vendor speaks OpenAI's.
+func MediaWire(vendor, operation string) string {
+	i, ok := index[vendor]
+	if !ok {
+		return ""
+	}
+	return contracts[i].MediaWires[operation]
+}
+
+// CredentialFor is where vendor reads an API key, if not as a bearer token.
+func CredentialFor(vendor string) (Credential, bool) {
+	i, ok := index[vendor]
+	if !ok || contracts[i].Credential == nil {
+		return Credential{}, false
+	}
+	return *contracts[i].Credential, true
+}
 
 // Speaks reports whether the contract documents a generation dialect.
 func (c Contract) Speaks(dialect string) bool { return slices.Contains(c.Dialects, dialect) }

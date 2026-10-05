@@ -90,8 +90,11 @@ type Result struct {
 	Artifact      *Artifact     // staged binary response
 	Body          io.ReadCloser // SSE response body; the caller drains it
 	ContentType   string
-	Source        oif.Document    // bounded immutable native JSON result for strict media
-	BlobSource    *oif.BlobResult // existing spool owns the bytes and lifecycle
+	// BilledCharacters is the characters a speech call bills, as the vendor
+	// reports them.
+	BilledCharacters *int64
+	Source           oif.Document    // bounded immutable native JSON result for strict media
+	BlobSource       *oif.BlobResult // existing spool owns the bytes and lifecycle
 }
 
 const errorBodyLimit = 64 * 1024
@@ -327,6 +330,13 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			}
 			contentType = original
 		}
+		if call.CharacterHeader != "" {
+			billed, err := strconv.ParseInt(resp.Header.Get(call.CharacterHeader), 10, 64)
+			if err != nil || billed < 0 {
+				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Detail: "speech response does not report its billed characters"}
+			}
+			result.BilledCharacters = &billed
+		}
 		artifact, failure := t.stageResponse(ctx, resp, contentType, request)
 		if failure != nil {
 			return nil, stageFailure(failure)
@@ -382,7 +392,11 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		if failure := retainJSON(body); failure != nil {
 			return nil, failure
 		}
-		decoded, mErr := DecodeTranscriptionJSON(body)
+		decode := DecodeTranscriptionJSON
+		if call.DecodeTranscription != nil {
+			decode = call.DecodeTranscription
+		}
+		decoded, mErr := decode(body)
 		if mErr != nil {
 			return nil, &Failure{Class: ClassProtocol, Detail: mErr.Message}
 		}
@@ -419,7 +433,9 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		}
 		var decoded *ImageResult
 		var mErr *Error
-		if call.Native != "" {
+		if call.DecodeImages != nil {
+			decoded, mErr = call.DecodeImages(body, stage)
+		} else if call.Native != "" {
 			expected := int64(1)
 			if request != nil && request.Count != nil {
 				expected = *request.Count

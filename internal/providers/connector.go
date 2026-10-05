@@ -759,6 +759,9 @@ func (s *Server) certifyNativeMedia(ctx context.Context, cfg *Configuration, cre
 	if tuple.Operation == "image_generation" && (cfg.Kind == KindVertex || cfg.Kind == KindBedrock) {
 		return s.certifyNativeImage(ctx, cfg, credential, model)
 	}
+	if vendor := value(cfg.Options.VendorID); reviewedMedia(cfg.Kind, vendor, tuple.Operation) {
+		return s.certifyVendorMedia(ctx, cfg, credential, vendor)
+	}
 	endpoint, err := url.Parse(value(cfg.Endpoint))
 	if err != nil || cfg.Kind != KindOpenAI || cfg.AuthMode != AuthAPIKey || len(credential) == 0 ||
 		len(cfg.Options.CredentialHeaders) != 0 || endpoint.Scheme != "https" ||
@@ -775,6 +778,22 @@ func (s *Server) certifyNativeMedia(ctx context.Context, cfg *Configuration, cre
 		return nil
 	}
 	return &probeError{Code: "model_unavailable", Detail: "The credential cannot discover the requested media model."}
+}
+
+// certifyVendorMedia proves a reviewed vendor's media operation without
+// billed work: the reviewed codec proves the wire, and the vendor's account
+// probe proves the credential reaches it. The model is the operator's
+// declaration, as for any upstream that lists none.
+func (s *Server) certifyVendorMedia(ctx context.Context, cfg *Configuration, credential []byte, vendor string) error {
+	contract, _ := vendors.Lookup(vendor)
+	status, data, err := s.call(ctx, cfg, credential, http.MethodGet, "/"+contract.AccountProbe, nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return statusError(cfg, status, data)
+	}
+	return nil
 }
 
 func (s *Server) certifyNativeImage(ctx context.Context, cfg *Configuration, credential []byte, model string) error {

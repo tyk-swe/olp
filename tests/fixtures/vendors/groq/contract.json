@@ -2,9 +2,11 @@
   "vendor": "groq",
   "documentation_url": "https://console.groq.com/docs/openai",
   "reviewed_at": "2026-10-05",
-  "notes": "Supplying logprobs, logit_bias or top_logprobs returns 400; n must be 1. Streams end with data: [DONE]. Responses is documented as beta. Audio transcription, translation and speech are documented under the same base.",
+  "notes": "Supplying logprobs, logit_bias or top_logprobs returns 400; n must be 1. Streams end with data: [DONE]. Responses is documented as beta. Audio transcription, translation and speech are documented under the same base. Transcription and translation use OpenAI's audio wire: https://console.groq.com/docs/speech-to-text",
   "endpoints": {
-    "generation": "https://api.groq.com/openai/v1/chat/completions"
+    "generation": "https://api.groq.com/openai/v1/chat/completions",
+    "transcription": "https://api.groq.com/openai/v1/audio/transcriptions",
+    "translation": "https://api.groq.com/openai/v1/audio/translations"
   },
   "unsupported_parameters": [
     "logit_bias",

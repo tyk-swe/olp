@@ -259,6 +259,14 @@ func capabilitiesFor(kind, vendor string) []CapabilityInput {
 
 // Custom endpoints need a safe live probe; native media instead relies on the
 // official connector contract and authenticated discovery.
+// reviewedMedia reports a compatible vendor's reviewed media operation, which
+// certifies through its codec contract and a costless proof of access. No
+// reviewed vendor streams media.
+func reviewedMedia(kind, vendor, operation string) bool {
+	contract, ok := vendors.Lookup(vendor)
+	return ok && kind == KindOpenAICompatible && contract.Connector == kind && contract.AccountProbe != "" && contract.Serves(operation)
+}
+
 func certifiable(kind, vendor string, c CapabilityInput) bool {
 	if !connectors.Supports(kind, vendor, c.Operation, c.Surface, c.Mode) {
 		return false
@@ -271,8 +279,8 @@ func certifiable(kind, vendor string, c CapabilityInput) bool {
 	case "bedrock_invoke":
 		return kind == KindBedrock
 	case "image_generation":
-		return kind == KindOpenAI || kind == KindVertex || kind == KindBedrock
+		return kind == KindOpenAI || kind == KindVertex || kind == KindBedrock || reviewedMedia(kind, vendor, c.Operation) && c.Mode == ModeUnary
 	default:
-		return kind == KindOpenAI
+		return kind == KindOpenAI || reviewedMedia(kind, vendor, c.Operation) && c.Mode == ModeUnary
 	}
 }

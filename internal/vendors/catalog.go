@@ -3,8 +3,10 @@ package vendors
 import (
 	"encoding/json"
 	"fmt"
+	"net/textproto"
 	"net/url"
 	"slices"
+	"strings"
 )
 
 // GenerationParameters are the generation request parameters the catalogue
@@ -77,7 +79,8 @@ var contracts = []Contract{
 
 	// OpenAI-compatible presets, each reviewed against the documentation it
 	// links on the date its evidence in tests/fixtures/vendors records.
-	compatiblePreset("groq", "Groq", "Groq", "Groq OpenAI-compatible endpoint.", "https://api.groq.com/openai/v1", Link{"Groq OpenAI compatibility", "https://console.groq.com/docs/openai"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: openAIDialects, Unsupported: []string{"logit_bias", "logprobs", "top_logprobs"}}, exactChat),
+	compatiblePreset("groq", "Groq", "Groq", "Groq OpenAI-compatible endpoint.", "https://api.groq.com/openai/v1", Link{"Groq OpenAI compatibility", "https://console.groq.com/docs/openai"}, Contract{Discovery: true, Operations: []string{"generation", "transcription", "translation"}, Dialects: openAIDialects, Unsupported: []string{"logit_bias", "logprobs", "top_logprobs"},
+		MediaWires: map[string]string{"transcription": "groq-audio", "translation": "groq-audio"}, AccountProbe: "models"}, exactChat),
 	compatiblePreset("mistral", "Mistral", "Mistral AI", "Mistral La Plateforme.", "https://api.mistral.ai/v1", Link{"Mistral chat API", "https://docs.mistral.ai/api/endpoint/chat"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: []string{"openai-chat", "mistral-fim"},
 		Requests: map[string]RequestShape{"generation": {Rewrites: []Rewrite{maxTokens, {From: "seed", To: "random_seed"}}}}}, nil),
 	compatiblePreset("openrouter", "OpenRouter", "OpenRouter", "OpenRouter unified API.", "https://openrouter.ai/api/v1", Link{"OpenRouter API reference", "https://openrouter.ai/docs/api/reference/overview"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects}, exactChat),
@@ -111,7 +114,8 @@ var contracts = []Contract{
 		}}, nil),
 
 	// Frontier and fast inference.
-	compatiblePreset("xai", "xAI", "xAI", "xAI Grok API.", "https://api.x.ai/v1", Link{"xAI chat completions", "https://docs.x.ai/developers/rest-api-reference/inference/chat-completions"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: openAIDialects, Unsupported: []string{"logit_bias"}}, exactChat),
+	compatiblePreset("xai", "xAI", "xAI", "xAI Grok API.", "https://api.x.ai/v1", Link{"xAI chat completions", "https://docs.x.ai/developers/rest-api-reference/inference/chat-completions"}, Contract{Discovery: true, Operations: []string{"generation", "image_generation"}, Dialects: openAIDialects, Unsupported: []string{"logit_bias"},
+		MediaWires: map[string]string{"image_generation": "xai-images"}, AccountProbe: "api-key"}, exactChat),
 	compatiblePreset("cerebras", "Cerebras", "Cerebras", "Cerebras Inference.", "https://api.cerebras.ai/v1", Link{"Cerebras OpenAI compatibility", "https://inference-docs.cerebras.ai/resources/openai"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect, Unsupported: []string{"prediction", "service_tier"}}, exactChat),
 	compatiblePreset("sambanova", "SambaNova", "SambaNova", "SambaNova Cloud.", "https://api.sambanova.ai/v1", Link{"SambaNova OpenAI compatibility", "https://docs.sambanova.ai/docs/en/features/openai-compatibility"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects, Unsupported: []string{"frequency_penalty", "presence_penalty"}}, exactChat),
 	compatiblePreset("nebius", "Nebius Token Factory", "Nebius", "Nebius Token Factory, formerly AI Studio.", "https://api.tokenfactory.nebius.com/v1", Link{"Nebius Token Factory chat completions", "https://docs.tokenfactory.nebius.com/api-reference/inference/create-chat-completion"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects}, exactChat),
@@ -192,6 +196,17 @@ func (c Contract) validate() error {
 		if u, err := url.Parse(endpoint); err != nil || u.Scheme != "https" || !c.Serves(operation) {
 			return fmt.Errorf("operation endpoint %q must be an HTTPS URL of a served operation", operation)
 		}
+	}
+	if c.Credential != nil && (c.Credential.Header == "" || textproto.CanonicalMIMEHeaderKey(c.Credential.Header) != c.Credential.Header || strings.ContainsAny(c.Credential.Scheme, "\r\n")) {
+		return fmt.Errorf("a credential placement needs a canonical header")
+	}
+	for operation, wire := range c.MediaWires {
+		if !c.Serves(operation) || wire == "" {
+			return fmt.Errorf("media wire %q names an unserved operation %q", wire, operation)
+		}
+	}
+	if c.AccountProbe != "" && (strings.HasPrefix(c.AccountProbe, "/") || strings.Contains(c.AccountProbe, "..") || strings.ContainsAny(c.AccountProbe, "#\\")) {
+		return fmt.Errorf("the account probe must be a relative path")
 	}
 	if c.Preset == nil {
 		return nil

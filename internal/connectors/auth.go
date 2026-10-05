@@ -29,6 +29,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials/processcreds"
 
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // ErrAuthentication reports that authentication could not authorize an
@@ -316,6 +317,10 @@ func (*Auth) authenticateAPIKey(_ context.Context, req *http.Request, c Config, 
 	case "azure_openai":
 		req.Header.Set("Api-Key", string(secret))
 	default:
+		if placement, ok := vendors.CredentialFor(c.VendorID); ok {
+			req.Header.Set(placement.Header, placement.Scheme+string(secret))
+			break
+		}
 		req.Header.Set("Authorization", "Bearer "+string(secret))
 	}
 	return authorization{}, nil

@@ -27,6 +27,9 @@ surfaces. Current protocol, connector, SDK, and media tests are described in
 | `qualified` | Restricted to the provider, model family, or resource policy described below; exact capabilities still require certification. |
 | `reviewed` | Available only through the named compatible-vendor profiles and certified models. |
 
+Reviewed vendors serve image, speech and transcription operations on the
+OpenAI surface through their media codecs; see [vendor media](providers/media.md).
+
 Native generation dialects, such as Mistral fill-in-the-middle and Cohere
 Chat v2, serve their own clients at `/native/{dialect}/models/{route}` and are
 never translated; see [native generation dialects](provider-profiles.md#native-generation-dialects).
