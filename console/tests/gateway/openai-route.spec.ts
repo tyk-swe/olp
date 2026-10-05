@@ -134,7 +134,9 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
   ).toBeVisible();
   await page.getByRole('radio', { name: /OpenAI-compatible/ }).check();
   await page.getByLabel('Provider name').fill('Compatible upstream');
-  await page.getByLabel('Authentication').selectOption('api_key');
+  await page
+    .getByLabel('Authentication', { exact: true })
+    .selectOption('api_key');
   await page
     .getByRole('textbox', { name: 'Endpoint', exact: true })
     .fill(upstream.endpoint);

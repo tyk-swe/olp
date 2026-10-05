@@ -289,7 +289,9 @@ test.describe('Hosted console integration', () => {
     ).toBeVisible();
     await page.getByRole('radio', { name: /Azure OpenAI/ }).check();
     await page.getByLabel('Provider name').fill(vertical.providerName);
-    await page.getByLabel('Authentication').selectOption('api_key');
+    await page
+      .getByLabel('Authentication', { exact: true })
+      .selectOption('api_key');
     await page.getByLabel('Seed model (optional)').fill(vertical.deployment);
     await page.getByLabel('Azure resource endpoint').fill(vertical.endpoint);
     await page.getByLabel('API version').fill(vertical.apiVersion);
