@@ -2,63 +2,29 @@
 package codexwire
 
 import (
-	"bytes"
-	"compress/gzip"
-	"io"
 	"net/http"
 	"strconv"
-	"strings"
-
-	"github.com/klauspost/compress/zstd"
 
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
-const MaxBody = 16 << 20
+const MaxBody = codewire.MaxBody
 
-type Request struct {
-	Operation        codemode.Operation
-	PreviousResponse string
-	Estimate         int64
-}
+type Request = codemode.Request
 
 func Decode(raw []byte, encoding string, limit int64) ([]byte, error) {
-	if int64(len(raw)) > limit {
-		return nil, codemode.Refuse(413, "code_body_too_large")
-	}
-	var reader io.Reader
-	switch strings.ToLower(strings.TrimSpace(encoding)) {
-	case "", "identity":
-		return raw, nil
-	case "gzip":
-		gz, err := gzip.NewReader(bytes.NewReader(raw))
-		if err != nil {
-			return nil, codemode.Refuse(400, "code_encoding_invalid")
-		}
-		defer gz.Close()
-		reader = gz
-	case "zstd":
-		zr, err := zstd.NewReader(bytes.NewReader(raw), zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(uint64(limit)))
-		if err != nil {
-			return nil, codemode.Refuse(400, "code_encoding_invalid")
-		}
-		defer zr.Close()
-		reader = zr
-	default:
-		return nil, codemode.Refuse(415, "code_encoding_unsupported")
-	}
-	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
-	if err != nil {
-		return nil, codemode.Refuse(400, "code_encoding_invalid")
-	}
-	if int64(len(body)) > limit {
-		return nil, codemode.Refuse(413, "code_body_too_large")
-	}
-	return body, nil
+	return codewire.Decode(raw, encoding, limit)
 }
 
 func Classify(body []byte, headers http.Header, path string, websocket bool) (Request, error) {
+	return ClassifyWith(body, path, websocket, func(root oif.Value) (codemode.Identity, error) { return Identity(headers, root) })
+}
+
+// ClassifyWith classifies a Responses body whose conversation identity comes
+// from identity, which reads the parsed body and its own request headers.
+func ClassifyWith(body []byte, path string, websocket bool, identity func(oif.Value) (codemode.Identity, error)) (Request, error) {
 	var request Request
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: MaxBody})
 	if err != nil || document.Root().Kind() != oif.Object {
@@ -110,11 +76,11 @@ func Classify(body []byte, headers http.Header, path string, websocket bool) (Re
 		}
 	}
 	request.Operation.Model = model
-	identity, err := Identity(headers, root)
+	identified, err := identity(root)
 	if err != nil {
 		return request, err
 	}
-	request.Operation.Identity = identity
+	request.Operation.Identity = identified
 	previous := field(root, "previous_response_id")
 	if previous.Kind() != oif.Absent && previous.Kind() != oif.Null {
 		request.PreviousResponse, ok = previous.Text()

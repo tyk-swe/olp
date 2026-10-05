@@ -23,6 +23,9 @@
   } = $props();
 
   const device = $derived(enrollment.device);
+  // A secret input is an API key the authorization page issues, which the
+  // operator pastes masked; otherwise it is a callback URL or code.
+  const secret = $derived(enrollment.input === 'secret');
 
   // Status requests drive a device authorization's polling: each waits the
   // interval OLP last reported, and none follows once the enrollment ended or
@@ -79,7 +82,9 @@
 
 <section class="card grant" aria-labelledby="grant-enrollment-heading">
   <p class="eyebrow">Grant enrollment</p>
-  <h2 id="grant-enrollment-heading">Sign in upstream</h2>
+  <h2 id="grant-enrollment-heading">
+    {secret ? 'Issue an upstream API key' : 'Sign in upstream'}
+  </h2>
   {#if device}
     <ol>
       <li>
@@ -122,8 +127,10 @@
     <ol>
       <li>
         <p>
-          Open the plugin's authorization page, in any browser, and sign in to
-          the upstream account this provider should use.
+          {#if secret}Open the vendor's API key page, in any browser, sign in to
+            the upstream account this provider should use, and create an API
+            key.{:else}Open the plugin's authorization page, in any browser, and
+            sign in to the upstream account this provider should use.{/if}
         </p>
         <div class="authorization">
           <code>{enrollment.authorization_url}</code>
@@ -131,7 +138,8 @@
             class="button button-secondary"
             href={enrollment.authorization_url}
             target="_blank"
-            rel="noreferrer noopener">Open authorization page</a
+            rel="noreferrer noopener"
+            >{secret ? 'Open API key page' : 'Open authorization page'}</a
           >
           {@render copyButton(
             enrollment.authorization_url ?? '',
@@ -142,35 +150,61 @@
       <li>
         <form onsubmit={submit} aria-busy={busy === 'grant'}>
           <div class="form-field">
-            <label for="grant-input"
-              >Paste back the callback URL or code the upstream returned</label
-            ><input
-              id="grant-input"
-              aria-describedby="grant-input-help"
-              autocomplete="off"
-              spellcheck="false"
-              bind:value={input}
-              required
-            /><small id="grant-input-help"
-              >After you sign in, the upstream sends your browser to a callback
-              URL that may not load: copy it from the address bar. Or copy the
-              code the upstream displays. Continue before {formatDate(
-                enrollment.expires_at
-              )}; each sign-in can be used once.</small
-            >
+            {#if secret}
+              <label for="grant-input"
+                >Paste the API key the vendor issued</label
+              ><input
+                id="grant-input"
+                type="password"
+                aria-describedby="grant-input-help"
+                autocomplete="off"
+                spellcheck="false"
+                bind:value={input}
+                required
+              /><small id="grant-input-help"
+                >OLP encrypts the key beneath a credential version and
+                identifies it by a fingerprint; it is never shown again, and
+                developers receive only OLP keys. A different key is a different
+                account. Continue before {formatDate(
+                  enrollment.expires_at
+                )}.</small
+              >
+            {:else}
+              <label for="grant-input"
+                >Paste back the callback URL or code the upstream returned</label
+              ><input
+                id="grant-input"
+                aria-describedby="grant-input-help"
+                autocomplete="off"
+                spellcheck="false"
+                bind:value={input}
+                required
+              /><small id="grant-input-help"
+                >After you sign in, the upstream sends your browser to a
+                callback URL that may not load: copy it from the address bar. Or
+                copy the code the upstream displays. Continue before {formatDate(
+                  enrollment.expires_at
+                )}; each sign-in can be used once.</small
+              >
+            {/if}
           </div>
           <div class="actions">
             <button
               class="button button-primary"
               type="submit"
               disabled={Boolean(busy)}
-              >{busy === 'grant' ? 'Enrolling the grant…' : 'Continue'}</button
+              >{busy === 'grant'
+                ? secret
+                  ? 'Enrolling the key…'
+                  : 'Enrolling the grant…'
+                : 'Continue'}</button
             >
             <button
               class="button button-secondary"
               type="button"
               disabled={Boolean(busy)}
-              onclick={() => onCancel()}>Cancel sign-in</button
+              onclick={() => onCancel()}
+              >{secret ? 'Cancel enrollment' : 'Cancel sign-in'}</button
             >
           </div>
         </form>

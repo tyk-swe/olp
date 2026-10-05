@@ -111,6 +111,78 @@ The release-contract suite reads every embedded OpenAPI operation and checks
 concrete process registration, including client-config. The generated
 authorization golden records its read/project boundary.
 
+## Coding-plan adapters: OpenCode Go and GLM Coding Plan
+
+The same evidence class applies to the OpenCode Go and GLM Coding Plan
+adapters: controlled fixtures only, with no live coding-plan key. Exact package
+URLs and hashes are in `tests/fixtures/coding-plans/evidence.json`, enforced by
+`scripts/code-mode-qualification.sh` and `tests/codecli/evidence_test.go`.
+
+### Pinned official clients
+
+- **Claude Code 2.1.286**, the npm platform package
+  `@anthropic-ai/claude-code-linux-{x64,arm64}`, checked as `2.1.286 (Claude
+  Code)`. Its gateway contract is the
+  [gateway compatibility guide](https://code.claude.com/docs/en/llm-gateway-protocol):
+  `POST /v1/messages?beta=true`, `x-claude-code-session-id`, and agent headers on
+  subagent requests.
+- **OpenCode 1.18.34**, the npm platform package `opencode-linux-{x64,arm64}`.
+  The [session headers](https://github.com/anomalyco/opencode/blob/v1.18.34/packages/opencode/src/session/llm/request.ts)
+  name `x-opencode-session-id` and, for a child session,
+  `x-opencode-parent-session-id`. The x64 package needs AVX2; the `-baseline`
+  build is unqualified.
+
+These pins are independent of `tests/clients`, so a bump of the ordinary-route
+client suite cannot change code-mode evidence.
+
+The harness in `tests/codecli/agents.go` runs each client with the configuration
+the public client-config endpoint generated: Claude Code sources the shell file
+and OpenCode reads the `opencode.json` from its working directory. The
+environment is an allowlist with a private home and XDG directories. A decoy
+workstation key (`ANTHROPIC_API_KEY`, `OPENCODE_API_KEY`, `ZHIPU_API_KEY`) must
+never reach OLP or the upstream. Proxy variables point at a trap that refuses
+and records every request leaving loopback. OpenCode asks the trap for
+`registry.npmjs.org` at startup to install its own dependencies; the trap
+refuses it and no model traffic goes there. Claude Code runs with
+`--permission-mode default` and the tools each journey allows, because auto
+mode's classifier needs a real model.
+
+### Support and evidence matrix
+
+| Surface | Evidence | Qualification |
+| --- | --- | --- |
+| Pasted-key enrollment | Production WASM plugins through public APIs and the console: key page at an approved origin, masked input, NULL expiry and refresh, fingerprint principal, no plaintext key in secrets or responses, ordinary probe and activation fenced, a different key refused as a rotation | Controlled only |
+| OLP-key-only configuration | Generated Claude Code shell and OpenCode JSON run unmodified; decoy credentials overridden; no `auth.json` | Controlled only |
+| Claude Code on GLM Coding Plan and OpenCode Go | Tool loop (`Read`), subagent (`Agent`) bound beneath its session, `--continue`; every model variable on the route | Controlled only; OpenCode Go only for Messages models |
+| OpenCode on GLM Coding Plan and OpenCode Go | Tool loop (`read`), child session (`task`) bound beneath its parent, `--continue`; Chat Completions with `include_usage`, and Messages for OpenCode Go | Controlled only |
+| OpenCode Go Responses | Raw forwarding through `v1/responses`, client identity, `previous_response_id` reference; OpenCode's request shape captured | Controlled only; no real-client Responses journey |
+| Payload and header fidelity | Byte-identical bodies and SSE (with pings), forwarded `anthropic-*` and client headers, `?beta=true`, OLP key consumed from `Authorization` or `X-API-Key`, the adapter's single credential header placed | Controlled only |
+| Upstream placement | `api.z.ai` and `open.bigmodel.cn` paths for Messages and Chat; `opencode.ai/zen/go/v1` for all three; Anthropic-shaped refusals on Messages paths | Controlled fixed-host TLS peers |
+| Conversation trees | Claude Code session, agent and nested agent; OpenCode parent and child; unresolved parent, anonymous and ambiguous identity refused before dispatch | Controlled only |
+| No replay or failover | A 429 is relayed byte for byte, cools the account, and the retry refuses without dispatch or switching accounts | Controlled only |
+| Adapter management | Mixed pools and publications refused; route, revision and account `adapter`; client-config clients, formats and 422s | Controlled only |
+| Console | Client and model pickers, adapter badges, masked key enrollment, axe at desktop and 390px | Browser suite |
+| Real coding-plan account | No key supplied or used | Unqualified |
+
+Not qualified: Codex-path or WebSocket traffic on these adapters, which refuses;
+`count_tokens`; Z.ai's MCP servers; vendor allowance windows; hard token
+budgets; agent teams; shells other than POSIX `sh`-compatible ones; Linux
+arm64 execution.
+
+### Reproduction
+
+```sh
+OLP_TEST_PULL_POLICY=missing ./scripts/integration.sh code
+./scripts/code-mode-qualification.sh install claude-code
+./scripts/code-mode-qualification.sh install opencode
+```
+
+`code` runs every `TestCode*` test, including `TestCodeCodingPlan*` and the
+real-client `TestCodeQualificationClaudeCodeJourneys` and
+`TestCodeQualificationOpenCodeJourneys`. `process` mode runs the journeys with
+the other `TestCodeQualification` tests, given exported
+`OLP_CLAUDE_CODE_BINARY` and `OLP_OPENCODE_BINARY`.
+
 ## Remaining release gates
 
 Record integrated OLP revision, client package/hash, platform, native model,
@@ -129,6 +201,11 @@ is still a release gate.
 
 Exercise hosted search/files, live quota reset, credential rotation during an active task and real enrollment,
 refresh/allowance/inference. Complete the console/browser suite separately.
+
+For OpenCode Go and GLM Coding Plan, live qualification needs a subscriber's
+own key, enrolled by paste, and must record which models each vendor serves on
+which endpoint, whether it accepts the client's `anthropic-beta` values, and
+its quota and concurrency refusals.
 No full issue-294 or live subscription support claim follows from these fixtures.
 
 Raw synthetic captures exist in memory only. Durable diagnostics contain

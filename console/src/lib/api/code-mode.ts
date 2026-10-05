@@ -15,17 +15,27 @@ export type CodeBinding = Schemas['CodeBinding'];
 export type CodeAttempt = Schemas['CodeAttempt'];
 export type CodeClientConfiguration = Schemas['CodeClientConfiguration'];
 
+export type CodeClient = CodeClientConfiguration['client'];
+
+/** The client and models a client configuration is generated for; omitted
+ * fields take the route adapter's defaults. */
+export type CodeClientSelection = {
+  client?: CodeClient;
+  model?: string;
+  small_model?: string;
+};
+
 export async function getCodeClientConfiguration(
   route: CodeRoute,
   gatewayURL: string,
-  model?: string,
+  selection: CodeClientSelection = {},
   signal?: AbortSignal
 ): Promise<CodeClientConfiguration> {
   return unwrap(
     await apiClient.GET('/api/v1/code/routes/{id}/client-config', {
       params: {
         path: { id: route.id },
-        query: { gateway_url: gatewayURL, model }
+        query: { gateway_url: gatewayURL, ...selection }
       },
       signal
     })

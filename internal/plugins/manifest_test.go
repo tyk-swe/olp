@@ -2,11 +2,13 @@ package plugins
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -117,6 +119,19 @@ func TestManifestAcceptsAnAddressBeginningWithAGrantFact(t *testing.T) {
 	m.Profiles[2].Hosting.Address = "{grant.api_base}/v1"
 	if err := validateManifest(m, false); err != nil {
 		t.Fatalf("refused an address beginning with a grant fact: %v", err)
+	}
+}
+
+func TestManifestGrantInputIsCallbackOrSecret(t *testing.T) {
+	for _, m := range []abi.Manifest{codeplans.OpenCodeGoManifest(), codeplans.ZAIManifest()} {
+		if err := validateManifest(m, false); err != nil {
+			t.Fatalf("%s: %v", m.Name, err)
+		}
+	}
+	m := validManifest()
+	m.Profiles[2].Grant.Input = "password"
+	if err, ok := errors.AsType[*Error](validateManifest(m, false)); !ok || err.Field != "manifest.profiles[2].grant.input" {
+		t.Fatalf("unknown grant input accepted: %v", err)
 	}
 }
 

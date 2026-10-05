@@ -259,7 +259,17 @@ type GrantAuthentication struct {
 	// profile's header and query parameter templates use as {grant.<name>},
 	// or the upstream's base URL, with which the address may begin.
 	Facts []string `json:"facts,omitempty"`
+	// Input, when GrantInputSecret, declares that the operator continues
+	// enrollment with a secret the upstream issued, such as an API key, rather
+	// than a callback URL or code. OLP masks the value as it is pasted. The
+	// profile's StartGrant returns the URL of the page that issues the secret,
+	// never a device authorization. Empty means a callback URL or code.
+	Input string `json:"input,omitempty"`
 }
+
+// GrantInputSecret is the GrantAuthentication input of a profile whose
+// enrollment continues with a pasted upstream secret.
+const GrantInputSecret = "secret"
 
 // Hosting is a profile's hosting adaptation: where and how the dialect's
 // requests reach the upstream, how the upstream lists its models and how its

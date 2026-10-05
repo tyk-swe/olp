@@ -19,6 +19,7 @@ export const account: CodeAccount = {
   credential_id: '01980000-0000-7000-8000-000000000012',
   principal: 'fixture-principal',
   name: 'Coding subscription',
+  adapter: 'zai_coding',
   enabled: true,
   eligible: true,
   models: ['native-model'],
@@ -47,6 +48,7 @@ export const route: CodeRoute = {
   revision_id: '01980000-0000-7000-8000-000000000031',
   revision: 1,
   published_at: '2026-10-01T10:00:00Z',
+  adapter: 'zai_coding',
   etag
 };
 export const budget: CodeBudget = {

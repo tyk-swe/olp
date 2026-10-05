@@ -17,7 +17,10 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -121,7 +124,13 @@ func (l *codeTestLedger) wait(t *testing.T) codemode.Usage {
 
 type codeTestAuthorizer struct{ principal string }
 
-func (a codeTestAuthorizer) AuthorizeCode(context.Context, runtime.Configuration, codemode.Account) (codemode.Authorization, error) {
+func (a codeTestAuthorizer) AuthorizeCode(_ context.Context, _ runtime.Configuration, _ codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
+	if dispatch.Adapter != codemode.AdapterCodex {
+		if header := codeadapter.CredentialHeader(dispatch.Adapter, dispatch.Protocol); header == "X-Api-Key" {
+			return codemode.Authorization{Principal: a.principal, Headers: http.Header{header: {"upstream-only"}}}, nil
+		}
+		return codemode.Authorization{Principal: a.principal, Headers: http.Header{"Authorization": {"Bearer upstream-only"}}}, nil
+	}
 	return codemode.Authorization{Principal: a.principal, Headers: http.Header{"Authorization": {"Bearer upstream-only"}, "Chatgpt-Account-Id": {"upstream-account"}}}, nil
 }
 
@@ -129,12 +138,16 @@ func newCodeForwardHarness(t *testing.T) (*harness, *codeTestLedger, *httptest.S
 	t.Helper()
 	h := newHarness(t, Config{})
 	ledger := &codeTestLedger{done: make(chan codemode.Usage, 100)}
-	route := codemode.Route{ID: "route", Slug: "coding", ProjectID: "project", RevisionID: "revision", Enabled: true, Models: []string{"native-model"}}
+	publishedAt := time.Now()
+	route := codemode.Route{ID: "route", Slug: "coding", ProjectID: "project", PoolID: "pool", RevisionID: "revision", Revision: 1, PublishedAt: &publishedAt, Enabled: true, Models: []string{"native-model"}}
 	authority := h.rt.keys[fullKey]
 	authority.ProjectID = &route.ProjectID
 	h.rt.keys[fullKey] = authority
 	h.rt.release.Snapshot.CodeRoutes = map[string]codemode.Route{"coding": route}
-	h.rt.release.Snapshot.CodeConnections = map[string]runtime.Configuration{"revision:provider": {Endpoint: h.upstream.URL + "/a"}}
+	h.rt.release.Snapshot.CodeConnections = map[string]runtime.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codexauth.ProfileID, Endpoint: h.upstream.URL + "/a"}}
+	if err := h.rt.release.Snapshot.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	h.gateway.CodeLedger = ledger
 	h.gateway.CodeAuthorizer = codeTestAuthorizer{principal: "principal"}
 	mux := http.NewServeMux()
@@ -437,7 +450,10 @@ func TestCodeForwardRefusalsNeverDispatch(t *testing.T) {
 			case "principal":
 				h.gateway.CodeAuthorizer = codeTestAuthorizer{principal: "different"}
 			case "unpublished":
-				h.rt.release.Snapshot.CodeConnections = nil
+				// The revision froze another provider's connection, not the account's.
+				connections := h.rt.release.Snapshot.CodeConnections
+				connections["revision:other-provider"] = connections["revision:provider"]
+				delete(connections, "revision:provider")
 			case "previous-response":
 				body = `{"model":"native-model","previous_response_id":"unknown"}`
 			case "ledger-budget":

@@ -419,6 +419,9 @@ func parseGrant(grant *abi.GrantAuthentication) error {
 	if len(grant.Facts) > 16 {
 		return &ProfileError{Field: "grant.facts", Message: "Declare at most 16 grant facts."}
 	}
+	if grant.Input != "" && grant.Input != abi.GrantInputSecret {
+		return &ProfileError{Field: "grant.input", Message: `Declare the grant input as "secret", or leave it out for a callback URL or code.`}
+	}
 	for i, fact := range grant.Facts {
 		field := fmt.Sprintf("grant.facts[%d]", i)
 		if !valueName.MatchString(fact) {

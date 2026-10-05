@@ -88,3 +88,48 @@
 /bedrock/model/m/converse | sigv4 only | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header." | bedrock 401 missing_authorization "Provide the X-OLP-API-Key header or a bearer API key."
 /bedrock/model/m/converse | unknown key | 401 invalid_api_key "Incorrect API key provided." | bedrock 401 invalid_api_key "Incorrect API key provided."
 /bedrock/model/m/converse | missing scope | 403 permission_denied "This API key does not have the inference scope." | bedrock 403 permission_denied "This API key does not have the inference scope."
+/code/coding/responses | none | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/responses | bearer | key full
+/code/coding/responses | lowercase bearer | key full
+/code/coding/responses | padded bearer | key full
+/code/coding/responses | basic | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/responses | x-api-key | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/responses | x-goog-api-key | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/responses | query key | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/responses | x-olp-api-key | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/responses | bearer over x-api-key | key full
+/code/coding/responses | x-goog-api-key over query | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/responses | x-olp-api-key over bearer | key other_key
+/code/coding/responses | sigv4 only | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/responses | unknown key | 401 invalid_api_key "Incorrect API key provided."
+/code/coding/responses | missing scope | 403 permission_denied "This API key does not have the inference scope."
+/code/coding/v1/messages | none | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/messages | bearer | key full
+/code/coding/v1/messages | lowercase bearer | key full
+/code/coding/v1/messages | padded bearer | key full
+/code/coding/v1/messages | basic | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/messages | x-api-key | key full
+/code/coding/v1/messages | x-goog-api-key | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/messages | query key | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/messages | x-olp-api-key | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/messages | bearer over x-api-key | key full
+/code/coding/v1/messages | x-goog-api-key over query | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/messages | x-olp-api-key over bearer | key other_key
+/code/coding/v1/messages | sigv4 only | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/messages | unknown key | 401 invalid_api_key "Incorrect API key provided."
+/code/coding/v1/messages | missing scope | 403 permission_denied "This API key does not have the inference scope."
+/code/coding/v1/chat/completions | none | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/chat/completions | bearer | key full
+/code/coding/v1/chat/completions | lowercase bearer | key full
+/code/coding/v1/chat/completions | padded bearer | key full
+/code/coding/v1/chat/completions | basic | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/chat/completions | x-api-key | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/chat/completions | x-goog-api-key | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/chat/completions | query key | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/chat/completions | x-olp-api-key | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/chat/completions | bearer over x-api-key | key full
+/code/coding/v1/chat/completions | x-goog-api-key over query | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/chat/completions | x-olp-api-key over bearer | key other_key
+/code/coding/v1/chat/completions | sigv4 only | 401 invalid_api_key "Provide an API key as a bearer token in the Authorization header."
+/code/coding/v1/chat/completions | unknown key | 401 invalid_api_key "Incorrect API key provided."
+/code/coding/v1/chat/completions | missing scope | 403 permission_denied "This API key does not have the inference scope."

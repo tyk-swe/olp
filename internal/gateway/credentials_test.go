@@ -30,6 +30,9 @@ func TestPresentedKeyLocations(t *testing.T) {
 		"/gemini/v1beta/models/m:generateContent",
 		"/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
 		"/bedrock/model/m/converse",
+		"/code/coding/responses",
+		"/code/coding/v1/messages",
+		"/code/coding/v1/chat/completions",
 	}
 	cases := []struct {
 		name    string

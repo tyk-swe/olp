@@ -1,6 +1,10 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import type { CodeClientConfiguration, CodeRoute } from '$lib/api/code-mode';
+  import type {
+    CodeClientConfiguration,
+    CodeClientSelection,
+    CodeRoute
+  } from '$lib/api/code-mode';
   import { listProjectMemberships } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
@@ -14,7 +18,7 @@
     gatewayURL: string;
     loadClientConfiguration?: (
       route: CodeRoute,
-      model?: string,
+      selection: CodeClientSelection,
       signal?: AbortSignal
     ) => Promise<CodeClientConfiguration>;
   } = $props();

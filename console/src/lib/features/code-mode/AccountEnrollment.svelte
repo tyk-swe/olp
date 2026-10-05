@@ -52,6 +52,7 @@
   $effect(() => onBusyChange(!!busy || !!enrollment));
 
   async function completed(result: GrantEnrollmentCompletion) {
+    const pasted = enrollment?.input === 'secret';
     enrollment = null;
     input = '';
     await Promise.all([
@@ -61,8 +62,9 @@
       client.invalidateQueries({ queryKey: providerKeys.detail(providerId) })
     ]);
     onComplete(result.credential_id);
-    notice =
-      'Grant enrolled. Save the account to associate this credential. Enrollment did not test inference.';
+    notice = pasted
+      ? 'Key enrolled. Save the account to associate this credential. Enrollment did not test the key or inference.'
+      : 'Grant enrolled. Save the account to associate this credential. Enrollment did not test inference.';
   }
   async function run(action: string, work: () => Promise<void>) {
     if (busy || !allowed) return;
@@ -110,8 +112,9 @@
 
 <div class="enrollment">
   <p>
-    Enroll through the provider's supported grant flow. Upstream credentials
-    stay in OLP; developers receive only an OLP key.
+    Enroll through the provider's supported grant flow: a device sign-in for
+    Codex, or a pasted API key for OpenCode Go and GLM Coding Plan. Upstream
+    credentials stay in OLP; developers receive only an OLP key.
   </p>
   {#if error}<p class="field-error" role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}

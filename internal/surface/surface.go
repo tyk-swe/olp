@@ -47,8 +47,14 @@ var prefixes = []Prefix{
 	{Path: "/metrics", Surface: Management},
 }
 
-// Of classifies a request path.
+// Of classifies a request path. A code route's Anthropic Messages paths speak
+// the anthropic surface, as Claude Code and Anthropic SDKs expect.
 func Of(path string) Surface {
+	if rest, ok := strings.CutPrefix(path, "/code/"); ok {
+		if _, operation, ok := strings.Cut(rest, "/"); ok && (operation == "v1/messages" || strings.HasPrefix(operation, "v1/messages/")) {
+			return Surface{Name: "anthropic", Inference: true}
+		}
+	}
 	for _, prefix := range prefixes {
 		if strings.HasPrefix(path, prefix.Path) {
 			return prefix.Surface

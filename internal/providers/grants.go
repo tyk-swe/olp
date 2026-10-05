@@ -122,6 +122,9 @@ func (s *Server) startGrantEnrollment(r *http.Request, p access.Principal) (acce
 	} else {
 		body["authorization_url"] = enrollment.AuthorizationURL
 	}
+	if enrollment.Input != "" {
+		body["input"] = enrollment.Input
+	}
 	return access.Commit(r, tx, access.Reply{Status: 201, Body: body})
 }
 

@@ -50,10 +50,12 @@ export OLP_TEST_BINARY="$PWD/.local/bin/olp"
 make build
 source scripts/secrets.sh "$scratch/secrets"
 OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
-export OLP_CODEX_BINARY
+export OLP_CODEX_BINARY OLP_CLAUDE_CODE_BINARY OLP_OPENCODE_BINARY
 OLP_CODEX_BINARY=$(./scripts/code-mode-qualification.sh install)
+OLP_CLAUDE_CODE_BINARY=$(./scripts/code-mode-qualification.sh install claude-code)
+OLP_OPENCODE_BINARY=$(./scripts/code-mode-qualification.sh install opencode)
 if [[ "$mode" == code ]]; then
-  go test -mod=readonly -race -tags=integration,codecli -count=1 -timeout=15m -v -run '^TestCode' ./tests/integration
+  go test -mod=readonly -race -tags=integration,codecli -count=1 -timeout=25m -v -run '^TestCode' ./tests/integration
   ./scripts/code-mode-qualification.sh cli
   exit
 fi
@@ -63,7 +65,7 @@ restore_valkey="${project}-restore-valkey"
 docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 valkey/valkey:9-alpine valkey-server --requirepass olp-local >/dev/null
 OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
 export OLP_TEST_RESTORE_VALKEY_URL
-go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=15m -v -run '^TestCode' ./tests/integration
+go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=25m -v -run '^TestCode' ./tests/integration
 go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v -skip '^TestCode' ./tests/integration
 ./scripts/code-mode-qualification.sh cli
 go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestIntegration' ./internal/database ./internal/gateway ./internal/providers ./internal/media ./internal/usage

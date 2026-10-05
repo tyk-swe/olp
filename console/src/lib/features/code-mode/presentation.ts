@@ -15,6 +15,27 @@ export type CodeEditing =
   | { kind: 'routes'; current?: CodeRoute }
   | { kind: 'budgets'; current?: CodeBudget };
 
+const adapterLabels: Record<string, string> = {
+  codex: 'Codex',
+  opencode_go: 'OpenCode Go',
+  zai_coding: 'GLM Coding Plan'
+};
+
+/** The subscription family an account or a published route serves. */
+export function adapterLabel(adapter: string | null | undefined): string {
+  return adapter ? (adapterLabels[adapter] ?? adapter) : 'No adapter';
+}
+
+const clientLabels: Record<string, string> = {
+  codex: 'Codex CLI',
+  'claude-code': 'Claude Code',
+  opencode: 'OpenCode'
+};
+
+export function clientLabel(client: string): string {
+  return clientLabels[client] ?? client;
+}
+
 export function tokenCount(value: number | null | undefined): string {
   return value == null ? 'Unknown' : formatInteger(value);
 }
