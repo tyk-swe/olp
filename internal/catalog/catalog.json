@@ -4100,6 +4100,250 @@
       "name": "Cohere (native v2 API)",
       "models": [
         {
+          "id": "c4ai-aya-expanse-32b",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "0.5",
+              "output_per_million": "1.5",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cohere.com/pricing",
+                "observed_at": "2026-10-05T15:08:45Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.cohere.com/docs/models",
+            "observed_at": "2026-10-05T15:17:08Z"
+          }
+        },
+        {
+          "id": "command",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "lifecycle": {
+            "deprecated_at": "2025-09-15",
+            "provenance": {
+              "source_url": "https://docs.cohere.com/docs/deprecations",
+              "observed_at": "2026-10-05T15:17:28Z"
+            }
+          },
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "1",
+              "output_per_million": "2",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cohere.com/pricing",
+                "observed_at": "2026-10-05T15:08:45Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.cohere.com/docs/models",
+            "observed_at": "2026-10-05T15:17:08Z"
+          }
+        },
+        {
+          "id": "command-light",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "lifecycle": {
+            "deprecated_at": "2025-09-15",
+            "provenance": {
+              "source_url": "https://docs.cohere.com/docs/deprecations",
+              "observed_at": "2026-10-05T15:17:28Z"
+            }
+          },
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "0.3",
+              "output_per_million": "0.6",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cohere.com/pricing",
+                "observed_at": "2026-10-05T15:08:45Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.cohere.com/docs/models",
+            "observed_at": "2026-10-05T15:17:08Z"
+          }
+        },
+        {
+          "id": "command-r-03-2024",
+          "aliases": [
+            "command-r"
+          ],
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "lifecycle": {
+            "deprecated_at": "2025-09-15",
+            "replacement": "command-r-08-2024",
+            "provenance": {
+              "source_url": "https://docs.cohere.com/docs/deprecations",
+              "observed_at": "2026-10-05T15:17:28Z"
+            }
+          },
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "0.5",
+              "output_per_million": "1.5",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cohere.com/pricing",
+                "observed_at": "2026-10-05T15:08:45Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.cohere.com/docs/models",
+            "observed_at": "2026-10-05T15:17:08Z"
+          }
+        },
+        {
+          "id": "command-r-08-2024",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "0.15",
+              "output_per_million": "0.6",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cohere.com/pricing",
+                "observed_at": "2026-10-05T15:08:45Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.cohere.com/docs/models",
+            "observed_at": "2026-10-05T15:17:08Z"
+          }
+        },
+        {
+          "id": "command-r-plus-04-2024",
+          "aliases": [
+            "command-r-plus"
+          ],
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "lifecycle": {
+            "deprecated_at": "2025-09-15",
+            "replacement": "command-r-plus-08-2024",
+            "provenance": {
+              "source_url": "https://docs.cohere.com/docs/deprecations",
+              "observed_at": "2026-10-05T15:17:28Z"
+            }
+          },
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "3",
+              "output_per_million": "15",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cohere.com/pricing",
+                "observed_at": "2026-10-05T15:08:45Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.cohere.com/docs/models",
+            "observed_at": "2026-10-05T15:17:08Z"
+          }
+        },
+        {
+          "id": "command-r-plus-08-2024",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "2.5",
+              "output_per_million": "10",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cohere.com/pricing",
+                "observed_at": "2026-10-05T15:08:45Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.cohere.com/docs/models",
+            "observed_at": "2026-10-05T15:17:08Z"
+          }
+        },
+        {
+          "id": "command-r7b-12-2024",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "0.0375",
+              "output_per_million": "0.15",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cohere.com/pricing",
+                "observed_at": "2026-10-05T15:08:45Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.cohere.com/docs/models",
+            "observed_at": "2026-10-05T15:17:08Z"
+          }
+        },
+        {
           "id": "embed-v5.0-fast",
           "input_modalities": [
             "image",

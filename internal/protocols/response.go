@@ -64,6 +64,11 @@ func decodeTransformed(wire, target openai.Family, body []byte, route, encoding 
 		} else {
 			c, err = openai.DecodeResponse(body, route)
 		}
+	case openai.FamilyMistralFIM:
+		// A fill-in-the-middle result is a chat completion.
+		c, err = openai.DecodeChat(body, route)
+	case openai.FamilyCohereChat:
+		c, err = decodeCohereChat(body)
 	case openai.FamilyAnthropic:
 		c, err = decodeAnthropic(body, route)
 	case openai.FamilyGemini:

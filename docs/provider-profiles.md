@@ -101,6 +101,32 @@ before dispatch. Cohere's v2 API does not define sparse or token-multivector
 output; TEI remains the scoped native contract for those layouts. No
 cross-dialect mapping or live-model quality claim is implied.
 
+## Native generation dialects
+
+Some vendor generation APIs have no counterpart in another dialect. Clients
+speak them as they are, at `POST /native/{dialect}/models/{route}`, on strict
+routes whose targets are certified for `generation` on the `native` surface:
+
+| Dialect | Profile | Upstream |
+| --- | --- | --- |
+| `mistral-fim` | `mistral-fim`, with the `mistral` preset | [`/v1/fim/completions`](https://docs.mistral.ai/api/endpoint/fim) |
+| `cohere-chat-v2` | `cohere-v2`, the `cohere-native-v2` preset's profile | [`/v2/chat`](https://docs.cohere.com/reference/chat) |
+
+OLP validates the envelope, binds the route's model in place of the body's
+`model`, which may be absent or name the route, and forwards everything else
+unchanged: Cohere's documents, citation options, tools and thinking reach
+Cohere, and its citations, tool plans and documents return byte for byte. The
+result and every streamed event are checked against the dialect's grammar and
+metered: fill-in-the-middle as chat completion chunks ending in `[DONE]`, and
+Cohere by the billed units its `message-end` event reports, which leave out its
+own preamble. A stream that ends before its terminal event is truncated.
+
+A native generation dialect is never translated. Its profile serves no other
+surface, and an OpenAI, Anthropic or Gemini request to its route finds no
+eligible target; an automatic `cohere-native-v2` provider has no Chat
+Completions to send at all, so it does not generate. Input content policies
+cannot inspect these dialects and refuse them.
+
 ## Defaults, bindings and semantic configuration
 
 An example configuration fragment for native Anthropic generation:

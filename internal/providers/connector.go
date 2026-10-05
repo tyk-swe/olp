@@ -466,6 +466,11 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 			payload["generationConfig"] = map[string]int{"maxOutputTokens": 16}
 		}
 	}
+	if tuple.Surface == "native" {
+		// A native generation dialect is probed in its own grammar.
+		family, _ = cfg.transport().TargetFamily(openai.FamilyChat)
+		payload = protocols.NativeGenerationProbe(family)
+	}
 	if tuple.Mode == ModeStreaming {
 		if tuple.Surface == "gemini" {
 			family = openai.FamilyGeminiStream

@@ -124,6 +124,12 @@ func TestEveryVendorContractNamesAKindThatServesIt(t *testing.T) {
 			served := false
 			for _, option := range CapabilityOptions {
 				served = served || option.Operation == operation && connectors.Supports(contract.Connector, contract.ID, operation, option.Surface, option.Mode)
+				// An operation in a native dialect is served through the
+				// vendor's preset profile.
+				if ref := contract.Preset; ref != nil && ref.Profile != nil {
+					profiled := connectors.Config{Kind: contract.Connector, VendorID: contract.ID, ProfileID: ref.Profile.ID, ProfileRevision: ref.Profile.Revision}
+					served = served || option.Operation == operation && profiled.Supports(operation, option.Surface, option.Mode)
+				}
 			}
 			if !served {
 				t.Fatalf("%s lists %s, which its connector kind never serves", contract.ID, operation)

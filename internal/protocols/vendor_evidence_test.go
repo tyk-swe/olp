@@ -189,6 +189,9 @@ func checkEndpoints(t *testing.T, contract vendors.Contract, evidence vendorEvid
 		if !ok {
 			continue
 		}
+		if target, err := config.TargetFamily(family); config.ProfileID != "" && err == nil {
+			family = target
+		}
 		got, err := config.URL(family, "model", false)
 		if profile, profiled := config.Profile(); profiled == nil {
 			if codec, registered := operationregistry.Lookup(profile.OperationDialect(operation)); registered && codec.Operation.ID == operation {
@@ -243,6 +246,9 @@ func checkResponses(t *testing.T, contract vendors.Contract, evidence vendorEvid
 		}
 		checkBasis(t, operation+" result", documented.Basis)
 		body := vendorFixture(t, contract.ID, documented.File)
+		if operation == "generation" {
+			family = generationWire(contract)
+		}
 		var request *openai.Request
 		if family == openai.FamilyRerank {
 			request, _ = Parse(openai.FamilyRerank, []byte(`{"model":"route","query":"q","documents":["a","b","c"]}`), "")
@@ -271,7 +277,8 @@ func checkStream(t *testing.T, contract vendors.Contract, evidence vendorEvidenc
 	checkBasis(t, "stream", evidence.Stream.Basis)
 	stream := vendorFixture(t, contract.ID, evidence.Stream.File)
 	var text strings.Builder
-	completion, err := Stream(openai.FamilyChat, openai.FamilyChat, strings.NewReader(string(stream)), 1<<20, "route", true, func(frame []byte) error {
+	wire := generationWire(contract)
+	completion, err := Stream(wire, wire, strings.NewReader(string(stream)), 1<<20, "route", true, func(frame []byte) error {
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
@@ -289,12 +296,28 @@ func checkStream(t *testing.T, contract vendors.Contract, evidence vendorEvidenc
 	if err != nil {
 		t.Fatalf("stream does not complete: %v", err)
 	}
+	if text.Len() == 0 {
+		// A native dialect's frames are its own; its decoder collects the text.
+		text.WriteString(completion.OutputText)
+	}
 	if text.String() != evidence.Stream.Text {
 		t.Fatalf("stream text = %q, documented %q", text.String(), evidence.Stream.Text)
 	}
 	if !sameUsage(completion.Usage, evidence.Stream.Usage) {
 		t.Fatalf("stream usage = %+v, documented %s", completion.Usage, evidence.Stream.Usage)
 	}
+}
+
+// generationWire is the dialect a preset generates in: its profile's, or Chat
+// Completions.
+func generationWire(contract vendors.Contract) openai.Family {
+	if ref := contract.Preset.Profile; ref != nil {
+		config := connectors.Config{Kind: contract.Connector, ProfileID: ref.ID, ProfileRevision: ref.Revision, VendorID: contract.ID}
+		if wire, err := config.TargetFamily(openai.FamilyChat); err == nil {
+			return wire
+		}
+	}
+	return openai.FamilyChat
 }
 
 func checkError(t *testing.T, contract vendors.Contract, evidence vendorEvidence) {

@@ -24,14 +24,17 @@ func TestEveryCompatibleVendorUsesItsReviewedOperationContract(t *testing.T) {
 				for _, surface := range []string{"openai", "anthropic", "gemini"} {
 					for _, mode := range []string{"unary", "streaming"} {
 						kindServes := surface == "openai" && (operation == "generation" || mode == "unary")
-						want := kindServes && contract.Serves(operation)
+						// Generation is translated only to a vendor that speaks
+						// an OpenAI dialect; another serves its own natively.
+						translatable := operation != "generation" || contract.Speaks("openai-chat") || contract.Speaks("openai-responses")
+						want := kindServes && contract.Serves(operation) && translatable
 						if got := connectors.Supports("openai_compatible", contract.ID, operation, surface, mode); got != want {
 							t.Fatalf("%s/%s/%s: supported=%v want %v", operation, surface, mode, got, want)
 						}
 					}
 				}
 			}
-			if !contract.Serves("generation") {
+			if !contract.Serves("generation") || !contract.Speaks("openai-chat") && !contract.Speaks("openai-responses") {
 				return
 			}
 			wantWire := openai.FamilyChat

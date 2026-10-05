@@ -14,7 +14,7 @@ import (
 var contracts = buildContracts()
 
 func buildContracts() *oif.Registry {
-	families := []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyBedrock, openai.FamilyInputTokens, openai.FamilyAnthropicCount, openai.FamilyGeminiCount, "bedrock_count", openai.FamilyEmbeddings, openai.FamilyGeminiEmbeddings, openai.FamilyGeminiEmbeddingsBatch, openai.FamilyVertexEmbeddings, openai.FamilyBedrockEmbeddings, openai.FamilyRerank, openai.FamilyBedrockRerank, openai.FamilyModeration}
+	families := []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyBedrock, openai.FamilyInputTokens, openai.FamilyAnthropicCount, openai.FamilyGeminiCount, "bedrock_count", openai.FamilyEmbeddings, openai.FamilyGeminiEmbeddings, openai.FamilyGeminiEmbeddingsBatch, openai.FamilyVertexEmbeddings, openai.FamilyBedrockEmbeddings, openai.FamilyRerank, openai.FamilyBedrockRerank, openai.FamilyModeration, openai.FamilyMistralFIM, openai.FamilyCohereChat}
 	operations := []oif.Operation{}
 	bindings := []oif.Binding{}
 	seen := map[oif.Identity]bool{}

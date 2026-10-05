@@ -8597,6 +8597,52 @@
   },
   {
     "operation_dialects": {
+      "generation": "mistral-fim"
+    },
+    "default_schemas": {
+      "generation": {
+        "additionalProperties": false,
+        "properties": {
+          "dialect": {
+            "const": "mistral-fim"
+          },
+          "native_options": {
+            "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
+            "type": "object"
+          },
+          "values": {
+            "additionalProperties": false,
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "dialect"
+        ],
+        "type": "object"
+      }
+    },
+    "id": "mistral-fim",
+    "revision": "1",
+    "label": "Mistral fill-in-the-middle",
+    "kind": "openai_compatible",
+    "dialect": "mistral-fim",
+    "dialect_revision": "v1",
+    "hosting": "direct-compatible",
+    "authentication": [
+      "api_key"
+    ],
+    "transport": "http",
+    "operations": [
+      "generation"
+    ],
+    "semantic_headers": [],
+    "query_settings": [],
+    "documentation": "https://docs.mistral.ai/api/endpoint/fim",
+    "strict": true
+  },
+  {
+    "operation_dialects": {
       "generation": "openai-chat"
     },
     "default_schemas": {
@@ -9882,6 +9928,7 @@
   {
     "operation_dialects": {
       "embeddings": "cohere-embed-v2",
+      "generation": "cohere-chat-v2",
       "rerank": "cohere-rerank-v2"
     },
     "default_schemas": {
@@ -9959,6 +10006,27 @@
         ],
         "type": "object"
       },
+      "generation": {
+        "additionalProperties": false,
+        "properties": {
+          "dialect": {
+            "const": "cohere-chat-v2"
+          },
+          "native_options": {
+            "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
+            "type": "object"
+          },
+          "values": {
+            "additionalProperties": false,
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "dialect"
+        ],
+        "type": "object"
+      },
       "rerank": {
         "additionalProperties": false,
         "properties": {
@@ -10008,7 +10076,8 @@
     "transport": "http",
     "operations": [
       "embeddings",
-      "rerank"
+      "rerank",
+      "generation"
     ],
     "semantic_headers": [],
     "query_settings": [],

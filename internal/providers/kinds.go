@@ -226,6 +226,8 @@ func capabilityOptions() []CapabilityInput {
 	for _, operation := range []string{"generation", "bedrock_invoke"} {
 		out = append(out, tuple(operation, "bedrock", "unary"), tuple(operation, "bedrock", "streaming"))
 	}
+	// Native generation dialects, which only their profiles serve.
+	out = append(out, tuple("generation", "native", "unary"), tuple("generation", "native", "streaming"))
 	return out
 }
 

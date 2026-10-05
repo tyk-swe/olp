@@ -15,6 +15,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -186,6 +187,9 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		}
 		if input.Configuration.ProfileID != "" {
 			profile, _ := input.Configuration.transport().Profile()
+			if _, native := protocols.NativeGenerationFamily(profile.OperationDialect("generation")); native && operation == "generation" {
+				surface = "native"
+			}
 			switch profile.Dialect {
 			case "openai-chat", "openai-responses":
 				// Vertex's OpenAI-compatible profile speaks OpenAI, whatever

@@ -43,7 +43,8 @@ func StreamMetadataEvents(family Family, r io.Reader, maxEventBytes int, route s
 func stream(family Family, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit Emit, observe func(oif.Event) error) (*Completion, error) {
 	var s streamer
 	switch family {
-	case FamilyChat:
+	case FamilyChat, FamilyMistralFIM:
+		// Fill-in-the-middle streams chat completion chunks.
 		// Bound distinct-choice bookkeeping as well as individual wire events.
 		s = &chatStream{route: route, includeUsage: includeUsage, collect: collect, maxChoices: max(1, maxEventBytes/16), emit: emit}
 	case FamilyResponses:

@@ -30,6 +30,9 @@ func Stream(wire, target openai.Family, r io.Reader, maxEvent int, route string,
 // Actionability still requires the admitted projection and durable-state barrier.
 func StreamWithEvents(wire, target openai.Family, r io.Reader, maxEvent int, route string, includeUsage bool, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
 	native := wire == target || wire == openai.FamilyGemini && target == openai.FamilyGeminiStream
+	if wire.Surface() == "native" && !native {
+		return nil, protocolError("a native generation dialect is never translated")
+	}
 	var finish func(*openai.Completion) error
 	upstreamEmit := emit
 	if !native {
@@ -60,6 +63,11 @@ func StreamWithEvents(wire, target openai.Family, r io.Reader, maxEvent int, rou
 			}
 			return upstreamEmit(frame)
 		}, observe)
+	case openai.FamilyMistralFIM:
+		// Fill-in-the-middle streams chat completion chunks.
+		c, err = openai.StreamMetadataEvents(openai.FamilyMistralFIM, r, maxEvent, route, true, upstreamEmit, observe)
+	case openai.FamilyCohereChat:
+		c, err = streamCohereEvents(r, maxEvent, upstreamEmit, observe)
 	case openai.FamilyAnthropic:
 		c, err = streamAnthropicEvents(r, maxEvent, route, upstreamEmit, observe)
 	case openai.FamilyGemini:

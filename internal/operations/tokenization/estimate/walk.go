@@ -222,6 +222,16 @@ func walkInput(in *input, family openai.Family, field func(string) node) {
 		w.dialectMessages(field("contents"))
 		w.dialectSystem(field("systemInstruction"))
 		w.dialectRequest(field("generateContentRequest"))
+		switch family {
+		case openai.FamilyMistralFIM:
+			// The model reads the code on both sides of the gap.
+			w.text(field("prompt"))
+			w.text(field("suffix"))
+		case openai.FamilyCohereChat:
+			// Grounding documents are prompt text, in a rendering Cohere
+			// does not document.
+			w.schema(field("documents"))
+		}
 		w.schema(field("tools"))
 		if family.Surface() == "bedrock" {
 			// Converse holds its tool catalogue beside the conversation, where

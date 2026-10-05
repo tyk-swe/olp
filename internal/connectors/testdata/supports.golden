@@ -19,16 +19,16 @@ openai "fireworks": generation/openai/unary generation/openai/streaming generati
 openai "deepinfra": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
 openai "huggingface": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 openai "cohere": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
-openai "cohere-native-v2": embeddings/openai/unary
+openai "cohere-native-v2": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
 openai "voyage": embeddings/openai/unary
 openai_compatible "": generation/openai/unary generation/openai/streaming token_count/openai/unary embeddings/openai/unary moderation/openai/unary image_generation/openai/unary image_generation/openai/streaming image_edit/openai/unary image_edit/openai/streaming image_variation/openai/unary speech/openai/unary speech/openai/streaming transcription/openai/unary transcription/openai/streaming translation/openai/unary video_create/openai/async video_list/openai/unary video_get/openai/unary video_content/openai/unary video_delete/openai/unary
 openai_compatible "unreviewed": generation/openai/unary generation/openai/streaming token_count/openai/unary embeddings/openai/unary moderation/openai/unary image_generation/openai/unary image_generation/openai/streaming image_edit/openai/unary image_edit/openai/streaming image_variation/openai/unary speech/openai/unary speech/openai/streaming transcription/openai/unary transcription/openai/streaming translation/openai/unary video_create/openai/async video_list/openai/unary video_get/openai/unary video_content/openai/unary video_delete/openai/unary
 openai_compatible "openai": generation/openai/unary generation/openai/streaming token_count/openai/unary embeddings/openai/unary moderation/openai/unary image_generation/openai/unary image_generation/openai/streaming image_edit/openai/unary image_edit/openai/streaming image_variation/openai/unary speech/openai/unary speech/openai/streaming transcription/openai/unary transcription/openai/streaming translation/openai/unary video_create/openai/async video_list/openai/unary video_get/openai/unary video_content/openai/unary video_delete/openai/unary
 openai_compatible "openai_compatible": generation/openai/unary generation/openai/streaming token_count/openai/unary embeddings/openai/unary moderation/openai/unary image_generation/openai/unary image_generation/openai/streaming image_edit/openai/unary image_edit/openai/streaming image_variation/openai/unary speech/openai/unary speech/openai/streaming transcription/openai/unary transcription/openai/streaming translation/openai/unary video_create/openai/async video_list/openai/unary video_get/openai/unary video_content/openai/unary video_delete/openai/unary
-openai_compatible "anthropic": generation/openai/unary generation/openai/streaming token_count/openai/unary
-openai_compatible "google": generation/openai/unary generation/openai/streaming token_count/openai/unary embeddings/openai/unary
+openai_compatible "anthropic": token_count/openai/unary
+openai_compatible "google": token_count/openai/unary embeddings/openai/unary
 openai_compatible "google-vertex": generation/openai/unary generation/openai/streaming token_count/openai/unary embeddings/openai/unary image_generation/openai/unary image_generation/openai/streaming
-openai_compatible "amazon-bedrock": generation/openai/unary generation/openai/streaming token_count/openai/unary embeddings/openai/unary image_generation/openai/unary image_generation/openai/streaming
+openai_compatible "amazon-bedrock": token_count/openai/unary embeddings/openai/unary image_generation/openai/unary image_generation/openai/streaming
 openai_compatible "amazon-sagemaker": generation/openai/unary generation/openai/streaming
 openai_compatible "ibm-watsonx": generation/openai/unary generation/openai/streaming
 openai_compatible "azure": generation/openai/unary generation/openai/streaming token_count/openai/unary embeddings/openai/unary moderation/openai/unary image_generation/openai/unary image_generation/openai/streaming image_edit/openai/unary image_edit/openai/streaming image_variation/openai/unary speech/openai/unary speech/openai/streaming transcription/openai/unary transcription/openai/streaming translation/openai/unary video_create/openai/async video_list/openai/unary video_get/openai/unary video_content/openai/unary video_delete/openai/unary
@@ -65,7 +65,7 @@ anthropic "fireworks": generation/openai/unary generation/openai/streaming gener
 anthropic "deepinfra": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 anthropic "huggingface": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 anthropic "cohere": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
-anthropic "cohere-native-v2": 
+anthropic "cohere-native-v2": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 anthropic "voyage": 
 gemini "": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary
 gemini "unreviewed": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary
@@ -88,7 +88,7 @@ gemini "fireworks": generation/openai/unary generation/openai/streaming generati
 gemini "deepinfra": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
 gemini "huggingface": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 gemini "cohere": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
-gemini "cohere-native-v2": embeddings/openai/unary
+gemini "cohere-native-v2": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
 gemini "voyage": embeddings/openai/unary
 azure_openai "": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary moderation/openai/unary batch/openai/unary realtime/openai/realtime image_generation/openai/unary image_generation/openai/streaming image_edit/openai/unary image_edit/openai/streaming image_variation/openai/unary speech/openai/unary speech/openai/streaming transcription/openai/unary transcription/openai/streaming translation/openai/unary video_create/openai/async video_list/openai/unary video_get/openai/unary video_content/openai/unary video_delete/openai/unary
 azure_openai "unreviewed": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary moderation/openai/unary batch/openai/unary realtime/openai/realtime image_generation/openai/unary image_generation/openai/streaming image_edit/openai/unary image_edit/openai/streaming image_variation/openai/unary speech/openai/unary speech/openai/streaming transcription/openai/unary transcription/openai/streaming translation/openai/unary video_create/openai/async video_list/openai/unary video_get/openai/unary video_content/openai/unary video_delete/openai/unary
@@ -111,7 +111,7 @@ azure_openai "fireworks": generation/openai/unary generation/openai/streaming ge
 azure_openai "deepinfra": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
 azure_openai "huggingface": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 azure_openai "cohere": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
-azure_openai "cohere-native-v2": embeddings/openai/unary
+azure_openai "cohere-native-v2": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
 azure_openai "voyage": embeddings/openai/unary
 vertex_ai "": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary image_generation/openai/unary
 vertex_ai "unreviewed": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary image_generation/openai/unary
@@ -134,7 +134,7 @@ vertex_ai "fireworks": generation/openai/unary generation/openai/streaming gener
 vertex_ai "deepinfra": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
 vertex_ai "huggingface": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 vertex_ai "cohere": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
-vertex_ai "cohere-native-v2": embeddings/openai/unary
+vertex_ai "cohere-native-v2": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
 vertex_ai "voyage": embeddings/openai/unary
 bedrock "": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary token_count/bedrock/unary embeddings/openai/unary bedrock_invoke/bedrock/unary bedrock_invoke/bedrock/streaming image_generation/openai/unary
 bedrock "unreviewed": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary token_count/bedrock/unary embeddings/openai/unary bedrock_invoke/bedrock/unary bedrock_invoke/bedrock/streaming image_generation/openai/unary
@@ -157,7 +157,7 @@ bedrock "fireworks": generation/openai/unary generation/openai/streaming generat
 bedrock "deepinfra": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming embeddings/openai/unary
 bedrock "huggingface": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming
 bedrock "cohere": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming embeddings/openai/unary
-bedrock "cohere-native-v2": embeddings/openai/unary
+bedrock "cohere-native-v2": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming embeddings/openai/unary
 bedrock "voyage": embeddings/openai/unary
 sagemaker "": generation/openai/unary generation/openai/streaming
 sagemaker "unreviewed": generation/openai/unary generation/openai/streaming
@@ -180,7 +180,7 @@ sagemaker "fireworks": generation/openai/unary generation/openai/streaming
 sagemaker "deepinfra": generation/openai/unary generation/openai/streaming
 sagemaker "huggingface": generation/openai/unary generation/openai/streaming
 sagemaker "cohere": generation/openai/unary generation/openai/streaming
-sagemaker "cohere-native-v2": 
+sagemaker "cohere-native-v2": generation/openai/unary generation/openai/streaming
 sagemaker "voyage": 
 watsonx "": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 watsonx "unreviewed": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
@@ -203,7 +203,7 @@ watsonx "fireworks": generation/openai/unary generation/openai/streaming generat
 watsonx "deepinfra": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 watsonx "huggingface": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 watsonx "cohere": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
-watsonx "cohere-native-v2": 
+watsonx "cohere-native-v2": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 watsonx "voyage": 
 plugin "": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 plugin "unreviewed": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming

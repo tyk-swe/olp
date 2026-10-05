@@ -82,6 +82,7 @@ var profileRegistry = []Profile{
 	{ID: "bedrock-converse", Label: "Bedrock Converse", Kind: "bedrock", Dialect: "bedrock-converse", Hosting: "bedrock-converse"},
 	{ID: "bedrock-anthropic-invoke", Label: "Bedrock Anthropic Invoke", Kind: "bedrock", Dialect: "anthropic-messages", DialectRevision: "bedrock-2023-05-31", Hosting: "bedrock-anthropic-invoke"},
 	{ID: "bedrock-invoke", Label: "Bedrock model-specific Invoke", Kind: "bedrock", Dialect: "bedrock-invoke", Hosting: "bedrock-invoke"},
+	{ID: "mistral-fim", Label: "Mistral fill-in-the-middle", Kind: "openai_compatible", Dialect: "mistral-fim", DialectRevision: "v1", Hosting: "direct-compatible"},
 	{ID: "sagemaker-openai-chat", Label: "SageMaker OpenAI-compatible Chat Completions", Kind: KindSageMaker, Dialect: "openai-chat", DialectRevision: "v1", Hosting: "sagemaker-openai"},
 }
 
@@ -153,6 +154,11 @@ func init() {
 		// Interactions and Live have independent request and event grammars.
 		// Their profile tuples cannot fall through GenerateContent's codec.
 		switch p.Dialect {
+		case "mistral-fim":
+			p.Operations = []string{"generation"}
+			p.Authentication = []string{"api_key"}
+			p.SemanticHeaders = []string{}
+			p.Documentation = "https://docs.mistral.ai/api/endpoint/fim"
 		case "gemini-interactions":
 			p.Operations = []string{"generation"}
 			p.Authentication = []string{"api_key"}
@@ -372,7 +378,7 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 	}
 	switch operation {
 	case "generation":
-		if family, ok := generationFamily(p.Dialect); ok {
+		if family, ok := generationFamily(p.OperationDialect("generation")); ok {
 			return family, nil
 		}
 	case "token_count":
@@ -420,6 +426,10 @@ func generationFamily(dialect string) (openai.Family, bool) {
 		return openai.FamilyGemini, true
 	case "bedrock-converse":
 		return openai.FamilyBedrock, true
+	case "mistral-fim":
+		return openai.FamilyMistralFIM, true
+	case "cohere-chat-v2":
+		return openai.FamilyCohereChat, true
 	}
 	return "", false
 }
@@ -431,6 +441,11 @@ func (c Config) Supports(operation, surface, mode string) bool {
 	}
 	if c.ProfileID != "" {
 		if p, err := c.profile(); err == nil {
+			// A native generation dialect serves its own clients on the
+			// native surface, and is never translated to or from another.
+			if family, ok := generationFamily(p.OperationDialect("generation")); ok && family.Surface() == "native" && operation == "generation" {
+				return surface == "native" && (mode == "unary" || mode == "streaming") && slices.Contains(p.Operations, operation) && vendors.Serves(c.VendorID, operation)
+			}
 			switch p.Dialect {
 			case "gemini-interactions":
 				return operation == "generation" && surface == "gemini" && (mode == "unary" || mode == "streaming")

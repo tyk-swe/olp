@@ -17,6 +17,7 @@ var wireDialects = map[Family]string{
 	FamilyGeminiEmbeddings: "gemini-embeddings", FamilyGeminiEmbeddingsBatch: "gemini-embeddings-batch",
 	FamilyVertexEmbeddings: "vertex-embeddings", FamilyBedrockEmbeddings: "bedrock-embeddings",
 	FamilyBedrock: "bedrock-converse", "bedrock_count": "bedrock-count-tokens",
+	FamilyMistralFIM: "mistral-fim", FamilyCohereChat: "cohere-chat-v2",
 }
 
 func Descriptor(family Family, stream bool) oif.Descriptor {

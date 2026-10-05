@@ -37,6 +37,11 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 	if kind == "openai_compatible" && surface != "openai" {
 		return false
 	}
+	// A compatible vendor that speaks no OpenAI dialect, such as Cohere's
+	// native API, generates only through its own dialect's profile.
+	if kind == "openai_compatible" && operation == "generation" && !vendors.Speaks(vendor, "openai-chat") && !vendors.Speaks(vendor, "openai-responses") {
+		return false
+	}
 	if surface == "bedrock" && kind != "bedrock" {
 		return false
 	}

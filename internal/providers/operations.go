@@ -29,6 +29,10 @@ func configurationCertifiable(cfg *Configuration, tuple CapabilityInput) bool {
 	if _, ok := configuredOperation(cfg, tuple.Operation); ok {
 		return cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 	}
+	if tuple.Operation == OperationGeneration && tuple.Surface == "native" {
+		// Only a profile in a native generation dialect serves this surface.
+		return cfg.ProfileID != "" && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+	}
 	return certifiable(cfg.Kind, value(cfg.Options.VendorID), tuple)
 }
 

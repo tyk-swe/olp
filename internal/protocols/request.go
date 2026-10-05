@@ -71,6 +71,9 @@ func Parse(family openai.Family, data []byte, model string) (*openai.Request, er
 	if err != nil {
 		return nil, &openai.RequestError{Code: "invalid_json", Message: "The request body must be unambiguous valid JSON."}
 	}
+	if family.Surface() == "native" {
+		return parseNativeGeneration(family, doc, model)
+	}
 	// The members that carry the conversation are read from the document, so
 	// they are not copied into the fields.
 	f := doc.FieldsWithout("messages", "contents", "generateContentRequest")

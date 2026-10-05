@@ -497,7 +497,8 @@
     "documentation_url": "https://docs.mistral.ai/api/endpoint/chat",
     "endpoint": "https://api.mistral.ai/v1",
     "dialects": [
-      "openai-chat"
+      "openai-chat",
+      "mistral-fim"
     ],
     "unsupported_parameters": []
   },
@@ -847,7 +848,8 @@
     "discovery": false,
     "operations": [
       "embeddings",
-      "rerank"
+      "rerank",
+      "generation"
     ],
     "authentication": [
       "api_key",
@@ -865,11 +867,30 @@
       "max_tokens",
       "top_n",
       "max_tokens_per_doc",
-      "priority"
+      "priority",
+      "messages",
+      "documents",
+      "citation_options",
+      "tools",
+      "tool_choice",
+      "strict_tools",
+      "response_format",
+      "safety_mode",
+      "temperature",
+      "p",
+      "k",
+      "seed",
+      "stop_sequences",
+      "frequency_penalty",
+      "presence_penalty",
+      "logprobs",
+      "thinking"
     ],
     "documentation_url": "https://docs.cohere.com/reference/embed",
     "endpoint": "https://api.cohere.ai/v2",
-    "dialects": [],
+    "dialects": [
+      "cohere-chat-v2"
+    ],
     "unsupported_parameters": []
   },
   {

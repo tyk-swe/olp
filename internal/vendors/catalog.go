@@ -78,7 +78,7 @@ var contracts = []Contract{
 	// OpenAI-compatible presets, each reviewed against the documentation it
 	// links on the date its evidence in tests/fixtures/vendors records.
 	compatiblePreset("groq", "Groq", "Groq", "Groq OpenAI-compatible endpoint.", "https://api.groq.com/openai/v1", Link{"Groq OpenAI compatibility", "https://console.groq.com/docs/openai"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: openAIDialects, Unsupported: []string{"logit_bias", "logprobs", "top_logprobs"}}, exactChat),
-	compatiblePreset("mistral", "Mistral", "Mistral AI", "Mistral La Plateforme.", "https://api.mistral.ai/v1", Link{"Mistral chat API", "https://docs.mistral.ai/api/endpoint/chat"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: chatDialect,
+	compatiblePreset("mistral", "Mistral", "Mistral AI", "Mistral La Plateforme.", "https://api.mistral.ai/v1", Link{"Mistral chat API", "https://docs.mistral.ai/api/endpoint/chat"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: []string{"openai-chat", "mistral-fim"},
 		Requests: map[string]RequestShape{"generation": {Rewrites: []Rewrite{maxTokens, {From: "seed", To: "random_seed"}}}}}, nil),
 	compatiblePreset("openrouter", "OpenRouter", "OpenRouter", "OpenRouter unified API.", "https://openrouter.ai/api/v1", Link{"OpenRouter API reference", "https://openrouter.ai/docs/api/reference/overview"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects}, exactChat),
 	compatiblePreset("together", "Together AI", "Together AI", "Together AI inference.", "https://api.together.ai/v1", Link{"Together OpenAI compatibility", "https://docs.together.ai/docs/openai-api-compatibility"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Unsupported: []string{"logit_bias", "metadata", "prediction", "service_tier", "store"}, Requests: chatTokenLimit}, nil),
@@ -99,8 +99,9 @@ var contracts = []Contract{
 		},
 		OperationEndpoints: map[string]string{"rerank": "https://api.cohere.ai/v2/rerank"}}, nil),
 	compatiblePreset("cohere-native-v2", "Cohere native v2", "Cohere", "Cohere native v2 compatible API.", "https://api.cohere.ai/v2", Link{"Cohere native v2 API", "https://docs.cohere.com/reference/embed"}, Contract{
-		Operations: []string{"embeddings", "rerank"}, ProbeOperation: "embeddings",
-		Parameters: []string{"input_type", "texts", "images", "inputs", "embedding_types", "output_dimension", "truncate", "max_tokens", "top_n", "max_tokens_per_doc", "priority"}}, &ProfileRef{ID: "cohere-v2", Revision: "1"}),
+		Operations: []string{"embeddings", "rerank", "generation"}, Dialects: []string{"cohere-chat-v2"}, ProbeOperation: "embeddings",
+		Parameters: []string{"input_type", "texts", "images", "inputs", "embedding_types", "output_dimension", "truncate", "max_tokens", "top_n", "max_tokens_per_doc", "priority",
+			"messages", "documents", "citation_options", "tools", "tool_choice", "strict_tools", "response_format", "safety_mode", "temperature", "p", "k", "seed", "stop_sequences", "frequency_penalty", "presence_penalty", "logprobs", "thinking"}}, &ProfileRef{ID: "cohere-v2", Revision: "1"}),
 	compatiblePreset("voyage", "Voyage AI", "Voyage AI", "Voyage AI compatible API.", "https://api.voyageai.com/v1", Link{"Voyage AI embeddings API", "https://docs.voyageai.com/reference/embeddings-api"}, Contract{
 		Operations: []string{"embeddings", "rerank"}, ProbeOperation: "embeddings",
 		Parameters: []string{"dimensions", "input_type", "truncation", "output_dtype", "encoding_format"},

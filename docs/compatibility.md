@@ -27,6 +27,10 @@ surfaces. Current protocol, connector, SDK, and media tests are described in
 | `qualified` | Restricted to the provider, model family, or resource policy described below; exact capabilities still require certification. |
 | `reviewed` | Available only through the named compatible-vendor profiles and certified models. |
 
+Native generation dialects, such as Mistral fill-in-the-middle and Cohere
+Chat v2, serve their own clients at `/native/{dialect}/models/{route}` and are
+never translated; see [native generation dialects](provider-profiles.md#native-generation-dialects).
+
 The `sagemaker` kind serves only generation on the OpenAI surface, as the
 `openai_compatible` column shows; see [SageMaker AI](providers/sagemaker.md).
 The `watsonx` kind serves only generation, translated on every surface but
