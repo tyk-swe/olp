@@ -1185,6 +1185,24 @@ func (e PluginRewriteOp) Valid() bool {
 	}
 }
 
+// Defines values for PricingSourceFormat.
+const (
+	Catalog PricingSourceFormat = "catalog"
+	Prices  PricingSourceFormat = "prices"
+)
+
+// Valid indicates whether the value is a known member of the PricingSourceFormat enum.
+func (e PricingSourceFormat) Valid() bool {
+	switch e {
+	case Catalog:
+		return true
+	case Prices:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProjectMemberResponseProjectRole.
 const (
 	ProjectMemberResponseProjectRoleManager ProjectMemberResponseProjectRole = "manager"
@@ -2851,11 +2869,14 @@ type CreateNotificationRuleRequest struct {
 // CreatePricingSourceRequest defines model for CreatePricingSourceRequest.
 type CreatePricingSourceRequest struct {
 	// Enabled Defaults to true.
-	Enabled *bool  `json:"enabled,omitempty"`
-	Name    string `json:"name"`
+	Enabled *bool `json:"enabled,omitempty"`
 
-	// Url Document URL validated by the installation egress policy.
-	Url string `json:"url"`
+	// Format Defaults to prices.
+	Format *PricingSourceFormat `json:"format,omitempty"`
+	Name   string               `json:"name"`
+
+	// Url Document URL validated by the installation egress policy. Required for prices; omit for a catalog source to read the catalog this release ships. A fetched catalog is verified with its detached signature at the same URL plus .sig.
+	Url nullable.Nullable[string] `json:"url,omitempty"`
 }
 
 // CreateProjectRequest defines model for CreateProjectRequest.
@@ -4044,10 +4065,15 @@ type PricingSource struct {
 	CreatedBy openapi_types.UUID `json:"created_by"`
 	Enabled   bool               `json:"enabled"`
 	Etag      openapi_types.UUID `json:"etag"`
-	Id        openapi_types.UUID `json:"id"`
-	Name      string             `json:"name"`
-	UpdatedAt time.Time          `json:"updated_at"`
-	Url       string             `json:"url"`
+
+	// Format How a source document is read: a price list, or a signed reference catalog verified against the keys this release trusts.
+	Format    PricingSourceFormat `json:"format"`
+	Id        openapi_types.UUID  `json:"id"`
+	Name      string              `json:"name"`
+	UpdatedAt time.Time           `json:"updated_at"`
+
+	// Url Document URL. A catalog source without one reads the catalog this release ships.
+	Url nullable.Nullable[string] `json:"url"`
 }
 
 // PricingSourceDiff defines model for PricingSourceDiff.
@@ -4065,7 +4091,13 @@ type PricingSourceDocument struct {
 	Currency    string                       `json:"currency"`
 	EffectiveAt nullable.Nullable[time.Time] `json:"effective_at,omitempty"`
 	Prices      []PriceRequest               `json:"prices"`
+
+	// Unrepresentable Components a catalog lists that no price holds; publishing never prices them.
+	Unrepresentable *[]UnrepresentablePrice `json:"unrepresentable,omitempty"`
 }
+
+// PricingSourceFormat How a source document is read: a price list, or a signed reference catalog verified against the keys this release trusts.
+type PricingSourceFormat string
 
 // PricingSourceListResponse defines model for PricingSourceListResponse.
 type PricingSourceListResponse struct {
@@ -4076,21 +4108,33 @@ type PricingSourceListResponse struct {
 // PricingSourceRefreshResponse defines model for PricingSourceRefreshResponse.
 type PricingSourceRefreshResponse struct {
 	Diff     PricingSourceDiff     `json:"diff"`
+	Skipped  []SkippedPrice        `json:"skipped"`
 	Snapshot PricingSourceSnapshot `json:"snapshot"`
 	Source   PricingSource         `json:"source"`
 }
 
 // PricingSourceSnapshot defines model for PricingSourceSnapshot.
 type PricingSourceSnapshot struct {
-	Currency   string                `json:"currency"`
-	Document   PricingSourceDocument `json:"document"`
-	FetchedAt  time.Time             `json:"fetched_at"`
-	Id         openapi_types.UUID    `json:"id"`
-	PriceCount int32                 `json:"price_count"`
+	Catalog    nullable.Nullable[PricingSourceSnapshotCatalog] `json:"catalog"`
+	Currency   string                                          `json:"currency"`
+	Document   PricingSourceDocument                           `json:"document"`
+	FetchedAt  time.Time                                       `json:"fetched_at"`
+	Id         openapi_types.UUID                              `json:"id"`
+	PriceCount int32                                           `json:"price_count"`
 
 	// Sha256 SHA-256 digest of the canonical document.
 	Sha256   string             `json:"sha256"`
 	SourceId openapi_types.UUID `json:"source_id"`
+}
+
+// PricingSourceSnapshotCatalog Signed reference catalog a snapshot was mapped from.
+type PricingSourceSnapshotCatalog struct {
+	// KeyId Trusted key that verified the catalog signature.
+	KeyId       string    `json:"key_id"`
+	PublishedAt time.Time `json:"published_at"`
+
+	// Sha256 SHA-256 digest of the signed catalog document.
+	Sha256 string `json:"sha256"`
 }
 
 // PricingSourceSnapshotListResponse defines model for PricingSourceSnapshotListResponse.
@@ -4729,6 +4773,20 @@ type RecentAuthenticationRequest struct {
 	// Purpose Exact security operation authorized by this one-time grant: password_enrollment, oidc_link, oidc_unlink or plugin_permit.
 	Purpose    string                                `json:"purpose"`
 	ResourceId nullable.Nullable[openapi_types.UUID] `json:"resource_id,omitempty"`
+}
+
+// ReferenceCatalog The signed reference catalog this release ships, verified at start-up.
+type ReferenceCatalog struct {
+	ApiVersion string `json:"api_version"`
+
+	// KeyId Trusted key that verified the catalog.
+	KeyId       string    `json:"key_id"`
+	ModelCount  int32     `json:"model_count"`
+	PublishedAt time.Time `json:"published_at"`
+
+	// Sha256 SHA-256 digest of the signed catalog document; facts taken from it are tagged catalog@<sha256>.
+	Sha256      string `json:"sha256"`
+	VendorCount int32  `json:"vendor_count"`
 }
 
 // ReplaceRouteDraftRequest defines model for ReplaceRouteDraftRequest.
@@ -5384,6 +5442,14 @@ type SimulationRequest struct {
 // SimulationSemanticHeaders Profile-owned semantic headers for the hypothetical inference request. Authentication, credentials, routing and arbitrary transport headers are rejected. Values are always redacted in inspection output.
 type SimulationSemanticHeaders map[string]string
 
+// SkippedPrice A catalog price this installation cannot store, such as an unknown vendor or operation a newer catalog names.
+type SkippedPrice struct {
+	Model     string `json:"model"`
+	Operation string `json:"operation"`
+	Reason    string `json:"reason"`
+	VendorId  string `json:"vendor_id"`
+}
+
 // SlotHealth defines model for SlotHealth.
 type SlotHealth struct {
 	ActiveCredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"active_credential_version_id,omitempty"`
@@ -5478,6 +5544,15 @@ type UnconfinedPluginPermitRequest struct {
 	Digest string `json:"digest"`
 }
 
+// UnrepresentablePrice A price component the catalog lists that pricing revisions cannot yet hold, in the vendor's own terms.
+type UnrepresentablePrice struct {
+	Component string `json:"component"`
+	Detail    string `json:"detail"`
+	Model     string `json:"model"`
+	Operation string `json:"operation"`
+	VendorId  string `json:"vendor_id"`
+}
+
 // UpdateApiKeyRequest A merge patch: every field is optional, an omitted field keeps the stored
 // value, and an explicit `null` clears one. Writing absent fields through
 // would silently widen a key's privileges — a rename would drop the route
@@ -5546,7 +5621,9 @@ type UpdateNotificationRuleRequest struct {
 type UpdatePricingSourceRequest struct {
 	Enabled *bool   `json:"enabled,omitempty"`
 	Name    *string `json:"name,omitempty"`
-	Url     *string `json:"url,omitempty"`
+
+	// Url Null only for a catalog source, which then reads the catalog this release ships. A source keeps its format.
+	Url nullable.Nullable[string] `json:"url,omitempty"`
 }
 
 // UpdateProfileRequest defines model for UpdateProfileRequest.

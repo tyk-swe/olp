@@ -2305,17 +2305,23 @@
             "description": "Defaults to true.",
             "type": "boolean"
           },
+          "format": {
+            "$ref": "#/components/schemas/PricingSourceFormat",
+            "description": "Defaults to prices."
+          },
           "name": {
             "type": "string"
           },
           "url": {
-            "description": "Document URL validated by the installation egress policy.",
-            "type": "string"
+            "description": "Document URL validated by the installation egress policy. Required for prices; omit for a catalog source to read the catalog this release ships. A fetched catalog is verified with its detached signature at the same URL plus .sig.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "name",
-          "url"
+          "name"
         ],
         "type": "object"
       },
@@ -5555,6 +5561,9 @@
             "format": "uuid",
             "type": "string"
           },
+          "format": {
+            "$ref": "#/components/schemas/PricingSourceFormat"
+          },
           "id": {
             "format": "uuid",
             "type": "string"
@@ -5567,7 +5576,11 @@
             "type": "string"
           },
           "url": {
-            "type": "string"
+            "description": "Document URL. A catalog source without one reads the catalog this release ships.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -5578,7 +5591,8 @@
           "etag",
           "created_by",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "format"
         ],
         "type": "object"
       },
@@ -5651,6 +5665,13 @@
               "$ref": "#/components/schemas/PriceRequest"
             },
             "type": "array"
+          },
+          "unrepresentable": {
+            "description": "Components a catalog lists that no price holds; publishing never prices them.",
+            "items": {
+              "$ref": "#/components/schemas/UnrepresentablePrice"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -5684,6 +5705,12 @@
           "diff": {
             "$ref": "#/components/schemas/PricingSourceDiff"
           },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/SkippedPrice"
+            },
+            "type": "array"
+          },
           "snapshot": {
             "$ref": "#/components/schemas/PricingSourceSnapshot"
           },
@@ -5694,12 +5721,23 @@
         "required": [
           "source",
           "snapshot",
-          "diff"
+          "diff",
+          "skipped"
         ],
         "type": "object"
       },
       "PricingSourceSnapshot": {
         "properties": {
+          "catalog": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PricingSourceSnapshotCatalog"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "currency": {
             "type": "string"
           },
@@ -5734,7 +5772,8 @@
           "currency",
           "price_count",
           "fetched_at",
-          "document"
+          "document",
+          "catalog"
         ],
         "type": "object"
       },
@@ -10358,7 +10397,11 @@
             "type": "string"
           },
           "url": {
-            "type": "string"
+            "description": "Null only for a catalog source, which then reads the catalog this release ships. A source keeps its format.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -13002,6 +13045,130 @@
           "balance",
           "observed_at"
         ]
+      },
+      "PricingSourceFormat": {
+        "description": "How a source document is read: a price list, or a signed reference catalog verified against the keys this release trusts.",
+        "enum": [
+          "prices",
+          "catalog"
+        ],
+        "type": "string"
+      },
+      "PricingSourceSnapshotCatalog": {
+        "additionalProperties": false,
+        "description": "Signed reference catalog a snapshot was mapped from.",
+        "properties": {
+          "key_id": {
+            "description": "Trusted key that verified the catalog signature.",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "SHA-256 digest of the signed catalog document.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha256",
+          "published_at",
+          "key_id"
+        ],
+        "type": "object"
+      },
+      "UnrepresentablePrice": {
+        "additionalProperties": false,
+        "description": "A price component the catalog lists that pricing revisions cannot yet hold, in the vendor's own terms.",
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "vendor_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendor_id",
+          "model",
+          "operation",
+          "component",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "SkippedPrice": {
+        "additionalProperties": false,
+        "description": "A catalog price this installation cannot store, such as an unknown vendor or operation a newer catalog names.",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "vendor_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendor_id",
+          "model",
+          "operation",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ReferenceCatalog": {
+        "additionalProperties": false,
+        "description": "The signed reference catalog this release ships, verified at start-up.",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "key_id": {
+            "description": "Trusted key that verified the catalog.",
+            "type": "string"
+          },
+          "model_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "published_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "SHA-256 digest of the signed catalog document; facts taken from it are tagged catalog@<sha256>.",
+            "type": "string"
+          },
+          "vendor_count": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "api_version",
+          "published_at",
+          "sha256",
+          "key_id",
+          "vendor_count",
+          "model_count"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -18483,7 +18650,7 @@
                 }
               }
             },
-            "description": "Source document failed validation"
+            "description": "Source document failed validation; for a catalog source also catalog_signature_invalid, catalog_outdated or catalog_unsupported_version"
           },
           "502": {
             "content": {
@@ -18503,7 +18670,7 @@
                 }
               }
             },
-            "description": "Egress policy or database unavailable"
+            "description": "Egress policy, reference catalog or database unavailable"
           }
         },
         "security": [
@@ -29605,6 +29772,61 @@
         ],
         "tags": [
           "code-mode"
+        ]
+      }
+    },
+    "/api/v1/reference-catalog": {
+      "get": {
+        "description": "Describes the signed reference catalog this release ships. Its prices reach pricing only through a catalog pricing source an operator refreshes and publishes.",
+        "operationId": "get_reference_catalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceCatalog"
+                }
+              }
+            },
+            "description": "Reference catalog"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks installation-wide management read access"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "This process holds no verified reference catalog"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "pricing"
         ]
       }
     }

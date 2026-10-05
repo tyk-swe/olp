@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
@@ -20,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -38,6 +40,9 @@ type Management struct {
 	PluginRuntime *plugins.Runtime
 	PluginHost    *plugins.Host
 	Unconfined    *plugins.Unconfined
+	// Catalog is the reference catalog this release ships, verified at
+	// start-up.
+	Catalog *catalog.Signed
 }
 
 // Register mounts the whole management API: the published contract, every
@@ -67,7 +72,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	// Usage, pricing, request history and recovery reporting are part
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.
-	(&usage.Server{Access: m.Access, VendorKind: providers.VendorKind, Egress: m.Egress}).Register(mux)
+	(&usage.Server{Access: m.Access, VendorKind: providers.VendorKind, Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: signing.Trusted()}).Register(mux)
 	(&configuration.Server{
 		Access:                 m.Access,
 		Egress:                 m.Egress,

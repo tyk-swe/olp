@@ -317,7 +317,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 			defer pluginRuntime.Close(context.Background())
-			Management{Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined}.Register(public)
+			Management{Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {

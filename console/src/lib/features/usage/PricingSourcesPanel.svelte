@@ -4,18 +4,26 @@
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {
     createPricingSource,
+    getReferenceCatalog,
     listPricingSourceSnapshots,
     listPricingSources,
     publishPricingSnapshot,
     refreshPricingSource,
     updatePricingSource,
     type PricingSource,
+    type PricingSourceFormat,
     type PricingSourceRefresh,
     type PricingSourceSnapshot
   } from '$lib/features/usage/api/pricingSources';
   import { pricingKeys } from '$lib/features/usage/pricingKeys';
   import type { PriceDraft } from '$lib/features/usage/api/pricing';
   import { formatDate } from '$lib/format';
+  import {
+    bundledCatalogHint,
+    catalogProvenanceLabel,
+    sourceAddress,
+    sourceFormatLabel
+  } from '$lib/features/usage/pricingSourcePresentation';
 
   const queryClient = useQueryClient();
   const access = useRole();
@@ -25,12 +33,18 @@
     queryKey: pricingKeys.sources(),
     queryFn: ({ signal }) => listPricingSources(signal)
   }));
+  const referenceCatalog = createQuery(() => ({
+    queryKey: pricingKeys.referenceCatalog(),
+    queryFn: ({ signal }) => getReferenceCatalog(signal),
+    staleTime: Infinity
+  }));
 
   let error = $state('');
   let notice = $state('');
   let busy = $state('');
 
   let createName = $state('');
+  let createFormat = $state<PricingSourceFormat>('prices');
   let createUrl = $state('');
   let createBusy = $state(false);
 
@@ -38,6 +52,12 @@
   let editName = $state('');
   let editUrl = $state('');
   let editEnabled = $state(true);
+  // A price list needs a URL; a catalog source without one reads the
+  // catalog bundled with this release.
+  const createReady = $derived(
+    Boolean(createName.trim()) &&
+      (createFormat === 'catalog' || Boolean(createUrl.trim()))
+  );
 
   let refreshed = $state<Record<string, PricingSourceRefresh>>({});
   let snapshots = $state<Record<string, PricingSourceSnapshot[]>>({});
@@ -48,23 +68,24 @@
   function startEdit(source: PricingSource) {
     editId = source.id;
     editName = source.name;
-    editUrl = source.url;
+    editUrl = source.url ?? '';
     editEnabled = source.enabled;
     error = '';
   }
 
   async function submitCreate(event: SubmitEvent) {
     event.preventDefault();
-    if (!canEdit || createBusy || !createName.trim() || !createUrl.trim())
-      return;
+    if (!canEdit || createBusy || !createReady) return;
     createBusy = true;
     error = notice = '';
     try {
       await createPricingSource({
         name: createName.trim(),
-        url: createUrl.trim()
+        format: createFormat,
+        url: createUrl.trim() || null
       });
       createName = createUrl = '';
+      createFormat = 'prices';
       notice = 'Pricing source created.';
       await queryClient.invalidateQueries({ queryKey: pricingKeys.sources() });
     } catch (cause) {
@@ -81,13 +102,19 @@
   }
 
   async function saveEdit(source: PricingSource) {
-    if (!canEdit || busy || !editName.trim() || !editUrl.trim()) return;
+    if (
+      !canEdit ||
+      busy ||
+      !editName.trim() ||
+      (source.format === 'prices' && !editUrl.trim())
+    )
+      return;
     busy = source.id;
     error = notice = '';
     try {
       await updatePricingSource(source, {
         name: editName.trim(),
-        url: editUrl.trim(),
+        url: editUrl.trim() || null,
         enabled: editEnabled
       });
       editId = '';
@@ -127,6 +154,8 @@
         [source.id]: await listPricingSourceSnapshots(source)
       };
       notice = `Snapshot ${result.snapshot.sha256.slice(0, 12)}… fetched: ${result.diff.added_count} added, ${result.diff.changed_count} changed, ${result.diff.removed_count} removed against the latest revision.`;
+      if (result.skipped.length)
+        notice += ` ${result.skipped.length} catalog prices name a vendor or operation this release does not know and were skipped.`;
     } catch (cause) {
       error = errorMessage(cause, 'The pricing source could not be fetched.');
     } finally {
@@ -186,7 +215,8 @@
       <p>
         Sources publish external price documents into immutable revisions. A
         source is advisory: negotiated rates need publish-time overrides.
-        Refreshing never publishes on its own.
+        Refreshing never publishes on its own. A signed reference catalog is
+        verified against the keys this release trusts before any price is read.
       </p>
     </div>
   </div>
@@ -208,19 +238,39 @@
           />
         </div>
         <div class="form-field">
-          <label for="source-url">Document URL</label><input
+          <label for="source-format">Format</label><select
+            id="source-format"
+            bind:value={createFormat}
+          >
+            <option value="prices">Price list (JSON)</option>
+            <option value="catalog">Signed reference catalog</option>
+          </select>
+        </div>
+        <div class="form-field full">
+          <label for="source-url"
+            >Document URL{createFormat === 'catalog'
+              ? ' (optional)'
+              : ''}</label
+          ><input
             id="source-url"
             type="url"
+            aria-describedby="source-url-help"
             bind:value={createUrl}
-            required
-            placeholder="https://prices.example.com/openai.json"
-          />
+            required={createFormat === 'prices'}
+            placeholder={createFormat === 'catalog'
+              ? 'https://raw.githubusercontent.com/tyk-swe/olp/main/internal/catalog/catalog.json'
+              : 'https://prices.example.com/openai.json'}
+          /><small id="source-url-help"
+            >{createFormat === 'catalog'
+              ? bundledCatalogHint(referenceCatalog.data)
+              : 'A JSON price list, fetched through the egress policy.'}</small
+          >
         </div>
       </div>
       <button
         class="button button-primary"
         type="submit"
-        disabled={createBusy || !createName.trim() || !createUrl.trim()}
+        disabled={createBusy || !createReady}
         >{createBusy ? 'Creating…' : 'Create pricing source'}</button
       >
     </form>
@@ -255,11 +305,15 @@
                 />
               </div>
               <div class="form-field">
-                <label for={`edit-url-${source.id}`}>Document URL</label><input
+                <label for={`edit-url-${source.id}`}
+                  >Document URL{source.format === 'catalog'
+                    ? ' (empty for the bundled catalog)'
+                    : ''}</label
+                ><input
                   id={`edit-url-${source.id}`}
                   type="url"
                   bind:value={editUrl}
-                  required
+                  required={source.format === 'prices'}
                 />
               </div>
               <div class="form-field">
@@ -288,7 +342,8 @@
             <div class="source-head">
               <div>
                 <strong>{source.name}</strong>
-                <small class="mono">{source.url}</small>
+                <small>{sourceFormatLabel(source)}</small>
+                <small class="mono">{sourceAddress(source)}</small>
                 <small
                   >{source.enabled ? 'Enabled' : 'Disabled'} · updated {formatDate(
                     source.updated_at
@@ -327,6 +382,9 @@
                   · {fetched.snapshot.price_count} prices ·
                   {fetched.snapshot.currency}
                 </p>
+                {#if fetched.snapshot.catalog}<p>
+                    {catalogProvenanceLabel(fetched.snapshot)}
+                  </p>{/if}
                 <p>
                   Diff vs latest revision: {fetched.diff.added_count} added,
                   {fetched.diff.changed_count} changed, {fetched.diff
@@ -341,6 +399,35 @@
                 {#if fetched.diff.removed_count > 0}<p>
                     Removed: {diffKeys(fetched.diff.removed)}
                   </p>{/if}
+                {#if fetched.snapshot.document.unrepresentable?.length}<details>
+                    <summary
+                      >{fetched.snapshot.document.unrepresentable.length} price components
+                      no revision can hold</summary
+                    >
+                    <ul>
+                      {#each fetched.snapshot.document.unrepresentable as entry (`${entry.vendor_id}/${entry.model}/${entry.operation}/${entry.component}`)}<li
+                        >
+                          <span class="mono"
+                            >{entry.vendor_id}/{entry.model}</span
+                          >
+                          · {entry.operation} · {entry.component}: {entry.detail}
+                        </li>{/each}
+                    </ul>
+                  </details>{/if}
+                {#if fetched.skipped.length}<details>
+                    <summary
+                      >{fetched.skipped.length} catalog prices skipped</summary
+                    >
+                    <ul>
+                      {#each fetched.skipped as entry (`${entry.vendor_id}/${entry.model}/${entry.operation}`)}<li
+                        >
+                          <span class="mono"
+                            >{entry.vendor_id}/{entry.model}</span
+                          >
+                          · {entry.operation}: {entry.reason}
+                        </li>{/each}
+                    </ul>
+                  </details>{/if}
               </div>
             {/if}
             {#if (snapshots[source.id] ?? []).length}
@@ -352,7 +439,9 @@
                       >{snapshot.price_count} prices · fetched {formatDate(
                         snapshot.fetched_at
                       )}</small
-                    >
+                    >{#if snapshot.catalog}<small
+                        >{catalogProvenanceLabel(snapshot)}</small
+                      >{/if}
                     {#if canEdit}
                       {#if publishId === snapshot.id}
                         <div class="publish-form">
@@ -449,6 +538,13 @@
   }
   .diff p {
     margin: 0;
+  }
+  .diff ul {
+    margin: 0.4rem 0 0;
+    padding-left: 1.1rem;
+  }
+  .full {
+    grid-column: 1 / -1;
   }
   .snapshot-list {
     display: grid;

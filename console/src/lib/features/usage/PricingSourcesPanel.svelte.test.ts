@@ -4,6 +4,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ApiProblem } from '$lib/api/http';
 import { useRole } from '$lib/features/access/session/useRole.svelte';
 import {
+  createPricingSource,
+  getReferenceCatalog,
   listPricingSources,
   updatePricingSource,
   type PricingSource
@@ -16,6 +18,7 @@ vi.mock('$lib/features/access/session/useRole.svelte', () => ({
 }));
 vi.mock('./api/pricingSources', () => ({
   createPricingSource: vi.fn(),
+  getReferenceCatalog: vi.fn(),
   listPricingSourceSnapshots: vi.fn(),
   listPricingSources: vi.fn(),
   publishPricingSnapshot: vi.fn(),
@@ -26,6 +29,7 @@ vi.mock('./api/pricingSources', () => ({
 const source: PricingSource = {
   id: 'source-1',
   name: 'Vendor prices',
+  format: 'prices',
   url: 'https://prices.example/models.json',
   enabled: true,
   etag: 'e1',
@@ -63,6 +67,14 @@ beforeEach(() => {
   vi.mocked(updatePricingSource)
     .mockRejectedValueOnce(mismatch)
     .mockResolvedValue(changed as never);
+  vi.mocked(getReferenceCatalog).mockResolvedValue({
+    api_version: 'openllmproxy.dev/catalog/v1',
+    published_at: '2026-10-05T12:00:00Z',
+    sha256: 'f'.repeat(64),
+    key_id: 'release-2026a',
+    vendor_count: 14,
+    model_count: 334
+  });
   host = document.createElement('div');
   document.body.append(host);
   client = new QueryClient({
@@ -118,4 +130,28 @@ it('refreshes the source after a refused edit so a retry sends its ETag', async 
   button('Save').click();
   await vi.waitFor(() => expect(updatePricingSource).toHaveBeenCalledTimes(2));
   expect(vi.mocked(updatePricingSource).mock.calls[1]![0].etag).toBe('e2');
+});
+
+it('creates a catalog source without a URL to read the bundled catalog', async () => {
+  vi.mocked(createPricingSource).mockResolvedValue(source as never);
+  const name = host.querySelector<HTMLInputElement>('#source-name')!;
+  name.value = 'Release catalog';
+  name.dispatchEvent(new Event('input', { bubbles: true }));
+  const format = host.querySelector<HTMLSelectElement>('#source-format')!;
+  format.value = 'catalog';
+  format.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+  await vi.waitFor(() =>
+    expect(host.querySelector('#source-url-help')?.textContent).toContain(
+      '334 models from 14 vendors'
+    )
+  );
+  button('Create pricing source').click();
+  await vi.waitFor(() =>
+    expect(createPricingSource).toHaveBeenCalledWith({
+      name: 'Release catalog',
+      format: 'catalog',
+      url: null
+    })
+  );
 });
