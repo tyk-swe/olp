@@ -24,8 +24,8 @@ func (s *Server) kindCapabilities(r *http.Request, _ access.Principal) (access.R
 	return access.OK(map[string]any{"provider_kind": kind, "capabilities": capabilitiesFor(kind, defaultVendor(kind))}), nil
 }
 
-func (s *Server) vendors(r *http.Request, _ access.Principal) (access.Reply, error) {
-	return access.OK(vendors), nil
+func (s *Server) listVendors(r *http.Request, _ access.Principal) (access.Reply, error) {
+	return access.OK(vendorCatalogue), nil
 }
 
 func (s *Server) inventory(r *http.Request, principal access.Principal) (access.Reply, error) {
@@ -120,7 +120,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/operation-dialects", s.operationDialects)
 	s.Access.Route(mux, "GET /api/v1/provider-kinds", s.kinds)
 	s.Access.Route(mux, "GET /api/v1/provider-kinds/{provider_kind}/capabilities", s.kindCapabilities)
-	s.Access.Route(mux, "GET /api/v1/provider-vendors", s.vendors)
+	s.Access.Route(mux, "GET /api/v1/provider-vendors", s.listVendors)
 	s.Access.Route(mux, "GET /api/v1/provider-models", s.inventory)
 	s.Access.Route(mux, "GET /api/v1/runtime-generations", s.generations)
 	s.Access.Route(mux, "GET /api/v1/providers", s.providers)

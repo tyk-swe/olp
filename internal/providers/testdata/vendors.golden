@@ -6,12 +6,27 @@
     "discovery": true,
     "operations": [
       "generation",
-      "embeddings",
       "token_count",
-      "moderation"
+      "embeddings",
+      "moderation",
+      "batch",
+      "realtime",
+      "image_generation",
+      "image_edit",
+      "image_variation",
+      "speech",
+      "transcription",
+      "translation",
+      "video_create",
+      "video_list",
+      "video_get",
+      "video_content",
+      "video_delete"
     ],
     "authentication": [
-      "api_key"
+      "api_key",
+      "headers",
+      "none"
     ],
     "parameters": [
       "temperature",
@@ -42,9 +57,20 @@
     "discovery": true,
     "operations": [
       "generation",
-      "embeddings",
       "token_count",
-      "moderation"
+      "embeddings",
+      "moderation",
+      "image_generation",
+      "image_edit",
+      "image_variation",
+      "speech",
+      "transcription",
+      "translation",
+      "video_create",
+      "video_list",
+      "video_get",
+      "video_content",
+      "video_delete"
     ],
     "authentication": [
       "api_key",
@@ -72,6 +98,383 @@
     ],
     "documentation_url": "https://platform.openai.com/docs/api-reference/chat",
     "endpoint": null
+  },
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "connector": "anthropic",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "token_count"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.anthropic.com",
+    "endpoint": "https://api.anthropic.com/v1"
+  },
+  {
+    "id": "google",
+    "name": "Google Gemini",
+    "connector": "gemini",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "token_count",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://ai.google.dev",
+    "endpoint": "https://generativelanguage.googleapis.com/v1beta"
+  },
+  {
+    "id": "google-vertex",
+    "name": "Google Vertex AI",
+    "connector": "vertex_ai",
+    "discovery": false,
+    "operations": [
+      "generation",
+      "token_count",
+      "embeddings",
+      "image_generation"
+    ],
+    "authentication": [
+      "adc",
+      "service_account"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://cloud.google.com/vertex-ai",
+    "endpoint": null
+  },
+  {
+    "id": "amazon-bedrock",
+    "name": "Amazon Bedrock",
+    "connector": "bedrock",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "token_count",
+      "embeddings",
+      "bedrock_invoke",
+      "image_generation"
+    ],
+    "authentication": [
+      "default_chain",
+      "static"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.aws.amazon.com/bedrock",
+    "endpoint": null
+  },
+  {
+    "id": "azure",
+    "name": "Azure OpenAI",
+    "connector": "azure_openai",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "token_count",
+      "embeddings",
+      "moderation",
+      "batch",
+      "realtime",
+      "image_generation",
+      "image_edit",
+      "image_variation",
+      "speech",
+      "transcription",
+      "translation",
+      "video_create",
+      "video_list",
+      "video_get",
+      "video_content",
+      "video_delete"
+    ],
+    "authentication": [
+      "api_key",
+      "azure_default",
+      "azure_client_secret"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://learn.microsoft.com/azure/ai-services/openai",
+    "endpoint": null
+  },
+  {
+    "id": "groq",
+    "name": "Groq",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://console.groq.com/docs/openai",
+    "endpoint": "https://api.groq.com/openai/v1"
+  },
+  {
+    "id": "mistral",
+    "name": "Mistral",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.mistral.ai/api/",
+    "endpoint": "https://api.mistral.ai/v1"
+  },
+  {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://openrouter.ai/docs",
+    "endpoint": "https://openrouter.ai/api/v1"
+  },
+  {
+    "id": "together",
+    "name": "Together AI",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.together.ai/docs/openai-api-compatibility",
+    "endpoint": "https://api.together.xyz/v1"
+  },
+  {
+    "id": "vllm",
+    "name": "vLLM",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html",
+    "endpoint": "https://vllm.example.internal/v1"
   },
   {
     "id": "deepseek",
@@ -329,365 +732,5 @@
     ],
     "documentation_url": "https://docs.voyageai.com",
     "endpoint": "https://api.voyageai.com/v1"
-  },
-  {
-    "id": "groq",
-    "name": "Groq",
-    "connector": "openai_compatible",
-    "discovery": true,
-    "operations": [
-      "generation"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [
-      "temperature",
-      "top_p",
-      "max_tokens",
-      "max_completion_tokens",
-      "max_output_tokens",
-      "stop",
-      "tools",
-      "tool_choice",
-      "response_format",
-      "seed",
-      "presence_penalty",
-      "frequency_penalty",
-      "logit_bias",
-      "n",
-      "user",
-      "reasoning",
-      "reasoning_effort"
-    ],
-    "documentation_url": "https://console.groq.com/docs/openai",
-    "endpoint": "https://api.groq.com/openai/v1"
-  },
-  {
-    "id": "mistral",
-    "name": "Mistral",
-    "connector": "openai_compatible",
-    "discovery": true,
-    "operations": [
-      "generation"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [
-      "temperature",
-      "top_p",
-      "max_tokens",
-      "max_completion_tokens",
-      "max_output_tokens",
-      "stop",
-      "tools",
-      "tool_choice",
-      "response_format",
-      "seed",
-      "presence_penalty",
-      "frequency_penalty",
-      "logit_bias",
-      "n",
-      "user",
-      "reasoning",
-      "reasoning_effort"
-    ],
-    "documentation_url": "https://docs.mistral.ai/api/",
-    "endpoint": "https://api.mistral.ai/v1"
-  },
-  {
-    "id": "openrouter",
-    "name": "OpenRouter",
-    "connector": "openai_compatible",
-    "discovery": true,
-    "operations": [
-      "generation"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [
-      "temperature",
-      "top_p",
-      "max_tokens",
-      "max_completion_tokens",
-      "max_output_tokens",
-      "stop",
-      "tools",
-      "tool_choice",
-      "response_format",
-      "seed",
-      "presence_penalty",
-      "frequency_penalty",
-      "logit_bias",
-      "n",
-      "user",
-      "reasoning",
-      "reasoning_effort"
-    ],
-    "documentation_url": "https://openrouter.ai/docs",
-    "endpoint": "https://openrouter.ai/api/v1"
-  },
-  {
-    "id": "together",
-    "name": "Together AI",
-    "connector": "openai_compatible",
-    "discovery": true,
-    "operations": [
-      "generation"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [
-      "temperature",
-      "top_p",
-      "max_tokens",
-      "max_completion_tokens",
-      "max_output_tokens",
-      "stop",
-      "tools",
-      "tool_choice",
-      "response_format",
-      "seed",
-      "presence_penalty",
-      "frequency_penalty",
-      "logit_bias",
-      "n",
-      "user",
-      "reasoning",
-      "reasoning_effort"
-    ],
-    "documentation_url": "https://docs.together.ai/docs/openai-api-compatibility",
-    "endpoint": "https://api.together.xyz/v1"
-  },
-  {
-    "id": "vllm",
-    "name": "vLLM",
-    "connector": "openai_compatible",
-    "discovery": true,
-    "operations": [
-      "generation"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [
-      "temperature",
-      "top_p",
-      "max_tokens",
-      "max_completion_tokens",
-      "max_output_tokens",
-      "stop",
-      "tools",
-      "tool_choice",
-      "response_format",
-      "seed",
-      "presence_penalty",
-      "frequency_penalty",
-      "logit_bias",
-      "n",
-      "user",
-      "reasoning",
-      "reasoning_effort"
-    ],
-    "documentation_url": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html",
-    "endpoint": "https://vllm.example.internal/v1"
-  },
-  {
-    "id": "anthropic",
-    "name": "Anthropic",
-    "connector": "anthropic",
-    "discovery": true,
-    "operations": [
-      "generation",
-      "token_count"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [
-      "temperature",
-      "top_p",
-      "max_tokens",
-      "max_completion_tokens",
-      "max_output_tokens",
-      "stop",
-      "tools",
-      "tool_choice",
-      "response_format",
-      "seed",
-      "presence_penalty",
-      "frequency_penalty",
-      "logit_bias",
-      "n",
-      "user",
-      "reasoning",
-      "reasoning_effort"
-    ],
-    "documentation_url": "https://docs.anthropic.com",
-    "endpoint": "https://api.anthropic.com/v1"
-  },
-  {
-    "id": "google",
-    "name": "Google Gemini",
-    "connector": "gemini",
-    "discovery": true,
-    "operations": [
-      "generation",
-      "embeddings",
-      "token_count"
-    ],
-    "authentication": [
-      "api_key",
-      "headers",
-      "none"
-    ],
-    "parameters": [
-      "temperature",
-      "top_p",
-      "max_tokens",
-      "max_completion_tokens",
-      "max_output_tokens",
-      "stop",
-      "tools",
-      "tool_choice",
-      "response_format",
-      "seed",
-      "presence_penalty",
-      "frequency_penalty",
-      "logit_bias",
-      "n",
-      "user",
-      "reasoning",
-      "reasoning_effort"
-    ],
-    "documentation_url": "https://ai.google.dev",
-    "endpoint": "https://generativelanguage.googleapis.com/v1beta"
-  },
-  {
-    "id": "google-vertex",
-    "name": "Google Vertex AI",
-    "connector": "vertex_ai",
-    "discovery": false,
-    "operations": [
-      "generation",
-      "embeddings",
-      "token_count",
-      "image_generation"
-    ],
-    "authentication": [
-      "adc",
-      "service_account"
-    ],
-    "parameters": [
-      "temperature",
-      "top_p",
-      "max_tokens",
-      "max_completion_tokens",
-      "max_output_tokens",
-      "stop",
-      "tools",
-      "tool_choice",
-      "response_format",
-      "seed",
-      "presence_penalty",
-      "frequency_penalty",
-      "logit_bias",
-      "n",
-      "user",
-      "reasoning",
-      "reasoning_effort"
-    ],
-    "documentation_url": "https://cloud.google.com/vertex-ai",
-    "endpoint": null
-  },
-  {
-    "id": "amazon-bedrock",
-    "name": "Amazon Bedrock",
-    "connector": "bedrock",
-    "discovery": true,
-    "operations": [
-      "generation",
-      "embeddings",
-      "token_count",
-      "image_generation"
-    ],
-    "authentication": [
-      "default_chain",
-      "static"
-    ],
-    "parameters": [
-      "temperature",
-      "top_p",
-      "max_tokens",
-      "max_completion_tokens",
-      "max_output_tokens",
-      "stop",
-      "tools",
-      "tool_choice",
-      "response_format",
-      "seed",
-      "presence_penalty",
-      "frequency_penalty",
-      "logit_bias",
-      "n",
-      "user",
-      "reasoning",
-      "reasoning_effort"
-    ],
-    "documentation_url": "https://docs.aws.amazon.com/bedrock",
-    "endpoint": null
-  },
-  {
-    "id": "azure",
-    "name": "Azure OpenAI",
-    "connector": "azure_openai",
-    "discovery": true,
-    "operations": [
-      "generation",
-      "embeddings",
-      "token_count",
-      "moderation"
-    ],
-    "authentication": [
-      "api_key",
-      "azure_default",
-      "azure_client_secret"
-    ],
-    "parameters": [
-      "temperature",
-      "top_p",
-      "max_tokens",
-      "max_completion_tokens",
-      "max_output_tokens",
-      "stop",
-      "tools",
-      "tool_choice",
-      "response_format",
-      "seed",
-      "presence_penalty",
-      "frequency_penalty",
-      "logit_bias",
-      "n",
-      "user",
-      "reasoning",
-      "reasoning_effort"
-    ],
-    "documentation_url": "https://learn.microsoft.com/azure/ai-services/openai",
-    "endpoint": null
   }
 ]

@@ -177,7 +177,7 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	if input.Model != nil {
-		surface, operation := "openai", "generation"
+		surface, operation := "openai", probeOperation(&input.Configuration)
 		switch input.Configuration.Kind {
 		case KindAnthropic:
 			surface = "anthropic"
@@ -196,9 +196,6 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 			case "bedrock-invoke":
 				surface, operation = "bedrock", "bedrock_invoke"
 			}
-		}
-		if value(input.Configuration.Options.VendorID) == "voyage" {
-			operation = "embeddings"
 		}
 		// A dedicated operation profile, such as an embeddings or rerank
 		// dialect, declares the tuple it can actually certify.

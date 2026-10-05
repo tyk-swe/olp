@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // attemptPricing is one attempt resolved against the pricing revision that was
@@ -59,6 +61,19 @@ func attemptRouting(attempt *Attempt) (routingPin, error) {
 	return pin, nil
 }
 
+// defaultVendorCases are the CASE arms naming the default vendor of each
+// connector kind whose vendor identifier is not the kind itself, so an attempt
+// of a provider that names no vendor is priced as the vendor catalogue says.
+var defaultVendorCases = func() string {
+	var arms []string
+	for _, contract := range vendors.All() {
+		if contract.KindDefault && contract.ID != contract.Connector {
+			arms = append(arms, fmt.Sprintf("WHEN '%s' THEN '%s'", contract.Connector, contract.ID))
+		}
+	}
+	return strings.Join(arms, "\n                                  ")
+}()
+
 // priceAttemptSQL resolves the price for one attempt.
 //
 // The selection walks outwards from the most specific evidence: a price scoped
@@ -78,7 +93,7 @@ func attemptRouting(attempt *Attempt) (routingPin, error) {
 // portion at a rate nothing checked. The same reason keeps the completeness
 // test and the charge behind one shared expression, so neither can admit a
 // dimension the other refuses to price.
-const priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
+var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
         selected.currency,
         priced.complete AS pricing_complete,
         CASE WHEN $8::boolean AND priced.complete
@@ -107,10 +122,7 @@ const priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
                                   THEN provider_revision.configuration->'options'->>'vendor_id'
                                   ELSE provider.configuration->'options'->>'vendor_id' END,
                               CASE COALESCE(provider_revision.configuration->>'kind', provider.kind)
-                                  WHEN 'gemini' THEN 'google'
-                                  WHEN 'vertex_ai' THEN 'google-vertex'
-                                  WHEN 'bedrock' THEN 'amazon-bedrock'
-                                  WHEN 'azure_openai' THEN 'azure'
+                                  ` + defaultVendorCases + `
                                   ELSE COALESCE(provider_revision.configuration->>'kind', provider.kind)
                               END) END)
           AND (price.provider_id IS NULL OR price.provider_id = provider.id)

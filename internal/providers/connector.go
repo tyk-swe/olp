@@ -26,6 +26,7 @@ import (
 	"github.com/tyk-swe/olp/internal/providerinvoke"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/upstream"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // Probe bounds: one upstream call, one response body, four in flight.
@@ -227,10 +228,8 @@ func listingFor(cfg *Configuration) (modelListing, bool, error) {
 		}
 		return listing, true, nil
 	}
-	for _, vendor := range vendors {
-		if vendor.ID == value(cfg.Options.VendorID) && !vendor.Discovery {
-			return modelListing{}, false, nil
-		}
+	if contract, ok := vendors.Lookup(value(cfg.Options.VendorID)); ok && !contract.Discovery {
+		return modelListing{}, false, nil
 	}
 	listing := modelListing{path: "/models", models: "data", id: "id", display: "display_name"}
 	switch cfg.Kind {
@@ -475,7 +474,7 @@ func (s *Server) certifyTuple(ctx context.Context, cfg *Configuration, credentia
 			families = []openai.Family{openai.FamilyResponses}
 		}
 	}
-	if cfg.ProfileID == "" && tuple.Operation == "generation" && tuple.Surface == "openai" && !protocols.ChatOnly(value(cfg.Options.VendorID)) && (cfg.Kind == KindOpenAI || cfg.Kind == KindAzure || cfg.Kind == KindOpenAICompatible) {
+	if cfg.ProfileID == "" && tuple.Operation == "generation" && tuple.Surface == "openai" && vendors.Speaks(value(cfg.Options.VendorID), "openai-responses") && (cfg.Kind == KindOpenAI || cfg.Kind == KindAzure || cfg.Kind == KindOpenAICompatible) {
 		families = append(families, openai.FamilyResponses)
 	}
 	for _, family := range families {

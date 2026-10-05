@@ -199,3 +199,14 @@ func TestSamePriceComparesRatesNumerically(t *testing.T) {
 		t.Fatal("a changed currency must not compare equal")
 	}
 }
+
+func TestPriceSelectionNamesEachKindsDefaultVendor(t *testing.T) {
+	for kind, vendor := range map[string]string{"gemini": "google", "vertex_ai": "google-vertex", "bedrock": "amazon-bedrock", "azure_openai": "azure"} {
+		if !strings.Contains(priceAttemptSQL, "WHEN '"+kind+"' THEN '"+vendor+"'") {
+			t.Fatalf("price selection does not name %s as the default vendor of %s", vendor, kind)
+		}
+	}
+	if strings.Contains(priceAttemptSQL, "WHEN 'openai'") {
+		t.Fatal("a kind whose default vendor is itself needs no CASE arm")
+	}
+}

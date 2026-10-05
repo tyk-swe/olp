@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 func configuredOperation(cfg *Configuration, operation string) (operations.Dialect, bool) {
@@ -36,12 +37,9 @@ func configurationCertifiable(cfg *Configuration, tuple CapabilityInput) bool {
 // the default tuple, such as a dedicated embeddings or rerank dialect, is
 // probed with the first unary tuple it can certify.
 func defaultProbeTuple(cfg *Configuration) CapabilityInput {
-	operation := "generation"
+	operation := probeOperation(cfg)
 	if cfg.Kind == KindVertex && cfg.transport().Hosting() != "vertex-anthropic" {
 		operation = "token_count"
-	}
-	if value(cfg.Options.VendorID) == "voyage" {
-		operation = "embeddings"
 	}
 	tuple := CapabilityInput{Operation: operation, Surface: "openai", Mode: ModeUnary}
 	if cfg.ProfileID == "" || probeable(cfg, tuple) {
@@ -59,6 +57,15 @@ func defaultProbeTuple(cfg *Configuration) CapabilityInput {
 		}
 	}
 	return tuple
+}
+
+// probeOperation is the operation that certifies a declared model of the
+// configured vendor: the one its contract names, or generation.
+func probeOperation(cfg *Configuration) string {
+	if contract, ok := vendors.Lookup(value(cfg.Options.VendorID)); ok && contract.ProbeOperation != "" {
+		return contract.ProbeOperation
+	}
+	return "generation"
 }
 
 func probeable(cfg *Configuration, tuple CapabilityInput) bool {

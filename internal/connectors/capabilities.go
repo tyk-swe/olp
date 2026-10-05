@@ -1,8 +1,11 @@
 package connectors
 
+import "github.com/tyk-swe/olp/internal/vendors"
+
 // Supports is the reviewed connector matrix, distinct from a live model
 // certification. Generic endpoints never acquire native cross-surface
-// privileges by declaring a tuple or impersonating an official vendor.
+// privileges by declaring a tuple or impersonating an official vendor. A
+// vendor with a reviewed contract is limited to the operations it lists.
 // Media tuples mirror the reviewed matrix: image, audio, and video
 // operations exist only on the OpenAI surface of the OpenAI connector
 // families; no other connector may serve them.
@@ -30,19 +33,8 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 	if mode == "realtime" && (surface != "openai" || operation != "realtime") {
 		return false
 	}
-	switch vendor {
-	case "voyage":
-		if operation != "embeddings" && operation != "rerank" {
-			return false
-		}
-	case "cohere":
-		if operation != "generation" && operation != "embeddings" && operation != "rerank" {
-			return false
-		}
-	case "deepseek", "fireworks", "deepinfra", "huggingface", "perplexity":
-		if operation != "generation" {
-			return false
-		}
+	if !vendors.Serves(vendor, operation) {
+		return false
 	}
 	openaiFamily := kind == "openai" || kind == "azure_openai" || kind == "openai_compatible"
 	nativeEmbeddings := kind == "gemini" || kind == "vertex_ai" || kind == "bedrock"
@@ -63,7 +55,10 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 	case "embeddings":
 		return surface == "openai" && mode == "unary" && (openaiFamily || nativeEmbeddings)
 	case "rerank":
-		return surface == "openai" && mode == "unary" && kind == "openai_compatible" && (vendor == "cohere" || vendor == "voyage")
+		// Rerank has no common wire: only a vendor whose contract reviews
+		// its rerank shape serves it.
+		contract, reviewed := vendors.Lookup(vendor)
+		return surface == "openai" && mode == "unary" && kind == "openai_compatible" && reviewed && contract.Serves("rerank")
 	case "moderation", "image_variation", "translation":
 		return surface == "openai" && mode == "unary" && openaiFamily
 	case "image_generation":

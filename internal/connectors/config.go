@@ -14,6 +14,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 type Config struct {
@@ -60,9 +61,6 @@ func DefaultEndpoint(kind, region, project string) string {
 	}
 	return ""
 }
-
-const coherePresetEndpoint = "https://api.cohere.ai/compatibility/v1"
-const cohereRerankEndpoint = "https://api.cohere.ai/v2/rerank"
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 var cloudIdentifier = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
@@ -242,8 +240,8 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 	case openai.FamilyBedrockEmbeddings:
 		path = "/model/" + url.PathEscape(model) + "/invoke"
 	case openai.FamilyRerank:
-		if c.VendorID == "cohere" && base == coherePresetEndpoint {
-			return cohereRerankEndpoint, nil
+		if endpoint, ok := c.operationEndpoint("rerank", base); ok {
+			return endpoint, nil
 		}
 		path = "/rerank"
 	}
@@ -283,6 +281,18 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 		path += "?api-version=" + url.QueryEscape(c.APIVersion)
 	}
 	return base + path, nil
+}
+
+// operationEndpoint is the address the vendor's contract documents for an
+// operation it serves outside its reviewed endpoint, while the provider still
+// uses that endpoint.
+func (c Config) operationEndpoint(operation, base string) (string, bool) {
+	contract, ok := vendors.Lookup(c.VendorID)
+	if !ok || base != strings.TrimRight(contract.Endpoint, "/") {
+		return "", false
+	}
+	endpoint, ok := contract.OperationEndpoints[operation]
+	return endpoint, ok
 }
 
 // MediaURL resolves an OpenAI-family media resource path — images, audio, and

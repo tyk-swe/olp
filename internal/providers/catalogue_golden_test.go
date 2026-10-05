@@ -47,7 +47,7 @@ func indented(t *testing.T, v any) []byte {
 // /provider-vendors publish.
 func TestOnboardingCatalogueIsReviewed(t *testing.T) {
 	golden(t, "kinds.golden", indented(t, map[string]any{"items": kinds}))
-	golden(t, "vendors.golden", indented(t, vendors))
+	golden(t, "vendors.golden", indented(t, vendorCatalogue))
 }
 
 // TestCertifiableTuplesAreReviewed pins every tuple certification may probe,
@@ -56,7 +56,7 @@ func TestCertifiableTuplesAreReviewed(t *testing.T) {
 	var out strings.Builder
 	for _, kind := range kinds {
 		candidates := []string{defaultVendor(kind.Kind)}
-		for _, v := range vendors {
+		for _, v := range vendorCatalogue {
 			if v.Connector == kind.Kind && v.ID != defaultVendor(kind.Kind) {
 				candidates = append(candidates, v.ID)
 			}

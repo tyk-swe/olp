@@ -6,26 +6,18 @@ import (
 	"strconv"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-func encodeRerank(vendor string, f Object, model string) ([]byte, error) {
+// encodeRerank conforms a rerank request to the vendor's reviewed rerank
+// shape. Rerank has no common wire, so a vendor without one is refused.
+func encodeRerank(vendor string, f Object) ([]byte, error) {
 	delete(f, "stream")
-	switch vendor {
-	case "voyage":
-		if value, ok := f["top_n"]; ok {
-			f["top_k"] = value
-			delete(f, "top_n")
-		}
-	case "cohere":
-		if present(f["truncation"]) {
-			return nil, requestError("truncation", "Cohere cannot represent truncation")
-		}
-		// Cohere v2 has no return_documents control and never echoes
-		// documents; decodeRerank restores them from the request.
-		delete(f, "return_documents")
-	default:
+	contract, ok := vendors.Lookup(vendor)
+	if !ok || !contract.Serves("rerank") {
 		return nil, requestError("operation", "The selected provider does not support rerank")
 	}
+	conform(contract.Request("rerank"), f)
 	return json.Marshal(f)
 }
 

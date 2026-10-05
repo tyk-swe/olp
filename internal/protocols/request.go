@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 type Object = map[string]json.RawMessage
@@ -200,17 +201,10 @@ func WireFamily(kind, vendor string, source openai.Family) openai.Family {
 	if source.Operation() == "moderation" {
 		return openai.FamilyModeration
 	}
-	if source == openai.FamilyResponses && !ChatOnly(vendor) {
+	if source == openai.FamilyResponses && vendors.Speaks(vendor, "openai-responses") {
 		return source
 	}
 	return openai.FamilyChat
-}
-func ChatOnly(vendor string) bool {
-	switch vendor {
-	case "deepseek", "fireworks", "deepinfra", "huggingface", "perplexity", "cohere":
-		return true
-	}
-	return false
 }
 
 // Encode applies connector defaults before translation, and keeps native
@@ -266,20 +260,11 @@ func encodeTransformed(r *openai.Request, wire openai.Family, kind, vendor, mode
 	if !native {
 		sourceDefaults = nil
 	}
-	if vendor == "voyage" {
-		if present(r.Field("dimensions")) && present(r.Field("output_dimension")) {
-			return nil, wire, requestError("dimensions", "Use only one embedding dimension parameter")
-		}
-		copyDefaults := Object{}
-		maps.Copy(copyDefaults, sourceDefaults)
-		sourceDefaults = copyDefaults
-		if len(r.Field("dimensions")) > 0 {
-			delete(sourceDefaults, "output_dimension")
-		}
-		if len(r.Field("output_dimension")) > 0 {
-			delete(sourceDefaults, "dimensions")
-		}
+	_, shape := vendorShape(vendor, r.Family.Operation())
+	if err := refuseRewriteConflicts(shape, r); err != nil {
+		return nil, wire, err
 	}
+	sourceDefaults = yieldDefaults(shape, r, sourceDefaults)
 	if r.Family.Surface() != "openai" {
 		mergeDefaultsTracked(f, sourceDefaults, applied)
 	}
@@ -303,18 +288,10 @@ func encodeTransformed(r *openai.Request, wire openai.Family, kind, vendor, mode
 			f["generateContentRequest"] = raw(nested)
 		}
 		if r.Family == openai.FamilyRerank {
-			encoded, err := encodeRerank(vendor, f, model)
+			encoded, err := encodeRerank(vendor, f)
 			return encoded, wire, err
 		}
-		if vendor == "voyage" {
-			normalizeVoyage(f)
-		}
-		if ChatOnly(vendor) {
-			if value, ok := f["max_completion_tokens"]; ok {
-				f["max_tokens"] = value
-				delete(f, "max_completion_tokens")
-			}
-		}
+		conform(shape, f)
 		encoded, err := json.Marshal(f)
 		return encoded, wire, err
 	}
@@ -359,36 +336,12 @@ func encodeTransformed(r *openai.Request, wire openai.Family, kind, vendor, mode
 		}
 	}
 	mergeDefaultsTracked(out, targetDefaults, applied)
-	if ChatOnly(vendor) {
-		if value, ok := out["max_completion_tokens"]; ok {
-			out["max_tokens"] = value
-			delete(out, "max_completion_tokens")
-		}
-	}
+	conform(shape, out)
 	if err := validateProfile(vendor, wire, out); err != nil {
 		return nil, wire, err
 	}
 	encoded, err := json.Marshal(out)
 	return encoded, wire, err
-}
-func validateProfile(vendor string, family openai.Family, f Object) error {
-	op := family.Operation()
-	if vendor == "voyage" && op != "embeddings" && op != "rerank" || vendor == "cohere" && op != "generation" && op != "embeddings" && op != "rerank" || ChatOnly(vendor) && vendor != "cohere" && op != "generation" {
-		return requestError("operation", "Operation is outside the configured vendor contract")
-	}
-	if vendor == "cohere" {
-		for _, k := range []string{"n", "parallel_tool_calls", "dimensions", "user", "store", "metadata", "logit_bias", "top_logprobs", "modalities", "prediction", "audio", "service_tier", "input_type", "truncate"} {
-			if present(f[k]) {
-				return requestError(k, "Cohere cannot represent "+k)
-			}
-		}
-	}
-	if vendor == "voyage" && op == "embeddings" {
-		if _, ok := textInput(f["input"]); !ok {
-			return requestError("input", "Voyage embeddings require text input")
-		}
-	}
-	return nil
 }
 func textInput(v json.RawMessage) ([]string, bool) {
 	var s string
@@ -398,16 +351,6 @@ func textInput(v json.RawMessage) ([]string, bool) {
 	var a []string
 	err := json.Unmarshal(v, &a)
 	return a, err == nil && len(a) > 0
-}
-func normalizeVoyage(f Object) {
-	if v, ok := f["dimensions"]; ok {
-		f["output_dimension"] = v
-		delete(f, "dimensions")
-	}
-	if _, ok := f["encoding_format"]; ok {
-		f["output_dtype"] = raw("float")
-		delete(f, "encoding_format")
-	}
 }
 
 // ParameterNames is used by strict routing policies. Delivery fields never

@@ -2,12 +2,14 @@ package providers
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/vendors"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -106,5 +108,26 @@ func TestPluginProviderOptionsFollowTheirProfile(t *testing.T) {
 	builtin.Normalize()
 	if problem, ok := errors.AsType[*access.Problem](builtin.Validate(&egress.Policy{})); !ok || problem.Field != "configuration.options.plugin_options" {
 		t.Fatalf("a built-in provider took plugin options: %v", problem)
+	}
+}
+
+func TestEveryVendorContractNamesAKindThatServesIt(t *testing.T) {
+	for _, contract := range vendors.All() {
+		kind := kindByName(contract.Connector)
+		if kind == nil {
+			t.Fatalf("%s names unknown connector kind %s", contract.ID, contract.Connector)
+		}
+		if contract.Preset != nil && !slices.ContainsFunc(kind.AuthModes, func(a authCapability) bool { return a.Mode == contract.Preset.AuthMode }) {
+			t.Fatalf("%s presets authentication %s, which %s does not accept", contract.ID, contract.Preset.AuthMode, kind.Kind)
+		}
+		for _, operation := range contract.Operations {
+			served := false
+			for _, option := range CapabilityOptions {
+				served = served || option.Operation == operation && connectors.Supports(contract.Connector, contract.ID, operation, option.Surface, option.Mode)
+			}
+			if !served {
+				t.Fatalf("%s lists %s, which its connector kind never serves", contract.ID, operation)
+			}
+		}
 	}
 }

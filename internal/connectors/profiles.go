@@ -18,6 +18,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // Profile links independently owned dialect, hosting and authentication contracts.
@@ -305,8 +306,8 @@ func (c Config) ValidateProfile() error {
 			}
 		}
 	}
-	if p.Dialect == "openai-responses" && slices.Contains([]string{"deepseek", "fireworks", "deepinfra", "huggingface", "perplexity", "cohere"}, c.VendorID) {
-		return errors.New("this vendor's declared dialect does not include Responses")
+	if _, generation := generationFamily(p.Dialect); generation && !vendors.Speaks(c.VendorID, p.Dialect) {
+		return errors.New("the vendor's reviewed contract does not include the profile's dialect")
 	}
 	if len(c.SemanticHeaders) > 16 || len(c.QuerySettings) > 16 {
 		return errors.New("use at most 16 semantic headers and query settings")
@@ -425,7 +426,9 @@ func (c Config) Supports(operation, surface, mode string) bool {
 			case "gemini-live":
 				return operation == "realtime" && surface == "gemini" && mode == "realtime"
 			}
-			if codec, ok := operationregistry.Lookup(p.OperationDialect(operation)); ok && codec.Operation.ID == operation {
+			// An operation outside the profile has no dialect of its own; the
+			// default dialect OperationDialect names for it does not apply.
+			if codec, ok := operationregistry.Lookup(p.OperationDialect(operation)); ok && codec.Operation.ID == operation && slices.Contains(p.Operations, operation) {
 				if operationregistry.Default.SupportsTarget(codec.Identity, surface, mode) {
 					return true
 				}
