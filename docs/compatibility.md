@@ -99,8 +99,9 @@ Voyage, Jina, Together and Infinity, and for Bedrock's rerank models; other
 vendors are refused. Echoed documents must be the request's own, as text or
 as an object holding it. Vertex `image_generation` qualifies
 `imagen-*` and Gemini image models, Gemini and Vertex serve speech and
-transcription through Gemini models, and Bedrock qualifies `amazon.titan-image-generator-*` and Stability text-to-image models;
-other models and every edit/variation/audio/video operation remain refused.
+transcription through Gemini models, and Bedrock qualifies `amazon.titan-image-generator-*` and Stability text-to-image models
+and speech through Amazon Polly's engines; other models and every other
+media operation of these kinds remain refused.
 Native embeddings accept only the canonical input shapes described per provider
 below.
 

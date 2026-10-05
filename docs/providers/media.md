@@ -172,7 +172,9 @@ fal credential could only be certified by billing an image. It stays with
 plugins and custom endpoints.
 
 Imagen on the Gemini API shut down on 2026-08-17, so Gemini API image
-generation serves Gemini image models only; Vertex keeps Imagen.
+generation serves Gemini image models only. Google discontinued Imagen's
+Vertex endpoints on 2026-06-30 in favour of `gemini-2.5-flash-image`; the
+reference catalog marks them retired, so routes that still target them warn.
 
 Google Cloud Text-to-Speech is declined: Gemini speech models already serve
 Google speech on Vertex and the Gemini API, while Cloud Text-to-Speech sits

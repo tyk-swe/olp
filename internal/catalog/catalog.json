@@ -1,6 +1,6 @@
 {
   "api_version": "openllmproxy.dev/catalog/v1",
-  "published_at": "2026-10-05T15:24:29Z",
+  "published_at": "2026-10-05T18:20:32Z",
   "currency": "USD",
   "estimation": [],
   "vendors": [
@@ -1518,6 +1518,74 @@
           }
         },
         {
+          "id": "generative",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "audio"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "speech",
+              "unit_price": "0.00003",
+              "unrepresentable": [
+                {
+                  "component": "regional_uplift",
+                  "detail": "US East (N. Virginia) rates; other Regions may differ."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Free tier: 100,000 characters a month free for the first 12 months."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://aws.amazon.com/polly/pricing/",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.aws.amazon.com/polly/latest/dg/voice-engines-polly.html",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "long-form",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "audio"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "speech",
+              "unit_price": "0.0001",
+              "unrepresentable": [
+                {
+                  "component": "regional_uplift",
+                  "detail": "US East (N. Virginia) rates; other Regions may differ."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Free tier: 500,000 characters a month free for the first 12 months."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://aws.amazon.com/polly/pricing/",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.aws.amazon.com/polly/latest/dg/voice-engines-polly.html",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
           "id": "meta.llama3-1-405b-instruct-v1:0",
           "aliases": [
             "us.meta.llama3-1-405b-instruct-v1:0"
@@ -2436,6 +2504,40 @@
           }
         },
         {
+          "id": "neural",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "audio"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "speech",
+              "unit_price": "0.000016",
+              "unrepresentable": [
+                {
+                  "component": "regional_uplift",
+                  "detail": "US East (N. Virginia) rates; other Regions may differ."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Free tier: 1 million characters a month free for the first 12 months."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://aws.amazon.com/polly/pricing/",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.aws.amazon.com/polly/latest/dg/voice-engines-polly.html",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
           "id": "stability.sd3-5-large-v1:0",
           "canonical_model": "stabilityai/sd3.5-large",
           "input_modalities": [
@@ -2889,6 +2991,40 @@
           "provenance": {
             "source_url": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-stability-ai-stable-image-style-transfer.md",
             "observed_at": "2026-10-05T15:11:08Z"
+          }
+        },
+        {
+          "id": "standard",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "audio"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "speech",
+              "unit_price": "0.000004",
+              "unrepresentable": [
+                {
+                  "component": "regional_uplift",
+                  "detail": "US East (N. Virginia) rates; other Regions may differ."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Free tier: 5 million characters a month free."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://aws.amazon.com/polly/pricing/",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.aws.amazon.com/polly/latest/dg/voice-engines-polly.html",
+            "observed_at": "2026-10-05T18:20:32Z"
           }
         }
       ]
@@ -3663,6 +3799,399 @@
           "provenance": {
             "source_url": "https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
             "observed_at": "2026-10-05T15:08:53Z"
+          }
+        }
+      ]
+    },
+    {
+      "id": "assemblyai",
+      "name": "AssemblyAI",
+      "models": [
+        {
+          "id": "universal-2",
+          "input_modalities": [
+            "audio"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "transcription",
+              "unit_price": "0.000041666667",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "Add-ons stack on the base rate and multichannel audio is billed per channel: speaker diarization $0.02, keyterms $0.05, prompting $0.05, entity detection $0.08 per hour."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Free credit for new accounts and custom volume pricing."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://www.assemblyai.com/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.assemblyai.com/docs/pre-recorded-audio/select-the-speech-model",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "universal-3-5-pro",
+          "input_modalities": [
+            "audio"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "transcription",
+              "unit_price": "0.000058333333",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "Add-ons stack on the base rate and multichannel audio is billed per channel: speaker diarization $0.02, keyterms $0.05, prompting $0.05, entity detection $0.08 per hour."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Free credit for new accounts and custom volume pricing."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://www.assemblyai.com/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.assemblyai.com/docs/pre-recorded-audio/select-the-speech-model",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        }
+      ]
+    },
+    {
+      "id": "bfl",
+      "name": "Black Forest Labs",
+      "models": [
+        {
+          "id": "flux-2-flex",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.05",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "$0.05 per megapixel of output and input."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://docs.bfl.ml/quick_start/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.bfl.ml/quick_start/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "flux-2-klein-4b",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.014",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "$0.014 for the first megapixel of output, then $0.001 per additional megapixel."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://docs.bfl.ml/quick_start/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.bfl.ml/quick_start/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "flux-2-klein-9b",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.015",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "$0.015 for the first megapixel of output, then $0.002 per additional megapixel."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://docs.bfl.ml/quick_start/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.bfl.ml/quick_start/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "flux-2-max",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.07",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "$0.07 for the first megapixel of output, then $0.03 per additional megapixel; reference images are billed as input megapixels."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://docs.bfl.ml/quick_start/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.bfl.ml/quick_start/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "flux-2-pro",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.03",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "$0.03 for the first megapixel of output, then $0.015 per additional megapixel; reference images are billed as input megapixels."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://docs.bfl.ml/quick_start/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.bfl.ml/quick_start/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "flux-3-image",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.048",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Per image by resolution: 768 square $0.041, 1K $0.048, 1.5K $0.07, 2K $0.10, 4K $0.607."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://docs.bfl.ml/quick_start/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.bfl.ml/quick_start/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "flux-dev",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.025",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://docs.bfl.ml/quick_start/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.bfl.ml/quick_start/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "flux-kontext-max",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.08",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://docs.bfl.ml/quick_start/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.bfl.ml/quick_start/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "flux-kontext-pro",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.04",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://docs.bfl.ml/quick_start/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.bfl.ml/quick_start/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "flux-pro-1.1",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.04",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://docs.bfl.ml/quick_start/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.bfl.ml/quick_start/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "flux-pro-1.1-ultra",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.06",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://docs.bfl.ml/quick_start/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.bfl.ml/quick_start/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
           }
         }
       ]
@@ -4450,6 +4979,76 @@
       ]
     },
     {
+      "id": "deepgram",
+      "name": "Deepgram",
+      "models": [
+        {
+          "id": "nova-3",
+          "input_modalities": [
+            "audio"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "transcription",
+              "unit_price": "0.000071666667",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "Multichannel audio is billed per channel; multilingual transcription (language=multi) is $0.0052 per minute; redaction adds $0.002, keyterm prompting $0.0013 and entity detection $0.0017 per minute."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Growth plan: $0.0036 per minute monolingual, $0.0043 multilingual; $200 of free credit for new accounts."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://deepgram.com/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://developers.deepgram.com/docs/models-languages-overview",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "whisper-large",
+          "input_modalities": [
+            "audio"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "transcription",
+              "unit_price": "0.00008",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "Multichannel audio is billed per channel."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://deepgram.com/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://developers.deepgram.com/docs/models-languages-overview",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        }
+      ]
+    },
+    {
       "id": "deepseek",
       "name": "DeepSeek",
       "models": [
@@ -4528,6 +5127,306 @@
           "provenance": {
             "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
             "observed_at": "2026-10-05T15:08:45Z"
+          }
+        }
+      ]
+    },
+    {
+      "id": "elevenlabs",
+      "name": "ElevenLabs",
+      "models": [
+        {
+          "id": "eleven_flash_v2",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "audio"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "speech",
+              "unit_price": "0.00004",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "Billed by the character-cost response header; ElevenLabs does not document whether it counts characters or credits for Flash and Turbo models, which cost 0.5 to 1 credit per character on subscription plans."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Subscription plans include an allowance of characters or hours; API usage beyond it is billed at these rates."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://elevenlabs.io/pricing/api",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://elevenlabs.io/docs/models",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "eleven_flash_v2_5",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "audio"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "speech",
+              "unit_price": "0.00004",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "Billed by the character-cost response header; ElevenLabs does not document whether it counts characters or credits for Flash and Turbo models, which cost 0.5 to 1 credit per character on subscription plans."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Subscription plans include an allowance of characters or hours; API usage beyond it is billed at these rates."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://elevenlabs.io/pricing/api",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://elevenlabs.io/docs/models",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "eleven_multilingual_v2",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "audio"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "speech",
+              "unit_price": "0.00008",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Subscription plans include an allowance of characters or hours; API usage beyond it is billed at these rates."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://elevenlabs.io/pricing/api",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://elevenlabs.io/docs/models",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "eleven_v3",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "audio"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "speech",
+              "unit_price": "0.00008",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Subscription plans include an allowance of characters or hours; API usage beyond it is billed at these rates."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://elevenlabs.io/pricing/api",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://elevenlabs.io/docs/models",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "eleven_v3_conversational",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "audio"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "speech",
+              "unit_price": "0.00004",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "Billed by the character-cost response header; ElevenLabs does not document whether it counts characters or credits for Flash and Turbo models, which cost 0.5 to 1 credit per character on subscription plans."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Subscription plans include an allowance of characters or hours; API usage beyond it is billed at these rates."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://elevenlabs.io/pricing/api",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://elevenlabs.io/docs/models",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "eleven_v4",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "audio"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "speech",
+              "unit_price": "0.00008",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Subscription plans include an allowance of characters or hours; API usage beyond it is billed at these rates."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://elevenlabs.io/pricing/api",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://elevenlabs.io/docs/models",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "eleven_v4_turbo",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "audio"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "speech",
+              "unit_price": "0.00004",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "Billed by the character-cost response header; ElevenLabs does not document whether it counts characters or credits for Flash and Turbo models, which cost 0.5 to 1 credit per character on subscription plans."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Subscription plans include an allowance of characters or hours; API usage beyond it is billed at these rates."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://elevenlabs.io/pricing/api",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://elevenlabs.io/docs/models",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "scribe_v2",
+          "input_modalities": [
+            "audio"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "transcription",
+              "unit_price": "0.000061111111",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "Entity detection adds $0.07 per hour and keyterm prompting $0.05 per hour."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Subscription plans include an allowance of characters or hours; API usage beyond it is billed at these rates."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://elevenlabs.io/pricing/api",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://elevenlabs.io/docs/models",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "scribe_v2_medical",
+          "input_modalities": [
+            "audio"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "transcription",
+              "unit_price": "0.000061111111",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "Entity detection adds $0.07 per hour and keyterm prompting $0.05 per hour."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Subscription plans include an allowance of characters or hours; API usage beyond it is billed at these rates."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://elevenlabs.io/pricing/api",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://elevenlabs.io/docs/models",
+            "observed_at": "2026-10-05T18:20:32Z"
           }
         }
       ]
@@ -4947,6 +5846,25 @@
                 "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
                 "observed_at": "2026-10-05T15:09:18Z"
               }
+            },
+            {
+              "operation": "image_generation",
+              "input_per_million": "2",
+              "output_per_million": "120",
+              "unrepresentable": [
+                {
+                  "component": "batch_multiplier",
+                  "detail": "Batch is half price."
+                },
+                {
+                  "component": "media_units",
+                  "detail": "Output is priced at the image output rate; text and thinking output costs $12 per 1M tokens."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
             }
           ],
           "provenance": {
@@ -5000,6 +5918,25 @@
               "provenance": {
                 "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
                 "observed_at": "2026-10-05T15:09:18Z"
+              }
+            },
+            {
+              "operation": "image_generation",
+              "input_per_million": "0.5",
+              "output_per_million": "60",
+              "unrepresentable": [
+                {
+                  "component": "batch_multiplier",
+                  "detail": "Batch is half price."
+                },
+                {
+                  "component": "media_units",
+                  "detail": "Output is priced at the image output rate; text and thinking output costs $3 per 1M tokens."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
               }
             }
           ],
@@ -5117,6 +6054,25 @@
               "provenance": {
                 "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
                 "observed_at": "2026-10-05T15:09:18Z"
+              }
+            },
+            {
+              "operation": "image_generation",
+              "input_per_million": "0.25",
+              "output_per_million": "30",
+              "unrepresentable": [
+                {
+                  "component": "batch_multiplier",
+                  "detail": "Batch is half price."
+                },
+                {
+                  "component": "media_units",
+                  "detail": "Output is priced at the image output rate; text and thinking output costs $1.5 per 1M tokens."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
               }
             }
           ],
@@ -6985,6 +7941,25 @@
                 "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
                 "observed_at": "2026-10-05T15:11:04Z"
               }
+            },
+            {
+              "operation": "image_generation",
+              "input_per_million": "0.3",
+              "output_per_million": "30",
+              "unrepresentable": [
+                {
+                  "component": "batch_multiplier",
+                  "detail": "Batch is half price."
+                },
+                {
+                  "component": "media_units",
+                  "detail": "Output is priced at the image output rate; text and thinking output costs $2.5 per 1M tokens."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
             }
           ],
           "provenance": {
@@ -7235,6 +8210,29 @@
                 "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
                 "observed_at": "2026-10-05T15:11:04Z"
               }
+            },
+            {
+              "operation": "image_generation",
+              "input_per_million": "2",
+              "output_per_million": "120",
+              "unrepresentable": [
+                {
+                  "component": "batch_multiplier",
+                  "detail": "Batch is half price."
+                },
+                {
+                  "component": "media_units",
+                  "detail": "Output is priced at the image output rate; text and thinking output costs $12 per 1M tokens."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Above 200K input tokens, input is $4 and text output $18 per 1M tokens for the whole request."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
             }
           ],
           "provenance": {
@@ -7292,6 +8290,29 @@
               "provenance": {
                 "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
                 "observed_at": "2026-10-05T15:11:04Z"
+              }
+            },
+            {
+              "operation": "image_generation",
+              "input_per_million": "0.5",
+              "output_per_million": "60",
+              "unrepresentable": [
+                {
+                  "component": "batch_multiplier",
+                  "detail": "Batch is half price."
+                },
+                {
+                  "component": "media_units",
+                  "detail": "Output is priced at the image output rate; text and thinking output costs $3 per 1M tokens."
+                },
+                {
+                  "component": "regional_uplift",
+                  "detail": "Global endpoint rates; non-global endpoints cost 10% more."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
               }
             }
           ],
@@ -7403,6 +8424,25 @@
               "provenance": {
                 "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
                 "observed_at": "2026-10-05T15:11:04Z"
+              }
+            },
+            {
+              "operation": "image_generation",
+              "input_per_million": "0.25",
+              "output_per_million": "30",
+              "unrepresentable": [
+                {
+                  "component": "batch_multiplier",
+                  "detail": "Batch is half price."
+                },
+                {
+                  "component": "media_units",
+                  "detail": "Output is priced at the image output rate; text and thinking output costs $1.5 per 1M tokens."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
               }
             }
           ],
@@ -8200,6 +9240,210 @@
           }
         },
         {
+          "id": "imagen-3.0-fast-generate-001",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "lifecycle": {
+            "deprecated_at": "2026-03-24",
+            "retires_at": "2026-06-30",
+            "replacement": "gemini-2.5-flash-image",
+            "provenance": {
+              "source_url": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/release-notes",
+              "observed_at": "2026-10-05T18:20:32Z"
+            }
+          },
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.02",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://cloud.google.com/vertex-ai/generative-ai/docs/models/imagen/4-0-generate",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "imagen-3.0-generate-001",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "lifecycle": {
+            "deprecated_at": "2026-03-24",
+            "retires_at": "2026-06-30",
+            "replacement": "gemini-2.5-flash-image",
+            "provenance": {
+              "source_url": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/release-notes",
+              "observed_at": "2026-10-05T18:20:32Z"
+            }
+          },
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.04",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://cloud.google.com/vertex-ai/generative-ai/docs/models/imagen/4-0-generate",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "imagen-3.0-generate-002",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "lifecycle": {
+            "deprecated_at": "2026-03-24",
+            "retires_at": "2026-06-30",
+            "replacement": "gemini-2.5-flash-image",
+            "provenance": {
+              "source_url": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/release-notes",
+              "observed_at": "2026-10-05T18:20:32Z"
+            }
+          },
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.04",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://cloud.google.com/vertex-ai/generative-ai/docs/models/imagen/4-0-generate",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "imagen-4.0-fast-generate-001",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "lifecycle": {
+            "deprecated_at": "2026-03-24",
+            "retires_at": "2026-06-30",
+            "replacement": "gemini-2.5-flash-image",
+            "provenance": {
+              "source_url": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/release-notes",
+              "observed_at": "2026-10-05T18:20:32Z"
+            }
+          },
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.02",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://cloud.google.com/vertex-ai/generative-ai/docs/models/imagen/4-0-generate",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "imagen-4.0-generate-001",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "lifecycle": {
+            "deprecated_at": "2026-03-24",
+            "retires_at": "2026-06-30",
+            "replacement": "gemini-2.5-flash-image",
+            "provenance": {
+              "source_url": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/release-notes",
+              "observed_at": "2026-10-05T18:20:32Z"
+            }
+          },
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.04",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://cloud.google.com/vertex-ai/generative-ai/docs/models/imagen/4-0-generate",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "imagen-4.0-ultra-generate-001",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "lifecycle": {
+            "deprecated_at": "2026-03-24",
+            "retires_at": "2026-06-30",
+            "replacement": "gemini-2.5-flash-image",
+            "provenance": {
+              "source_url": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/release-notes",
+              "observed_at": "2026-10-05T18:20:32Z"
+            }
+          },
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.06",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://cloud.google.com/vertex-ai/generative-ai/docs/models/imagen/4-0-generate",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
           "id": "veo-3.1-fast-generate-001",
           "input_modalities": [
             "image",
@@ -8688,6 +9932,448 @@
           "provenance": {
             "source_url": "https://console.groq.com/docs/model/whisper-large-v3-turbo",
             "observed_at": "2026-10-05T15:10:53Z"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ibm-watsonx",
+      "name": "IBM watsonx.ai",
+      "models": [
+        {
+          "id": "ibm/granite-4-h-small",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "0.0636",
+              "output_per_million": "0.265",
+              "unrepresentable": [
+                {
+                  "component": "regional_uplift",
+                  "detail": "Billed in resource units of 1,000 tokens by each model's billing class; IBM's prices are indicative and may vary by country."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/getting-started/wx-ai-pricing.html?context=wx",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-models.html?context=wx",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "meta-llama/llama-3-3-70b-instruct",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "0.7526",
+              "output_per_million": "0.7526",
+              "unrepresentable": [
+                {
+                  "component": "regional_uplift",
+                  "detail": "Billed in resource units of 1,000 tokens by each model's billing class; IBM's prices are indicative and may vary by country."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/getting-started/wx-ai-pricing.html?context=wx",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-models.html?context=wx",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "meta-llama/llama-4-maverick-17b-128e-instruct-fp8",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "0.371",
+              "output_per_million": "1.484",
+              "unrepresentable": [
+                {
+                  "component": "regional_uplift",
+                  "detail": "Billed in resource units of 1,000 tokens by each model's billing class; IBM's prices are indicative and may vary by country."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/getting-started/wx-ai-pricing.html?context=wx",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-models.html?context=wx",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "mistralai/mistral-small-3-1-24b-instruct-2503",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "0.106",
+              "output_per_million": "0.318",
+              "unrepresentable": [
+                {
+                  "component": "regional_uplift",
+                  "detail": "Billed in resource units of 1,000 tokens by each model's billing class; IBM's prices are indicative and may vary by country."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/getting-started/wx-ai-pricing.html?context=wx",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-models.html?context=wx",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "openai/gpt-oss-120b",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "0.159",
+              "output_per_million": "0.636",
+              "unrepresentable": [
+                {
+                  "component": "regional_uplift",
+                  "detail": "Billed in resource units of 1,000 tokens by each model's billing class; IBM's prices are indicative and may vary by country."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/getting-started/wx-ai-pricing.html?context=wx",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-models.html?context=wx",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        }
+      ]
+    },
+    {
+      "id": "jina",
+      "name": "Jina AI",
+      "models": [
+        {
+          "id": "jina-clip-v2",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "embeddings"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "embeddings",
+              "input_per_million": "0.05",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Tokens are sold in prepaid packs shared across Jina's APIs: 1 billion for $50, or 11 billion for $500."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://api.jina.ai/v1/models",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://jina.ai/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "jina-embeddings-v3",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "embeddings"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "embeddings",
+              "input_per_million": "0.05",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Tokens are sold in prepaid packs shared across Jina's APIs: 1 billion for $50, or 11 billion for $500."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://api.jina.ai/v1/models",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://jina.ai/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "jina-embeddings-v4",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "embeddings"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "embeddings",
+              "input_per_million": "0.05",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Tokens are sold in prepaid packs shared across Jina's APIs: 1 billion for $50, or 11 billion for $500."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://api.jina.ai/v1/models",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://jina.ai/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "jina-embeddings-v5-text-nano",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "embeddings"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "embeddings",
+              "input_per_million": "0.02",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Tokens are sold in prepaid packs shared across Jina's APIs: 1 billion for $50, or 11 billion for $500."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://api.jina.ai/v1/models",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://jina.ai/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "jina-embeddings-v5-text-small",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "embeddings"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "embeddings",
+              "input_per_million": "0.05",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Tokens are sold in prepaid packs shared across Jina's APIs: 1 billion for $50, or 11 billion for $500."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://api.jina.ai/v1/models",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://jina.ai/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "jina-reranker-m0",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "rerank",
+              "input_per_million": "0.05",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Tokens are sold in prepaid packs shared across Jina's APIs: 1 billion for $50, or 11 billion for $500."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://api.jina.ai/v1/models",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://jina.ai/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "jina-reranker-v2-base-multilingual",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "rerank",
+              "input_per_million": "0.05",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Tokens are sold in prepaid packs shared across Jina's APIs: 1 billion for $50, or 11 billion for $500."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://api.jina.ai/v1/models",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://jina.ai/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "jina-reranker-v3",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "rerank",
+              "input_per_million": "0.05",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Tokens are sold in prepaid packs shared across Jina's APIs: 1 billion for $50, or 11 billion for $500."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://api.jina.ai/v1/models",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://jina.ai/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "jina-reranker-v3.5",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "rerank",
+              "input_per_million": "0.05",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "Tokens are sold in prepaid packs shared across Jina's APIs: 1 billion for $50, or 11 billion for $500."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://api.jina.ai/v1/models",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://jina.ai/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
           }
         }
       ]
@@ -13280,6 +14966,619 @@
           "provenance": {
             "source_url": "https://developers.openai.com/api/docs/models/whisper-1.md",
             "observed_at": "2026-10-05T15:08:50Z"
+          }
+        }
+      ]
+    },
+    {
+      "id": "recraft",
+      "name": "Recraft",
+      "models": [
+        {
+          "id": "recraftv2",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.022",
+              "unrepresentable": [
+                {
+                  "component": "per_request",
+                  "detail": "Generating with style references also creates a style, which adds $0.005 per request."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "recraftv3",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.04",
+              "unrepresentable": [
+                {
+                  "component": "per_request",
+                  "detail": "Generating with style references also creates a style, which adds $0.005 per request."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "recraftv4",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.04",
+              "unrepresentable": [
+                {
+                  "component": "per_request",
+                  "detail": "Generating with style references also creates a style, which adds $0.005 per request."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "recraftv4_1",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.035",
+              "unrepresentable": [
+                {
+                  "component": "per_request",
+                  "detail": "Generating with style references also creates a style, which adds $0.005 per request."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "recraftv4_1_flash",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.007",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "recraftv4_1_pro",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.21",
+              "unrepresentable": [
+                {
+                  "component": "per_request",
+                  "detail": "Generating with style references also creates a style, which adds $0.005 per request."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "recraftv4_1_utility",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.035",
+              "unrepresentable": [
+                {
+                  "component": "per_request",
+                  "detail": "Generating with style references also creates a style, which adds $0.005 per request."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "recraftv4_1_utility_pro",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.21",
+              "unrepresentable": [
+                {
+                  "component": "per_request",
+                  "detail": "Generating with style references also creates a style, which adds $0.005 per request."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "recraftv4_pro",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.25",
+              "unrepresentable": [
+                {
+                  "component": "per_request",
+                  "detail": "Generating with style references also creates a style, which adds $0.005 per request."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "recraftv4_styles",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.035",
+              "unrepresentable": [
+                {
+                  "component": "per_request",
+                  "detail": "Generating with style references also creates a style, which adds $0.005 per request."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "recraftv4_styles_pro",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.1",
+              "unrepresentable": [
+                {
+                  "component": "per_request",
+                  "detail": "Generating with style references also creates a style, which adds $0.005 per request."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://www.recraft.ai/docs/api-reference/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        }
+      ]
+    },
+    {
+      "id": "runway",
+      "name": "Runway",
+      "models": [
+        {
+          "id": "gen4.5",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "video"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "video_create",
+              "unit_price": "0.12",
+              "unrepresentable": [
+                {
+                  "component": "media_units",
+                  "detail": "ProRes and PNG-sequence output add 5 credits per second; 10-bit and HDR profiles add 20 credits per second, or 40 above 4 megapixels; a credit is $0.01."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://docs.dev.runwayml.com/guides/pricing/",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.dev.runwayml.com/guides/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "gen4_turbo",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "video"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "video_create",
+              "unit_price": "0.05",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://docs.dev.runwayml.com/guides/pricing/",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.dev.runwayml.com/guides/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "veo3.1",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "video"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "video_create",
+              "unit_price": "0.4",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "40 credits per second with audio, 20 without; a credit is $0.01."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://docs.dev.runwayml.com/guides/pricing/",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.dev.runwayml.com/guides/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "veo3.1_fast",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "video"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "video_create",
+              "unit_price": "0.15",
+              "unrepresentable": [
+                {
+                  "component": "tiers",
+                  "detail": "15 credits per second with audio, 10 without; a credit is $0.01."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://docs.dev.runwayml.com/guides/pricing/",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.dev.runwayml.com/guides/models/",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stability",
+      "name": "Stability AI",
+      "models": [
+        {
+          "id": "sd3.5-large",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.065",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://platform.stability.ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://platform.stability.ai/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "sd3.5-large-turbo",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.04",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://platform.stability.ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://platform.stability.ai/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "sd3.5-medium",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.035",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://platform.stability.ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://platform.stability.ai/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "stable-image-core",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.03",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://platform.stability.ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://platform.stability.ai/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "stable-image-inpaint",
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_edit",
+              "unit_price": "0.05",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://platform.stability.ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://platform.stability.ai/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
+          }
+        },
+        {
+          "id": "stable-image-ultra",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "image"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "image_generation",
+              "unit_price": "0.08",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://platform.stability.ai/pricing",
+                "observed_at": "2026-10-05T18:20:32Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://platform.stability.ai/pricing",
+            "observed_at": "2026-10-05T18:20:32Z"
           }
         }
       ]
