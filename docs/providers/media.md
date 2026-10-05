@@ -10,12 +10,17 @@ the others speak OpenAI's media wire as it is.
 
 ## Certification
 
-Certifying a media model must not create billable work, so a vendor's media
-operations certify through two proofs: the reviewed codec proves the wire,
-and the vendor's account probe, an authenticated request that costs nothing,
-proves the credential reaches the vendor. The model is the operator's
-declaration, as it is for any upstream that lists no models. Vendor media
-certifies unary operations only.
+Certifying a media model must not create billable work wherever a vendor
+allows it, so a vendor's media operations certify through two proofs: the
+reviewed codec proves the wire, and either the model's place in the vendor's
+model listing or the vendor's account probe, an authenticated request that
+costs nothing, proves the credential reaches it. Without a listing, the model
+is the operator's declaration, as it is for any upstream that lists no
+models. Vendor media certifies unary operations only.
+
+Vertex AI, Bedrock and Azure OpenAI offer no costless proof, so their media
+certifies by the smallest real call, which bills: one low-quality image, two
+characters of speech, or a tenth of a second of silence to transcribe.
 
 A codec translates the request, so it serves transformed routes only: strict
 routes refuse it with `native_media_contract`, and a profile's native media
@@ -32,6 +37,8 @@ defaults do not apply to it.
 | [Stability AI](https://platform.stability.ai/docs/api-reference) | `image_generation`, `image_edit` | `stability` | `GET /v1/user/balance` |
 | [Recraft](https://www.recraft.ai/docs/api-reference/endpoints) | `image_generation` | `recraft` | `GET /v1/users/me` |
 | [Black Forest Labs](https://docs.bfl.ai/api_integration/integration_guidelines) | `image_generation` | `bfl`: polled | `GET /v1/credits` |
+| [Gemini API](https://ai.google.dev/gemini-api/docs/image-generation) | `image_generation`, `speech`, `transcription` | `gemini` | model listing |
+| [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/image-generation) | `image_generation`, `speech`, `transcription` | `gemini` | real call |
 
 ### xAI
 
@@ -102,10 +109,31 @@ must be on the provider's host or under `bfl.ai`. One image is returned as
 request fails as `content_filter`; any other failure after submission is
 ambiguous, since BFL may still bill the work.
 
+### Gemini on the Gemini API and Vertex
+
+Gemini's `generateContent` serves all three operations, on a `gemini` provider
+and, through ADC, on a `vertex_ai` one. An image model answers a prompt with
+one image, at the aspect ratio of the requested size, as `b64_json`; usage is
+the tokens Gemini bills, and an image its safety filters withhold fails as
+`content_filter`. Vertex's `imagen-*` models keep their predict API.
+
+A speech model reads the input aloud in one of its prebuilt voices, such as
+`Kore`, named as the `voice`; Gemini answers with WAV or raw 16-bit PCM,
+which OLP serves as the `wav` or `pcm` the client asked for, and usage is the
+tokens billed. A transcription inlines the uploaded audio, which must name
+its audio content type, and asks the model for the transcript alone; it is
+served as `json` or `text`, with the tokens billed as usage. A prompt,
+language hint and timestamps are refused: `generateContent` has no place for
+them. Gemini's dedicated transcription model serves only the Interactions
+API, which OLP does not translate.
+
 ### Declined
 
 fal offers no costless authenticated request for ordinary API keys: its
 billing endpoint takes an Admin key, and its model listing takes none, so a
 fal credential could only be certified by billing an image. It stays with
 plugins and custom endpoints.
+
+Imagen on the Gemini API shut down on 2026-08-17, so Gemini API image
+generation serves Gemini image models only; Vertex keeps Imagen.
 

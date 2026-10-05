@@ -203,4 +203,56 @@ func TestReviewedVendorMedia(t *testing.T) {
 			t.Fatalf("the credential was cooled down after moderation: %d", status)
 		}
 	})
+	t.Run("gemini images and transcripts", func(t *testing.T) {
+		var lastPath string
+		var lastBody map[string]any
+		fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Goog-Api-Key") != vendorSecret {
+				http.Error(w, "unauthenticated", http.StatusUnauthorized)
+				return
+			}
+			if r.Method == http.MethodGet {
+				writeJSON(w, map[string]any{"models": []any{map[string]string{"name": "models/gemini-3.1-flash-image"}, map[string]string{"name": "models/gemini-3.5-flash"}}})
+				return
+			}
+			lastPath, lastBody = r.URL.Path, decodeBody(t, r)
+			part := map[string]any{"text": "Hello world."}
+			if strings.Contains(r.URL.Path, "image") {
+				part = map[string]any{"inlineData": map[string]string{"mimeType": "image/png", "data": pixel}}
+			}
+			writeJSON(w, map[string]any{"candidates": []any{map[string]any{"content": map[string]any{"role": "model", "parts": []any{part}}, "finishReason": "STOP"}},
+				"usageMetadata": map[string]int{"promptTokenCount": 9, "candidatesTokenCount": 1290, "totalTokenCount": 1299}})
+		}))
+		t.Cleanup(fixture.Close)
+		h := newAccessHarness(t)
+		images, secret := provisionRoute(t, h, map[string]any{"kind": "gemini", "auth_mode": "api_key", "endpoint": fixture.URL + "/v1beta"},
+			vendorSecret, "gemini-3.1-flash-image", []any{map[string]any{"operation": "image_generation", "surface": "openai", "mode": "unary"}}, []string{"image_generation"})
+		status, reply, _ := h.gateway("POST", "/v1/images/generations", secret, map[string]any{"model": images, "prompt": "a small illustration", "size": "1024x1024", "response_format": "b64_json"})
+		data, _ := reply["data"].([]any)
+		if status != http.StatusOK || len(data) != 1 || data[0].(map[string]any)["b64_json"] != pixel || lastPath != "/v1beta/models/gemini-3.1-flash-image:generateContent" {
+			t.Fatalf("Gemini image: %d %v at %s", status, reply, lastPath)
+		}
+		h = newAccessHarness(t)
+		transcripts, secret := provisionRoute(t, h, map[string]any{"kind": "gemini", "auth_mode": "api_key", "endpoint": fixture.URL + "/v1beta"},
+			vendorSecret, "gemini-3.5-flash", []any{map[string]any{"operation": "transcription", "surface": "openai", "mode": "unary"}}, []string{"transcription"})
+		var upload bytes.Buffer
+		form := multipart.NewWriter(&upload)
+		form.WriteField("model", transcripts)
+		form.WriteField("response_format", "text")
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", `form-data; name="file"; filename="hello.wav"`)
+		header.Set("Content-Type", "audio/wav")
+		part, _ := form.CreatePart(header)
+		part.Write([]byte("RIFF-audio"))
+		form.Close()
+		status, text, _ := h.gatewayRaw("POST", "/v1/audio/transcriptions", secret, &upload, map[string]string{"Content-Type": form.FormDataContentType()})
+		if status != http.StatusOK || string(text) != "Hello world." {
+			t.Fatalf("Gemini transcription: %d %q", status, text)
+		}
+		contents, _ := lastBody["contents"].([]any)
+		inline, _ := contents[0].(map[string]any)["parts"].([]any)[0].(map[string]any)["inlineData"].(map[string]any)
+		if inline["mimeType"] != "audio/wav" || inline["data"] != base64.StdEncoding.EncodeToString([]byte("RIFF-audio")) {
+			t.Fatalf("Gemini received %v", lastBody)
+		}
+	})
 }

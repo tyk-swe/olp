@@ -156,8 +156,7 @@ func TestAzureMediaCertifiesThroughTheDeployment(t *testing.T) {
 	}
 	v1 := Configuration{Kind: KindAzure, AuthMode: AuthAPIKey, ProfileID: "azure-v1-chat", ProfileRevision: "1", Endpoint: new("https://example.openai.azure.com")}
 	v1.Normalize()
-	if err := s.certifyAzureMedia(t.Context(), &v1, []byte("test-credential"), "media", "speech"); err == nil {
+	if err := s.certifyMediaCall(t.Context(), &v1, []byte("test-credential"), "media", "speech"); err == nil {
 		t.Fatal("Azure v1 certified speech")
 	}
 }
-

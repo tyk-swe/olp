@@ -51,6 +51,12 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 	if !vendors.Serves(vendor, operation) {
 		return false
 	}
+	// A vendor's own media API serves the operation on the OpenAI surface,
+	// unary, through the vendor's connector.
+	if vendors.MediaWire(vendor, operation) != "" {
+		connector, _ := vendors.Kind(vendor)
+		return connector == kind && surface == "openai" && mode == "unary"
+	}
 	openaiFamily := kind == "openai" || kind == "azure_openai" || kind == "openai_compatible"
 	nativeEmbeddings := kind == "gemini" || kind == "vertex_ai" || kind == "bedrock"
 	switch operation {

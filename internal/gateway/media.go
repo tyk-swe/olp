@@ -736,12 +736,19 @@ func mediaUsage(request *media.Request, result *media.Result) *openai.Usage {
 		// Speech usage is the characters a vendor reports billing. A count
 		// of the request's own characters would be no evidence: OpenAI, for
 		// one, bills its speech models by tokens.
+		if result.Tokens != nil {
+			return &openai.Usage{InputTokens: result.Tokens.InputTokens, OutputTokens: result.Tokens.OutputTokens, TotalTokens: result.Tokens.TotalTokens}
+		}
 		if result.BilledCharacters == nil {
 			return nil
 		}
 		units := strconv.FormatInt(*result.BilledCharacters, 10)
 		return &openai.Usage{MediaUnits: &units}
 	case media.ResponseTranscription:
+		if result.Transcription != nil && result.Transcription.Tokens != nil {
+			tokens := result.Transcription.Tokens
+			return &openai.Usage{InputTokens: tokens.InputTokens, OutputTokens: tokens.OutputTokens, TotalTokens: tokens.TotalTokens}
+		}
 		if result.Transcription == nil || result.Transcription.DurationSeconds == nil {
 			return nil
 		}

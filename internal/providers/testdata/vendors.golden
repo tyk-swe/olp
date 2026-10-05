@@ -157,7 +157,10 @@
     "operations": [
       "generation",
       "token_count",
-      "embeddings"
+      "embeddings",
+      "image_generation",
+      "speech",
+      "transcription"
     ],
     "authentication": [
       "api_key",
@@ -199,7 +202,9 @@
       "generation",
       "token_count",
       "embeddings",
-      "image_generation"
+      "image_generation",
+      "speech",
+      "transcription"
     ],
     "authentication": [
       "adc",

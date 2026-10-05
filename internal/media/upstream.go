@@ -91,8 +91,10 @@ type Result struct {
 	Body          io.ReadCloser // SSE response body; the caller drains it
 	ContentType   string
 	// BilledCharacters is the characters a speech call bills, as the vendor
-	// reports them.
+	// reports them, and Tokens the tokens it bills, for a vendor that bills
+	// speech by token.
 	BilledCharacters *int64
+	Tokens           *ImageUsage
 	Source           oif.Document    // bounded immutable native JSON result for strict media
 	BlobSource       *oif.BlobResult // existing spool owns the bytes and lifecycle
 }
@@ -122,6 +124,13 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	var pipe *io.PipeReader
 	var multipartDone chan error
 	var contentLength int64
+	if call.JSONFrom != nil {
+		inlined, failure := call.JSONFrom(t.readPart)
+		if failure != nil {
+			return nil, &Failure{Class: ClassProtocol, Detail: failure.Message}
+		}
+		call.JSON = inlined
+	}
 	switch {
 	case call.JSON != nil:
 		body = bytes.NewReader(call.JSON)
@@ -335,6 +344,9 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		result.Body = resp.Body
 		return result, nil
 	case ResponseBinary:
+		if call.DecodeAudio != nil {
+			return t.decodeAudio(ctx, resp, call, request, result)
+		}
 		contentType := binaryContentType(resp, "audio/")
 		if call.Strict {
 			original := resp.Header.Get("Content-Type")
@@ -381,7 +393,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		if request != nil && request.Format != nil {
 			format = *request.Format
 		}
-		if TranscriptionFormatIsText(format) {
+		if TranscriptionFormatIsText(format) && call.DecodeTranscription == nil {
 			if !transcriptionTextContentType(resp, format) {
 				return nil, &Failure{Class: ClassProtocol,
 					Detail: "transcription response content type does not match the requested format"}
@@ -410,9 +422,13 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		}
 		decoded, mErr := decode(body)
 		if mErr != nil {
-			return nil, &Failure{Class: ClassProtocol, Detail: mErr.Message}
+			return nil, decodeFailure(mErr)
 		}
 		result.Transcription = decoded
+		if format == "text" {
+			// A vendor that answers in JSON serves a text client its text.
+			result.Text = []byte(decoded.Text)
+		}
 		return result, nil
 	case ResponseImages:
 		if !requireContentType(resp, "application/json") {
@@ -499,6 +515,46 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		return result, nil
 	}
 	return nil, &Failure{Class: ClassProtocol, Detail: "unsupported media response kind"}
+}
+
+// readPart reads an uploaded file a JSON body inlines, within the audio
+// upload bound.
+func (t *Transport) readPart(part *Part) ([]byte, *Error) {
+	opened, err := t.Spool.Open(part.Handle)
+	if err != nil {
+		return nil, Fail(http.StatusInternalServerError, "media_unavailable", "The uploaded file is unavailable.")
+	}
+	defer opened.File.Close()
+	data, err := io.ReadAll(io.LimitReader(opened.File, DefaultAudioUploadLimit+1))
+	if err != nil || int64(len(data)) > DefaultAudioUploadLimit {
+		return nil, Fail(http.StatusRequestEntityTooLarge, "file_too_large", "The uploaded file exceeds the inline upload bound.")
+	}
+	return data, nil
+}
+
+// decodeAudio stages the speech a vendor returned inside JSON.
+func (t *Transport) decodeAudio(ctx context.Context, resp *http.Response, call *UpstreamCall, request *Request, result *Result) (*Result, *Failure) {
+	if !requireContentType(resp, "application/json") {
+		return nil, &Failure{Class: ClassProtocol, Detail: "speech response is not JSON"}
+	}
+	body, failure := t.collect(resp)
+	if failure != nil {
+		return nil, failure
+	}
+	decoded, mErr := call.DecodeAudio(body)
+	if mErr != nil {
+		return nil, decodeFailure(mErr)
+	}
+	name := "speech"
+	if request != nil {
+		name = request.Op + "-response"
+	}
+	artifact, err := t.Spool.Put(ctx, Upload{Filename: name, ContentType: decoded.ContentType, MaximumLength: int64(len(decoded.Audio)), Body: bytes.NewReader(decoded.Audio)})
+	if err != nil {
+		return nil, stageFailure(SpoolError(err))
+	}
+	result.Artifact, result.ContentType, result.Tokens = artifact, artifact.ContentType, decoded.Tokens
+	return result, nil
 }
 
 // decodeFailure maps a result decoder's error onto a transport failure: a

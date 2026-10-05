@@ -98,7 +98,8 @@ Use a base URL ending in `/v1` for native OpenAI SDK requests.
 Voyage, Jina, Together and Infinity, and for Bedrock's rerank models; other
 vendors are refused. Echoed documents must be the request's own, as text or
 as an object holding it. Vertex `image_generation` qualifies
-`imagen-*` models and Bedrock qualifies `amazon.titan-image-generator-*` and Stability text-to-image models;
+`imagen-*` and Gemini image models, Gemini and Vertex serve speech and
+transcription through Gemini models, and Bedrock qualifies `amazon.titan-image-generator-*` and Stability text-to-image models;
 other models and every edit/variation/audio/video operation remain refused.
 Native embeddings accept only the canonical input shapes described per provider
 below.

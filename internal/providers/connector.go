@@ -757,19 +757,20 @@ func selectProbeSlot(slots []slotRow, cfg *Configuration) *slotRow {
 	return best
 }
 
-// Media certification must not create billable images, audio or video jobs.
-// Discovery proves access to the exact mapped model; the official OpenAI
-// connector supplies the closed media wire contract. Custom hosts cannot use
+// Media certification proves a model serves a media operation without
+// billed work wherever the upstream allows: the official OpenAI connector's
+// model listing, or a reviewed vendor's listing or account probe, beside the
+// closed media wire contract its codec supplies. Custom hosts cannot use
 // unrelated chat success or a self-reported model list as media evidence.
+// Vertex, Bedrock and Azure offer no costless proof, so their media
+// certifies by the smallest real call of the operation.
 func (s *Server) certifyNativeMedia(ctx context.Context, cfg *Configuration, credential []byte, model string, tuple CapabilityInput) error {
-	if tuple.Operation == "image_generation" && (cfg.Kind == KindVertex || cfg.Kind == KindBedrock) {
-		return s.certifyNativeImage(ctx, cfg, credential, model)
+	vendor := value(cfg.Options.VendorID)
+	if mediaByCall(cfg.Kind, vendor, tuple.Operation) {
+		return s.certifyMediaCall(ctx, cfg, credential, model, tuple.Operation)
 	}
-	if azureMedia(cfg.Kind, tuple.Operation) {
-		return s.certifyAzureMedia(ctx, cfg, credential, model, tuple.Operation)
-	}
-	if vendor := value(cfg.Options.VendorID); reviewedMedia(cfg.Kind, vendor, tuple.Operation) {
-		return s.certifyVendorMedia(ctx, cfg, credential, vendor)
+	if reviewedMedia(cfg.Kind, vendor, tuple.Operation) {
+		return s.certifyVendorMedia(ctx, cfg, credential, model, vendor)
 	}
 	endpoint, err := url.Parse(value(cfg.Endpoint))
 	if err != nil || cfg.Kind != KindOpenAI || cfg.AuthMode != AuthAPIKey || len(credential) == 0 ||
@@ -778,131 +779,156 @@ func (s *Server) certifyNativeMedia(ctx context.Context, cfg *Configuration, cre
 		strings.TrimRight(endpoint.EscapedPath(), "/") != "/v1" {
 		return &probeError{Code: "capability_unavailable", Detail: "Media certification requires the official OpenAI endpoint and an API key."}
 	}
+	return s.certifyListedModel(ctx, cfg, credential, model)
+}
+
+// certifyListedModel proves the credential can discover the media model.
+func (s *Server) certifyListedModel(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
 	models, err := s.listModels(ctx, cfg, credential)
 	if err != nil {
 		return err
 	}
-	expected := cfg.transport().Model(model)
-	if slices.Contains(models, expected) {
+	if slices.Contains(models, cfg.transport().Model(model)) {
 		return nil
 	}
 	return &probeError{Code: "model_unavailable", Detail: "The credential cannot discover the requested media model."}
 }
 
-// azureMediaOperations are the media operations an Azure OpenAI deployment
-// certifies: the minimum set that unblocks most deployments.
-var azureMediaOperations = []string{"image_generation", "speech", "transcription"}
-
-func azureMedia(kind, operation string) bool {
-	return kind == KindAzure && slices.Contains(azureMediaOperations, operation)
+// mediaByCallOperations are the media operations certified by a real call
+// where no costless proof exists: Vertex's, Bedrock's images, and the
+// minimum set that unblocks most Azure OpenAI deployments.
+var mediaByCallOperations = map[string][]string{
+	KindVertex:  {"image_generation", "speech", "transcription"},
+	KindBedrock: {"image_generation"},
+	KindAzure:   {"image_generation", "speech", "transcription"},
 }
 
-// certifyAzureMedia proves an Azure OpenAI deployment serves a media
-// operation the only way Azure allows: by the smallest real call, as Vertex
-// and Bedrock image certification does. It bills a low-quality image, two
-// characters of speech, or a tenth of a second of silence.
-func (s *Server) certifyAzureMedia(ctx context.Context, cfg *Configuration, credential []byte, model, operation string) error {
+func mediaByCall(kind, vendor, operation string) bool {
+	if !slices.Contains(mediaByCallOperations[kind], operation) {
+		return false
+	}
+	// Vertex speech and transcription are Gemini's, which its contract names.
+	return operation == "image_generation" || kind == KindAzure || vendors.MediaWire(vendor, operation) != ""
+}
+
+// certifyMediaCall proves a model serves a media operation by its smallest
+// real call, which bills: one low-quality image, two characters of speech,
+// or a tenth of a second of silence to transcribe.
+func (s *Server) certifyMediaCall(ctx context.Context, cfg *Configuration, credential []byte, model, operation string) error {
 	transport := cfg.transport()
-	if transport.Hosting() == "azure-v1" {
+	if cfg.Kind == KindAzure && transport.Hosting() == "azure-v1" {
 		return &probeError{Code: "capability_unavailable", Detail: "Azure OpenAI serves media through deployments; its v1 API offers none."}
 	}
-	one, low := int64(1), "low"
-	request := &media.Request{Op: operation, Route: "certification", Prompt: "A small blue square.", Count: &one, Quality: &low, Input: "OK", Voice: "alloy"}
-	var body []byte
-	contentType := "application/json"
-	if operation == "transcription" {
-		var form bytes.Buffer
-		writer := multipart.NewWriter(&form)
-		_ = writer.WriteField("model", transport.Model(model))
-		part, _ := writer.CreateFormFile("file", "silence.wav")
-		_, _ = part.Write(media.SilentWAV(100))
-		_ = writer.Close()
-		body, contentType = form.Bytes(), writer.FormDataContentType()
-		request.File = &media.Part{}
+	one := int64(1)
+	request := &media.Request{Op: operation, Route: "certification", Prompt: "A small blue square.", Count: &one, Input: "OK", Voice: "alloy"}
+	if cfg.Kind == KindAzure && operation == "image_generation" {
+		low := "low"
+		request.Quality = &low
 	}
-	call, failure := media.Encode(request, cfg.Kind, transport.Model(model))
+	if cfg.Kind == KindVertex && operation == "speech" {
+		// Gemini speech speaks in one of its prebuilt voices, as WAV.
+		wav := "wav"
+		request.Voice, request.Format = "Kore", &wav
+	}
+	silence := media.SilentWAV(100)
+	if operation == "transcription" {
+		request.File = &media.Part{Filename: "silence.wav", ContentType: "audio/wav"}
+	}
+	call, _, failure := media.EncodeConfigured(request, transport, model)
 	if failure != nil {
 		return &probeError{Code: "capability_unavailable", Detail: failure.Message}
 	}
-	if call.JSON != nil {
-		body = call.JSON
+	body, contentType := call.JSON, "application/json"
+	switch {
+	case call.JSONFrom != nil:
+		var mErr *media.Error
+		if body, mErr = call.JSONFrom(func(*media.Part) ([]byte, *media.Error) { return silence, nil }); mErr != nil {
+			return &probeError{Code: "capability_unavailable", Detail: mErr.Message}
+		}
+	case len(call.Fields) > 0:
+		var form bytes.Buffer
+		writer := multipart.NewWriter(&form)
+		for _, field := range call.Fields {
+			switch {
+			case field.File != nil:
+				part, _ := writer.CreateFormFile(field.Name, "silence.wav")
+				_, _ = part.Write(silence)
+			case field.Text != nil:
+				_ = writer.WriteField(field.Name, *field.Text)
+			}
+		}
+		_ = writer.Close()
+		body, contentType = form.Bytes(), writer.FormDataContentType()
 	}
 	endpoint, err := transport.MediaURL(call.Path, model, call.Query)
 	if err != nil {
 		return &probeError{Code: "capability_unavailable", Detail: "The media probe endpoint could not be built."}
 	}
-	status, data, err := s.callAs(ctx, cfg, credential, http.MethodPost, endpoint, body, contentType)
+	status, data, err := s.callAs(ctx, cfg, credential, call.Method, endpoint, body, contentType)
 	if err != nil {
 		return err
 	}
 	if status != http.StatusOK {
 		return statusError(cfg, status, data)
 	}
-	switch operation {
-	case "image_generation":
-		_, mErr := media.DecodeImageResponse(data, func(b64 string, index int) (*media.Artifact, *media.Error) {
-			if _, err := base64.StdEncoding.DecodeString(b64); err != nil {
-				return nil, media.Fail(502, "provider_protocol_error", "The provider image payload is not valid base64.")
-			}
-			return &media.Artifact{}, nil
-		})
-		if mErr != nil {
-			return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
-		}
-	case "transcription":
-		if _, mErr := media.DecodeTranscriptionJSON(data); mErr != nil {
-			return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
-		}
-	default:
-		if len(data) == 0 {
-			return &probeError{Code: "provider_protocol_error", Detail: "The upstream returned no audio."}
-		}
+	if mErr := decodeMediaProbe(call, operation, data); mErr != nil {
+		return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
 	}
 	return nil
 }
 
+// decodeMediaProbe checks a probe's result with the codec the gateway reads
+// it with.
+func decodeMediaProbe(call *media.UpstreamCall, operation string, data []byte) *media.Error {
+	stage := func(b64 string, index int) (*media.Artifact, *media.Error) {
+		if _, err := base64.StdEncoding.DecodeString(b64); err != nil {
+			return nil, media.Fail(502, "provider_protocol_error", "The provider image payload is not valid base64.")
+		}
+		return &media.Artifact{}, nil
+	}
+	var mErr *media.Error
+	switch operation {
+	case "image_generation":
+		switch {
+		case call.DecodeImages != nil:
+			_, mErr = call.DecodeImages(data, stage)
+		case call.Native != "":
+			_, mErr = media.DecodeNativeImageResponse(call.Native, data, 1, stage)
+		default:
+			_, mErr = media.DecodeImageResponse(data, stage)
+		}
+	case "speech":
+		if call.DecodeAudio != nil {
+			_, mErr = call.DecodeAudio(data)
+		} else if len(data) == 0 {
+			mErr = media.Fail(502, "provider_protocol_error", "The upstream returned no audio.")
+		}
+	case "transcription":
+		decode := media.DecodeTranscriptionJSON
+		if call.DecodeTranscription != nil {
+			decode = call.DecodeTranscription
+		}
+		_, mErr = decode(data)
+	}
+	return mErr
+}
+
 // certifyVendorMedia proves a reviewed vendor's media operation without
-// billed work: the reviewed codec proves the wire, and the vendor's account
-// probe proves the credential reaches it. The model is the operator's
+// billed work: the reviewed codec proves the wire, and the model's place in
+// the vendor's listing, or else the vendor's account probe, proves the
+// credential reaches it. Without a listing, the model is the operator's
 // declaration, as for any upstream that lists none.
-func (s *Server) certifyVendorMedia(ctx context.Context, cfg *Configuration, credential []byte, vendor string) error {
+func (s *Server) certifyVendorMedia(ctx context.Context, cfg *Configuration, credential []byte, model, vendor string) error {
 	contract, _ := vendors.Lookup(vendor)
+	if contract.AccountProbe == "" {
+		return s.certifyListedModel(ctx, cfg, credential, model)
+	}
 	status, data, err := s.call(ctx, cfg, credential, http.MethodGet, "/"+contract.AccountProbe, nil)
 	if err != nil {
 		return err
 	}
 	if status != http.StatusOK {
 		return statusError(cfg, status, data)
-	}
-	return nil
-}
-
-func (s *Server) certifyNativeImage(ctx context.Context, cfg *Configuration, credential []byte, model string) error {
-	count := int64(1)
-	request := &media.Request{Op: media.OpImageGeneration, Route: "certification", Prompt: "A certification probe image.", Count: &count}
-	call, failure := media.Encode(request, cfg.Kind, cfg.transport().Model(model))
-	if failure != nil {
-		return &probeError{Code: "capability_unavailable", Detail: failure.Message}
-	}
-	endpoint, err := cfg.transport().MediaURL(call.Path, model, call.Query)
-	if err != nil || endpoint == "" {
-		return &probeError{Code: "capability_unavailable", Detail: "The media probe endpoint could not be built."}
-	}
-	status, data, err := s.call(ctx, cfg, credential, call.Method, endpoint, call.JSON)
-	if err != nil {
-		return err
-	}
-	if status != http.StatusOK {
-		return statusError(cfg, status, data)
-	}
-	_, mErr := media.DecodeNativeImageResponse(call.Native, data, 1, func(b64 string, index int) (*media.Artifact, *media.Error) {
-		if _, err := base64.StdEncoding.DecodeString(b64); err != nil {
-			return nil, media.Fail(502, "provider_protocol_error", "The provider image payload is not valid base64.")
-		}
-		return &media.Artifact{}, nil
-	})
-	if mErr != nil {
-		return &probeError{Code: "provider_protocol_error", Detail: "The upstream did not satisfy the requested native codec contract."}
 	}
 	return nil
 }

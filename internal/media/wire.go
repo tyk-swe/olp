@@ -90,6 +90,12 @@ type UpstreamCall struct {
 	// in place of the OpenAI decoders.
 	DecodeImages        func(body []byte, stage func(b64 string, index int) (*Artifact, *Error)) (*ImageResult, *Error)
 	DecodeTranscription func(body []byte) (*TranscriptionResult, *Error)
+	// DecodeAudio reads a vendor's JSON speech result: the audio it carries
+	// and the tokens it bills.
+	DecodeAudio func(body []byte) (*AudioResult, *Error)
+	// JSONFrom builds a JSON body that inlines uploaded files, whose bytes
+	// read returns, in place of JSON.
+	JSONFrom func(read func(*Part) ([]byte, *Error)) ([]byte, *Error)
 	// CharacterHeader names the response header in which a vendor reports
 	// the characters a speech call bills.
 	CharacterHeader string
@@ -103,6 +109,13 @@ type UpstreamCall struct {
 	// Only request-path calls set it; reconciliation traffic does not
 	// propagate client trace context.
 	Inject http.Header
+}
+
+// AudioResult is speech a vendor returned inside JSON.
+type AudioResult struct {
+	Audio       []byte
+	ContentType string
+	Tokens      *ImageUsage
 }
 
 // Step is the next request of a vendor's asynchronous image work: a GET of an
@@ -1147,7 +1160,8 @@ type ImageArtifact struct {
 	RevisedPrompt *string
 }
 
-// ImageUsage is the token usage an image response reported.
+// ImageUsage is the token usage a media response reported, such as an image
+// model's, or a speech or transcription model's that bills by token.
 type ImageUsage struct {
 	InputTokens  int64
 	OutputTokens int64
@@ -1662,7 +1676,9 @@ func EncodeVideoDeleteResponse(result *VideoDeleteResult, localID string) ([]byt
 type TranscriptionResult struct {
 	// TextOnly renders the transcript as OpenAI's json format, its text
 	// alone, for a client that asked for json of a vendor sent verbose_json.
-	TextOnly        bool
+	TextOnly bool
+	// Tokens is the usage of a vendor that bills transcripts by token.
+	Tokens          *ImageUsage
 	Text            string
 	Language        *string
 	DurationSeconds *float64
