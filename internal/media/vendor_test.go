@@ -53,6 +53,9 @@ func TestVendorMediaEndpointsAreDocumented(t *testing.T) {
 		}
 		var evidence struct {
 			Endpoints map[string]string `json:"endpoints"`
+			// MediaModel is the model a media probe names, where the vendor
+			// reads more than its identity from it.
+			MediaModel string `json:"media_model"`
 		}
 		if err := json.Unmarshal(raw, &evidence); err != nil {
 			t.Fatal(err)
@@ -62,11 +65,15 @@ func TestVendorMediaEndpointsAreDocumented(t *testing.T) {
 			if !slices.Contains([]string{OpImageGeneration, OpImageEdit, OpSpeech, OpTranscription, OpTranslation, OpVideoCreate}, operation) {
 				continue
 			}
-			call, _, failure := EncodeConfigured(mediaProbe(operation), config, "model")
+			model := "model"
+			if evidence.MediaModel != "" {
+				model = evidence.MediaModel
+			}
+			call, _, failure := EncodeConfigured(mediaProbe(operation), config, model)
 			if failure != nil {
 				t.Fatalf("%s %s: %s", contract.ID, operation, failure.Message)
 			}
-			got, err := config.MediaURL(call.Path, "model", call.Query)
+			got, err := config.MediaURL(call.Path, model, call.Query)
 			if want := evidence.Endpoints[operation]; err != nil || got != want {
 				t.Fatalf("%s %s is addressed at %s (%v); the documentation says %s", contract.ID, operation, got, err, want)
 			}

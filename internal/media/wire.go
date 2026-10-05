@@ -72,12 +72,15 @@ type Field struct {
 
 // UpstreamCall is the exact upstream HTTP request for one media operation.
 type UpstreamCall struct {
-	Method    string
-	Path      string
-	Query     url.Values
-	Accept    string
-	JSON      []byte
-	Fields    []Field
+	Method string
+	Path   string
+	Query  url.Values
+	Accept string
+	JSON   []byte
+	Fields []Field
+	// Upload is a staged file sent as the whole request body, for vendors
+	// that take raw audio rather than a multipart form.
+	Upload    *Part
 	Stream    bool
 	Kind      ResponseKind
 	Native    string

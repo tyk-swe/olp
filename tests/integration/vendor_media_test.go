@@ -5,9 +5,12 @@ package integration_test
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -102,6 +105,63 @@ func TestReviewedVendorMedia(t *testing.T) {
 		// A json client is served from verbose_json, whose duration Groq bills by.
 		if status != http.StatusOK || string(reply) != `{"text":"Hello there."}` || fields["model"] != "whisper-large-v3" || fields["response_format"] != "verbose_json" {
 			t.Fatalf("Groq transcription: %d %s %v", status, reply, fields)
+		}
+	})
+	t.Run("elevenlabs speech", func(t *testing.T) {
+		var path, format string
+		var body map[string]any
+		fixture := newVendorMediaFixture(t, "user", func(r *http.Request) bool {
+			return r.Header.Get("Xi-Api-Key") == vendorSecret && r.Header.Get("Authorization") == ""
+		},
+			func(w http.ResponseWriter, r *http.Request) {
+				path, format, body = r.URL.Path, r.URL.Query().Get("output_format"), decodeBody(t, r)
+				w.Header().Set("Content-Type", "audio/mpeg")
+				w.Header().Set("Character-Cost", "12")
+				w.Write([]byte("ID3audio"))
+			})
+		h := newAccessHarness(t)
+		slug, secret := provisionRoute(t, h, map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": fixture.URL + "/v1", "options": map[string]any{"vendor_id": "elevenlabs"}},
+			vendorSecret, "eleven_multilingual_v2", []any{map[string]any{"operation": "speech", "surface": "openai", "mode": "unary"}}, []string{"speech"})
+		encoded, _ := json.Marshal(map[string]any{"model": slug, "input": "Hello there.", "voice": "21m00Tcm4TlvDq8ikWAM"})
+		status, audio, headers := h.gatewayRaw("POST", "/v1/audio/speech", secret, bytes.NewReader(encoded), map[string]string{"Content-Type": "application/json"})
+		if status != http.StatusOK || string(audio) != "ID3audio" || !strings.HasPrefix(headers.Get("Content-Type"), "audio/mpeg") {
+			t.Fatalf("ElevenLabs speech: %d %q %v", status, audio, headers)
+		}
+		if path != "/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM" || format != "mp3_44100_128" || body["model_id"] != "eleven_multilingual_v2" || body["text"] != "Hello there." {
+			t.Fatalf("ElevenLabs request: %s %s %v", path, format, body)
+		}
+	})
+	t.Run("deepgram transcription", func(t *testing.T) {
+		var audio []byte
+		var contentType string
+		fixture := newVendorMediaFixture(t, "projects", func(r *http.Request) bool { return r.Header.Get("Authorization") == "Token "+vendorSecret },
+			func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/listen" || r.URL.Query().Get("model") != "nova-3" {
+					http.Error(w, "unexpected "+r.URL.String(), http.StatusNotFound)
+					return
+				}
+				audio, _ = io.ReadAll(r.Body)
+				contentType = r.Header.Get("Content-Type")
+				writeJSON(w, map[string]any{"metadata": map[string]any{"duration": 2.5}, "results": map[string]any{"channels": []any{map[string]any{"alternatives": []any{map[string]any{"transcript": "Hello world.", "words": []any{}}}}}}})
+			})
+		h := newAccessHarness(t)
+		slug, secret := provisionRoute(t, h, map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": fixture.URL + "/v1", "options": map[string]any{"vendor_id": "deepgram"}},
+			vendorSecret, "nova-3", []any{map[string]any{"operation": "transcription", "surface": "openai", "mode": "unary"}}, []string{"transcription"})
+		var upload bytes.Buffer
+		form := multipart.NewWriter(&upload)
+		form.WriteField("model", slug)
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", `form-data; name="file"; filename="hello.wav"`)
+		header.Set("Content-Type", "audio/wav")
+		part, _ := form.CreatePart(header)
+		part.Write([]byte("RIFF\x24\x00\x00\x00WAVEfmt "))
+		form.Close()
+		status, reply, _ := h.gatewayRaw("POST", "/v1/audio/transcriptions", secret, &upload, map[string]string{"Content-Type": form.FormDataContentType()})
+		if status != http.StatusOK || string(reply) != `{"text":"Hello world."}` {
+			t.Fatalf("Deepgram transcription: %d %s", status, reply)
+		}
+		if string(audio) != "RIFF\x24\x00\x00\x00WAVEfmt " || contentType != "audio/wav" {
+			t.Fatalf("Deepgram received %q as %s", audio, contentType)
 		}
 	})
 }

@@ -27,6 +27,8 @@ defaults do not apply to it.
 | --- | --- | --- | --- |
 | [xAI](https://docs.x.ai/developers/rest-api-reference/inference/images) | `image_generation` | `xai-images`: sizes become aspect ratios | `GET /v1/api-key` |
 | [Groq](https://console.groq.com/docs/speech-to-text) | `transcription`, `translation` | `groq-audio`: `json` is served from `verbose_json` | `GET /openai/v1/models` |
+| [ElevenLabs](https://elevenlabs.io/docs/api-reference/introduction) | `speech`, `transcription` | `elevenlabs` | `GET /v1/user` |
+| [Deepgram](https://developers.deepgram.com/reference/deepgram-api-overview) | `speech`, `transcription` | `deepgram` | `GET /v1/projects` |
 
 ### xAI
 
@@ -46,3 +48,26 @@ duration only in `verbose_json`. A request for `json` is sent as
 duration. `text` and `verbose_json` pass through; `srt`, `vtt` and diarized
 formats, streaming, `include`, chunking strategies and known speakers are
 refused, since Groq does not serve them.
+
+### ElevenLabs
+
+API keys travel in `xi-api-key`. Speech names an ElevenLabs voice ID as its
+`voice`, returns `mp3`, `opus`, `pcm` or `wav` audio, and takes a `speed` from
+0.7 to 1.2; usage is the characters ElevenLabs reports billing in its
+`character-cost` header. Transcription returns `json`, its text alone, or
+`verbose_json` with the language, the duration ElevenLabs bills by and the
+timed words; it takes `language` and refuses a prompt, temperature and the
+text and subtitle formats.
+
+### Deepgram
+
+API keys travel as `Authorization: Token`. An Aura model names its voice, so
+a request for `aura-2-thalia-en` names `thalia` as its voice; speech returns
+`mp3`, `opus`, `aac`, `flac`, `wav` or `pcm`, and usage is the characters
+Deepgram reports in `dg-char-count`. Transcription sends the audio itself as
+the request body and reads back `json` or `verbose_json` with the duration
+Deepgram bills by.
+
+Neither vendor translates speech to English, so `translation` is declined for
+both, and for AssemblyAI.
+

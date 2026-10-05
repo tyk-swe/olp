@@ -182,6 +182,8 @@ selects the `compatible-chat` profile, so it can serve strict routes; choose
 | `cohere` | Cohere | `https://api.cohere.ai/compatibility/v1` |  |
 | `cohere-native-v2` | Cohere native v2 | `https://api.cohere.ai/v2` | `cohere-v2` |
 | `jina` | Jina AI | `https://api.jina.ai/v1` |  |
+| `elevenlabs` | ElevenLabs | `https://api.elevenlabs.io/v1` |  |
+| `deepgram` | Deepgram | `https://api.deepgram.com/v1` |  |
 | `voyage` | Voyage AI | `https://api.voyageai.com/v1` |  |
 | `xai` | xAI | `https://api.x.ai/v1` | `compatible-chat` |
 | `cerebras` | Cerebras | `https://api.cerebras.ai/v1` | `compatible-chat` |

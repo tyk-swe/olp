@@ -121,10 +121,21 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	contentType := ""
 	var pipe *io.PipeReader
 	var multipartDone chan error
+	var contentLength int64
 	switch {
 	case call.JSON != nil:
 		body = bytes.NewReader(call.JSON)
 		contentType = "application/json"
+	case call.Upload != nil:
+		opened, err := t.Spool.Open(call.Upload.Handle)
+		if err != nil {
+			return nil, &Failure{Class: ClassConnect, Detail: "staged media upload is unavailable"}
+		}
+		defer opened.File.Close()
+		body, contentType, contentLength = opened.File, call.Upload.ContentType, opened.Artifact.ContentLength
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
 	case len(call.Fields) > 0:
 		reader, writer := io.Pipe()
 		form := multipart.NewWriter(writer)
@@ -149,6 +160,9 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
+	}
+	if contentLength > 0 {
+		req.ContentLength = contentLength
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
 	if call.Accept != "" {
@@ -330,11 +344,9 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			}
 			contentType = original
 		}
-		if call.CharacterHeader != "" {
-			billed, err := strconv.ParseInt(resp.Header.Get(call.CharacterHeader), 10, 64)
-			if err != nil || billed < 0 {
-				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Detail: "speech response does not report its billed characters"}
-			}
+		// Without the vendor's count, the call stays billing-uncertain; the
+		// audio it billed for is still delivered.
+		if billed, err := strconv.ParseInt(resp.Header.Get(call.CharacterHeader), 10, 64); call.CharacterHeader != "" && err == nil && billed >= 0 {
 			result.BilledCharacters = &billed
 		}
 		artifact, failure := t.stageResponse(ctx, resp, contentType, request)

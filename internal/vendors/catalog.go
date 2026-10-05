@@ -113,6 +113,12 @@ var contracts = []Contract{
 			"embeddings": {Rewrites: []Rewrite{{From: "encoding_format", To: "embedding_type"}}},
 			"rerank":     {Unsupported: []string{"truncation"}},
 		}}, nil),
+	compatiblePreset("elevenlabs", "ElevenLabs", "ElevenLabs", "ElevenLabs speech synthesis and transcription.", "https://api.elevenlabs.io/v1", Link{"ElevenLabs API reference", "https://elevenlabs.io/docs/api-reference/introduction"}, Contract{
+		Operations: []string{"speech", "transcription"}, ProbeOperation: "speech", Parameters: []string{"voice", "speed", "response_format", "language"},
+		MediaWires: map[string]string{"speech": "elevenlabs", "transcription": "elevenlabs"}, Credential: &Credential{Header: "Xi-Api-Key"}, AccountProbe: "user"}, nil),
+	compatiblePreset("deepgram", "Deepgram", "Deepgram", "Deepgram speech recognition and synthesis.", "https://api.deepgram.com/v1", Link{"Deepgram API reference", "https://developers.deepgram.com/reference/deepgram-api-overview"}, Contract{
+		Operations: []string{"speech", "transcription"}, ProbeOperation: "transcription", Parameters: []string{"voice", "response_format", "language"},
+		MediaWires: map[string]string{"speech": "deepgram", "transcription": "deepgram"}, Credential: &Credential{Header: "Authorization", Scheme: "Token "}, AccountProbe: "projects"}, nil),
 	compatiblePreset("voyage", "Voyage AI", "Voyage AI", "Voyage AI compatible API.", "https://api.voyageai.com/v1", Link{"Voyage AI embeddings API", "https://docs.voyageai.com/reference/embeddings-api"}, Contract{
 		Operations: []string{"embeddings", "rerank"}, ProbeOperation: "embeddings",
 		Parameters: []string{"dimensions", "input_type", "truncation", "output_dtype", "encoding_format"},

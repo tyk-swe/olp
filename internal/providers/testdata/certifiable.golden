@@ -12,6 +12,8 @@ openai_compatible huggingface: generation/openai/unary generation/openai/streami
 openai_compatible cohere: generation/openai/unary generation/openai/streaming embeddings/openai/unary rerank/openai/unary
 openai_compatible cohere-native-v2: embeddings/openai/unary rerank/openai/unary
 openai_compatible jina: embeddings/openai/unary rerank/openai/unary
+openai_compatible elevenlabs: speech/openai/unary transcription/openai/unary
+openai_compatible deepgram: speech/openai/unary transcription/openai/unary
 openai_compatible voyage: embeddings/openai/unary rerank/openai/unary
 openai_compatible xai: generation/openai/unary generation/openai/streaming image_generation/openai/unary
 openai_compatible cerebras: generation/openai/unary generation/openai/streaming

@@ -29,8 +29,10 @@ type vendorEvidence struct {
 	ReviewedAt       string `json:"reviewed_at"`
 	Notes            string `json:"notes"`
 	// Endpoints are the documented absolute URLs of every served operation.
-	Endpoints   map[string]string `json:"endpoints"`
-	Unsupported []string          `json:"unsupported_parameters"`
+	Endpoints map[string]string `json:"endpoints"`
+	// MediaModel is the model the media package's endpoint check names.
+	MediaModel  string   `json:"media_model"`
+	Unsupported []string `json:"unsupported_parameters"`
 	// Responses are unary results by operation.
 	Responses map[string]struct {
 		File  string          `json:"file"`

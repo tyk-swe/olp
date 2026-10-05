@@ -930,6 +930,55 @@
     ]
   },
   {
+    "id": "elevenlabs",
+    "name": "ElevenLabs",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "speech",
+      "transcription"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "voice",
+      "speed",
+      "response_format",
+      "language"
+    ],
+    "documentation_url": "https://elevenlabs.io/docs/api-reference/introduction",
+    "endpoint": "https://api.elevenlabs.io/v1",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "deepgram",
+    "name": "Deepgram",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "speech",
+      "transcription"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "voice",
+      "response_format",
+      "language"
+    ],
+    "documentation_url": "https://developers.deepgram.com/reference/deepgram-api-overview",
+    "endpoint": "https://api.deepgram.com/v1",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
     "id": "voyage",
     "name": "Voyage AI",
     "connector": "openai_compatible",
