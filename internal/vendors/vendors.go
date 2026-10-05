@@ -1,0 +1,185 @@
+// Package vendors holds the reviewed vendor contracts: the documented facts the
+// onboarding catalogue, the connector matrix and the request codecs share. A
+// vendor reachable through a connector kind is described once here instead of
+// being special-cased wherever its behavior differs from its kind.
+//
+// A contract is evidence of a documented API, not certification: every model
+// still needs its exact tuple probed before it serves traffic.
+package vendors
+
+import (
+	"encoding/json"
+	"maps"
+	"slices"
+)
+
+// Contract is a reviewed vendor.
+type Contract struct {
+	ID, Name, Maintainer string
+	// Description is the onboarding summary of a preset.
+	Description string
+	// Connector is the connector kind that serves the vendor.
+	Connector string
+	// KindDefault marks the vendor a provider of Connector gets when it
+	// names none.
+	KindDefault bool
+	// Endpoint is the reviewed base URL, or empty when the endpoint follows
+	// from cloud fields or an operator supplies it.
+	Endpoint      string
+	Documentation Link
+	// Discovery reports that the upstream lists its models at the kind's
+	// listing path; without it operators declare the models they probe.
+	Discovery bool
+	// Operations is the complete reviewed operation set. The connector
+	// matrix admits an operation for the vendor only when it is listed here
+	// and the connector kind serves it.
+	Operations []string
+	// Dialects are the generation dialects the vendor documents.
+	Dialects []string
+	// Parameters are the request parameters the onboarding catalogue lists
+	// as reviewed.
+	Parameters []string
+	// Unsupported request fields are refused for every operation.
+	Unsupported []string
+	// Requests shape requests per operation where the vendor's documented
+	// wire differs from its dialect.
+	Requests map[string]RequestShape
+	// OperationEndpoints are absolute URLs of operations the vendor serves
+	// outside Endpoint. They apply only while the provider uses Endpoint.
+	OperationEndpoints map[string]string
+	// ProbeOperation is the unary operation that certifies a declared model
+	// when the upstream cannot list models; empty means generation.
+	ProbeOperation string
+	// Preset makes the vendor an onboarding preset of its connector kind.
+	Preset *Preset
+}
+
+// Link is a labelled documentation URL.
+type Link struct{ Label, URL string }
+
+// Preset is how onboarding offers a vendor.
+type Preset struct {
+	// AuthMode is the authentication the preset selects.
+	AuthMode string
+	// Placeholder marks an endpoint the operator must replace: a
+	// self-hosted runtime or an account-scoped host.
+	Placeholder bool
+	// Profile is the profile a preset whose vendor contract is exact selects,
+	// so it can serve strict routes; nil leaves the provider Automatic.
+	Profile *ProfileRef
+}
+
+// ProfileRef names a profile revision.
+type ProfileRef struct{ ID, Revision string }
+
+// RequestShape conforms a request to the vendor's documented wire.
+type RequestShape struct {
+	// Unsupported request fields are refused.
+	Unsupported []string
+	// Drop removes fields the vendor documents as having no effect.
+	Drop []string
+	// Rewrites rename fields. A request that sets both names of a rewrite is
+	// refused, and a provider default of either name yields to the request
+	// setting the other.
+	Rewrites []Rewrite
+	// TextInput requires the input to be text rather than token arrays.
+	TextInput bool
+}
+
+// Rewrite renames From to To, replacing its value with Value when set.
+type Rewrite struct {
+	From, To string
+	Value    json.RawMessage
+}
+
+// Serves reports whether the contract lists operation.
+func (c Contract) Serves(operation string) bool { return slices.Contains(c.Operations, operation) }
+
+// Speaks reports whether the contract documents a generation dialect.
+func (c Contract) Speaks(dialect string) bool { return slices.Contains(c.Dialects, dialect) }
+
+// Request is the reviewed shape of an operation's requests, including the
+// fields refused for every operation.
+func (c Contract) Request(operation string) RequestShape {
+	shape := c.Requests[operation]
+	shape.Unsupported = append(slices.Clone(c.Unsupported), shape.Unsupported...)
+	return shape
+}
+
+// All returns detached copies of every contract in catalogue order.
+func All() []Contract {
+	out := make([]Contract, len(contracts))
+	for i, c := range contracts {
+		out[i] = c.clone()
+	}
+	return out
+}
+
+// Lookup returns the contract of a vendor identifier.
+func Lookup(id string) (Contract, bool) {
+	if i, ok := index[id]; ok {
+		return contracts[i].clone(), true
+	}
+	return Contract{}, false
+}
+
+// Serves reports whether a vendor's contract admits an operation. A vendor
+// without a contract is restricted only by its connector kind.
+func Serves(vendor, operation string) bool {
+	i, ok := index[vendor]
+	return !ok || contracts[i].Serves(operation)
+}
+
+// Speaks reports whether a vendor's contract documents a generation dialect.
+// A vendor without a contract is restricted only by its connector kind.
+func Speaks(vendor, dialect string) bool {
+	i, ok := index[vendor]
+	return !ok || contracts[i].Speaks(dialect)
+}
+
+// DefaultFor is the vendor a provider of kind gets when it names none: the
+// kind's default vendor, or the kind itself.
+func DefaultFor(kind string) string {
+	for _, c := range contracts {
+		if c.KindDefault && c.Connector == kind {
+			return c.ID
+		}
+	}
+	return kind
+}
+
+// Kind is the connector kind that serves a vendor.
+func Kind(vendor string) (string, bool) {
+	i, ok := index[vendor]
+	if !ok {
+		return "", false
+	}
+	return contracts[i].Connector, true
+}
+
+func (c Contract) clone() Contract {
+	c.Operations = slices.Clone(c.Operations)
+	c.Dialects = slices.Clone(c.Dialects)
+	c.Parameters = slices.Clone(c.Parameters)
+	c.Unsupported = slices.Clone(c.Unsupported)
+	c.OperationEndpoints = maps.Clone(c.OperationEndpoints)
+	if c.Requests != nil {
+		requests := make(map[string]RequestShape, len(c.Requests))
+		for operation, shape := range c.Requests {
+			shape.Unsupported = slices.Clone(shape.Unsupported)
+			shape.Drop = slices.Clone(shape.Drop)
+			shape.Rewrites = slices.Clone(shape.Rewrites)
+			requests[operation] = shape
+		}
+		c.Requests = requests
+	}
+	if c.Preset != nil {
+		preset := *c.Preset
+		if preset.Profile != nil {
+			profile := *preset.Profile
+			preset.Profile = &profile
+		}
+		c.Preset = &preset
+	}
+	return c
+}
