@@ -511,21 +511,6 @@ func (p Profile) BindIngressSemanticHeader(name, value string) (bool, error) {
 	return true, nil
 }
 
-func (c Config) AzureScope() string {
-	if c.Hosting() == "azure-v1" {
-		return "https://ai.azure.com/.default"
-	}
-	return "https://cognitiveservices.azure.com/.default"
-}
-
-func (c Config) profileBase() string {
-	base := strings.TrimRight(c.Endpoint, "/")
-	if c.Hosting() == "azure-v1" && !strings.HasSuffix(base, "/openai/v1") {
-		base += "/openai/v1"
-	}
-	return base
-}
-
 func (c Config) validateProfileEndpoint(u *url.URL) error {
 	if (c.ProfileID == "cohere-embed-v2" || c.ProfileID == "cohere-rerank-v2") &&
 		strings.EqualFold(u.Hostname(), "api.cohere.ai") && strings.TrimRight(u.Path, "/") != "/v2" {

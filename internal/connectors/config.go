@@ -262,7 +262,7 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 	if c.Hosting() == "azure-responses-legacy" && (wire == openai.FamilyResponses || wire == openai.FamilyInputTokens) {
 		return base + "/openai" + path + "?api-version=" + url.QueryEscape(c.APIVersion), nil
 	}
-	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+	if c.traits().deployment {
 		if model != c.Deployment && !c.hasDeployment(model) {
 			var metadata struct {
 				Deployment string `json:"deployment"`
@@ -305,7 +305,7 @@ func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
 		return "", errors.New("invalid upstream resource path")
 	}
 	base := c.profileBase()
-	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+	if c.traits().deployment {
 		deployment := c.Model(model)
 		if deployment != c.Deployment && !c.hasDeployment(deployment) {
 			var metadata struct {
@@ -328,7 +328,7 @@ func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
 	}
 	u := base + "/" + path
 	merged := url.Values{}
-	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+	if c.traits().deployment {
 		merged.Set("api-version", c.APIVersion)
 	}
 	for name, values := range query {
@@ -355,7 +355,7 @@ func (c Config) ResourceURL(model, path string, query url.Values) (string, error
 		return "", errors.New("invalid upstream resource path")
 	}
 	base := c.profileBase()
-	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+	if c.traits().deployment {
 		if strings.HasPrefix(path, "deployments/") {
 			deployment := c.Model(model)
 			if deployment == "" {
@@ -368,7 +368,7 @@ func (c Config) ResourceURL(model, path string, query url.Values) (string, error
 		}
 	}
 	merged := url.Values{}
-	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+	if c.traits().deployment {
 		merged.Set("api-version", c.APIVersion)
 	}
 	for name, values := range query {
@@ -389,7 +389,7 @@ func (c Config) RealtimeURL(model string) (string, error) {
 		return "", errors.New("profile does not support realtime")
 	}
 	query := url.Values{}
-	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+	if c.traits().deployment {
 		query.Set("deployment", c.Model(model))
 	} else {
 		query.Set("model", c.Model(model))

@@ -356,7 +356,7 @@ func (a *Auth) authenticateAWS(ctx context.Context, _ *http.Request, c Config, s
 	}
 	sign := func(ctx context.Context, req *http.Request, body []byte) ([]string, error) {
 		hash := sha256.Sum256(body)
-		if err := v4.NewSigner().SignHTTP(ctx, creds, req, hex.EncodeToString(hash[:]), "bedrock", c.CloudRegion, time.Now()); err != nil {
+		if err := v4.NewSigner().SignHTTP(ctx, creds, req, hex.EncodeToString(hash[:]), c.awsService(), c.CloudRegion, time.Now()); err != nil {
 			return nil, ErrAuthentication
 		}
 		header := req.Header.Get("Authorization")
