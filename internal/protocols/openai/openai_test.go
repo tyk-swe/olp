@@ -299,3 +299,22 @@ func TestUnaryDecoding(t *testing.T) {
 		t.Fatalf("error parse: %+v", upstream)
 	}
 }
+
+// TestParseErrorBodyReadsGoogleEnvelopes covers the shapes Google APIs use:
+// a canonical status in place of a type, optionally inside a one-element array.
+func TestParseErrorBodyReadsGoogleEnvelopes(t *testing.T) {
+	want := UpstreamError{Type: "INVALID_ARGUMENT", Code: "400", Message: "Request contains an invalid argument."}
+	for _, body := range []string{
+		`{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}`,
+		`[{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}]`,
+	} {
+		if got := ParseErrorBody([]byte(body)); got == nil || *got != want {
+			t.Fatalf("%s parsed as %+v", body, got)
+		}
+	}
+	for _, body := range []string{`[]`, `[{"error":{"message":"a"}},{"error":{"message":"b"}}]`, `[{"detail":"x"}]`} {
+		if got := ParseErrorBody([]byte(body)); got != nil {
+			t.Fatalf("%s parsed as %+v", body, got)
+		}
+	}
+}

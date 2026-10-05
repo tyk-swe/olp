@@ -7974,6 +7974,200 @@
   },
   {
     "operation_dialects": {
+      "generation": "openai-chat"
+    },
+    "default_schemas": {
+      "generation": {
+        "additionalProperties": false,
+        "properties": {
+          "dialect": {
+            "const": "openai-chat"
+          },
+          "native_options": {
+            "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
+            "type": "object"
+          },
+          "values": {
+            "additionalProperties": false,
+            "properties": {
+              "frequency_penalty": {
+                "title": "frequency_penalty",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "logit_bias": {
+                "title": "logit_bias",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "logprobs": {
+                "title": "logprobs",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "max_completion_tokens": {
+                "minimum": 1,
+                "title": "max_completion_tokens",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "max_tokens": {
+                "minimum": 1,
+                "title": "max_tokens",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "n": {
+                "minimum": 1,
+                "title": "n",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "parallel_tool_calls": {
+                "title": "parallel_tool_calls",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "presence_penalty": {
+                "title": "presence_penalty",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reasoning_effort": {
+                "title": "reasoning_effort",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "response_format": {
+                "description": "Replaced atomically; never recursively merged.",
+                "title": "response_format",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "seed": {
+                "title": "seed",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "service_tier": {
+                "title": "service_tier",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stop": {
+                "title": "stop",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stream_options": {
+                "description": "Replaced atomically; never recursively merged.",
+                "title": "stream_options",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "temperature": {
+                "title": "temperature",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "tool_choice": {
+                "title": "tool_choice",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tools": {
+                "description": "Replaced atomically; never recursively merged.",
+                "title": "tools",
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "top_logprobs": {
+                "title": "top_logprobs",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "top_p": {
+                "title": "top_p",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "verbosity": {
+                "title": "verbosity",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "dialect"
+        ],
+        "type": "object"
+      }
+    },
+    "id": "vertex-openai",
+    "revision": "1",
+    "label": "Vertex OpenAI-compatible Chat Completions",
+    "kind": "vertex_ai",
+    "dialect": "openai-chat",
+    "dialect_revision": "v1",
+    "hosting": "vertex-openai",
+    "authentication": [
+      "adc",
+      "service_account"
+    ],
+    "transport": "http",
+    "operations": [
+      "generation"
+    ],
+    "semantic_headers": [],
+    "query_settings": [],
+    "documentation": "https://cloud.google.com/vertex-ai/generative-ai/docs/migrate/openai/overview",
+    "strict": true
+  },
+  {
+    "operation_dialects": {
       "embeddings": "bedrock-embeddings",
       "generation": "bedrock-converse",
       "image_generation": "bedrock-converse/image_generation",

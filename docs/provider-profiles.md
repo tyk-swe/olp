@@ -49,6 +49,7 @@ listing; otherwise operators declare its providers' models.
 | `azure-v1-chat`, `azure-v1-responses` | `/openai/v1/chat/completions` or `/openai/v1/responses`; no dated API-version setting. |
 | `vertex-gemini` | Configured project/location, Google publisher and Gemini dialect. |
 | `vertex-anthropic` | Anthropic publisher, `:rawPredict` / `:streamRawPredict`; body version `vertex-2023-10-16`, model selected in URL. |
+| `vertex-openai` | `/endpoints/openapi/chat/completions` under the configured project/location; models named `publisher/model`, such as `google/gemini-2.5-flash` or `meta/llama-3.3-70b-instruct-maas`. |
 | `bedrock-converse` | `/model/{model}/converse` or `/converse-stream`. |
 | `bedrock-anthropic-invoke` | `/model/{model}/invoke` or `/invoke-with-response-stream`; body version `bedrock-2023-05-31`. |
 | `bedrock-invoke` | Qualified model-specific native Invoke surface; no generation/Chat fallback. |
@@ -62,7 +63,15 @@ is represented by GenerateContent here.
 Azure v1 accepts a resource origin or a base ending in `/openai/v1`. The Entra
 scope for this profile is `https://ai.azure.com/.default`; the `azure-legacy-*`
 profiles use `https://cognitiveservices.azure.com/.default`. Vertex endpoints
-must match the configured project, location and profile publisher. Bedrock
+must match the configured project, location and profile publisher, or for
+`vertex-openai` the project's `endpoints/openapi` address. When a Vertex provider
+names no endpoint, OLP derives the address from the profile.
+
+Azure AI Foundry Models, such as DeepSeek, Grok and Llama deployments, use the
+`azure-v1-chat` and `azure-v1-responses` profiles at the resource's
+`https://{resource}.services.ai.azure.com` origin, with the deployment name as
+the model. Microsoft has deprecated the separate Model Inference API under
+`/models`, so OLP has no profile for it. Bedrock
 signing happens only after the final URL, body and semantic headers have been
 constructed. Anthropic Invoke streaming unwraps bounded AWS event envelopes into
 native Anthropic events; it does not decode the stream as Converse or

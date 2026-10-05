@@ -38,6 +38,23 @@ type Config struct {
 	ObservedPrincipal string
 }
 
+// DefaultProfileEndpoint is the endpoint a provider of kind using profileID
+// gets when it names none: its kind's, or the address the profile's hosting
+// is served at.
+func DefaultProfileEndpoint(kind, profileID, region, project string) string {
+	endpoint := DefaultEndpoint(kind, region, project)
+	if kind != "vertex_ai" || endpoint == "" {
+		return endpoint
+	}
+	switch profileID {
+	case "vertex-anthropic":
+		return strings.TrimSuffix(endpoint, "/publishers/google") + "/publishers/anthropic"
+	case "vertex-openai":
+		return strings.TrimSuffix(endpoint, "/publishers/google") + "/endpoints/openapi"
+	}
+	return endpoint
+}
+
 func DefaultEndpoint(kind, region, project string) string {
 	switch kind {
 	case "openai":
@@ -89,7 +106,7 @@ func (c Config) Validate(policy *egress.Policy) error {
 	if err := c.validateProfileEndpoint(u); err != nil {
 		return err
 	}
-	if c.Hosting() == "azure-v1" || c.Hosting() == "azure-responses-legacy" {
+	if hosting := c.Hosting(); hosting == "azure-v1" || hosting == "azure-responses-legacy" {
 		return nil
 	}
 	switch c.Kind {
@@ -188,7 +205,7 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 	}
 	model = c.Model(model)
 	base := c.profileBase()
-	if !ModelValid(c.Kind, model) {
+	if !c.ValidModel(model) {
 		return "", errors.New("invalid upstream model identifier")
 	}
 	path := "/chat/completions"
@@ -278,6 +295,8 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 			}
 		}
 		base += "/openai/deployments/" + url.PathEscape(model)
+	}
+	if c.traits().apiVersion {
 		path += "?api-version=" + url.QueryEscape(c.APIVersion)
 	}
 	return base + path, nil
@@ -328,7 +347,7 @@ func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
 	}
 	u := base + "/" + path
 	merged := url.Values{}
-	if c.traits().deployment {
+	if c.traits().apiVersion {
 		merged.Set("api-version", c.APIVersion)
 	}
 	for name, values := range query {
@@ -368,7 +387,7 @@ func (c Config) ResourceURL(model, path string, query url.Values) (string, error
 		}
 	}
 	merged := url.Values{}
-	if c.traits().deployment {
+	if c.traits().apiVersion {
 		merged.Set("api-version", c.APIVersion)
 	}
 	for name, values := range query {

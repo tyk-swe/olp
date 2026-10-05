@@ -76,7 +76,7 @@ func Compile(config Config) (*Template, error) {
 	if !ok || !slices.Contains(p.Operations, config.Operation) || codec.Operation.ID != config.Operation {
 		return nil, fail("target_capability", "/operation", "operation_contract", "The profile has no registered unary operation contract.")
 	}
-	if !connectors.ModelValid(config.Provider.Kind, config.Provider.Model(config.Model)) {
+	if !config.Provider.ValidModel(config.Provider.Model(config.Model)) {
 		return nil, fail("resource_affinity", "/model", "serving_binding", "The configured serving model is invalid.")
 	}
 	defaults, origins, err := config.Provider.DefaultsFor(config.Operation, config.Model)

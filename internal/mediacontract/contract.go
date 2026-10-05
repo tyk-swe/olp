@@ -62,7 +62,7 @@ func Compile(c Config) (*Template, error) {
 	if strings.HasPrefix(c.Operation, "video_") && !slices.Contains([]string{"direct-openai", "direct-compatible"}, p.Hosting) {
 		return nil, reject("target_capability", "/profile", "video_hosting", "This video hosting has no qualified native lifecycle contract.")
 	}
-	if !connectors.ModelValid(c.Provider.Kind, c.Provider.Model(c.Model)) {
+	if !c.Provider.ValidModel(c.Provider.Model(c.Model)) {
 		return nil, reject("resource_affinity", "/model", "serving_binding", "The configured media model is invalid.")
 	}
 	defaults, provenance, err := c.Provider.DefaultsFor(c.Operation, c.Model)

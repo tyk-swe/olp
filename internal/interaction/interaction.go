@@ -84,7 +84,7 @@ func Compile(config Config) (*Template, error) {
 	if err := provider.ValidateProfile(); err != nil {
 		return nil, incompatible("target_capability", "/profile", "profile_configuration", "The provider profile composition or defaults are incompatible.")
 	}
-	if !connectors.ModelValid(provider.Kind, provider.Model(config.Model)) {
+	if !provider.ValidModel(provider.Model(config.Model)) {
 		return nil, incompatible("resource_affinity", "/model", "serving_binding", "The configured serving model is invalid.")
 	}
 	profile, _ := provider.Profile()

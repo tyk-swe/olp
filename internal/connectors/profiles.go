@@ -78,6 +78,7 @@ var profileRegistry = []Profile{
 	{ID: "azure-v1-responses", Label: "Azure v1 Responses", Kind: "azure_openai", Dialect: "openai-responses", DialectRevision: "v1", Hosting: "azure-v1"},
 	{ID: "vertex-gemini", Label: "Vertex Google publisher", Kind: "vertex_ai", Dialect: "gemini-generate-content", DialectRevision: "v1", Hosting: "vertex-google"},
 	{ID: "vertex-anthropic", Label: "Vertex Anthropic publisher", Kind: "vertex_ai", Dialect: "anthropic-messages", DialectRevision: "vertex-2023-10-16", Hosting: "vertex-anthropic"},
+	{ID: "vertex-openai", Label: "Vertex OpenAI-compatible Chat Completions", Kind: "vertex_ai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "vertex-openai"},
 	{ID: "bedrock-converse", Label: "Bedrock Converse", Kind: "bedrock", Dialect: "bedrock-converse", Hosting: "bedrock-converse"},
 	{ID: "bedrock-anthropic-invoke", Label: "Bedrock Anthropic Invoke", Kind: "bedrock", Dialect: "anthropic-messages", DialectRevision: "bedrock-2023-05-31", Hosting: "bedrock-anthropic-invoke"},
 	{ID: "bedrock-invoke", Label: "Bedrock model-specific Invoke", Kind: "bedrock", Dialect: "bedrock-invoke", Hosting: "bedrock-invoke"},
@@ -121,6 +122,11 @@ func init() {
 			if p.Kind == "vertex_ai" {
 				p.Authentication = []string{"adc", "service_account"}
 				p.Operations = append(p.Operations, "image_generation")
+			}
+			if p.Hosting == "vertex-openai" {
+				p.Operations = []string{"generation"}
+				p.QuerySettings = []string{}
+				p.Documentation = "https://cloud.google.com/vertex-ai/generative-ai/docs/migrate/openai/overview"
 			}
 			if p.Hosting == "vertex-anthropic" {
 				p.Operations = []string{"generation"}
@@ -546,14 +552,18 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 			return errors.New("legacy Azure Responses requires a dated API version")
 		}
 		return nil
-	case "vertex-google", "vertex-anthropic":
-		publisher := "google"
-		if c.Hosting() == "vertex-anthropic" {
-			publisher = "anthropic"
+	case "vertex-google", "vertex-anthropic", "vertex-openai":
+		want := "/v1/projects/" + c.CloudProject + "/locations/" + c.CloudRegion
+		switch c.Hosting() {
+		case "vertex-google":
+			want += "/publishers/google"
+		case "vertex-anthropic":
+			want += "/publishers/anthropic"
+		default:
+			want += "/endpoints/openapi"
 		}
-		want := "/v1/projects/" + c.CloudProject + "/locations/" + c.CloudRegion + "/publishers/" + publisher
 		if u.Path != want {
-			return errors.New("Vertex endpoint path must match the profile publisher, project and location")
+			return errors.New("Vertex endpoint path must match the profile's publisher or endpoint, project and location")
 		}
 	}
 	return nil

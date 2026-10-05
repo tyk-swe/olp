@@ -100,6 +100,14 @@ Each addition extends the [capability rules](../../internal/connectors/capabilit
 and [certification eligibility](../../internal/providers/kinds.go) explicitly;
 no operation becomes certifiable by default.
 
+#### Settled during implementation
+
+Reviewed on 2026-10-05 against each vendor's own documentation.
+
+| Target | Outcome | Source |
+| --- | --- | --- |
+| Azure AI Foundry models | Served by the `azure-v1-chat` and `azure-v1-responses` profiles at the resource's `services.ai.azure.com` origin. Microsoft deprecated the `/models` Model Inference API in favour of `/openai/v1`, so no `azure-ai-inference` profile ships. | [Model Inference API specification](https://github.com/Azure/azure-rest-api-specs/blob/main/specification/ai/data-plane/ModelInference/main.tsp), [migration guide](https://learn.microsoft.com/en-us/azure/foundry/how-to/model-inference-to-openai-migration) |
+
 ### M2.3 Media, embedding and rerank providers
 
 `certifiable` in [`kinds.go`](../../internal/providers/kinds.go) limits media

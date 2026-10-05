@@ -228,7 +228,7 @@ func (c Config) validateDefaultsAndBindings(p Profile) error {
 		return errors.New("use at most 2000 serving bindings")
 	}
 	for name, binding := range c.Bindings {
-		if !ModelValid(c.Kind, name) || binding.Model != "" && !ModelValid(c.Kind, binding.Model) || binding.Deployment != "" && !ModelValid(c.Kind, binding.Deployment) {
+		if !c.ValidModel(name) || binding.Model != "" && !c.ValidModel(binding.Model) || binding.Deployment != "" && !ModelValid(c.Kind, binding.Deployment) {
 			return errors.New("serving binding model or deployment is invalid")
 		}
 		if binding.Model != "" && binding.Deployment != "" {

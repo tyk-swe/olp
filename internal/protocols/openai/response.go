@@ -74,14 +74,24 @@ func (e *UpstreamError) Redact(redact func(string) string) *UpstreamError {
 }
 
 // ParseErrorBody extracts an OpenAI error envelope, tolerating other shapes.
+// Google APIs, including Vertex's OpenAI-compatible endpoint, may wrap the
+// envelope in a one-element array.
 func ParseErrorBody(body []byte) *UpstreamError {
-	var envelope struct {
+	type envelope struct {
 		Error json.RawMessage `json:"error"`
 	}
-	if json.Unmarshal(body, &envelope) != nil || len(envelope.Error) == 0 {
+	var single envelope
+	if json.Unmarshal(body, &single) != nil {
+		var wrapped []envelope
+		if json.Unmarshal(body, &wrapped) != nil || len(wrapped) != 1 {
+			return nil
+		}
+		single = wrapped[0]
+	}
+	if len(single.Error) == 0 {
 		return nil
 	}
-	return errorObject(envelope.Error)
+	return errorObject(single.Error)
 }
 
 func errorObject(raw json.RawMessage) *UpstreamError {
@@ -93,6 +103,9 @@ func errorObject(raw json.RawMessage) *UpstreamError {
 		Type    string          `json:"type"`
 		Code    json.RawMessage `json:"code"`
 		Message string          `json:"message"`
+		// Status is Google's canonical error name, such as RESOURCE_EXHAUSTED,
+		// which stands in for the type.
+		Status string `json:"status"`
 	}
 	if json.Unmarshal(raw, &detail) != nil {
 		return nil
@@ -100,6 +113,9 @@ func errorObject(raw json.RawMessage) *UpstreamError {
 	code := strings.Trim(string(detail.Code), `"`)
 	if code == "null" {
 		code = ""
+	}
+	if detail.Type == "" {
+		detail.Type = detail.Status
 	}
 	return &UpstreamError{Type: detail.Type, Code: code, Message: detail.Message}
 }

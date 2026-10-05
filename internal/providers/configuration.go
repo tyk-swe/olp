@@ -67,10 +67,7 @@ type Configuration struct {
 // compare equal and every stored document is complete.
 func (c *Configuration) Normalize() {
 	if c.Endpoint == nil || *c.Endpoint == "" {
-		if endpoint := connectors.DefaultEndpoint(c.Kind, value(c.CloudRegion), value(c.CloudProject)); endpoint != "" {
-			if c.ProfileID == "vertex-anthropic" {
-				endpoint = strings.TrimSuffix(endpoint, "/google") + "/anthropic"
-			}
+		if endpoint := connectors.DefaultProfileEndpoint(c.Kind, c.ProfileID, value(c.CloudRegion), value(c.CloudProject)); endpoint != "" {
 			c.Endpoint = new(endpoint)
 		}
 	}
