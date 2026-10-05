@@ -1,0 +1,22 @@
+{
+  "id": "chatcmpl-bd18c4194f544c189578cfcb273a2f74",
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello! It's nice to meet you. Is there something I can help you with, or would you like to chat?"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "model": "meta-llama/Llama-3.3-70B-Instruct",
+  "service_tier": "default",
+  "created": 1717516032,
+  "usage": {
+    "completion_tokens": 26,
+    "prompt_tokens": 13,
+    "total_tokens": 39
+  }
+}

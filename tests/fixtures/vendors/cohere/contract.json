@@ -1,0 +1,60 @@
+{
+  "vendor": "cohere",
+  "documentation_url": "https://docs.cohere.com/docs/compatibility-api",
+  "reviewed_at": "2026-10-05",
+  "notes": "The Compatibility API documents its unsupported chat and embeddings parameters. Rerank uses the native v2 endpoint, whose results restore documents from the request. Stream, usage and error shapes are undocumented.",
+  "endpoints": {
+    "generation": "https://api.cohere.ai/compatibility/v1/chat/completions",
+    "embeddings": "https://api.cohere.ai/compatibility/v1/embeddings",
+    "rerank": "https://api.cohere.ai/v2/rerank"
+  },
+  "unsupported_parameters": [
+    "audio",
+    "dimensions",
+    "input_type",
+    "logit_bias",
+    "metadata",
+    "modalities",
+    "n",
+    "parallel_tool_calls",
+    "prediction",
+    "service_tier",
+    "store",
+    "top_logprobs",
+    "truncate",
+    "truncation",
+    "user"
+  ],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "dialect",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "dialect",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  }
+}

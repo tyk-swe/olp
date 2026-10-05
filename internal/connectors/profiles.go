@@ -512,7 +512,7 @@ func (p Profile) BindIngressSemanticHeader(name, value string) (bool, error) {
 }
 
 func (c Config) validateProfileEndpoint(u *url.URL) error {
-	if (c.ProfileID == "cohere-embed-v2" || c.ProfileID == "cohere-rerank-v2") &&
+	if (c.ProfileID == "cohere-embed-v2" || c.ProfileID == "cohere-rerank-v2" || c.ProfileID == "cohere-v2") &&
 		strings.EqualFold(u.Hostname(), "api.cohere.ai") && strings.TrimRight(u.Path, "/") != "/v2" {
 		return errors.New("Cohere native v2 requires the /v2 endpoint; the compatibility/v1 preset is a separate API")
 	}

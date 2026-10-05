@@ -148,26 +148,69 @@ file; leave them empty to keep the binary defaults.
 ## OpenAI-compatible provider presets
 
 The release-owned wizard catalog resolves a reviewed HTTPS endpoint and
-`api_key` authentication into ordinary `openai_compatible` fields. The `vllm`
-preset is the exception: it starts unauthenticated, with a placeholder endpoint
-to replace with the operator's server. The record stores the vendor ID
-separately from its editable resolved connection values:
+`api_key` authentication into ordinary `openai_compatible` fields. Self-hosted
+runtimes (`vllm`, `ollama`, `lmstudio`, `llamacpp`, `docker-model-runner`) are
+the exception: they start unauthenticated, with a placeholder endpoint to
+replace with the operator's server. Account-scoped platforms (`databricks`,
+`snowflake-cortex`, `cloudflare-workers-ai`) also start at a placeholder whose
+host or path names the operator's account. The record stores the vendor ID
+separately from its editable resolved connection values.
 
-| ID | Provider | Endpoint |
-| --- | --- | --- |
-| `groq` | Groq | `https://api.groq.com/openai/v1` |
-| `mistral` | Mistral | `https://api.mistral.ai/v1` |
-| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` |
-| `together` | Together AI | `https://api.together.xyz/v1` |
-| `vllm` | vLLM | `https://vllm.example.internal/v1` (placeholder) |
-| `deepseek` | DeepSeek | `https://api.deepseek.com/v1` |
-| `fireworks` | Fireworks | `https://api.fireworks.ai/inference/v1` |
-| `deepinfra` | DeepInfra | `https://api.deepinfra.com/v1/openai` |
-| `huggingface` | Hugging Face | `https://router.huggingface.co/v1` |
-| `perplexity` | Perplexity | `https://api.perplexity.ai` |
-| `cohere` | Cohere | `https://api.cohere.ai/compatibility/v1` |
-| `cohere-native-v2` | Cohere native v2 | `https://api.cohere.ai/v2` |
-| `voyage` | Voyage AI | `https://api.voyageai.com/v1` |
+Each preset is a reviewed vendor contract in
+[`internal/vendors`](../internal/vendors/catalog.go): its operations, generation
+dialects, the request fields its documentation refuses or renames, and the
+documentation it was reviewed against. Its evidence, under
+[`tests/fixtures/vendors`](../tests/fixtures/vendors), pins the documented
+endpoints, refused parameters, usage shape, stream termination and error
+envelope, and states for each fixture whether it is a documented example or
+follows the documented schema or the OpenAI dialect where the vendor's
+documentation is silent. A preset whose vendor speaks Chat Completions exactly
+selects the `compatible-chat` profile, so it can serve strict routes; choose
+**Automatic** to use parameter defaults instead.
+
+| ID | Provider | Endpoint | Profile |
+| --- | --- | --- | --- |
+| `groq` | Groq | `https://api.groq.com/openai/v1` | `compatible-chat` |
+| `mistral` | Mistral | `https://api.mistral.ai/v1` |  |
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | `compatible-chat` |
+| `together` | Together AI | `https://api.together.ai/v1` |  |
+| `vllm` | vLLM | `https://vllm.example.internal/v1` (placeholder) |  |
+| `deepseek` | DeepSeek | `https://api.deepseek.com` |  |
+| `fireworks` | Fireworks | `https://api.fireworks.ai/inference/v1` | `compatible-chat` |
+| `deepinfra` | DeepInfra | `https://api.deepinfra.com/v1/openai` |  |
+| `huggingface` | Hugging Face | `https://router.huggingface.co/v1` |  |
+| `cohere` | Cohere | `https://api.cohere.ai/compatibility/v1` |  |
+| `cohere-native-v2` | Cohere native v2 | `https://api.cohere.ai/v2` | `cohere-v2` |
+| `voyage` | Voyage AI | `https://api.voyageai.com/v1` |  |
+| `xai` | xAI | `https://api.x.ai/v1` | `compatible-chat` |
+| `cerebras` | Cerebras | `https://api.cerebras.ai/v1` | `compatible-chat` |
+| `sambanova` | SambaNova | `https://api.sambanova.ai/v1` | `compatible-chat` |
+| `nebius` | Nebius Token Factory | `https://api.tokenfactory.nebius.com/v1` | `compatible-chat` |
+| `novita` | Novita AI | `https://api.novita.ai/openai/v1` |  |
+| `nvidia-nim` | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` |  |
+| `featherless` | Featherless | `https://api.featherless.ai/v1` |  |
+| `baseten` | Baseten | `https://inference.baseten.co/v1` |  |
+| `moonshot` | Moonshot AI | `https://api.moonshot.ai/v1` | `compatible-chat` |
+| `moonshot-cn` | Moonshot AI (China) | `https://api.moonshot.cn/v1` | `compatible-chat` |
+| `dashscope` | Alibaba Cloud Model Studio | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `compatible-chat` |
+| `dashscope-cn` | Alibaba Cloud Model Studio (China) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `compatible-chat` |
+| `zai` | Z.ai | `https://api.z.ai/api/paas/v4` |  |
+| `zhipu` | Zhipu BigModel | `https://open.bigmodel.cn/api/paas/v4` |  |
+| `minimax` | MiniMax | `https://api.minimax.io/v1` | `compatible-chat` |
+| `minimax-cn` | MiniMax (China) | `https://api.minimax.cn/v1` | `compatible-chat` |
+| `volcengine-ark` | Volcengine Ark | `https://ark.cn-beijing.volces.com/api/v3` | `compatible-chat` |
+| `byteplus-modelark` | BytePlus ModelArk | `https://ark.ap-southeast.bytepluses.com/api/v3` | `compatible-chat` |
+| `scaleway` | Scaleway Generative APIs | `https://api.scaleway.ai/v1` | `compatible-chat` |
+| `ovhcloud` | OVHcloud AI Endpoints | `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1` | `compatible-chat` |
+| `nscale` | Nscale | `https://inference.api.nscale.com/v1` | `compatible-chat` |
+| `databricks` | Databricks | `https://your-workspace.cloud.databricks.com/ai-gateway/mlflow/v1` (placeholder) |  |
+| `snowflake-cortex` | Snowflake Cortex | `https://your-account.snowflakecomputing.com/api/v2/cortex/v1` (placeholder) |  |
+| `cloudflare-workers-ai` | Cloudflare Workers AI | `https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/v1` (placeholder) |  |
+| `vercel-ai-gateway` | Vercel AI Gateway | `https://ai-gateway.vercel.sh/v1` |  |
+| `ollama` | Ollama | `https://ollama.example.internal/v1` (placeholder) |  |
+| `lmstudio` | LM Studio | `https://lmstudio.example.internal/v1` (placeholder) |  |
+| `llamacpp` | llama.cpp server | `https://llamacpp.example.internal/v1` (placeholder) |  |
+| `docker-model-runner` | Docker Model Runner | `https://model-runner.example.internal/engines/v1` (placeholder) |  |
 
 A preset is not provider or model certification. Creation and edits still run
 HTTPS, public-egress, SSRF, and reachability checks unless the host or address

@@ -1,0 +1,39 @@
+{
+  "vendor": "nvidia-nim",
+  "documentation_url": "https://docs.api.nvidia.com/nim/reference/create_chat_completion_v1_chat_completions_post",
+  "reviewed_at": "2026-10-05",
+  "notes": "Errors are RFC 9457 problem details. GET /v1/models answered an OpenAI-shaped list when observed; the documentation does not describe it. Only max_tokens is documented. Rerank is served from ai.api.nvidia.com in another shape.",
+  "endpoints": {
+    "generation": "https://integrate.api.nvidia.com/v1/chat/completions",
+    "embeddings": "https://integrate.api.nvidia.com/v1/embeddings"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 12,
+        "total_tokens": 21
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 422,
+    "envelope": null,
+    "class": "upstream_client"
+  }
+}

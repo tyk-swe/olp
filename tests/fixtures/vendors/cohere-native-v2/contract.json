@@ -1,0 +1,23 @@
+{
+  "vendor": "cohere-native-v2",
+  "documentation_url": "https://docs.cohere.com/reference/embed",
+  "reviewed_at": "2026-10-05",
+  "notes": "Native v2 embed and rerank, served through the cohere-v2 profile.",
+  "endpoints": {
+    "embeddings": "https://api.cohere.ai/v2/embed",
+    "rerank": "https://api.cohere.ai/v2/rerank"
+  },
+  "unsupported_parameters": [],
+  "responses": {},
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  }
+}

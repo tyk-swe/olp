@@ -9490,5 +9490,141 @@
     "query_settings": [],
     "documentation": "",
     "strict": true
+  },
+  {
+    "operation_dialects": {
+      "embeddings": "cohere-embed-v2",
+      "rerank": "cohere-rerank-v2"
+    },
+    "default_schemas": {
+      "embeddings": {
+        "additionalProperties": false,
+        "properties": {
+          "dialect": {
+            "const": "cohere-embed-v2"
+          },
+          "native_options": {
+            "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
+            "type": "object"
+          },
+          "values": {
+            "additionalProperties": false,
+            "properties": {
+              "embedding_types": {
+                "items": {
+                  "enum": [
+                    "float",
+                    "int8",
+                    "uint8",
+                    "binary",
+                    "ubinary",
+                    "base64"
+                  ],
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "input_type": {
+                "enum": [
+                  "search_document",
+                  "search_query",
+                  "classification",
+                  "clustering",
+                  "image"
+                ],
+                "type": "string"
+              },
+              "max_tokens": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "output_dimension": {
+                "enum": [
+                  256,
+                  512,
+                  1024,
+                  1536
+                ],
+                "minimum": 1,
+                "type": "integer"
+              },
+              "priority": {
+                "maximum": 999,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "truncate": {
+                "enum": [
+                  "NONE",
+                  "START",
+                  "END"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "dialect"
+        ],
+        "type": "object"
+      },
+      "rerank": {
+        "additionalProperties": false,
+        "properties": {
+          "dialect": {
+            "const": "cohere-rerank-v2"
+          },
+          "native_options": {
+            "description": "Operation payload extensions; routing, credentials and resource references are reserved.",
+            "type": "object"
+          },
+          "values": {
+            "additionalProperties": false,
+            "properties": {
+              "max_tokens_per_doc": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "priority": {
+                "maximum": 999,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "top_n": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "dialect"
+        ],
+        "type": "object"
+      }
+    },
+    "id": "cohere-v2",
+    "revision": "1",
+    "label": "Cohere native v2",
+    "kind": "openai_compatible",
+    "dialect": "cohere-embed-v2",
+    "dialect_revision": "v2",
+    "hosting": "direct-compatible",
+    "authentication": [
+      "api_key"
+    ],
+    "transport": "http",
+    "operations": [
+      "embeddings",
+      "rerank"
+    ],
+    "semantic_headers": [],
+    "query_settings": [],
+    "documentation": "https://docs.cohere.com/reference/embed",
+    "strict": true
   }
 ]

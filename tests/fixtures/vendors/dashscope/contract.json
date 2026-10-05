@@ -1,0 +1,44 @@
+{
+  "vendor": "dashscope",
+  "documentation_url": "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions",
+  "reviewed_at": "2026-10-05",
+  "notes": "Keys are bound to a region. Model listing is undocumented, so models are declared. Workspace-specific hosts are the documented recommendation and replace this endpoint.",
+  "endpoints": {
+    "generation": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "embeddings": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/embeddings"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 3019,
+        "output_tokens": 104,
+        "total_tokens": 3123,
+        "cached_input_tokens": 2048
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 401,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "invalid_api_key",
+      "message": "Incorrect API key provided. "
+    },
+    "class": "credential"
+  }
+}

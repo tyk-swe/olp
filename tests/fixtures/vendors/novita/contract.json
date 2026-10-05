@@ -1,0 +1,43 @@
+{
+  "vendor": "novita",
+  "documentation_url": "https://docs.novita.ai/api-reference/model-apis-llm-create-chat-completion",
+  "reviewed_at": "2026-10-05",
+  "notes": "The example is the documented batch-inference output. Only max_tokens is documented. The error body is undocumented.",
+  "endpoints": {
+    "generation": "https://api.novita.ai/openai/v1/chat/completions",
+    "embeddings": "https://api.novita.ai/openai/v1/embeddings"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 5,
+        "output_tokens": 13,
+        "total_tokens": 18
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  }
+}

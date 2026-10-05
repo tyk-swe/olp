@@ -1,0 +1,21 @@
+{
+  "id": "29e1432c-edfb-44a4-b531-c23c600abfae",
+  "object": "chat.completion",
+  "created": 1754902266,
+  "model": "deepseek-test",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello! How can I assist you today?"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 5,
+    "completion_tokens": 13,
+    "total_tokens": 18
+  }
+}

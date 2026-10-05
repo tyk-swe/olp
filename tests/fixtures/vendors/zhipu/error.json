@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "1001",
+    "message": "Header 中未收到 Authentication 参数，无法进行身份验证"
+  }
+}

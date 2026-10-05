@@ -1,0 +1,43 @@
+{
+  "vendor": "cloudflare-workers-ai",
+  "documentation_url": "https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/",
+  "reviewed_at": "2026-10-05",
+  "notes": "The account ID is the operator's. Model ids use the @cf/ form. Responses serves gpt-oss without streaming only and is not reviewed. Parameter support, usage and error bodies are undocumented.",
+  "endpoints": {
+    "generation": "https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/v1/chat/completions",
+    "embeddings": "https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/v1/embeddings"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "dialect",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "dialect",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  }
+}

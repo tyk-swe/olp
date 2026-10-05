@@ -6,10 +6,10 @@ route can select a provider using the same protocol or, when the route is
 supported protocol. The tables below show supported combinations; translation
 limits follow. See [concepts](concepts.md) for routes and certification.
 
-Compatible-vendor profiles can narrow the general connector matrix. See
-[provider routing](provider-routing.md) for the qualified DeepSeek, Fireworks,
-DeepInfra, Hugging Face, Perplexity, Cohere, and Voyage contracts and OLP
-routing preferences. Custom native endpoints require live certification; they do
+Reviewed vendor contracts narrow the general connector matrix to the operations
+each vendor documents. See [provider routing](provider-routing.md#reviewed-vendor-contracts)
+for how contracts shape requests, and the [preset table](configuration.md#openai-compatible-provider-presets)
+for every reviewed vendor. Custom native endpoints require live certification; they do
 not inherit the official OpenAI media discovery contract.
 
 The [gateway](gateway.md) applies shared admission and response bounds to these

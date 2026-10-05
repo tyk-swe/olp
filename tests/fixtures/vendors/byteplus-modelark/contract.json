@@ -1,0 +1,42 @@
+{
+  "vendor": "byteplus-modelark",
+  "documentation_url": "https://docs.byteplus.com/en/docs/ModelArk/1494384",
+  "reviewed_at": "2026-10-05",
+  "notes": "Southeast Asia region; the eu-west region has its own host and keys. model is a model ID or an ep- endpoint ID.",
+  "endpoints": {
+    "generation": "https://ark.ap-southeast.bytepluses.com/api/v3/chat/completions"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "vendor": "together",
+  "documentation_url": "https://docs.together.ai/docs/openai-api-compatibility",
+  "reviewed_at": "2026-10-05",
+  "notes": "The host moved from api.together.xyz to api.together.ai. GET /v1/models answers a bare array, so models are declared. service_tier, store, metadata and prediction are accepted but ignored, and logit_bias is unsupported on most models; all are refused. Only max_tokens is documented.",
+  "endpoints": {
+    "generation": "https://api.together.ai/v1/chat/completions",
+    "embeddings": "https://api.together.ai/v1/embeddings"
+  },
+  "unsupported_parameters": [
+    "logit_bias",
+    "metadata",
+    "prediction",
+    "service_tier",
+    "store"
+  ],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "schema",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "Invalid request"
+    },
+    "class": "upstream_client"
+  }
+}

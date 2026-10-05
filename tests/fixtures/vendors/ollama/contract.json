@@ -1,0 +1,50 @@
+{
+  "vendor": "ollama",
+  "documentation_url": "https://docs.ollama.com/api/openai-compatibility",
+  "reviewed_at": "2026-10-05",
+  "notes": "Self-hosted; the server listens on port 11434 by default and needs no key. Logprobs are documented as unsupported. Only max_tokens is documented. Usage arrives in streams with stream_options.include_usage.",
+  "endpoints": {
+    "generation": "https://ollama.example.internal/v1/chat/completions",
+    "embeddings": "https://ollama.example.internal/v1/embeddings"
+  },
+  "unsupported_parameters": [
+    "logit_bias",
+    "logprobs",
+    "n",
+    "tool_choice",
+    "top_logprobs",
+    "user"
+  ],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "dialect",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "dialect",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  }
+}

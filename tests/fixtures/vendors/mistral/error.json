@@ -1,0 +1,7 @@
+{
+  "object": "error",
+  "message": "A human-readable description of the error.",
+  "type": "invalid_request_error",
+  "param": "model",
+  "code": "unknown_model"
+}

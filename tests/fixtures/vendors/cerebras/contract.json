@@ -1,0 +1,45 @@
+{
+  "vendor": "cerebras",
+  "documentation_url": "https://inference-docs.cerebras.ai/resources/openai",
+  "reviewed_at": "2026-10-05",
+  "notes": "service_tier is unavailable on shared inference and prediction is endpoint-limited; n must be 1. The stream terminal and error body are undocumented.",
+  "endpoints": {
+    "generation": "https://api.cerebras.ai/v1/chat/completions"
+  },
+  "unsupported_parameters": [
+    "prediction",
+    "service_tier"
+  ],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 69,
+        "output_tokens": 45,
+        "total_tokens": 114
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "dialect",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  }
+}

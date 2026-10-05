@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "unknown_url",
+    "message": "Unknown request URL: GET /doc/. Please check the URL for typos.",
+    "param": null,
+    "type": "invalid_request_error"
+  }
+}

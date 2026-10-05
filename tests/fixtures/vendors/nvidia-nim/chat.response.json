@@ -1,0 +1,22 @@
+{
+  "id": "id-123",
+  "object": "chat.completion",
+  "created": 1677652288,
+  "model": "meta/muse-glimmer-30b",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "17 * 23 = 391.",
+        "reasoning_content": "17 * 20 = 340, 17 * 3 = 51, 340 + 51 = 391."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 9,
+    "completion_tokens": 12,
+    "total_tokens": 21
+  }
+}

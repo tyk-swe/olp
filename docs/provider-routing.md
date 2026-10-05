@@ -12,8 +12,9 @@ authentication mechanism.
    endpoint, authentication, and optional seed model. Vendor identity remains
    in `configuration.options.vendor_id` when an endpoint is customized.
 2. Test the connection, discover models or enter exact upstream identifiers,
-   and select the models to enable. Perplexity, Cohere, and Voyage use an
-   explicit model for their connection probe.
+   and select the models to enable. A vendor that publishes no OpenAI-shaped
+   model list, such as Cohere, Voyage, Together or an account-scoped platform,
+   uses an explicit model for its connection probe.
 3. Use **Validate models in bulk**. Keep configured capabilities or choose a
    generation, embedding, or token-count contract. The console reports
    failures per model, can stop after the current model, and can retry only
@@ -35,22 +36,29 @@ authentication mechanism.
 
 ![Reviewed models grouped under one published route name](assets/screenshots/provider-model-comparison.png)
 
-`GET /api/v1/provider-vendors` lists the vendor catalog. DeepSeek, Fireworks,
-DeepInfra, Hugging Face, Perplexity, and Cohere profiles support generation;
-Cohere and Voyage support embeddings and rerank. Each model and credential still
-needs certification for the requested operation.
+### Reviewed vendor contracts
 
-The generation profiles use Chat Completions upstream, including lossless
-translation of supported Responses requests. OLP's Hugging Face profile uses
-Chat Completions upstream; this describes the gateway profile, not every API
-available from
-[Hugging Face](https://huggingface.co/docs/inference-providers/en/index). Voyage
-maps dimensions to `output_dimension`, converts float encoding to its native
-default, disables implicit truncation, and normalizes usage. See the
-[Voyage contract](https://docs.voyageai.com/reference/embeddings-api). Cohere's
-documented unsupported parameters are rejected before selection; its compatible
-embeddings endpoint does not support dimensions. See
-[Cohere compatibility](https://docs.cohere.com/docs/compatibility-api).
+`GET /api/v1/provider-vendors` lists the vendor catalog. Each vendor is a
+reviewed contract in [`internal/vendors`](../internal/vendors/catalog.go): the
+operations its documentation lists, the generation dialects it speaks, and the
+request fields it refuses or spells differently. A vendor is admitted only the
+operations its contract lists, so a preset never claims media, moderation or
+token counting its documentation does not describe. Each model and credential
+still needs certification for the requested operation.
+
+A vendor that documents only Chat Completions is sent Chat Completions,
+including lossless translation of supported Responses requests, and a profile
+in another generation dialect is refused for it. Fields a vendor documents as
+unsupported or ignored are refused before selection rather than silently lost:
+Cohere's compatibility API, for example, refuses `n`, `dimensions` and its
+other documented exceptions. Renamed fields are rewritten: vendors that
+document only `max_tokens` receive the OpenAI `max_completion_tokens` under
+that name, Snowflake Cortex receives the reverse, Mistral receives `seed` as
+`random_seed`, and Voyage maps dimensions to `output_dimension` and float
+encoding to its native default. A request that sets both names of a renamed
+field is refused. See the [Voyage contract](https://docs.voyageai.com/reference/embeddings-api)
+and [Cohere compatibility](https://docs.cohere.com/docs/compatibility-api).
+
 Paid-provider qualification remains an operator activity scoped to the actual
 account, model, region, and credential.
 

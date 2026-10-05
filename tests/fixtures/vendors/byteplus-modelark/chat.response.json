@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-evidence",
+  "object": "chat.completion",
+  "created": 1759622400,
+  "model": "model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello!"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 9,
+    "completion_tokens": 3,
+    "total_tokens": 12
+  }
+}

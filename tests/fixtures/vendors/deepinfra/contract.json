@@ -1,0 +1,43 @@
+{
+  "vendor": "deepinfra",
+  "documentation_url": "https://docs.deepinfra.com/chat/overview",
+  "reviewed_at": "2026-10-05",
+  "notes": "Only max_tokens is documented. Usage arrives in the last stream chunk by default.",
+  "endpoints": {
+    "generation": "https://api.deepinfra.com/v1/openai/chat/completions",
+    "embeddings": "https://api.deepinfra.com/v1/openai/embeddings"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 15,
+        "output_tokens": 16,
+        "total_tokens": 31
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 429,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "engine_overloaded",
+      "message": "Model busy, retry later"
+    },
+    "class": "rate_limit"
+  }
+}

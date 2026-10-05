@@ -1,0 +1,43 @@
+{
+  "vendor": "ovhcloud",
+  "documentation_url": "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-capabilities",
+  "reviewed_at": "2026-10-05",
+  "notes": "Anonymous access is allowed at a lower rate limit. Model ids are case-sensitive.",
+  "endpoints": {
+    "generation": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions",
+    "embeddings": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/embeddings"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 19,
+        "output_tokens": 9,
+        "total_tokens": 28
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "observed",
+    "status": 404,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "unknown_url",
+      "message": "Unknown request URL: GET /doc/. Please check the URL for typos."
+    },
+    "class": "upstream_client"
+  }
+}

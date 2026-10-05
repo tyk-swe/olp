@@ -1,0 +1,9 @@
+{
+  "error": {
+    "message": "Decimal above maximum value. Expected a value between 0 and 1, but got 100 instead.",
+    "type": "invalid_request_error",
+    "param": "top_p",
+    "code": "decimal_above_max_value"
+  },
+  "request_id": "2a8b3c4d-1234-5678-abcd-ef0123456789"
+}

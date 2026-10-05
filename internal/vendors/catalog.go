@@ -21,10 +21,42 @@ var (
 	// endpoint no contract describes.
 	compatibleOperations = slices.Concat([]string{"generation", "token_count", "embeddings", "moderation"}, mediaOperations)
 
-	// chatTokenLimit renames the OpenAI token limit for vendors that document
-	// only the older Chat Completions spelling.
-	chatTokenLimit = map[string]RequestShape{"generation": {Rewrites: []Rewrite{{From: "max_completion_tokens", To: "max_tokens"}}}}
+	// maxTokens renames the OpenAI token limit for vendors that document only
+	// the older Chat Completions spelling.
+	maxTokens      = Rewrite{From: "max_completion_tokens", To: "max_tokens"}
+	chatTokenLimit = map[string]RequestShape{"generation": {Rewrites: []Rewrite{maxTokens}}}
+
+	// exactChat is the profile of a preset whose vendor speaks Chat
+	// Completions exactly, so it can serve strict routes.
+	exactChat = &ProfileRef{ID: "compatible-chat", Revision: "1"}
 )
+
+// compatiblePreset is an OpenAI-compatible vendor onboarding offers with an
+// API key at its reviewed endpoint.
+func compatiblePreset(id, name, maintainer, description, endpoint string, docs Link, c Contract, profile *ProfileRef) Contract {
+	c.ID, c.Name, c.Maintainer, c.Description, c.Connector, c.Endpoint, c.Documentation = id, name, maintainer, description, "openai_compatible", endpoint, docs
+	if c.Parameters == nil {
+		c.Parameters = GenerationParameters
+	}
+	c.Preset = &Preset{AuthMode: "api_key", Profile: profile}
+	return c
+}
+
+// accountPreset is a vendor whose host or path names the operator's account,
+// so its endpoint is a placeholder.
+func accountPreset(id, name, description, endpoint string, docs Link, c Contract) Contract {
+	c = compatiblePreset(id, name, name, description, endpoint, docs, c, nil)
+	c.Preset.Placeholder = true
+	return c
+}
+
+// selfHostedPreset is a runtime the operator runs: unauthenticated at a
+// placeholder address until the operator says otherwise.
+func selfHostedPreset(id, name, description, endpoint string, docs Link, c Contract) Contract {
+	c = compatiblePreset(id, name, name, description, endpoint, docs, c, nil)
+	c.Preset.AuthMode, c.Preset.Placeholder = "none", true
+	return c
+}
 
 // contracts is the reviewed vendor catalogue. Kind defaults come first, then
 // each connector kind's presets in onboarding order.
@@ -37,18 +69,19 @@ var contracts = []Contract{
 	{ID: "amazon-bedrock", Name: "Amazon Bedrock", Maintainer: "Amazon Web Services", Connector: "bedrock", KindDefault: true, Documentation: Link{"Amazon Bedrock", "https://docs.aws.amazon.com/bedrock"}, Discovery: true, Operations: []string{"generation", "token_count", "embeddings", "bedrock_invoke", "image_generation"}, Dialects: []string{"bedrock-converse", "anthropic-messages"}, Parameters: GenerationParameters},
 	{ID: "azure", Name: "Azure OpenAI", Maintainer: "Microsoft", Connector: "azure_openai", KindDefault: true, Documentation: Link{"Azure OpenAI", "https://learn.microsoft.com/azure/ai-services/openai"}, Discovery: true, Operations: openAIOperations, Dialects: openAIDialects, Parameters: GenerationParameters},
 
-	// OpenAI-compatible presets.
-	{ID: "groq", Name: "Groq", Maintainer: "Groq", Description: "Groq OpenAI-compatible endpoint.", Connector: "openai_compatible", Endpoint: "https://api.groq.com/openai/v1", Documentation: Link{"Groq OpenAI compatibility", "https://console.groq.com/docs/openai"}, Discovery: true, Operations: []string{"generation"}, Dialects: openAIDialects, Parameters: GenerationParameters, Preset: &Preset{AuthMode: "api_key"}},
-	{ID: "mistral", Name: "Mistral", Maintainer: "Mistral AI", Description: "Mistral La Plateforme.", Connector: "openai_compatible", Endpoint: "https://api.mistral.ai/v1", Documentation: Link{"Mistral API", "https://docs.mistral.ai/api/"}, Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects, Parameters: GenerationParameters, Preset: &Preset{AuthMode: "api_key"}},
-	{ID: "openrouter", Name: "OpenRouter", Maintainer: "OpenRouter", Description: "OpenRouter unified API.", Connector: "openai_compatible", Endpoint: "https://openrouter.ai/api/v1", Documentation: Link{"OpenRouter API", "https://openrouter.ai/docs"}, Discovery: true, Operations: []string{"generation"}, Dialects: openAIDialects, Parameters: GenerationParameters, Preset: &Preset{AuthMode: "api_key"}},
-	{ID: "together", Name: "Together AI", Maintainer: "Together AI", Description: "Together AI inference.", Connector: "openai_compatible", Endpoint: "https://api.together.xyz/v1", Documentation: Link{"Together OpenAI compatibility", "https://docs.together.ai/docs/openai-api-compatibility"}, Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects, Parameters: GenerationParameters, Preset: &Preset{AuthMode: "api_key"}},
-	{ID: "vllm", Name: "vLLM", Maintainer: "vLLM", Description: "Self-hosted vLLM OpenAI server.", Connector: "openai_compatible", Endpoint: "https://vllm.example.internal/v1", Documentation: Link{"vLLM OpenAI server", "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html"}, Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects, Parameters: GenerationParameters, Preset: &Preset{AuthMode: "none", Placeholder: true}},
-	{ID: "deepseek", Name: "DeepSeek", Maintainer: "DeepSeek", Description: "DeepSeek compatible API.", Connector: "openai_compatible", Endpoint: "https://api.deepseek.com/v1", Documentation: Link{"DeepSeek API", "https://api-docs.deepseek.com"}, Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect, Parameters: GenerationParameters, Requests: chatTokenLimit, Preset: &Preset{AuthMode: "api_key"}},
-	{ID: "fireworks", Name: "Fireworks", Maintainer: "Fireworks", Description: "Fireworks compatible API.", Connector: "openai_compatible", Endpoint: "https://api.fireworks.ai/inference/v1", Documentation: Link{"Fireworks API", "https://docs.fireworks.ai"}, Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect, Parameters: GenerationParameters, Requests: chatTokenLimit, Preset: &Preset{AuthMode: "api_key"}},
-	{ID: "deepinfra", Name: "DeepInfra", Maintainer: "DeepInfra", Description: "DeepInfra compatible API.", Connector: "openai_compatible", Endpoint: "https://api.deepinfra.com/v1/openai", Documentation: Link{"DeepInfra API", "https://deepinfra.com/docs"}, Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect, Parameters: GenerationParameters, Requests: chatTokenLimit, Preset: &Preset{AuthMode: "api_key"}},
-	{ID: "huggingface", Name: "Hugging Face", Maintainer: "Hugging Face", Description: "Hugging Face compatible API.", Connector: "openai_compatible", Endpoint: "https://router.huggingface.co/v1", Documentation: Link{"Hugging Face API", "https://huggingface.co/docs/inference-providers"}, Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect, Parameters: GenerationParameters, Requests: chatTokenLimit, Preset: &Preset{AuthMode: "api_key"}},
-	{ID: "perplexity", Name: "Perplexity", Maintainer: "Perplexity", Description: "Perplexity compatible API.", Connector: "openai_compatible", Endpoint: "https://api.perplexity.ai", Documentation: Link{"Perplexity API", "https://docs.perplexity.ai"}, Operations: []string{"generation"}, Dialects: chatDialect, Parameters: GenerationParameters, Requests: chatTokenLimit, Preset: &Preset{AuthMode: "api_key"}},
-	{ID: "cohere", Name: "Cohere", Maintainer: "Cohere", Description: "Cohere compatible API.", Connector: "openai_compatible", Endpoint: "https://api.cohere.ai/compatibility/v1", Documentation: Link{"Cohere API", "https://docs.cohere.com"},
+	// OpenAI-compatible presets, each reviewed against the documentation it
+	// links on the date its evidence in tests/fixtures/vendors records.
+	compatiblePreset("groq", "Groq", "Groq", "Groq OpenAI-compatible endpoint.", "https://api.groq.com/openai/v1", Link{"Groq OpenAI compatibility", "https://console.groq.com/docs/openai"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: openAIDialects, Unsupported: []string{"logit_bias", "logprobs", "top_logprobs"}}, exactChat),
+	compatiblePreset("mistral", "Mistral", "Mistral AI", "Mistral La Plateforme.", "https://api.mistral.ai/v1", Link{"Mistral chat API", "https://docs.mistral.ai/api/endpoint/chat"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: chatDialect,
+		Requests: map[string]RequestShape{"generation": {Rewrites: []Rewrite{maxTokens, {From: "seed", To: "random_seed"}}}}}, nil),
+	compatiblePreset("openrouter", "OpenRouter", "OpenRouter", "OpenRouter unified API.", "https://openrouter.ai/api/v1", Link{"OpenRouter API reference", "https://openrouter.ai/docs/api/reference/overview"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects}, exactChat),
+	compatiblePreset("together", "Together AI", "Together AI", "Together AI inference.", "https://api.together.ai/v1", Link{"Together OpenAI compatibility", "https://docs.together.ai/docs/openai-api-compatibility"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Unsupported: []string{"logit_bias", "metadata", "prediction", "service_tier", "store"}, Requests: chatTokenLimit}, nil),
+	selfHostedPreset("vllm", "vLLM", "Self-hosted vLLM OpenAI server.", "https://vllm.example.internal/v1", Link{"vLLM OpenAI-compatible server", "https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects, Unsupported: []string{"user"}}),
+	compatiblePreset("deepseek", "DeepSeek", "DeepSeek", "DeepSeek compatible API.", "https://api.deepseek.com", Link{"DeepSeek chat completion API", "https://api-docs.deepseek.com/api/create-chat-completion"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect, Unsupported: []string{"frequency_penalty", "presence_penalty"}, Requests: chatTokenLimit}, nil),
+	compatiblePreset("fireworks", "Fireworks", "Fireworks", "Fireworks compatible API.", "https://api.fireworks.ai/inference/v1", Link{"Fireworks OpenAI compatibility", "https://docs.fireworks.ai/tools-sdks/openai-compatibility"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: chatDialect}, exactChat),
+	compatiblePreset("deepinfra", "DeepInfra", "DeepInfra", "DeepInfra compatible API.", "https://api.deepinfra.com/v1/openai", Link{"DeepInfra chat API", "https://docs.deepinfra.com/chat/overview"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Requests: chatTokenLimit}, nil),
+	compatiblePreset("huggingface", "Hugging Face", "Hugging Face", "Hugging Face Inference Providers.", "https://router.huggingface.co/v1", Link{"Hugging Face chat completion", "https://huggingface.co/docs/inference-providers/tasks/chat-completion"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect, Requests: chatTokenLimit}, nil),
+	compatiblePreset("cohere", "Cohere", "Cohere", "Cohere compatible API.", "https://api.cohere.ai/compatibility/v1", Link{"Cohere Compatibility API", "https://docs.cohere.com/docs/compatibility-api"}, Contract{
 		Operations: []string{"generation", "embeddings", "rerank"}, Dialects: chatDialect,
 		Parameters:  []string{"temperature", "max_output_tokens", "top_p", "stop", "seed", "tools", "response_format", "encoding_format"},
 		Unsupported: []string{"n", "parallel_tool_calls", "dimensions", "user", "store", "metadata", "logit_bias", "top_logprobs", "modalities", "prediction", "audio", "service_tier", "input_type", "truncate"},
@@ -58,20 +91,61 @@ var contracts = []Contract{
 			// echoes documents; results restore them from the request.
 			"rerank": {Unsupported: []string{"truncation"}, Drop: []string{"return_documents"}},
 		},
-		OperationEndpoints: map[string]string{"rerank": "https://api.cohere.ai/v2/rerank"},
-		Preset:             &Preset{AuthMode: "api_key"}},
-	{ID: "cohere-native-v2", Name: "Cohere native v2", Maintainer: "Cohere", Description: "Cohere native v2 compatible API.", Connector: "openai_compatible", Endpoint: "https://api.cohere.ai/v2", Documentation: Link{"Cohere native v2 API", "https://docs.cohere.com/reference/embed"},
+		OperationEndpoints: map[string]string{"rerank": "https://api.cohere.ai/v2/rerank"}}, nil),
+	compatiblePreset("cohere-native-v2", "Cohere native v2", "Cohere", "Cohere native v2 compatible API.", "https://api.cohere.ai/v2", Link{"Cohere native v2 API", "https://docs.cohere.com/reference/embed"}, Contract{
 		Operations: []string{"embeddings", "rerank"}, ProbeOperation: "embeddings",
-		Parameters: []string{"input_type", "texts", "images", "inputs", "embedding_types", "output_dimension", "truncate", "max_tokens", "top_n", "max_tokens_per_doc", "priority"},
-		Preset:     &Preset{AuthMode: "api_key"}},
-	{ID: "voyage", Name: "Voyage AI", Maintainer: "Voyage AI", Description: "Voyage AI compatible API.", Connector: "openai_compatible", Endpoint: "https://api.voyageai.com/v1", Documentation: Link{"Voyage AI API", "https://docs.voyageai.com"},
+		Parameters: []string{"input_type", "texts", "images", "inputs", "embedding_types", "output_dimension", "truncate", "max_tokens", "top_n", "max_tokens_per_doc", "priority"}}, &ProfileRef{ID: "cohere-v2", Revision: "1"}),
+	compatiblePreset("voyage", "Voyage AI", "Voyage AI", "Voyage AI compatible API.", "https://api.voyageai.com/v1", Link{"Voyage AI embeddings API", "https://docs.voyageai.com/reference/embeddings-api"}, Contract{
 		Operations: []string{"embeddings", "rerank"}, ProbeOperation: "embeddings",
 		Parameters: []string{"dimensions", "input_type", "truncation", "output_dtype", "encoding_format"},
 		Requests: map[string]RequestShape{
 			"embeddings": {TextInput: true, Rewrites: []Rewrite{{From: "dimensions", To: "output_dimension"}, {From: "encoding_format", To: "output_dtype", Value: json.RawMessage(`"float"`)}}},
 			"rerank":     {Rewrites: []Rewrite{{From: "top_n", To: "top_k"}}},
-		},
-		Preset: &Preset{AuthMode: "api_key"}},
+		}}, nil),
+
+	// Frontier and fast inference.
+	compatiblePreset("xai", "xAI", "xAI", "xAI Grok API.", "https://api.x.ai/v1", Link{"xAI chat completions", "https://docs.x.ai/developers/rest-api-reference/inference/chat-completions"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: openAIDialects, Unsupported: []string{"logit_bias"}}, exactChat),
+	compatiblePreset("cerebras", "Cerebras", "Cerebras", "Cerebras Inference.", "https://api.cerebras.ai/v1", Link{"Cerebras OpenAI compatibility", "https://inference-docs.cerebras.ai/resources/openai"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect, Unsupported: []string{"prediction", "service_tier"}}, exactChat),
+	compatiblePreset("sambanova", "SambaNova", "SambaNova", "SambaNova Cloud.", "https://api.sambanova.ai/v1", Link{"SambaNova OpenAI compatibility", "https://docs.sambanova.ai/docs/en/features/openai-compatibility"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects, Unsupported: []string{"frequency_penalty", "presence_penalty"}}, exactChat),
+	compatiblePreset("nebius", "Nebius Token Factory", "Nebius", "Nebius Token Factory, formerly AI Studio.", "https://api.tokenfactory.nebius.com/v1", Link{"Nebius Token Factory chat completions", "https://docs.tokenfactory.nebius.com/api-reference/inference/create-chat-completion"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects}, exactChat),
+	compatiblePreset("novita", "Novita AI", "Novita AI", "Novita AI model APIs.", "https://api.novita.ai/openai/v1", Link{"Novita AI chat completions", "https://docs.novita.ai/api-reference/model-apis-llm-create-chat-completion"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Requests: chatTokenLimit}, nil),
+	compatiblePreset("nvidia-nim", "NVIDIA NIM", "NVIDIA", "NVIDIA-hosted NIM API catalog.", "https://integrate.api.nvidia.com/v1", Link{"NVIDIA NIM chat completions", "https://docs.api.nvidia.com/nim/reference/create_chat_completion_v1_chat_completions_post"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Requests: chatTokenLimit}, nil),
+	compatiblePreset("featherless", "Featherless", "Featherless", "Featherless serverless inference.", "https://api.featherless.ai/v1", Link{"Featherless completions", "https://featherless.ai/docs/completions"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Requests: chatTokenLimit}, nil),
+	compatiblePreset("baseten", "Baseten", "Baseten", "Baseten Model APIs.", "https://inference.baseten.co/v1", Link{"Baseten chat completions", "https://docs.baseten.co/reference/inference-api/chat-completions"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect, Requests: chatTokenLimit}, nil),
+
+	// Regional and open-model platforms. Keys are bound to a region, so each
+	// region the vendor documents is its own preset.
+	compatiblePreset("moonshot", "Moonshot AI", "Moonshot AI", "Moonshot AI Kimi platform.", "https://api.moonshot.ai/v1", Link{"Kimi chat API", "https://platform.kimi.ai/docs/api/chat"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect}, exactChat),
+	compatiblePreset("moonshot-cn", "Moonshot AI (China)", "Moonshot AI", "Moonshot AI Kimi platform in mainland China.", "https://api.moonshot.cn/v1", Link{"Kimi chat API (China)", "https://platform.kimi.com/docs/api/chat"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: chatDialect}, exactChat),
+	compatiblePreset("dashscope", "Alibaba Cloud Model Studio", "Alibaba Cloud", "Alibaba Cloud Model Studio, international.", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", Link{"Model Studio OpenAI Chat Completions", "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects}, exactChat),
+	compatiblePreset("dashscope-cn", "Alibaba Cloud Model Studio (China)", "Alibaba Cloud", "Alibaba Cloud Bailian in mainland China.", "https://dashscope.aliyuncs.com/compatible-mode/v1", Link{"Bailian OpenAI Chat Completions", "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects}, exactChat),
+	compatiblePreset("zai", "Z.ai", "Z.ai", "Z.ai GLM platform.", "https://api.z.ai/api/paas/v4", Link{"Z.ai chat completion", "https://docs.z.ai/api-reference/llm/chat-completion"}, Contract{Operations: []string{"generation"}, Dialects: chatDialect, Requests: chatTokenLimit}, nil),
+	compatiblePreset("zhipu", "Zhipu BigModel", "Zhipu AI", "Zhipu BigModel GLM platform in mainland China.", "https://open.bigmodel.cn/api/paas/v4", Link{"BigModel OpenAI compatibility", "https://docs.bigmodel.cn/cn/guide/develop/openai/introduction"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Requests: chatTokenLimit}, nil),
+	compatiblePreset("minimax", "MiniMax", "MiniMax", "MiniMax platform, international.", "https://api.minimax.io/v1", Link{"MiniMax OpenAI chat", "https://platform.minimax.io/docs/api-reference/text-chat-openai"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: openAIDialects, Unsupported: []string{"frequency_penalty", "logit_bias", "presence_penalty"}}, exactChat),
+	compatiblePreset("minimax-cn", "MiniMax (China)", "MiniMax", "MiniMax platform in mainland China.", "https://api.minimax.cn/v1", Link{"MiniMax OpenAI chat (China)", "https://platform.minimax.cn/docs/api-reference/text-chat-openai"}, Contract{Discovery: true, Operations: []string{"generation"}, Dialects: openAIDialects, Unsupported: []string{"frequency_penalty", "logit_bias", "presence_penalty"}}, exactChat),
+	compatiblePreset("volcengine-ark", "Volcengine Ark", "Volcengine", "Volcengine Ark in mainland China. Models may be named by endpoint ID.", "https://ark.cn-beijing.volces.com/api/v3", Link{"Ark chat API", "https://www.volcengine.com/docs/82379/1494384"}, Contract{Operations: []string{"generation"}, Dialects: openAIDialects}, exactChat),
+	compatiblePreset("byteplus-modelark", "BytePlus ModelArk", "BytePlus", "BytePlus ModelArk, Southeast Asia. Models may be named by endpoint ID.", "https://ark.ap-southeast.bytepluses.com/api/v3", Link{"ModelArk chat API", "https://docs.byteplus.com/en/docs/ModelArk/1494384"}, Contract{Operations: []string{"generation"}, Dialects: openAIDialects}, exactChat),
+	compatiblePreset("scaleway", "Scaleway Generative APIs", "Scaleway", "Scaleway Generative APIs.", "https://api.scaleway.ai/v1", Link{"Scaleway Chat API", "https://www.scaleway.com/en/docs/generative-apis/api-cli/using-chat-api/"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects,
+		Unsupported: []string{"audio", "metadata", "modalities", "prediction", "service_tier", "store", "user", "web_search_options"}}, exactChat),
+	compatiblePreset("ovhcloud", "OVHcloud AI Endpoints", "OVHcloud", "OVHcloud AI Endpoints.", "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1", Link{"AI Endpoints capabilities", "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-capabilities"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects}, exactChat),
+	compatiblePreset("nscale", "Nscale", "Nscale", "Nscale serverless inference.", "https://inference.api.nscale.com/v1", Link{"Nscale chat completions", "https://docs.nscale.com/api-reference/inference/create-chat-completion"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: chatDialect}, exactChat),
+
+	// Data platforms and aggregators. Account-scoped hosts are placeholders
+	// the operator replaces.
+	accountPreset("databricks", "Databricks", "Databricks Foundation Model APIs through the AI Gateway.", "https://your-workspace.cloud.databricks.com/ai-gateway/mlflow/v1", Link{"Foundation Model APIs reference", "https://docs.databricks.com/aws/en/machine-learning/foundation-model-apis/api-reference"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Requests: chatTokenLimit}),
+	accountPreset("snowflake-cortex", "Snowflake Cortex", "Snowflake Cortex REST API.", "https://your-account.snowflakecomputing.com/api/v2/cortex/v1", Link{"Cortex REST API", "https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-rest-api"}, Contract{Operations: []string{"generation"}, Dialects: chatDialect, Unsupported: []string{"service_tier", "store"},
+		// Cortex refuses max_tokens and documents only max_completion_tokens.
+		Requests: map[string]RequestShape{"generation": {Rewrites: []Rewrite{{From: "max_tokens", To: "max_completion_tokens"}}}}}),
+	accountPreset("cloudflare-workers-ai", "Cloudflare Workers AI", "Cloudflare Workers AI OpenAI-compatible endpoints.", "https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/v1", Link{"Workers AI OpenAI compatibility", "https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: chatDialect}),
+	compatiblePreset("vercel-ai-gateway", "Vercel AI Gateway", "Vercel", "Vercel AI Gateway.", "https://ai-gateway.vercel.sh/v1", Link{"AI Gateway Chat Completions", "https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects, Requests: chatTokenLimit}, nil),
+
+	// Self-hosted runtimes start unauthenticated at a placeholder address and
+	// rely on the egress allowlists for private addresses.
+	selfHostedPreset("ollama", "Ollama", "Self-hosted Ollama; the server listens on port 11434 by default.", "https://ollama.example.internal/v1", Link{"Ollama OpenAI compatibility", "https://docs.ollama.com/api/openai-compatibility"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects,
+		Unsupported: []string{"logit_bias", "logprobs", "n", "tool_choice", "top_logprobs", "user"}, Requests: chatTokenLimit}),
+	selfHostedPreset("lmstudio", "LM Studio", "Self-hosted LM Studio server; port 1234 in its examples.", "https://lmstudio.example.internal/v1", Link{"LM Studio OpenAI compatibility", "https://lmstudio.ai/docs/developer/openai-compat"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects, Requests: chatTokenLimit}),
+	selfHostedPreset("llamacpp", "llama.cpp server", "Self-hosted llama-server; port 8080 by default.", "https://llamacpp.example.internal/v1", Link{"llama.cpp server API", "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md"}, Contract{Discovery: true, Operations: []string{"generation", "embeddings"}, Dialects: openAIDialects}),
+	selfHostedPreset("docker-model-runner", "Docker Model Runner", "Docker Model Runner; port 12434 on the host by default.", "https://model-runner.example.internal/engines/v1", Link{"Docker Model Runner API", "https://docs.docker.com/ai/model-runner/api-reference/"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Requests: chatTokenLimit}),
 }
 
 // index maps vendor identifiers to their position in contracts.

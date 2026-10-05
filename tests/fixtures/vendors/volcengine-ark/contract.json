@@ -1,0 +1,42 @@
+{
+  "vendor": "volcengine-ark",
+  "documentation_url": "https://www.volcengine.com/docs/82379/1494384",
+  "reviewed_at": "2026-10-05",
+  "notes": "The path prefix is /api/v3. model is a model ID or an ep- endpoint ID, so models are declared. Parameter limits are per model. Only a code table documents errors.",
+  "endpoints": {
+    "generation": "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  }
+}

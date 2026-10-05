@@ -1,0 +1,24 @@
+{
+  "id": "chatcmpl-01",
+  "object": "chat.completion",
+  "model": "zai-org/GLM-5.3",
+  "created": 1759622400,
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Gradient descent adjusts model parameters to reduce a loss function."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 8,
+    "completion_tokens": 11,
+    "total_tokens": 19,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    }
+  }
+}

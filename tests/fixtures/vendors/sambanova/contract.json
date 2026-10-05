@@ -1,0 +1,46 @@
+{
+  "vendor": "sambanova",
+  "documentation_url": "https://docs.sambanova.ai/docs/en/features/openai-compatibility",
+  "reviewed_at": "2026-10-05",
+  "notes": "presence_penalty and frequency_penalty are documented as not yet supported and ignored. created is a float. Usage arrives in streams with stream_options.include_usage.",
+  "endpoints": {
+    "generation": "https://api.sambanova.ai/v1/chat/completions",
+    "embeddings": "https://api.sambanova.ai/v1/embeddings"
+  },
+  "unsupported_parameters": [
+    "frequency_penalty",
+    "presence_penalty"
+  ],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 43,
+        "output_tokens": 350,
+        "total_tokens": 393
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "decimal_above_max_value",
+      "message": "Decimal above maximum value. Expected a value between 0 and 1, but got 100 instead."
+    },
+    "class": "upstream_client"
+  }
+}

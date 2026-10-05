@@ -1,0 +1,26 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "In madam moon's silver glow, ...",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1737583288.6076705,
+  "id": "83a7809d-e18f-44f9-9ab7-2bc494c6c661",
+  "model": "gpt-oss-120b",
+  "object": "chat.completion",
+  "system_fingerprint": "fastcoe",
+  "usage": {
+    "acceptance_rate": 4.058139324188232,
+    "completion_tokens": 350,
+    "completion_tokens_after_first_per_sec": 248.09314856382406,
+    "is_last_response": true,
+    "prompt_tokens": 43,
+    "total_tokens": 393,
+    "total_latency": 1.4649275719174653
+  }
+}

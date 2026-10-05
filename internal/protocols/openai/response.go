@@ -97,7 +97,11 @@ func errorObject(raw json.RawMessage) *UpstreamError {
 	if json.Unmarshal(raw, &detail) != nil {
 		return nil
 	}
-	return &UpstreamError{Type: detail.Type, Code: strings.Trim(string(detail.Code), `"`), Message: detail.Message}
+	code := strings.Trim(string(detail.Code), `"`)
+	if code == "null" {
+		code = ""
+	}
+	return &UpstreamError{Type: detail.Type, Code: code, Message: detail.Message}
 }
 
 // DecodeChat validates a unary chat completion and rewrites its model to the route.

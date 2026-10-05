@@ -66,6 +66,21 @@ passes against the vendor's documentation, which the preset records as
 Presets also gain an optional `profile_id`, so a preset whose vendor contract
 is exact can serve strict routes without the operator choosing a profile.
 
+#### Declined candidates
+
+Reviewed on 2026-10-05 against each vendor's own documentation. A declined
+vendor stays reachable through **Custom endpoint** or a plugin.
+
+| Candidate | Reason | Source |
+| --- | --- | --- |
+| Lambda | The Lambda Inference API was sunset on 2025-09-25. | [Lambda announcement](https://deeptalk.lambda.ai/t/sunsetting-chat-sunsetting-inference/4744) |
+| Hyperbolic | The serverless inference API is retired; only GPU rental remains. | [Hyperbolic FAQ](https://www.hyperbolic.ai/docs/faq/inference-models) |
+| GitHub Models | Retired on 2026-07-30, including its inference API. | [GitHub changelog](https://github.blog/changelog/2026-07-30-github-models-is-now-retired/) |
+| Hugging Face TGI | The repository is archived and in maintenance mode; `GET /v1/models` is not a list. | [TGI repository](https://github.com/huggingface/text-generation-inference) |
+| Xinference | Its documented chat result reports token usage as `-1`, which OLP refuses as unmeterable. | [Xinference guide](https://inference.readthedocs.io/en/latest/getting_started/using_xinference.html) |
+| Perplexity (withdrawn preset) | Sonar Chat Completions ended on 2026-09-27; its replacement router is in private preview. | [Perplexity migration](https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview) |
+| Codestral endpoint | `codestral.mistral.ai` is absent from current Mistral documentation; fill-in-the-middle is served at `api.mistral.ai` through the `mistral-fim` profile. | [Mistral FIM API](https://docs.mistral.ai/api/endpoint/fim) |
+
 ### M2.2 First-party profiles and codecs
 
 Cloud platforms and APIs that no existing composition expresses get first-party

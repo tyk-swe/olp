@@ -1,0 +1,39 @@
+{
+  "vendor": "nebius",
+  "documentation_url": "https://docs.tokenfactory.nebius.com/api-reference/inference/create-chat-completion",
+  "reviewed_at": "2026-10-05",
+  "notes": "Nebius AI Studio was renamed Nebius Token Factory with a new host. Errors carry a detail string.",
+  "endpoints": {
+    "generation": "https://api.tokenfactory.nebius.com/v1/chat/completions",
+    "embeddings": "https://api.tokenfactory.nebius.com/v1/embeddings"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 13,
+        "output_tokens": 26,
+        "total_tokens": 39
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 429,
+    "envelope": null,
+    "class": "rate_limit"
+  }
+}
