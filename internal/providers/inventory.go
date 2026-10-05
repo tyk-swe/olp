@@ -57,7 +57,8 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 			SELECT 1 FROM jsonb_array_elements(r.models) published,jsonb_array_elements(published->'capabilities') c
 			WHERE published->>'id'=m.id::text AND c->>'source'='certified' AND ($4='' OR c->>'surface'=$4)
 		),
-		coalesce(p.configuration->'options'->'models'->m.upstream_model,'{}'::json)
+		coalesce(p.configuration->'options'->'models'->m.upstream_model,'{}'::json),
+		coalesce(p.configuration->'options'->>'vendor_id','')
 		FROM olp.provider_models m JOIN olp.providers p ON p.id=m.provider_id
 		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
 		WHERE m.id<$1 AND ($2='' OR m.upstream_model ILIKE '%'||$2||'%' OR m.display_name ILIKE '%'||$2||'%' OR p.name ILIKE '%'||$2||'%')
@@ -72,9 +73,9 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 	for rows.Next() {
 		var m storedModel
 		var capabilities, metadata []byte
-		var providerID, providerName, providerKind string
+		var providerID, providerName, providerKind, vendorID string
 		var available bool
-		if err = rows.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt, &providerID, &providerName, &providerKind, &available, &metadata); err != nil {
+		if err = rows.Scan(&m.ID, &m.UpstreamModel, &m.DisplayName, &m.Enabled, &capabilities, &m.DiscoveredAt, &providerID, &providerName, &providerKind, &available, &metadata, &vendorID); err != nil {
 			return access.Reply{}, err
 		}
 		if err = json.Unmarshal(capabilities, &m.Capabilities); err != nil {
@@ -84,7 +85,11 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 		if metadataErr != nil {
 			return access.Reply{}, metadataErr
 		}
-		items = append(items, map[string]any{"available": available, "metadata": facts, "provider_id": providerID, "provider_name": providerName, "provider_kind": providerKind, "model": modelJSON(m)})
+		if vendorID == "" {
+			vendorID = defaultVendor(providerKind)
+		}
+		items = append(items, map[string]any{"available": available, "metadata": facts, "provider_id": providerID, "provider_name": providerName, "provider_kind": providerKind, "model": modelJSON(m),
+			"lifecycle": catalogLifecycle(s.Catalog, vendorID, m.UpstreamModel, metadata)})
 	}
 	if err = rows.Err(); err != nil {
 		return access.Reply{}, err
@@ -135,6 +140,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	certifyTimeout := time.Duration(len(CapabilityOptions)+1) * probeTimeout
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/probe", s.probe, access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/discovery", s.discover, access.MaxBody(1<<20), access.Deadline(certifyTimeout))
+	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/catalog-suggestions", s.catalogSuggestions)
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/catalog-suggestions/accept", s.acceptCatalogSuggestions, access.MaxBody(1<<20))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/restore-as-draft", s.restoreActiveAsDraft)
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/models", s.models)
 	s.Access.Route(mux, "PATCH /api/v1/providers/{provider_id}/models/{model_id}", s.setModel)

@@ -31,6 +31,7 @@
     type CursorHistory
   } from '$lib/lists/pagination';
   import CapabilityReview from '$lib/features/providers/CapabilityReview.svelte';
+  import CatalogSuggestions from '$lib/features/providers/CatalogSuggestions.svelte';
   import {
     activationReady,
     certificationPrerequisiteReady,
@@ -223,6 +224,15 @@
     >
   </div>
   {#if editingLocked}<p class="locked-note">{DISABLED_EDIT_NOTE}</p>{/if}
+  <CatalogSuggestions
+    {current}
+    {canManage}
+    locked={editingLocked}
+    {busy}
+    {run}
+    onProviderChanged={() => refresh(false)}
+    {onNotice}
+  />
   {#if canManage && !editingLocked && (declared || current.configuration.kind === 'openai_compatible')}<details
       class="manual-fallback"
       open={declared}

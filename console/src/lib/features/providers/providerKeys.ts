@@ -34,6 +34,8 @@ export const providerKeys = {
   models: (id: string, cursor?: string) =>
     ['providers', 'models', 'of', id, cursor ?? 'first'] as const,
   vendors: () => ['provider-vendors'] as const,
+  catalogSuggestions: (id: string, etag: string) =>
+    ['providers', 'catalog-suggestions', id, etag] as const,
   configurationSchemas: () => ['provider-configuration-schemas'] as const,
   slots: (id: string, etag: string) => ['provider-slots', id, etag] as const,
   bulkModels: (id: string, etag: string) =>

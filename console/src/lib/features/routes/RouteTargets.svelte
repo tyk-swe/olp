@@ -7,7 +7,16 @@
     targetUnavailable
   } from '$lib/features/routes/routeEditor';
   import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
+  import { lifecycleNotice } from '$lib/features/providers/models/lifecycle';
+  import type { EditableTarget } from '$lib/features/routes/routeEditor';
   let { editor }: { editor: RouteDraftEditorState } = $props();
+
+  function targetNotice(target: EditableTarget) {
+    return lifecycleNotice(
+      editor.modelOptions.find((option) => option.id === target.providerModelId)
+        ?.lifecycle
+    );
+  }
 </script>
 
 <section class="card editor" aria-labelledby="targets-heading">
@@ -127,9 +136,26 @@
               ).join(', ')}</span
             >{/if}
         </div>
+        {#if targetNotice(target)}{@const notice = targetNotice(target)!}
+          <p class="target-lifecycle" class:danger={notice.tone === 'danger'}>
+            <strong
+              >{notice.tone === 'danger' ? 'Retired:' : 'Retiring:'}</strong
+            >
+            {notice.text}
+          </p>{/if}
       </li>
     {/each}
   </ol>
+  {#if editor.routeLifecycleWarnings.length}<div
+      class="eligibility-warning"
+      role="status"
+    >
+      <strong>Some targets are deprecated or retiring.</strong><span
+        >{editor.routeLifecycleWarnings
+          .map((warning) => `${warning.label}: ${warning.notice.text}`)
+          .join(' ')} Add a replacement target before the vendor retires them.</span
+      >
+    </div>{/if}
   {#if editor.routeEligibilityWarnings.length}<div
       class="eligibility-warning"
       role="status"
@@ -217,6 +243,15 @@
   }
   .target-eligibility.warning {
     color: var(--warning);
+  }
+  .target-lifecycle {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--warning);
+    font-size: var(--text-body-sm);
+  }
+  .target-lifecycle.danger {
+    color: var(--danger);
   }
   .eligibility-warning {
     display: grid;

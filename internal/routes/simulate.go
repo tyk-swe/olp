@@ -170,7 +170,7 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 	if err := ValidateFidelityPolicy(d.Fidelity, d.ContentPolicy); err != nil {
 		return access.Reply{}, err
 	}
-	live, err := resolve(r.Context(), s.Access.Pool, d.Targets)
+	live, err := s.resolve(r.Context(), s.Access.Pool, d.Targets)
 	if err != nil {
 		return access.Reply{}, err
 	}

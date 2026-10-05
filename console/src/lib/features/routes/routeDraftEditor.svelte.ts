@@ -42,6 +42,7 @@ import {
   modesFor,
   policyRulesFrom,
   routeEligibilityWarnings as findRouteEligibilityWarnings,
+  routeLifecycleWarnings as findRouteLifecycleWarnings,
   surfacesFor,
   toRouteModelOptions,
   validateRouteEditor,
@@ -137,6 +138,9 @@ export class RouteDraftEditorState {
       this.modelOptions,
       this.operations
     )
+  );
+  routeLifecycleWarnings = $derived(
+    findRouteLifecycleWarnings(this.targets, this.modelOptions)
   );
   /**
    * True while the captured epoch still owns this editor: the component is

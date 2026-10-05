@@ -55,6 +55,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	catalogue.Unconfined = m.Unconfined
 	catalogue.Log = m.Log
 	catalogue.Plugins = m.PluginHost
+	catalogue.Catalog = m.Catalog
 	if m.Limiter != nil {
 		catalogue.Quotas = m.Limiter
 	}
@@ -62,6 +63,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	routeServer := routes.New(m.Access)
 	routeServer.Inputs = m.Runtime.RoutingInputs
 	routeServer.UnconfinedPlugins = m.Unconfined != nil
+	routeServer.Catalog = m.Catalog
 	routeServer.Register(mux)
 	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&media.Management{Access: m.Access, Pool: m.Access.Pool, Jobs: m.Media, Log: m.Log}).Register(mux)

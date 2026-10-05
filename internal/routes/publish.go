@@ -75,7 +75,7 @@ func (s *Server) validateDraft(r *http.Request, _ access.Principal) (access.Repl
 	if err = reserveOrdinarySlug(r.Context(), tx, current.Slug); err != nil {
 		return access.Reply{}, err
 	}
-	live, err := resolve(r.Context(), tx, current.Targets)
+	live, err := s.resolve(r.Context(), tx, current.Targets)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -142,7 +142,7 @@ func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Repl
 	if err = reserveOrdinarySlug(r.Context(), tx, current.Slug); err != nil {
 		return access.Reply{}, err
 	}
-	live, err := resolve(r.Context(), tx, current.Targets)
+	live, err := s.resolve(r.Context(), tx, current.Targets)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -278,7 +278,7 @@ type routeRow struct {
 }
 
 func (s *Server) routeJSON(ctx context.Context, q access.Queryer, row *routeRow) (map[string]any, error) {
-	live, err := resolve(ctx, q, row.Latest.Targets)
+	live, err := s.resolve(ctx, q, row.Latest.Targets)
 	if err != nil {
 		return nil, err
 	}
@@ -408,7 +408,7 @@ func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, e
 		return access.Reply{}, err
 	}
 	rows.Close()
-	live, err := resolve(r.Context(), s.Access.Pool, all)
+	live, err := s.resolve(r.Context(), s.Access.Pool, all)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -435,7 +435,7 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	if err != nil {
 		return access.Reply{}, err
 	}
-	live, err := resolve(r.Context(), s.Access.Pool, v.Targets)
+	live, err := s.resolve(r.Context(), s.Access.Pool, v.Targets)
 	if err != nil {
 		return access.Reply{}, err
 	}

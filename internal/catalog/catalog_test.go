@@ -174,7 +174,7 @@ func TestLookupMatchesIdentifiersAliasesAndCanonicalModels(t *testing.T) {
 	if _, _, ok := signed.Lookup("other", "example-large"); ok {
 		t.Fatal("a model matched under another vendor")
 	}
-	if lifecycle := signed.Lifecycle("example", "example-large"); lifecycle == nil || *lifecycle.RetiresAt != "2027-03-01" {
+	if lifecycle := signed.Lifecycle("example", "example-large"); lifecycle == nil || *lifecycle.RetiresAt != "2027-03-01" || *lifecycle.Replacement != "example-xl" {
 		t.Fatalf("lifecycle = %+v", lifecycle)
 	}
 }

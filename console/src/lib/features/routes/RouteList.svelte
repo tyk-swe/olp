@@ -1,5 +1,6 @@
 <script lang="ts">
   import { routeKeys } from '$lib/features/routes/routeKeys';
+  import { retiringTargets } from '$lib/features/routes/routeEditor';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -162,7 +163,11 @@
                     >{item.revision_count} total</small
                   ></td
                 ><td>{item.latest_revision.operations.join(', ')}</td><td
-                  >{item.latest_revision.targets.length}</td
+                  >{item.latest_revision.targets
+                    .length}{#if retiringTargets(item.latest_revision.targets)}<br
+                    /><span class="badge warning"
+                      >{retiringTargets(item.latest_revision.targets)} retiring</span
+                    >{/if}</td
                 ><td>{formatDate(item.latest_revision.activated_at)}</td><td
                   >{item.created_by_email ?? 'A removed account'}</td
                 ><td class="row-actions"
@@ -249,7 +254,10 @@
                     class="badge">{item.state}</span
                   ></td
                 ><td>{item.operations.join(', ')}</td><td
-                  >{item.targets.length}</td
+                  >{item.targets.length}{#if retiringTargets(item.targets)}<br
+                    /><span class="badge warning"
+                      >{retiringTargets(item.targets)} retiring</span
+                    >{/if}</td
                 ><td
                   >{formatInteger(item.overall_timeout_ms)} ms / {item.max_attempts}</td
                 ><td>{formatDate(item.updated_at)}</td><td

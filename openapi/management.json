@@ -6668,6 +6668,17 @@
           "available": {
             "type": "boolean"
           },
+          "lifecycle": {
+            "description": "The model's deprecation and retirement as the reference catalog documents them, or null when it documents none.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelLifecycle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "metadata": {
             "$ref": "#/components/schemas/ModelMetadata"
           },
@@ -6691,7 +6702,8 @@
           "provider_id",
           "provider_name",
           "provider_kind",
-          "model"
+          "model",
+          "lifecycle"
         ],
         "type": "object"
       },
@@ -9063,6 +9075,17 @@
             "format": "uuid",
             "type": "string"
           },
+          "lifecycle": {
+            "description": "The model's deprecation and retirement as the reference catalog documents them, or null when it documents none.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelLifecycle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "position": {
             "format": "int32",
             "type": "integer"
@@ -9104,7 +9127,8 @@
           "priority",
           "weight",
           "timeout_ms",
-          "position"
+          "position",
+          "lifecycle"
         ],
         "type": "object"
       },
@@ -13167,6 +13191,180 @@
           "key_id",
           "vendor_count",
           "model_count"
+        ],
+        "type": "object"
+      },
+      "ModelLifecycle": {
+        "additionalProperties": false,
+        "description": "A model's deprecation and retirement as its vendor documents them in the reference catalog.",
+        "properties": {
+          "deprecated_at": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "replacement": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retires_at": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "description": "Vendor page that documents the dates.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deprecated_at",
+          "retires_at",
+          "replacement",
+          "source"
+        ],
+        "type": "object"
+      },
+      "CatalogCapabilityHints": {
+        "additionalProperties": false,
+        "description": "Capabilities the vendor documents; an absent hint is unknown. Hints never certify a capability.",
+        "properties": {
+          "prompt_caching": {
+            "type": "boolean"
+          },
+          "reasoning": {
+            "type": "boolean"
+          },
+          "structured_outputs": {
+            "type": "boolean"
+          },
+          "tools": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ProviderCatalogSuggestion": {
+        "additionalProperties": false,
+        "description": "The reference catalog's facts for one of a provider's models.",
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/CatalogCapabilityHints"
+          },
+          "catalog_model": {
+            "description": "Catalog model the upstream model matched.",
+            "type": "string"
+          },
+          "changes": {
+            "description": "Stored facts accepting would change.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "conflict": {
+            "description": "Why the suggestion cannot be accepted: privacy_evidence when the stored facts attest a privacy declaration.",
+            "enum": [
+              "privacy_evidence",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "facts": {
+            "$ref": "#/components/schemas/ModelMetadata"
+          },
+          "lifecycle": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelLifecycle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "matched_by": {
+            "enum": [
+              "id",
+              "alias",
+              "canonical_model"
+            ],
+            "type": "string"
+          },
+          "model_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "upstream_model",
+          "catalog_model",
+          "matched_by",
+          "facts",
+          "changes",
+          "capabilities",
+          "lifecycle",
+          "conflict"
+        ],
+        "type": "object"
+      },
+      "ProviderCatalogSuggestionListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog": {
+            "$ref": "#/components/schemas/ReferenceCatalog"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCatalogSuggestion"
+            },
+            "type": "array"
+          },
+          "vendor_id": {
+            "description": "Vendor the provider's models were matched under.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "catalog",
+          "vendor_id",
+          "items"
+        ],
+        "type": "object"
+      },
+      "AcceptCatalogSuggestionsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_sha256": {
+            "description": "Digest of the catalog the suggestions were reviewed against; a different catalog answers 409.",
+            "type": "string"
+          },
+          "upstream_models": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 2000,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "catalog_sha256",
+          "upstream_models"
         ],
         "type": "object"
       }
@@ -29827,6 +30025,193 @@
         ],
         "tags": [
           "pricing"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/catalog-suggestions": {
+      "get": {
+        "description": "Lists the reference catalog's facts for the provider's models, matched under the provider's vendor by upstream model, alias or canonical model, with what accepting each would change.",
+        "operationId": "list_provider_catalog_suggestions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCatalogSuggestionListResponse"
+                }
+              }
+            },
+            "description": "Catalog suggestions"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "This process holds no verified reference catalog"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/catalog-suggestions/accept": {
+      "post": {
+        "description": "Stores the catalog's facts for the named models as operator facts tagged catalog@<sha256>. It changes the provider configuration, so certified capabilities return to declared and must be certified again.",
+        "operationId": "accept_provider_catalog_suggestions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current provider ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique acceptance key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptCatalogSuggestionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderDetailResponse"
+                }
+              }
+            },
+            "description": "Provider with the accepted facts"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The reference catalog changed since the suggestions were reviewed"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider ETag mismatch"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A model has no catalog facts, or its facts attest a privacy declaration"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "This process holds no verified reference catalog"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
         ]
       }
     }

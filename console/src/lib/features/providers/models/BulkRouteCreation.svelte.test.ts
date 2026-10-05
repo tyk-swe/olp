@@ -5,6 +5,7 @@ import type { ProviderModelInventory } from '../api/models';
 import BulkRouteCreation from './BulkRouteCreation.svelte';
 
 const model: ProviderModelInventory = {
+  lifecycle: null,
   provider_id: 'provider-12345678',
   provider_name: 'Primary',
   provider_kind: 'openai',

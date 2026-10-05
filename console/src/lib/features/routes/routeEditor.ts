@@ -4,6 +4,10 @@ import type {
   ReplaceRouteDraftInput
 } from '$lib/features/routes/api';
 import type { ProviderModelInventory } from '$lib/features/providers/api/models';
+import {
+  lifecycleNotice,
+  type LifecycleNotice
+} from '$lib/features/providers/models/lifecycle';
 
 export type EditableTarget = {
   providerModelId: string;
@@ -48,6 +52,8 @@ export type RouteModelOption = {
   upstreamModel: string;
   label: string;
   capabilities: ProviderModelInventory['model']['capabilities'];
+  /** The model's documented deprecation and retirement, or null. */
+  lifecycle: ProviderModelInventory['lifecycle'];
 };
 
 export type EditablePolicyRule = {
@@ -110,7 +116,8 @@ export function toRouteModelOptions(
     providerName: entry.provider_name,
     upstreamModel: entry.model.upstream_model,
     label: `${entry.provider_name} · ${entry.model.display_name}`,
-    capabilities: entry.model.capabilities
+    capabilities: entry.model.capabilities,
+    lifecycle: entry.lifecycle ?? null
   }));
 }
 
@@ -195,6 +202,38 @@ export function routeEligibilityWarnings(
         )
       )
   );
+}
+
+/** A target whose model its vendor has deprecated or is retiring. */
+export type TargetLifecycleWarning = {
+  label: string;
+  notice: LifecycleNotice;
+};
+
+/** The selected targets whose models need a lifecycle warning. */
+export function routeLifecycleWarnings(
+  targets: EditableTarget[],
+  modelOptions: RouteModelOption[],
+  today: Date = new Date()
+): TargetLifecycleWarning[] {
+  const warnings: TargetLifecycleWarning[] = [];
+  for (const target of targets) {
+    const option = modelOptions.find(
+      (candidate) => candidate.id === target.providerModelId
+    );
+    const notice = lifecycleNotice(option?.lifecycle, today);
+    if (option && notice) warnings.push({ label: option.label, notice });
+  }
+  return warnings;
+}
+
+/** How many of a route's targets have a model deprecated or retiring soon. */
+export function retiringTargets(
+  targets: { lifecycle?: ProviderModelInventory['lifecycle'] }[],
+  today: Date = new Date()
+): number {
+  return targets.filter((target) => lifecycleNotice(target.lifecycle, today))
+    .length;
 }
 
 const policyRuleId = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;

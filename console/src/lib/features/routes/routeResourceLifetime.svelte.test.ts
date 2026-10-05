@@ -72,6 +72,7 @@ const draftB: RouteDraft = {
 const drafts: Record<string, RouteDraft | Promise<RouteDraft>> = {};
 
 const model: ProviderModelInventory = {
+  lifecycle: null,
   available: true,
   metadata: {
     canonical_model: null,

@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
@@ -92,24 +91,9 @@ func catalogRate(d *catalog.Decimal) *string {
 	return &value
 }
 
-// ReferenceCatalog describes the reference catalog this release ships.
-type ReferenceCatalog struct {
-	APIVersion  string `json:"api_version"`
-	PublishedAt string `json:"published_at"`
-	SHA256      string `json:"sha256"`
-	KeyID       string `json:"key_id"`
-	VendorCount int    `json:"vendor_count"`
-	ModelCount  int    `json:"model_count"`
-}
-
-func describeCatalog(signed *catalog.Signed) ReferenceCatalog {
-	return ReferenceCatalog{APIVersion: signed.Catalog.APIVersion, PublishedAt: signed.Catalog.PublishedAt.UTC().Format(time.RFC3339),
-		SHA256: signed.SHA256, KeyID: signed.KeyID, VendorCount: len(signed.Catalog.Vendors), ModelCount: signed.ModelCount()}
-}
-
 func (s *Server) referenceCatalog(r *http.Request, _ access.Principal) (access.Reply, error) {
 	if s.Catalog == nil {
 		return access.Reply{}, access.Fail(503, "reference_catalog_unavailable", "This process holds no verified reference catalog.")
 	}
-	return access.OK(describeCatalog(s.Catalog)), nil
+	return access.OK(s.Catalog.Summary()), nil
 }

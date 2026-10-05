@@ -22,6 +22,7 @@ let component: ReturnType<typeof mount>;
 
 function modelEntry(index: number): ProviderModelInventory {
   return {
+    lifecycle: null,
     available: true,
     metadata: {
       canonical_model: null,

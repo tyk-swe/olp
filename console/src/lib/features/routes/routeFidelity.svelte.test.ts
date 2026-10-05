@@ -37,6 +37,7 @@ vi.mock('$lib/features/routes/api', async (original) => ({
 }));
 
 const model: ProviderModelInventory = {
+  lifecycle: null,
   available: true,
   metadata: {
     canonical_model: null,

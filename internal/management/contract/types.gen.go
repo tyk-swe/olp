@@ -1284,6 +1284,45 @@ func (e ProviderAuthMode) Valid() bool {
 	}
 }
 
+// Defines values for ProviderCatalogSuggestionConflict.
+const (
+	ProviderCatalogSuggestionConflictLessThannil     ProviderCatalogSuggestionConflict = "<nil>"
+	ProviderCatalogSuggestionConflictPrivacyEvidence ProviderCatalogSuggestionConflict = "privacy_evidence"
+)
+
+// Valid indicates whether the value is a known member of the ProviderCatalogSuggestionConflict enum.
+func (e ProviderCatalogSuggestionConflict) Valid() bool {
+	switch e {
+	case ProviderCatalogSuggestionConflictLessThannil:
+		return true
+	case ProviderCatalogSuggestionConflictPrivacyEvidence:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProviderCatalogSuggestionMatchedBy.
+const (
+	Alias          ProviderCatalogSuggestionMatchedBy = "alias"
+	CanonicalModel ProviderCatalogSuggestionMatchedBy = "canonical_model"
+	Id             ProviderCatalogSuggestionMatchedBy = "id"
+)
+
+// Valid indicates whether the value is a known member of the ProviderCatalogSuggestionMatchedBy enum.
+func (e ProviderCatalogSuggestionMatchedBy) Valid() bool {
+	switch e {
+	case Alias:
+		return true
+	case CanonicalModel:
+		return true
+	case Id:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProviderConfigurationField.
 const (
 	ProviderConfigurationFieldApiVersion   ProviderConfigurationField = "api_version"
@@ -1791,6 +1830,13 @@ func (e ListProviderResourcesParamsKind) Valid() bool {
 	}
 }
 
+// AcceptCatalogSuggestionsRequest defines model for AcceptCatalogSuggestionsRequest.
+type AcceptCatalogSuggestionsRequest struct {
+	// CatalogSha256 Digest of the catalog the suggestions were reviewed against; a different catalog answers 409.
+	CatalogSha256  string   `json:"catalog_sha256"`
+	UpstreamModels []string `json:"upstream_models"`
+}
+
 // AcceptInvitationRequest defines model for AcceptInvitationRequest.
 type AcceptInvitationRequest struct {
 	DisplayName string  `json:"display_name"`
@@ -2111,6 +2157,14 @@ type CapabilityResponse struct {
 	Operation   string                       `json:"operation"`
 	Source      string                       `json:"source"`
 	Surface     string                       `json:"surface"`
+}
+
+// CatalogCapabilityHints Capabilities the vendor documents; an absent hint is unknown. Hints never certify a capability.
+type CatalogCapabilityHints struct {
+	PromptCaching     *bool `json:"prompt_caching,omitempty"`
+	Reasoning         *bool `json:"reasoning,omitempty"`
+	StructuredOutputs *bool `json:"structured_outputs,omitempty"`
+	Tools             *bool `json:"tools,omitempty"`
 }
 
 // ChangePasswordRequest defines model for ChangePasswordRequest.
@@ -3357,6 +3411,16 @@ type MediaJobListResponse struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
+// ModelLifecycle A model's deprecation and retirement as its vendor documents them in the reference catalog.
+type ModelLifecycle struct {
+	DeprecatedAt nullable.Nullable[openapi_types.Date] `json:"deprecated_at"`
+	Replacement  nullable.Nullable[string]             `json:"replacement"`
+	RetiresAt    nullable.Nullable[openapi_types.Date] `json:"retires_at"`
+
+	// Source Vendor page that documents the dates.
+	Source string `json:"source"`
+}
+
 // ModelMetadata defines model for ModelMetadata.
 type ModelMetadata struct {
 	CanonicalModel   nullable.Nullable[string]    `json:"canonical_model,omitempty"`
@@ -4251,6 +4315,42 @@ type ProviderCapabilityOptionsResponse struct {
 	ProviderKind ProviderKind `json:"provider_kind"`
 }
 
+// ProviderCatalogSuggestion The reference catalog's facts for one of a provider's models.
+type ProviderCatalogSuggestion struct {
+	// Capabilities Capabilities the vendor documents; an absent hint is unknown. Hints never certify a capability.
+	Capabilities CatalogCapabilityHints `json:"capabilities"`
+
+	// CatalogModel Catalog model the upstream model matched.
+	CatalogModel string `json:"catalog_model"`
+
+	// Changes Stored facts accepting would change.
+	Changes []string `json:"changes"`
+
+	// Conflict Why the suggestion cannot be accepted: privacy_evidence when the stored facts attest a privacy declaration.
+	Conflict      nullable.Nullable[ProviderCatalogSuggestionConflict] `json:"conflict"`
+	Facts         ModelMetadata                                        `json:"facts"`
+	Lifecycle     nullable.Nullable[ModelLifecycle]                    `json:"lifecycle"`
+	MatchedBy     ProviderCatalogSuggestionMatchedBy                   `json:"matched_by"`
+	ModelId       openapi_types.UUID                                   `json:"model_id"`
+	UpstreamModel string                                               `json:"upstream_model"`
+}
+
+// ProviderCatalogSuggestionConflict Why the suggestion cannot be accepted: privacy_evidence when the stored facts attest a privacy declaration.
+type ProviderCatalogSuggestionConflict string
+
+// ProviderCatalogSuggestionMatchedBy defines model for ProviderCatalogSuggestion.MatchedBy.
+type ProviderCatalogSuggestionMatchedBy string
+
+// ProviderCatalogSuggestionListResponse defines model for ProviderCatalogSuggestionListResponse.
+type ProviderCatalogSuggestionListResponse struct {
+	// Catalog The signed reference catalog this release ships, verified at start-up.
+	Catalog ReferenceCatalog            `json:"catalog"`
+	Items   []ProviderCatalogSuggestion `json:"items"`
+
+	// VendorId Vendor the provider's models were matched under.
+	VendorId string `json:"vendor_id"`
+}
+
 // ProviderConfiguration defines model for ProviderConfiguration.
 type ProviderConfiguration struct {
 	ApiVersion nullable.Nullable[string] `json:"api_version,omitempty"`
@@ -4407,10 +4507,13 @@ type ProviderModelInventoryListResponse struct {
 
 // ProviderModelInventoryResponse defines model for ProviderModelInventoryResponse.
 type ProviderModelInventoryResponse struct {
-	Available  bool                  `json:"available"`
-	Metadata   ModelMetadata         `json:"metadata"`
-	Model      ProviderModelResponse `json:"model"`
-	ProviderId openapi_types.UUID    `json:"provider_id"`
+	Available bool `json:"available"`
+
+	// Lifecycle The model's deprecation and retirement as the reference catalog documents them, or null when it documents none.
+	Lifecycle  nullable.Nullable[ModelLifecycle] `json:"lifecycle"`
+	Metadata   ModelMetadata                     `json:"metadata"`
+	Model      ProviderModelResponse             `json:"model"`
+	ProviderId openapi_types.UUID                `json:"provider_id"`
 
 	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 	ProviderKind ProviderKind `json:"provider_kind"`
@@ -5154,16 +5257,19 @@ type RouteTargetRequest struct {
 type RouteTargetResponse struct {
 	// Available False when the provider was disabled or the model left the provider's
 	// activated revision. The target is still part of the stored route.
-	Available       bool               `json:"available"`
-	Id              openapi_types.UUID `json:"id"`
-	Position        int32              `json:"position"`
-	Priority        int32              `json:"priority"`
-	ProviderId      openapi_types.UUID `json:"provider_id"`
-	ProviderModel   string             `json:"provider_model"`
-	ProviderModelId openapi_types.UUID `json:"provider_model_id"`
-	ProviderName    string             `json:"provider_name"`
-	TimeoutMs       int32              `json:"timeout_ms"`
-	Weight          int32              `json:"weight"`
+	Available bool               `json:"available"`
+	Id        openapi_types.UUID `json:"id"`
+
+	// Lifecycle The model's deprecation and retirement as the reference catalog documents them, or null when it documents none.
+	Lifecycle       nullable.Nullable[ModelLifecycle] `json:"lifecycle"`
+	Position        int32                             `json:"position"`
+	Priority        int32                             `json:"priority"`
+	ProviderId      openapi_types.UUID                `json:"provider_id"`
+	ProviderModel   string                            `json:"provider_model"`
+	ProviderModelId openapi_types.UUID                `json:"provider_model_id"`
+	ProviderName    string                            `json:"provider_name"`
+	TimeoutMs       int32                             `json:"timeout_ms"`
+	Weight          int32                             `json:"weight"`
 }
 
 // RoutingConstraints defines model for RoutingConstraints.
@@ -6406,6 +6512,15 @@ type ActivateProviderParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// AcceptProviderCatalogSuggestionsParams defines parameters for AcceptProviderCatalogSuggestions.
+type AcceptProviderCatalogSuggestionsParams struct {
+	// IfMatch Current provider ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique acceptance key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // PutCredentialSlotParams defines parameters for PutCredentialSlot.
 type PutCredentialSlotParams struct {
 	// IfMatch Current credential-slot ETag
@@ -6907,6 +7022,9 @@ type CreateProviderJSONRequestBody = CreateProviderRequest
 
 // UpdateProviderJSONRequestBody defines body for UpdateProvider for application/json ContentType.
 type UpdateProviderJSONRequestBody = UpdateProviderRequest
+
+// AcceptProviderCatalogSuggestionsJSONRequestBody defines body for AcceptProviderCatalogSuggestions for application/json ContentType.
+type AcceptProviderCatalogSuggestionsJSONRequestBody = AcceptCatalogSuggestionsRequest
 
 // PutCredentialSlotJSONRequestBody defines body for PutCredentialSlot for application/json ContentType.
 type PutCredentialSlotJSONRequestBody = SlotWrite

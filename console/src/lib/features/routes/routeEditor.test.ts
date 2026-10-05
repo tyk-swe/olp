@@ -22,6 +22,8 @@ import {
   type EditablePolicyRule,
   type EditableTarget,
   type RouteEditorValues,
+  retiringTargets,
+  routeLifecycleWarnings,
   type RouteModelOption
 } from '$lib/features/routes/routeEditor';
 
@@ -44,6 +46,7 @@ const validEditor: RouteEditorValues = {
 
 const modelOptions: RouteModelOption[] = [
   {
+    lifecycle: null,
     id: 'model-a',
     providerId: 'provider-a',
     providerName: 'Primary',
@@ -72,6 +75,7 @@ const modelOptions: RouteModelOption[] = [
     ]
   },
   {
+    lifecycle: null,
     id: 'model-b',
     providerId: 'provider-b',
     providerName: 'Fallback',
@@ -122,6 +126,7 @@ describe('Route Studio model eligibility', () => {
   it('normalizes provider inventory without losing capability provenance', () => {
     const inventory: ProviderModelInventory[] = [
       {
+        lifecycle: null,
         available: true,
         metadata: {
           canonical_model: null,
@@ -159,7 +164,67 @@ describe('Route Studio model eligibility', () => {
         providerName: 'Primary',
         upstreamModel: 'gpt-test',
         label: 'Primary · GPT Test',
-        capabilities: modelOptions[0].capabilities
+        capabilities: modelOptions[0].capabilities,
+        lifecycle: null
+      }
+    ]);
+  });
+
+  it('counts route targets whose model is retired or retiring soon', () => {
+    const today = new Date('2026-10-05T00:00:00Z');
+    const source = 'https://example.test';
+    expect(
+      retiringTargets(
+        [
+          { lifecycle: null },
+          {
+            lifecycle: {
+              deprecated_at: null,
+              retires_at: '2026-10-01',
+              replacement: null,
+              source
+            }
+          },
+          {
+            lifecycle: {
+              deprecated_at: null,
+              retires_at: '2028-01-01',
+              replacement: null,
+              source
+            }
+          }
+        ],
+        today
+      )
+    ).toBe(1);
+  });
+
+  it('warns about targets whose vendor is retiring their model', () => {
+    const retiring = modelOptions.map((option, index) => ({
+      ...option,
+      lifecycle: index
+        ? null
+        : {
+            deprecated_at: '2026-09-30',
+            retires_at: '2026-11-30',
+            replacement: 'model-c',
+            source: 'https://example.test/deprecations'
+          }
+    }));
+    const targets = [target, { ...target, providerModelId: 'model-b' }];
+    expect(
+      routeLifecycleWarnings(
+        targets,
+        retiring,
+        new Date('2026-10-05T00:00:00Z')
+      )
+    ).toEqual([
+      {
+        label: retiring[0].label,
+        notice: {
+          tone: 'warning',
+          text: 'Retires on 2026-11-30, in 56 days. Its vendor names model-c as the replacement.'
+        }
       }
     ]);
   });

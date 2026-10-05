@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/signing"
 )
@@ -107,12 +108,42 @@ func (s *Signed) Lookup(vendorID string, names ...string) (*Model, Match, bool) 
 }
 
 // Lifecycle is the documented deprecation and retirement of a vendor's model,
-// or nil when the catalog documents none.
-func (s *Signed) Lifecycle(vendorID string, names ...string) *Lifecycle {
+// or nil when the catalog documents none. A nil catalog documents nothing.
+func (s *Signed) Lifecycle(vendorID string, names ...string) *LifecycleView {
+	if s == nil {
+		return nil
+	}
 	if model, _, ok := s.Lookup(vendorID, names...); ok {
-		return model.Lifecycle
+		return model.Lifecycle.View()
 	}
 	return nil
+}
+
+// LifecycleView is a lifecycle as the management API shows it.
+type LifecycleView struct {
+	DeprecatedAt *string `json:"deprecated_at"`
+	RetiresAt    *string `json:"retires_at"`
+	Replacement  *string `json:"replacement"`
+	// Source is the vendor page that documents the dates.
+	Source string `json:"source"`
+}
+
+// View is the lifecycle as the management API shows it, or nil.
+func (l *Lifecycle) View() *LifecycleView {
+	if l == nil {
+		return nil
+	}
+	view := &LifecycleView{Source: l.Provenance.SourceURL}
+	if l.DeprecatedAt != nil {
+		view.DeprecatedAt = new(string(*l.DeprecatedAt))
+	}
+	if l.RetiresAt != nil {
+		view.RetiresAt = new(string(*l.RetiresAt))
+	}
+	if l.Replacement != "" {
+		view.Replacement = new(l.Replacement)
+	}
+	return view
 }
 
 func (s *Signed) vendorModels(vendorID string) []*Model {
@@ -135,4 +166,20 @@ func (s *Signed) ModelCount() int {
 		n += len(vendor.Models)
 	}
 	return n
+}
+
+// Summary describes a verified catalog to the management API.
+type Summary struct {
+	APIVersion  string `json:"api_version"`
+	PublishedAt string `json:"published_at"`
+	SHA256      string `json:"sha256"`
+	KeyID       string `json:"key_id"`
+	VendorCount int    `json:"vendor_count"`
+	ModelCount  int    `json:"model_count"`
+}
+
+// Summary describes the catalog.
+func (s *Signed) Summary() Summary {
+	return Summary{APIVersion: s.Catalog.APIVersion, PublishedAt: s.Catalog.PublishedAt.UTC().Format(time.RFC3339), SHA256: s.SHA256, KeyID: s.KeyID,
+		VendorCount: len(s.Catalog.Vendors), ModelCount: s.ModelCount()}
 }
