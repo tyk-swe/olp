@@ -282,6 +282,9 @@ func certifiable(kind, vendor string, c CapabilityInput) bool {
 	case "bedrock_invoke":
 		return kind == KindBedrock
 	default:
-		return kind == KindOpenAI || (reviewedMedia(kind, vendor, c.Operation) || mediaByCall(kind, vendor, c.Operation)) && c.Mode == ModeUnary
+		// Reviewed vendor media is unary, but for the job a video creation
+		// starts.
+		vendorMode := c.Mode == ModeUnary || c.Operation == "video_create" && c.Mode == "async"
+		return kind == KindOpenAI || (reviewedMedia(kind, vendor, c.Operation) || mediaByCall(kind, vendor, c.Operation)) && vendorMode
 	}
 }

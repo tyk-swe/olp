@@ -1,0 +1,26 @@
+{
+  "vendor": "runway",
+  "documentation_url": "https://docs.dev.runwayml.com/api",
+  "reviewed_at": "2026-10-05",
+  "notes": "Every request carries X-Runway-Version: 2024-11-06. Text-to-video and image-to-video create tasks; GET /v1/tasks/{id} reports PENDING, THROTTLED, RUNNING, SUCCEEDED with output URLs that expire within days, FAILED or CANCELLED; DELETE cancels or removes a task with 204. GET /v1/organization proves a key without cost. OLP lists jobs from its own records.",
+  "endpoints": {
+    "video_create": "https://api.dev.runwayml.com/v1/text_to_video",
+    "video_get": "https://api.dev.runwayml.com/v1/tasks/{id}",
+    "video_content": "https://api.dev.runwayml.com/v1/tasks/{id}",
+    "video_delete": "https://api.dev.runwayml.com/v1/tasks/{id}",
+    "video_list": "https://api.dev.runwayml.com/v1/tasks/{id}"
+  },
+  "unsupported_parameters": [],
+  "responses": {},
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 400,
+    "envelope": {
+      "type": "",
+      "code": "",
+      "message": "Invalid request body"
+    },
+    "class": "upstream_client"
+  }
+}

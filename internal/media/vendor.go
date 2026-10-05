@@ -64,3 +64,12 @@ func encodeVendor(r *Request, cfg connectors.Config, model string) (*UpstreamCal
 	call, failure := encode(r, model)
 	return call, true, failure
 }
+
+// EncodeJob is the call for one operation on an existing video job, in the
+// wire of the vendor its pinned provider revision names.
+func EncodeJob(r *Request, cfg connectors.Config, model string) (*UpstreamCall, *Error) {
+	if call, translated, failure := encodeVendor(r, cfg, model); translated {
+		return call, failure
+	}
+	return Encode(r, "openai", model)
+}

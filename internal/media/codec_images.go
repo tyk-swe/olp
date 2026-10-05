@@ -244,7 +244,7 @@ func nextBFLStep(body []byte) (*Step, *Error) {
 	case wire.Status == "Pending" || wire.Status == "Reasoning" || wire.Status == "Generating":
 		return nil, nil
 	case wire.Status == "Ready" && wire.Result.Sample != "":
-		return &Step{URL: wire.Result.Sample, Image: true}, nil
+		return &Step{URL: wire.Result.Sample, Asset: "image/"}, nil
 	case wire.Status == "Request Moderated" || wire.Status == "Content Moderated":
 		return nil, Fail(http.StatusBadRequest, "content_filter", "The provider's content filter refused the image request.")
 	}

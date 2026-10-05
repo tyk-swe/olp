@@ -124,6 +124,10 @@ var contracts = []Contract{
 	compatiblePreset("assemblyai", "AssemblyAI", "AssemblyAI", "AssemblyAI speech recognition.", "https://api.assemblyai.com", Link{"AssemblyAI transcript API", "https://www.assemblyai.com/docs/pre-recorded-audio/api-reference/transcripts/submit"}, Contract{
 		Operations: []string{"transcription"}, ProbeOperation: "transcription", Parameters: []string{"language", "response_format"},
 		MediaWires: map[string]string{"transcription": "assemblyai"}, Credential: &Credential{Header: "Authorization"}, AccountProbe: "v2/transcript?limit=1"}, nil),
+	compatiblePreset("runway", "Runway", "Runway", "Runway video generation.", "https://api.dev.runwayml.com/v1", Link{"Runway API reference", "https://docs.dev.runwayml.com/api"}, Contract{
+		Operations: []string{"video_create", "video_list", "video_get", "video_content", "video_delete"}, ProbeOperation: "video_get", Parameters: []string{"seconds", "size", "input_reference"},
+		MediaWires: map[string]string{"video_create": "runway", "video_get": "runway", "video_content": "runway", "video_delete": "runway"},
+		Headers:    map[string]string{"X-Runway-Version": "2024-11-06"}, AccountProbe: "organization"}, nil),
 	compatiblePreset("stability", "Stability AI", "Stability AI", "Stability AI image generation and inpainting.", "https://api.stability.ai", Link{"Stability AI API reference", "https://platform.stability.ai/docs/api-reference"}, Contract{
 		Operations: []string{"image_generation", "image_edit"}, ProbeOperation: "image_generation", Parameters: []string{"size", "output_format", "response_format"},
 		MediaWires: map[string]string{"image_generation": "stability", "image_edit": "stability"}, AccountProbe: "v1/user/balance",
@@ -233,6 +237,11 @@ func (c Contract) validate() error {
 	}
 	if c.Credential != nil && (c.Credential.Header == "" || textproto.CanonicalMIMEHeaderKey(c.Credential.Header) != c.Credential.Header || strings.ContainsAny(c.Credential.Scheme, "\r\n")) {
 		return fmt.Errorf("a credential placement needs a canonical header")
+	}
+	for name := range c.Headers {
+		if textproto.CanonicalMIMEHeaderKey(name) != name || name == "Authorization" {
+			return fmt.Errorf("static header %q must be canonical and carry no credential", name)
+		}
 	}
 	for operation, wire := range c.MediaWires {
 		if !c.Serves(operation) || wire == "" {

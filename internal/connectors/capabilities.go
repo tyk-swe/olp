@@ -55,7 +55,8 @@ func Supports(kind, vendor, operation, surface, mode string) bool {
 	// unary, through the vendor's connector.
 	if vendors.MediaWire(vendor, operation) != "" {
 		connector, _ := vendors.Kind(vendor)
-		return connector == kind && surface == "openai" && mode == "unary"
+		creates := operation == "video_create" && mode == "async"
+		return connector == kind && surface == "openai" && (mode == "unary" || creates)
 	}
 	openaiFamily := kind == "openai" || kind == "azure_openai" || kind == "openai_compatible"
 	nativeEmbeddings := kind == "gemini" || kind == "vertex_ai" || kind == "bedrock"

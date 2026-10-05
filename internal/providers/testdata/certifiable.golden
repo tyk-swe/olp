@@ -15,6 +15,7 @@ openai_compatible jina: embeddings/openai/unary rerank/openai/unary
 openai_compatible elevenlabs: speech/openai/unary transcription/openai/unary
 openai_compatible deepgram: speech/openai/unary transcription/openai/unary
 openai_compatible assemblyai: transcription/openai/unary
+openai_compatible runway: video_list/openai/unary video_get/openai/unary video_content/openai/unary video_delete/openai/unary video_create/openai/async
 openai_compatible stability: image_generation/openai/unary image_edit/openai/unary
 openai_compatible recraft: image_generation/openai/unary
 openai_compatible bfl: image_generation/openai/unary

@@ -53,6 +53,9 @@ type Contract struct {
 	// Credential places an API key where the vendor reads it, when that is
 	// not an Authorization bearer token.
 	Credential *Credential
+	// Headers are static headers every request to the vendor carries, such
+	// as the API version it requires.
+	Headers map[string]string
 	// MediaWires name the vendor's own API for each media operation whose
 	// wire is not OpenAI's; the media codec of the same name translates it.
 	// Such an operation serves transformed routes only.
@@ -137,6 +140,15 @@ func MediaWire(vendor, operation string) string {
 		return ""
 	}
 	return contracts[i].MediaWires[operation]
+}
+
+// HeadersFor are the static headers every request to vendor carries.
+func HeadersFor(vendor string) map[string]string {
+	i, ok := index[vendor]
+	if !ok {
+		return nil
+	}
+	return contracts[i].Headers
 }
 
 // CredentialFor is where vendor reads an API key, if not as a bearer token.

@@ -185,6 +185,7 @@ selects the `compatible-chat` profile, so it can serve strict routes; choose
 | `elevenlabs` | ElevenLabs | `https://api.elevenlabs.io/v1` |  |
 | `deepgram` | Deepgram | `https://api.deepgram.com/v1` |  |
 | `assemblyai` | AssemblyAI | `https://api.assemblyai.com` |  |
+| `runway` | Runway | `https://api.dev.runwayml.com/v1` |  |
 | `stability` | Stability AI | `https://api.stability.ai` |  |
 | `recraft` | Recraft | `https://external.api.recraft.ai/v1` |  |
 | `bfl` | Black Forest Labs | `https://api.bfl.ai/v1` |  |

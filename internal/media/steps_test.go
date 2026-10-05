@@ -80,7 +80,7 @@ func TestBFLWorkIsPolledThenFetched(t *testing.T) {
 		t.Fatalf("staged %q", staged.String())
 	}
 	// A work that strays outside its domains is refused before any request.
-	if transport.stepAllowed("https://attacker.example/x", []string{"bfl.ai"}, server.URL+"/v1") || !transport.stepAllowed(server.URL+"/v1/get_result", []string{"bfl.ai"}, server.URL+"/v1") {
+	if transport.stepAllowed("https://attacker.example/x", []string{"bfl.ai"}, server.URL+"/v1", true) || !transport.stepAllowed(server.URL+"/v1/get_result", []string{"bfl.ai"}, server.URL+"/v1", true) {
 		t.Fatal("step addresses were not confined")
 	}
 }

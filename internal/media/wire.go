@@ -95,6 +95,10 @@ type UpstreamCall struct {
 	// in place of the OpenAI decoders.
 	DecodeImages        func(body []byte, stage func(b64 string, index int) (*Artifact, *Error)) (*ImageResult, *Error)
 	DecodeTranscription func(body []byte) (*TranscriptionResult, *Error)
+	// DecodeVideo reads a vendor's video job object, and NoContent marks a
+	// call the vendor answers with 204 and no body, such as a deletion.
+	DecodeVideo func(body []byte) (*VideoJobResult, *Error)
+	NoContent   bool
 	// DecodeAudio reads a vendor's JSON speech result: the audio it carries
 	// and the tokens it bills.
 	DecodeAudio func(body []byte) (*AudioResult, *Error)
@@ -132,9 +136,10 @@ type Step struct {
 	JSON        []byte
 	Wait        time.Duration
 	Credentials bool
-	// Image marks the step that fetches the generated image, which ends the
-	// work.
-	Image bool
+	// Asset marks the step that fetches the work's product, which ends it:
+	// a response of a content type with this prefix, such as image/ or
+	// video/.
+	Asset string
 	// Done marks the response just read as the work's result, which the
 	// call's decoder reads; Cleanup, if any, then deletes the vendor's copy.
 	Done    bool

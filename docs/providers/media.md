@@ -35,6 +35,7 @@ defaults do not apply to it.
 | [ElevenLabs](https://elevenlabs.io/docs/api-reference/introduction) | `speech`, `transcription` | `elevenlabs` | `GET /v1/user` |
 | [Deepgram](https://developers.deepgram.com/reference/deepgram-api-overview) | `speech`, `transcription` | `deepgram` | `GET /v1/projects` |
 | [AssemblyAI](https://www.assemblyai.com/docs/pre-recorded-audio/api-reference/transcripts/submit) | `transcription` | `assemblyai`: polled | `GET /v2/transcript?limit=1` |
+| [Runway](https://docs.dev.runwayml.com/api) | `video_create` and the video lifecycle | `runway`: jobs | `GET /v1/organization` |
 | [Stability AI](https://platform.stability.ai/docs/api-reference) | `image_generation`, `image_edit` | `stability` | `GET /v1/user/balance` |
 | [Recraft](https://www.recraft.ai/docs/api-reference/endpoints) | `image_generation` | `recraft` | `GET /v1/users/me` |
 | [Black Forest Labs](https://docs.bfl.ai/api_integration/integration_guidelines) | `image_generation` | `bfl`: polled | `GET /v1/credits` |
@@ -93,6 +94,19 @@ keeps no copy of the audio or its words. It is served as `json`,
 `verbose_json` with the language, the duration AssemblyAI bills by and the
 timed words, or `text`; it takes `language` and refuses a prompt and a
 temperature. The EU region is `https://api.eu.assemblyai.com`.
+
+### Runway
+
+A video creation starts a Runway task, which OLP keeps as a durable video
+job pinned to its provider revision, as it does OpenAI's: `GET
+/v1/videos/{id}` polls the task, the reconciler settles it, and deleting the
+video deletes the task. Every request carries Runway's required
+`X-Runway-Version`. The model, such as `gen4.5` or `veo3.1`, names the Runway
+model; the size becomes its ratio, `seconds` its duration, four by default as
+OpenAI's is, and an image `input_reference` makes it an image-to-video task.
+Content is the task's first output, fetched from Runway's CDN, where its
+signed URL takes no credential; Runway makes no thumbnails or spritesheets.
+Jobs are listed from OLP's own records.
 
 ### Stability AI
 
@@ -164,3 +178,12 @@ Google Cloud Text-to-Speech is declined: Gemini speech models already serve
 Google speech on Vertex and the Gemini API, while Cloud Text-to-Speech sits
 on its own host, which a Vertex provider's address does not reach, and its
 voices need a language that OpenAI's speech request does not carry.
+
+Video vendors whose models have ended or are ending are declined: Azure
+OpenAI's Sora retires on 2026-10-15, Veo on the Gemini API ends on
+2026-10-22, and Amazon Nova Reel reached end of life on 2026-09-30. Veo on
+Vertex AI is declined too: Google's references disagree on how a finished
+operation returns its video, which arrives inside the operation itself unless
+it is written to Cloud Storage, and Veo has no deletion. Runway serves Veo 3.1
+models.
+

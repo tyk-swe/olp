@@ -3,7 +3,6 @@ package media
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,14 +16,13 @@ import (
 const maxSteps = 240
 
 // follow runs a vendor's asynchronous work after its submission: each step
-// is a request within the attempt's deadline, until one fetches the image,
-// which follow stages, or a response is the work's result, which it returns
-// for the call's decoder. A response that names no next step repeats the
+// is a request within the attempt's deadline, until one fetches the work's
+// product, or a response is the work's result, which it returns for the
+// call's decoder. A response that names no next step repeats the
 // last poll. The submission was dispatched, so every failure here is
 // ambiguous: the vendor may yet finish, and bill, the work.
-func (t *Transport) follow(ctx context.Context, call *UpstreamCall, body []byte, send func(*http.Request) (*http.Response, error), target Target,
-	stage func(string, int) (*Artifact, *Error)) (*ImageResult, []byte, *Failure) {
-	fail := func(class FailureClass, detail string) (*ImageResult, []byte, *Failure) {
+func (t *Transport) follow(ctx context.Context, call *UpstreamCall, body []byte, send func(*http.Request) (*http.Response, error), target Target) (*stepResponse, []byte, *Failure) {
+	fail := func(class FailureClass, detail string) (*stepResponse, []byte, *Failure) {
 		return nil, nil, &Failure{Class: class, Dispatched: true, Ambiguous: true, Detail: detail}
 	}
 	step, mErr := call.Next(body)
@@ -45,7 +43,7 @@ func (t *Transport) follow(ctx context.Context, call *UpstreamCall, body []byte,
 		}
 		// No step means the work is still running: poll it again.
 		if step == nil {
-			if last == nil || last.Image || last.Method != "" && last.Method != http.MethodGet {
+			if last == nil || last.Asset != "" || last.Method != "" && last.Method != http.MethodGet {
 				return fail(ClassProtocol, "the vendor's work names nowhere to poll")
 			}
 			step = last
@@ -64,16 +62,11 @@ func (t *Transport) follow(ctx context.Context, call *UpstreamCall, body []byte,
 		if failure != nil {
 			return nil, nil, failure
 		}
-		if step.Image {
-			if !strings.HasPrefix(strings.ToLower(resp.contentType), "image/") {
-				return fail(ClassProtocol, "the vendor's result is not an image")
+		if step.Asset != "" {
+			if !strings.HasPrefix(strings.ToLower(resp.contentType), step.Asset) {
+				return fail(ClassProtocol, "the vendor's product is not the media it made")
 			}
-			staged, failure := stage(base64.StdEncoding.EncodeToString(resp.body), 0)
-			if failure != nil {
-				return fail(ClassProtocol, failure.Message)
-			}
-			handle := staged.Handle
-			return &ImageResult{CreatedAt: t.now().Unix(), Images: []ImageArtifact{{Handle: &handle}}}, nil, nil
+			return resp, nil, nil
 		}
 		body = resp.body
 		step, mErr = call.Next(body)
@@ -92,7 +85,7 @@ func (t *Transport) step(ctx context.Context, step *Step, call *UpstreamCall, se
 	fail := func(class FailureClass, detail string) (*stepResponse, *Failure) {
 		return nil, &Failure{Class: class, Dispatched: true, Ambiguous: true, Detail: detail}
 	}
-	if !t.stepAllowed(step.URL, call.StepDomains, target.Config.Endpoint) {
+	if !t.stepAllowed(step.URL, call.StepDomains, target.Config.Endpoint, step.Credentials) {
 		return fail(ClassProtocol, "the vendor directed its work to an address outside its domains")
 	}
 	method := step.Method
@@ -135,8 +128,10 @@ func (t *Transport) step(ctx context.Context, step *Step, call *UpstreamCall, se
 }
 
 // stepAllowed admits a step URL the egress policy allows on the provider
-// endpoint's host or under one of the vendor's domains.
-func (t *Transport) stepAllowed(raw string, domains []string, endpoint string) bool {
+// endpoint's host or under one of the vendor's domains. A step that carries
+// no credential, such as a signed product URL on a vendor's CDN, may go to
+// any HTTPS host the policy allows.
+func (t *Transport) stepAllowed(raw string, domains []string, endpoint string, credentialed bool) bool {
 	u, err := url.Parse(raw)
 	if err != nil || u.User != nil || u.Host == "" {
 		return false
@@ -147,7 +142,7 @@ func (t *Transport) stepAllowed(raw string, domains []string, endpoint string) b
 	}
 	host := strings.ToLower(u.Hostname())
 	own := host == strings.ToLower(base.Hostname()) && u.Scheme == base.Scheme
-	listed := u.Scheme == "https" && slices.ContainsFunc(domains, func(domain string) bool { return host == domain || strings.HasSuffix(host, "."+domain) })
+	listed := u.Scheme == "https" && (!credentialed || slices.ContainsFunc(domains, func(domain string) bool { return host == domain || strings.HasSuffix(host, "."+domain) }))
 	if !own && !listed {
 		return false
 	}

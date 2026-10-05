@@ -489,6 +489,9 @@ func (c Config) host(req *http.Request, credential []byte) ([]string, error) {
 	if c.Kind == "anthropic" && c.ProfileID == "" {
 		req.Header.Set("Anthropic-Version", anthropicMessagesRevision)
 	}
+	for name, value := range vendors.HeadersFor(c.VendorID) {
+		req.Header.Set(name, value)
+	}
 	if c.Plugin != nil {
 		return c.Plugin.place(req, credential, c.PluginOptions)
 	}

@@ -1,0 +1,11 @@
+{
+  "error": "Invalid request body",
+  "issues": [
+    {
+      "path": [
+        "ratio"
+      ],
+      "message": "Invalid enum value"
+    }
+  ]
+}

@@ -230,7 +230,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 			Ambiguous: call.Ambiguous && outcome.Acceptance.Unresolved(), Detail: "upstream transport failed"}
 	}
 	firstByte := t.now().Sub(started)
-	if resp.StatusCode != http.StatusOK && !(call.Kind == ResponseVideoJob && resp.StatusCode == http.StatusCreated) {
+	if resp.StatusCode != http.StatusOK && !(call.Kind == ResponseVideoJob && resp.StatusCode == http.StatusCreated) && !(call.NoContent && resp.StatusCode == http.StatusNoContent) {
 		// A provider can reject headers before reading the upload. Stop the
 		// producer and preserve the definitive HTTP rejection in that case.
 		if pipe != nil {
@@ -378,6 +378,32 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		result.ContentType = artifact.ContentType
 		return result, nil
 	case ResponseVideoContent:
+		if call.Next != nil {
+			// The vendor names its product in a job object; the work's
+			// last step fetches it.
+			if !requireContentType(resp, "application/json") {
+				return nil, &Failure{Class: ClassProtocol, Detail: "video job response is not JSON"}
+			}
+			body, failure := t.collect(resp)
+			if failure != nil {
+				return nil, failure
+			}
+			asset, _, failure := t.follow(ctx, call, body, send, target)
+			if failure != nil {
+				failure.Ambiguous = false // Reading content creates nothing.
+				return nil, failure
+			}
+			if asset == nil {
+				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Detail: "the vendor named no video content"}
+			}
+			contentType := strings.ToLower(strings.TrimSpace(strings.Split(asset.contentType, ";")[0]))
+			artifact, err := t.Spool.Put(ctx, Upload{Filename: "video-content", ContentType: contentType, MaximumLength: int64(len(asset.body)), Body: bytes.NewReader(asset.body)})
+			if err != nil {
+				return nil, stageFailure(SpoolError(err))
+			}
+			result.Artifact, result.ContentType = artifact, artifact.ContentType
+			return result, nil
+		}
 		base := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
 		if call.Strict {
 			original := resp.Header.Get("Content-Type")
@@ -427,7 +453,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		}
 		if call.Next != nil {
 			var failure *Failure
-			if _, body, failure = t.follow(ctx, call, body, send, target, nil); failure != nil {
+			if _, body, failure = t.follow(ctx, call, body, send, target); failure != nil {
 				return nil, failure
 			}
 		}
@@ -477,14 +503,19 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		var decoded *ImageResult
 		var mErr *Error
 		if call.Next != nil {
-			var failure *Failure
-			decoded, _, failure = t.follow(ctx, call, body, send, target, stage)
+			asset, _, failure := t.follow(ctx, call, body, send, target)
 			if failure != nil {
-				for _, handle := range stagedHandles {
-					t.Spool.Remove(handle)
-				}
 				return nil, failure
 			}
+			if asset == nil {
+				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Ambiguous: true, Detail: "the vendor's work ended without an image"}
+			}
+			staged, sErr := stage(base64.StdEncoding.EncodeToString(asset.body), 0)
+			if sErr != nil {
+				return nil, stageFailure(sErr)
+			}
+			handle := staged.Handle
+			decoded = &ImageResult{CreatedAt: t.now().Unix(), Images: []ImageArtifact{{Handle: &handle}}}
 		} else if call.DecodeImages != nil {
 			decoded, mErr = call.DecodeImages(body, stage)
 		} else if call.Native != "" {
@@ -505,6 +536,10 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		result.Images = decoded
 		return result, nil
 	case ResponseVideoJob, ResponseVideoList, ResponseVideoDelete:
+		if call.NoContent && resp.StatusCode == http.StatusNoContent {
+			result.Deleted = &VideoDeleteResult{Deleted: true}
+			return result, nil
+		}
 		if !requireContentType(resp, "application/json") {
 			return nil, &Failure{Class: ClassProtocol, Detail: "video response is not JSON"}
 		}
@@ -516,12 +551,14 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			return nil, failure
 		}
 		var mErr *Error
-		switch call.Kind {
-		case ResponseVideoJob:
+		switch {
+		case call.DecodeVideo != nil:
+			result.Video, mErr = call.DecodeVideo(body)
+		case call.Kind == ResponseVideoJob:
 			result.Video, mErr = DecodeVideoObject(body)
-		case ResponseVideoList:
+		case call.Kind == ResponseVideoList:
 			result.List, mErr = DecodeVideoListResponse(body)
-		case ResponseVideoDelete:
+		case call.Kind == ResponseVideoDelete:
 			result.Deleted, mErr = DecodeVideoDeleteResponse(body)
 		}
 		if mErr != nil {

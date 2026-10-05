@@ -1007,6 +1007,33 @@
     "unsupported_parameters": []
   },
   {
+    "id": "runway",
+    "name": "Runway",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "video_create",
+      "video_list",
+      "video_get",
+      "video_content",
+      "video_delete"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "seconds",
+      "size",
+      "input_reference"
+    ],
+    "documentation_url": "https://docs.dev.runwayml.com/api",
+    "endpoint": "https://api.dev.runwayml.com/v1",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
     "id": "stability",
     "name": "Stability AI",
     "connector": "openai_compatible",
