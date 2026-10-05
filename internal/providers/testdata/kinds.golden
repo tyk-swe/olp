@@ -1,0 +1,387 @@
+{
+  "items": [
+    {
+      "kind": "openai",
+      "label": "OpenAI",
+      "description": "OpenAI platform API with Chat Completions and Responses.",
+      "default_auth_mode": "api_key",
+      "auth_modes": [
+        {
+          "mode": "api_key",
+          "label": "API key",
+          "credential": "required"
+        },
+        {
+          "mode": "headers",
+          "label": "Encrypted headers",
+          "credential": "required"
+        },
+        {
+          "mode": "none",
+          "label": "No credential",
+          "credential": "forbidden"
+        }
+      ],
+      "fields": [
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "openai_compatible",
+      "label": "OpenAI-compatible",
+      "description": "Any server implementing the OpenAI Chat Completions or Responses API.",
+      "default_auth_mode": "api_key",
+      "auth_modes": [
+        {
+          "mode": "api_key",
+          "label": "Bearer API key",
+          "credential": "required"
+        },
+        {
+          "mode": "headers",
+          "label": "Custom credential headers",
+          "credential": "required"
+        },
+        {
+          "mode": "none",
+          "label": "No credential",
+          "credential": "forbidden"
+        }
+      ],
+      "fields": [
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": true
+        }
+      ],
+      "presets": [
+        {
+          "id": "groq",
+          "label": "Groq",
+          "description": "Groq OpenAI-compatible endpoint.",
+          "endpoint": "https://api.groq.com/openai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Groq",
+          "documentation_label": "Groq OpenAI compatibility",
+          "documentation_url": "https://console.groq.com/docs/openai"
+        },
+        {
+          "id": "mistral",
+          "label": "Mistral",
+          "description": "Mistral La Plateforme.",
+          "endpoint": "https://api.mistral.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Mistral AI",
+          "documentation_label": "Mistral API",
+          "documentation_url": "https://docs.mistral.ai/api/"
+        },
+        {
+          "id": "openrouter",
+          "label": "OpenRouter",
+          "description": "OpenRouter unified API.",
+          "endpoint": "https://openrouter.ai/api/v1",
+          "auth_mode": "api_key",
+          "maintainer": "OpenRouter",
+          "documentation_label": "OpenRouter API",
+          "documentation_url": "https://openrouter.ai/docs"
+        },
+        {
+          "id": "together",
+          "label": "Together AI",
+          "description": "Together AI inference.",
+          "endpoint": "https://api.together.xyz/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Together AI",
+          "documentation_label": "Together OpenAI compatibility",
+          "documentation_url": "https://docs.together.ai/docs/openai-api-compatibility"
+        },
+        {
+          "id": "vllm",
+          "label": "vLLM",
+          "description": "Self-hosted vLLM OpenAI server.",
+          "endpoint": "https://vllm.example.internal/v1",
+          "auth_mode": "none",
+          "maintainer": "vLLM",
+          "documentation_label": "vLLM OpenAI server",
+          "documentation_url": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html"
+        },
+        {
+          "id": "deepseek",
+          "label": "DeepSeek",
+          "description": "DeepSeek compatible API.",
+          "endpoint": "https://api.deepseek.com/v1",
+          "auth_mode": "api_key",
+          "maintainer": "DeepSeek",
+          "documentation_label": "DeepSeek API",
+          "documentation_url": "https://api-docs.deepseek.com"
+        },
+        {
+          "id": "fireworks",
+          "label": "Fireworks",
+          "description": "Fireworks compatible API.",
+          "endpoint": "https://api.fireworks.ai/inference/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Fireworks",
+          "documentation_label": "Fireworks API",
+          "documentation_url": "https://docs.fireworks.ai"
+        },
+        {
+          "id": "deepinfra",
+          "label": "DeepInfra",
+          "description": "DeepInfra compatible API.",
+          "endpoint": "https://api.deepinfra.com/v1/openai",
+          "auth_mode": "api_key",
+          "maintainer": "DeepInfra",
+          "documentation_label": "DeepInfra API",
+          "documentation_url": "https://deepinfra.com/docs"
+        },
+        {
+          "id": "huggingface",
+          "label": "Hugging Face",
+          "description": "Hugging Face compatible API.",
+          "endpoint": "https://router.huggingface.co/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Hugging Face",
+          "documentation_label": "Hugging Face API",
+          "documentation_url": "https://huggingface.co/docs/inference-providers"
+        },
+        {
+          "id": "perplexity",
+          "label": "Perplexity",
+          "description": "Perplexity compatible API.",
+          "endpoint": "https://api.perplexity.ai",
+          "auth_mode": "api_key",
+          "maintainer": "Perplexity",
+          "documentation_label": "Perplexity API",
+          "documentation_url": "https://docs.perplexity.ai"
+        },
+        {
+          "id": "cohere",
+          "label": "Cohere",
+          "description": "Cohere compatible API.",
+          "endpoint": "https://api.cohere.ai/compatibility/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Cohere",
+          "documentation_label": "Cohere API",
+          "documentation_url": "https://docs.cohere.com"
+        },
+        {
+          "id": "cohere-native-v2",
+          "label": "Cohere native v2",
+          "description": "Cohere native v2 compatible API.",
+          "endpoint": "https://api.cohere.ai/v2",
+          "auth_mode": "api_key",
+          "maintainer": "Cohere native v2",
+          "documentation_label": "Cohere native v2 API",
+          "documentation_url": "https://docs.cohere.com/reference/embed"
+        },
+        {
+          "id": "voyage",
+          "label": "Voyage AI",
+          "description": "Voyage AI compatible API.",
+          "endpoint": "https://api.voyageai.com/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Voyage AI",
+          "documentation_label": "Voyage AI API",
+          "documentation_url": "https://docs.voyageai.com"
+        }
+      ]
+    },
+    {
+      "kind": "anthropic",
+      "label": "Anthropic",
+      "description": "Native API, including custom endpoints.",
+      "default_auth_mode": "api_key",
+      "auth_modes": [
+        {
+          "mode": "api_key",
+          "label": "API key",
+          "credential": "required"
+        },
+        {
+          "mode": "headers",
+          "label": "Encrypted headers",
+          "credential": "required"
+        },
+        {
+          "mode": "none",
+          "label": "No credential",
+          "credential": "forbidden"
+        }
+      ],
+      "fields": [
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "gemini",
+      "label": "Google Gemini",
+      "description": "Native API, including custom endpoints.",
+      "default_auth_mode": "api_key",
+      "auth_modes": [
+        {
+          "mode": "api_key",
+          "label": "API key",
+          "credential": "required"
+        },
+        {
+          "mode": "headers",
+          "label": "Encrypted headers",
+          "credential": "required"
+        },
+        {
+          "mode": "none",
+          "label": "No credential",
+          "credential": "forbidden"
+        }
+      ],
+      "fields": [
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "azure_openai",
+      "label": "Azure OpenAI",
+      "description": "Azure deployment API.",
+      "default_auth_mode": "api_key",
+      "auth_modes": [
+        {
+          "mode": "api_key",
+          "label": "API key",
+          "credential": "required"
+        },
+        {
+          "mode": "azure_default",
+          "label": "Microsoft Entra default credential",
+          "credential": "forbidden"
+        },
+        {
+          "mode": "azure_client_secret",
+          "label": "Microsoft Entra client secret",
+          "credential": "required"
+        }
+      ],
+      "fields": [
+        {
+          "field": "endpoint",
+          "label": "Resource origin",
+          "required": true
+        },
+        {
+          "field": "deployment",
+          "label": "Deployment",
+          "required": true
+        },
+        {
+          "field": "api_version",
+          "label": "API version",
+          "required": true
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "vertex_ai",
+      "label": "Google Vertex AI",
+      "description": "Vertex publisher generation API.",
+      "default_auth_mode": "adc",
+      "auth_modes": [
+        {
+          "mode": "adc",
+          "label": "Application default credentials",
+          "credential": "forbidden"
+        },
+        {
+          "mode": "service_account",
+          "label": "Service account JSON",
+          "credential": "required"
+        }
+      ],
+      "fields": [
+        {
+          "field": "cloud_project",
+          "label": "Project",
+          "required": true
+        },
+        {
+          "field": "cloud_region",
+          "label": "Location",
+          "required": true
+        },
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "bedrock",
+      "label": "Amazon Bedrock",
+      "description": "Converse, ConverseStream and CountTokens.",
+      "default_auth_mode": "default_chain",
+      "auth_modes": [
+        {
+          "mode": "default_chain",
+          "label": "AWS credential chain",
+          "credential": "forbidden"
+        },
+        {
+          "mode": "static",
+          "label": "AWS credential JSON",
+          "credential": "required"
+        }
+      ],
+      "fields": [
+        {
+          "field": "cloud_region",
+          "label": "Region",
+          "required": true
+        },
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "plugin",
+      "label": "Provider plugin",
+      "description": "A profile an installed provider plugin supplies around a built-in dialect.",
+      "default_auth_mode": "static_credential",
+      "auth_modes": [
+        {
+          "mode": "static_credential",
+          "label": "Static credential",
+          "credential": "required"
+        },
+        {
+          "mode": "grant",
+          "label": "Grant",
+          "credential": "grant"
+        }
+      ],
+      "fields": [],
+      "presets": []
+    }
+  ]
+}
