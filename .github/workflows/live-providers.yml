@@ -7,7 +7,7 @@ on:
         type: choice
         required: true
         default: openai
-        options: [openai, anthropic, gemini, azure_openai, vertex, bedrock, sagemaker]
+        options: [openai, anthropic, gemini, azure_openai, vertex, bedrock, sagemaker, watsonx]
 permissions:
   contents: read
 jobs:
@@ -69,4 +69,10 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+        run: go test -tags=liveproviders -count=1 -timeout=2m ./internal/connectors -run TestLiveProvider
+      - if: inputs.provider == 'watsonx'
+        env:
+          OLP_WATSONX_LIVE_REGION: ${{ vars.OLP_WATSONX_LIVE_REGION }}
+          OLP_WATSONX_LIVE_PROJECT: ${{ vars.OLP_WATSONX_LIVE_PROJECT }}
+          OLP_WATSONX_LIVE_API_KEY: ${{ secrets.OLP_WATSONX_LIVE_API_KEY }}
         run: go test -tags=liveproviders -count=1 -timeout=2m ./internal/connectors -run TestLiveProvider

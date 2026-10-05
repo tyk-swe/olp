@@ -69,6 +69,14 @@ func TestLiveProviderNativeGeneration(t *testing.T) {
 		c.CloudRegion = require("OLP_BEDROCK_LIVE_REGION")
 		model = require("OLP_BEDROCK_LIVE_MODEL")
 		wire = openai.Family("bedrock")
+	case "watsonx":
+		c.AuthMode = "ibm_iam"
+		secret = require("OLP_WATSONX_LIVE_API_KEY")
+		c.CloudRegion = require("OLP_WATSONX_LIVE_REGION")
+		c.CloudProject = require("OLP_WATSONX_LIVE_PROJECT")
+		if model == "" {
+			model = "ibm/granite-3-8b-instruct"
+		}
 	case "sagemaker":
 		c.AuthMode = "default_chain"
 		c.CloudRegion = require("OLP_SAGEMAKER_LIVE_REGION")

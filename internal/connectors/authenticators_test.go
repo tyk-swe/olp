@@ -115,7 +115,7 @@ func TestAuthenticationFailuresTellARejectedCredentialFromATransientOne(t *testi
 		t.Run(test.name, func(t *testing.T) {
 			a := NewAuth(localPolicy())
 			// Test-only token endpoints: production keeps Google's public-only client.
-			a.googleClient = a.client
+			a.publicClient = a.client
 			c, secret := test.prepare(t, a)
 			req, _ := http.NewRequest("POST", "https://provider.example", nil)
 			_, err := a.Apply(t.Context(), req, c, secret, nil)

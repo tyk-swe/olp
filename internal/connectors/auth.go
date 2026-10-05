@@ -52,14 +52,20 @@ const authBodyLimit = 1 << 20
 type Auth struct {
 	// Signer runs the signing hooks of plugin profiles. Without one, a
 	// request of a profile that declares signing fails authentication.
-	Signer       Signer
-	mu           sync.Mutex
-	tokens       map[[32]byte]*cloudauth.Token
-	aws          map[[32]byte]aws.CredentialsProvider
-	azure        map[[32]byte]azcore.TokenCredential
-	azureTokens  map[[32]byte]azcore.AccessToken
-	client       *http.Client
-	googleClient *http.Client
+	Signer      Signer
+	mu          sync.Mutex
+	tokens      map[[32]byte]*cloudauth.Token
+	aws         map[[32]byte]aws.CredentialsProvider
+	azure       map[[32]byte]azcore.TokenCredential
+	azureTokens map[[32]byte]azcore.AccessToken
+	ibmTokens   map[[32]byte]ibmToken
+	client      *http.Client
+	// publicClient reaches token endpoints on the public internet, Google's
+	// and IBM Cloud IAM's, under a public-only policy that provider
+	// exceptions never relax.
+	publicClient *http.Client
+	// iamEndpoint is IBM Cloud IAM's token endpoint.
+	iamEndpoint  string
 	azureClient  *http.Client
 	adc          chan credentialResult
 	azureFactory func(mode string, secret []byte) (azcore.TokenCredential, error)
@@ -80,9 +86,9 @@ func NewAuth(policy *egress.Policy) *Auth {
 	client.Timeout = authTimeout
 	client.Transport = boundedAuthTransport{base: client.Transport, policy: &awsPolicy}
 	public := &egress.Policy{}
-	googleClient := public.Client(authTimeout)
-	googleClient.Timeout = authTimeout
-	googleClient.Transport = boundedAuthTransport{base: googleClient.Transport, policy: public}
+	publicClient := public.Client(authTimeout)
+	publicClient.Timeout = authTimeout
+	publicClient.Transport = boundedAuthTransport{base: publicClient.Transport, policy: public}
 
 	azurePolicy := *policy
 	azurePolicy.AllowedNetworks = append([]netip.Prefix{}, policy.AllowedNetworks...)
@@ -111,8 +117,8 @@ func NewAuth(policy *egress.Policy) *Auth {
 	azureClient.Timeout = authTimeout
 	azureClient.Transport = azureIdentityTransport{base: boundedAuthTransport{base: azureClient.Transport, policy: &azurePolicy}}
 	return &Auth{tokens: map[[32]byte]*cloudauth.Token{}, aws: map[[32]byte]aws.CredentialsProvider{},
-		azure: map[[32]byte]azcore.TokenCredential{}, azureTokens: map[[32]byte]azcore.AccessToken{},
-		client: client, googleClient: googleClient, azureClient: azureClient}
+		azure: map[[32]byte]azcore.TokenCredential{}, azureTokens: map[[32]byte]azcore.AccessToken{}, ibmTokens: map[[32]byte]ibmToken{},
+		client: client, publicClient: publicClient, azureClient: azureClient, iamEndpoint: ibmIAMEndpoint}
 }
 
 var azureAuthorityHosts = map[string]bool{
@@ -274,6 +280,7 @@ var authenticators = map[string]authenticator{
 	"azure_client_secret": {credential: true, authenticate: (*Auth).authenticateAzure},
 	"default_chain":       {authenticate: (*Auth).authenticateAWS},
 	"static":              {credential: true, authenticate: (*Auth).authenticateAWS},
+	"ibm_iam":             {credential: true, authenticate: (*Auth).authenticateIBM},
 	AuthStaticCredential:  {credential: true, authenticate: (*Auth).authenticatePlaced},
 	AuthGrant:             {credential: true, authenticate: (*Auth).authenticatePlaced},
 }
@@ -428,7 +435,7 @@ func (a *Auth) googleToken(ctx context.Context, c Config, secret []byte) (*cloud
 	ctx, cancel := context.WithTimeout(ctx, authTimeout)
 	defer cancel()
 	// Do not let environment-enabled SDK debug logs expose token exchanges.
-	opts := &googlecredentials.DetectOptions{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}, Client: a.googleClient, DisableAsyncRefresh: true, EarlyTokenRefresh: 30 * time.Second}
+	opts := &googlecredentials.DetectOptions{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}, Client: a.publicClient, DisableAsyncRefresh: true, EarlyTokenRefresh: 30 * time.Second}
 	var cred *cloudauth.Credentials
 	var err error
 	if c.AuthMode == "service_account" {

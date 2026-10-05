@@ -78,6 +78,11 @@ func DefaultEndpoint(kind, region, project string) string {
 	case KindSageMaker:
 		endpoint, _ := SageMakerEndpoint(region)
 		return endpoint
+	case KindWatsonx:
+		if !cloudIdentifier.MatchString(region) {
+			return ""
+		}
+		return "https://" + region + ".ml.cloud.ibm.com"
 	}
 	return ""
 }
@@ -89,6 +94,9 @@ var bedrockModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 func ModelValid(kind, model string) bool {
 	if kind == KindSageMaker {
 		return sagemakerModelValid(model)
+	}
+	if kind == KindWatsonx {
+		return watsonxModelValid(model)
 	}
 	if kind == "bedrock" {
 		return len(model) <= 2048 && bedrockModel.MatchString(model) && !strings.Contains(model, "..")
@@ -144,6 +152,16 @@ func (c Config) Validate(policy *egress.Policy) error {
 		}
 		if u.Path != "" || c.CloudProject != "" || c.Deployment != "" || c.APIVersion != "" {
 			return errors.New("SageMaker uses a runtime endpoint origin and region; models name the endpoint")
+		}
+	case KindWatsonx:
+		if !cloudIdentifier.MatchString(c.CloudRegion) || !cloudIdentifier.MatchString(c.CloudProject) {
+			return errors.New("watsonx requires a region and a project ID")
+		}
+		if u.Path != "" || c.Deployment != "" {
+			return errors.New("watsonx uses a regional endpoint origin, region and project")
+		}
+		if date, err := time.Parse(time.DateOnly, c.APIVersion); c.APIVersion != "" && (err != nil || date.Year() < 2024) {
+			return errors.New("watsonx api_version must be a YYYY-MM-DD date")
 		}
 	case "bedrock":
 		if !cloudIdentifier.MatchString(c.CloudRegion) {
@@ -221,8 +239,11 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 	if !c.ValidModel(model) {
 		return "", errors.New("invalid upstream model identifier")
 	}
-	if c.Kind == KindSageMaker {
+	switch c.Kind {
+	case KindSageMaker:
 		return sagemakerURL(base, wire, model)
+	case KindWatsonx:
+		return c.watsonxURL(base, wire, stream)
 	}
 	path := "/chat/completions"
 	switch wire {

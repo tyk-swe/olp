@@ -7,6 +7,7 @@ openai "google": generation/openai/unary generation/openai/streaming generation/
 openai "google-vertex": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary image_generation/openai/unary image_generation/openai/streaming
 openai "amazon-bedrock": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary image_generation/openai/unary image_generation/openai/streaming
 openai "amazon-sagemaker": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+openai "ibm-watsonx": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 openai "azure": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary moderation/openai/unary batch/openai/unary realtime/openai/realtime image_generation/openai/unary image_generation/openai/streaming image_edit/openai/unary image_edit/openai/streaming image_variation/openai/unary speech/openai/unary speech/openai/streaming transcription/openai/unary transcription/openai/streaming translation/openai/unary video_create/openai/async video_list/openai/unary video_get/openai/unary video_content/openai/unary video_delete/openai/unary
 openai "groq": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 openai "mistral": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
@@ -29,6 +30,7 @@ openai_compatible "google": generation/openai/unary generation/openai/streaming 
 openai_compatible "google-vertex": generation/openai/unary generation/openai/streaming token_count/openai/unary embeddings/openai/unary image_generation/openai/unary image_generation/openai/streaming
 openai_compatible "amazon-bedrock": generation/openai/unary generation/openai/streaming token_count/openai/unary embeddings/openai/unary image_generation/openai/unary image_generation/openai/streaming
 openai_compatible "amazon-sagemaker": generation/openai/unary generation/openai/streaming
+openai_compatible "ibm-watsonx": generation/openai/unary generation/openai/streaming
 openai_compatible "azure": generation/openai/unary generation/openai/streaming token_count/openai/unary embeddings/openai/unary moderation/openai/unary image_generation/openai/unary image_generation/openai/streaming image_edit/openai/unary image_edit/openai/streaming image_variation/openai/unary speech/openai/unary speech/openai/streaming transcription/openai/unary transcription/openai/streaming translation/openai/unary video_create/openai/async video_list/openai/unary video_get/openai/unary video_content/openai/unary video_delete/openai/unary
 openai_compatible "groq": generation/openai/unary generation/openai/streaming
 openai_compatible "mistral": generation/openai/unary generation/openai/streaming embeddings/openai/unary
@@ -51,6 +53,7 @@ anthropic "google": generation/openai/unary generation/openai/streaming generati
 anthropic "google-vertex": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary
 anthropic "amazon-bedrock": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary
 anthropic "amazon-sagemaker": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+anthropic "ibm-watsonx": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 anthropic "azure": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary
 anthropic "groq": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 anthropic "mistral": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
@@ -73,6 +76,7 @@ gemini "google": generation/openai/unary generation/openai/streaming generation/
 gemini "google-vertex": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary
 gemini "amazon-bedrock": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary
 gemini "amazon-sagemaker": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+gemini "ibm-watsonx": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 gemini "azure": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary
 gemini "groq": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 gemini "mistral": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
@@ -95,6 +99,7 @@ azure_openai "google": generation/openai/unary generation/openai/streaming gener
 azure_openai "google-vertex": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary image_generation/openai/unary image_generation/openai/streaming
 azure_openai "amazon-bedrock": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary image_generation/openai/unary image_generation/openai/streaming
 azure_openai "amazon-sagemaker": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+azure_openai "ibm-watsonx": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 azure_openai "azure": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary moderation/openai/unary batch/openai/unary realtime/openai/realtime image_generation/openai/unary image_generation/openai/streaming image_edit/openai/unary image_edit/openai/streaming image_variation/openai/unary speech/openai/unary speech/openai/streaming transcription/openai/unary transcription/openai/streaming translation/openai/unary video_create/openai/async video_list/openai/unary video_get/openai/unary video_content/openai/unary video_delete/openai/unary
 azure_openai "groq": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 azure_openai "mistral": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
@@ -117,6 +122,7 @@ vertex_ai "google": generation/openai/unary generation/openai/streaming generati
 vertex_ai "google-vertex": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary image_generation/openai/unary
 vertex_ai "amazon-bedrock": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary image_generation/openai/unary
 vertex_ai "amazon-sagemaker": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+vertex_ai "ibm-watsonx": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 vertex_ai "azure": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary embeddings/openai/unary image_generation/openai/unary
 vertex_ai "groq": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 vertex_ai "mistral": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming embeddings/openai/unary
@@ -139,6 +145,7 @@ bedrock "google": generation/openai/unary generation/openai/streaming generation
 bedrock "google-vertex": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary token_count/bedrock/unary embeddings/openai/unary image_generation/openai/unary
 bedrock "amazon-bedrock": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary token_count/bedrock/unary embeddings/openai/unary bedrock_invoke/bedrock/unary bedrock_invoke/bedrock/streaming image_generation/openai/unary
 bedrock "amazon-sagemaker": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming
+bedrock "ibm-watsonx": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming
 bedrock "azure": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming token_count/openai/unary token_count/anthropic/unary token_count/gemini/unary token_count/bedrock/unary embeddings/openai/unary image_generation/openai/unary
 bedrock "groq": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming
 bedrock "mistral": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming generation/bedrock/unary generation/bedrock/streaming embeddings/openai/unary
@@ -161,6 +168,7 @@ sagemaker "google": generation/openai/unary generation/openai/streaming
 sagemaker "google-vertex": generation/openai/unary generation/openai/streaming
 sagemaker "amazon-bedrock": generation/openai/unary generation/openai/streaming
 sagemaker "amazon-sagemaker": generation/openai/unary generation/openai/streaming
+sagemaker "ibm-watsonx": generation/openai/unary generation/openai/streaming
 sagemaker "azure": generation/openai/unary generation/openai/streaming
 sagemaker "groq": generation/openai/unary generation/openai/streaming
 sagemaker "mistral": generation/openai/unary generation/openai/streaming
@@ -174,6 +182,29 @@ sagemaker "huggingface": generation/openai/unary generation/openai/streaming
 sagemaker "cohere": generation/openai/unary generation/openai/streaming
 sagemaker "cohere-native-v2": 
 sagemaker "voyage": 
+watsonx "": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "unreviewed": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "openai": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "openai_compatible": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "anthropic": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "google": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "google-vertex": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "amazon-bedrock": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "amazon-sagemaker": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "ibm-watsonx": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "azure": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "groq": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "mistral": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "openrouter": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "together": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "vllm": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "deepseek": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "fireworks": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "deepinfra": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "huggingface": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "cohere": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+watsonx "cohere-native-v2": 
+watsonx "voyage": 
 plugin "": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 plugin "unreviewed": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 plugin "openai": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
@@ -183,6 +214,7 @@ plugin "google": generation/openai/unary generation/openai/streaming generation/
 plugin "google-vertex": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 plugin "amazon-bedrock": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 plugin "amazon-sagemaker": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
+plugin "ibm-watsonx": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 plugin "azure": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 plugin "groq": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming
 plugin "mistral": generation/openai/unary generation/openai/streaming generation/anthropic/unary generation/anthropic/streaming generation/gemini/unary generation/gemini/streaming

@@ -239,6 +239,11 @@ func listingFor(cfg *Configuration) (modelListing, bool, error) {
 	case KindGemini:
 		listing.models, listing.id, listing.display = "models", "name", "displayName"
 		listing.cursor, listing.parameter = "nextPageToken", "pageToken"
+	case KindWatsonx:
+		// The chat-capable foundation models, in one page of the most the
+		// listing returns.
+		listing.path = "/ml/v1/foundation_model_specs?version=" + connectors.WatsonxVersion(value(cfg.APIVersion)) + "&filters=function_text_chat&limit=200"
+		listing.models, listing.id, listing.display = "resources", "model_id", "label"
 	case KindBedrock:
 		listing.path, listing.models, listing.id, listing.display = "/foundation-models", "modelSummaries", "modelId", "modelName"
 		if value(cfg.Endpoint) == connectors.DefaultEndpoint(cfg.Kind, value(cfg.CloudRegion), "") {

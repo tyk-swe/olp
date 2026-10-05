@@ -131,3 +131,20 @@ func TestEveryVendorContractNamesAKindThatServesIt(t *testing.T) {
 		}
 	}
 }
+
+// TestCloudKindsConfigureFromTheirDefaults covers the SageMaker and watsonx
+// kinds: a region, and watsonx's project, give each its regional endpoint.
+func TestCloudKindsConfigureFromTheirDefaults(t *testing.T) {
+	for _, test := range []struct {
+		cfg      Configuration
+		endpoint string
+	}{
+		{Configuration{Kind: KindSageMaker, AuthMode: "default_chain", CloudRegion: new("eu-central-1")}, "https://runtime.sagemaker.eu-central-1.amazonaws.com"},
+		{Configuration{Kind: KindWatsonx, AuthMode: "ibm_iam", CloudRegion: new("eu-de"), CloudProject: new("8f3b2c1d-1234-4abc-9def-0123456789ab"), APIVersion: new("2026-09-25")}, "https://eu-de.ml.cloud.ibm.com"},
+	} {
+		test.cfg.Normalize()
+		if err := test.cfg.Validate(&egress.Policy{}); err != nil || value(test.cfg.Endpoint) != test.endpoint || value(test.cfg.Options.VendorID) != defaultVendor(test.cfg.Kind) {
+			t.Fatalf("%s configuration = %s %v, %v", test.cfg.Kind, value(test.cfg.Endpoint), value(test.cfg.Options.VendorID), err)
+		}
+	}
+}

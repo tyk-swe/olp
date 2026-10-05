@@ -20,6 +20,7 @@ body:
         - vertex_ai
         - bedrock
         - sagemaker
+        - watsonx
         - azure_openai
         - openai_compatible
     validations:

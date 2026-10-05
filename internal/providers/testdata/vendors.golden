@@ -315,6 +315,50 @@
     "unsupported_parameters": []
   },
   {
+    "id": "ibm-watsonx",
+    "name": "IBM watsonx.ai",
+    "connector": "watsonx",
+    "discovery": true,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "ibm_iam"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "n",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-api-chat.html?context=wx",
+    "endpoint": null,
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": [
+      "audio",
+      "logit_bias",
+      "metadata",
+      "modalities",
+      "parallel_tool_calls",
+      "prediction",
+      "service_tier",
+      "store",
+      "user",
+      "web_search_options"
+    ]
+  },
+  {
     "id": "azure",
     "name": "Azure OpenAI",
     "connector": "azure_openai",

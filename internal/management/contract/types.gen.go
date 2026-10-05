@@ -1248,6 +1248,7 @@ const (
 	ProviderAuthModeDefaultChain      ProviderAuthMode = "default_chain"
 	ProviderAuthModeGrant             ProviderAuthMode = "grant"
 	ProviderAuthModeHeaders           ProviderAuthMode = "headers"
+	ProviderAuthModeIbmIam            ProviderAuthMode = "ibm_iam"
 	ProviderAuthModeNone              ProviderAuthMode = "none"
 	ProviderAuthModeServiceAccount    ProviderAuthMode = "service_account"
 	ProviderAuthModeStatic            ProviderAuthMode = "static"
@@ -1270,6 +1271,8 @@ func (e ProviderAuthMode) Valid() bool {
 	case ProviderAuthModeGrant:
 		return true
 	case ProviderAuthModeHeaders:
+		return true
+	case ProviderAuthModeIbmIam:
 		return true
 	case ProviderAuthModeNone:
 		return true
@@ -1379,6 +1382,7 @@ const (
 	ProviderKindPlugin           ProviderKind = "plugin"
 	ProviderKindSagemaker        ProviderKind = "sagemaker"
 	ProviderKindVertexAi         ProviderKind = "vertex_ai"
+	ProviderKindWatsonx          ProviderKind = "watsonx"
 )
 
 // Valid indicates whether the value is a known member of the ProviderKind enum.
@@ -1401,6 +1405,8 @@ func (e ProviderKind) Valid() bool {
 	case ProviderKindSagemaker:
 		return true
 	case ProviderKindVertexAi:
+		return true
+	case ProviderKindWatsonx:
 		return true
 	default:
 		return false
@@ -4350,11 +4356,11 @@ type ProviderAuthCapabilityResponse struct {
 	Credential CredentialRequirement `json:"credential"`
 	Label      string                `json:"label"`
 
-	// Mode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
+	// Mode How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	Mode ProviderAuthMode `json:"mode"`
 }
 
-// ProviderAuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
+// ProviderAuthMode How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 type ProviderAuthMode string
 
 // ProviderCapabilityOptionsResponse defines model for ProviderCapabilityOptionsResponse.
@@ -4407,7 +4413,7 @@ type ProviderCatalogSuggestionListResponse struct {
 type ProviderConfiguration struct {
 	ApiVersion nullable.Nullable[string] `json:"api_version,omitempty"`
 
-	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
+	// AuthMode How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	AuthMode     ProviderAuthMode          `json:"auth_mode"`
 	CloudProject nullable.Nullable[string] `json:"cloud_project,omitempty"`
 	CloudRegion  nullable.Nullable[string] `json:"cloud_region,omitempty"`
@@ -4532,7 +4538,7 @@ type ProviderKindCapabilityListResponse struct {
 type ProviderKindCapabilityResponse struct {
 	AuthModes []ProviderAuthCapabilityResponse `json:"auth_modes"`
 
-	// DefaultAuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
+	// DefaultAuthMode How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	DefaultAuthMode ProviderAuthMode                  `json:"default_auth_mode"`
 	Description     string                            `json:"description"`
 	Fields          []ProviderFieldCapabilityResponse `json:"fields"`
@@ -4632,7 +4638,7 @@ type ProviderOperationDefaults struct {
 
 // ProviderPresetResponse defines model for ProviderPresetResponse.
 type ProviderPresetResponse struct {
-	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
+	// AuthMode How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	AuthMode    ProviderAuthMode `json:"auth_mode"`
 	Description string           `json:"description"`
 

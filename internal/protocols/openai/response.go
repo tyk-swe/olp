@@ -75,10 +75,12 @@ func (e *UpstreamError) Redact(redact func(string) string) *UpstreamError {
 
 // ParseErrorBody extracts an OpenAI error envelope, tolerating other shapes.
 // Google APIs, including Vertex's OpenAI-compatible endpoint, may wrap the
-// envelope in a one-element array.
+// envelope in a one-element array, and IBM's list errors, of which the first
+// states the failure.
 func ParseErrorBody(body []byte) *UpstreamError {
 	type envelope struct {
-		Error json.RawMessage `json:"error"`
+		Error  json.RawMessage `json:"error"`
+		Errors json.RawMessage `json:"errors"`
 	}
 	var single envelope
 	if json.Unmarshal(body, &single) != nil {
@@ -87,6 +89,10 @@ func ParseErrorBody(body []byte) *UpstreamError {
 			return nil
 		}
 		single = wrapped[0]
+	}
+	var listed []json.RawMessage
+	if len(single.Error) == 0 && json.Unmarshal(single.Errors, &listed) == nil && len(listed) > 0 {
+		return errorObject(listed[0])
 	}
 	if len(single.Error) == 0 {
 		return nil

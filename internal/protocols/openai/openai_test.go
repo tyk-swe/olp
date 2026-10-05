@@ -300,8 +300,9 @@ func TestUnaryDecoding(t *testing.T) {
 	}
 }
 
-// TestParseErrorBodyReadsGoogleEnvelopes covers the shapes Google APIs use:
-// a canonical status in place of a type, optionally inside a one-element array.
+// TestParseErrorBodyReadsGoogleEnvelopes covers the shapes Google APIs use, a
+// canonical status in place of a type, optionally inside a one-element array,
+// and IBM's list of errors.
 func TestParseErrorBodyReadsGoogleEnvelopes(t *testing.T) {
 	want := UpstreamError{Type: "INVALID_ARGUMENT", Code: "400", Message: "Request contains an invalid argument."}
 	for _, body := range []string{
@@ -312,7 +313,14 @@ func TestParseErrorBodyReadsGoogleEnvelopes(t *testing.T) {
 			t.Fatalf("%s parsed as %+v", body, got)
 		}
 	}
-	for _, body := range []string{`[]`, `[{"error":{"message":"a"}},{"error":{"message":"b"}}]`, `[{"detail":"x"}]`} {
+	ibm := `{"errors":[{"code":"authentication_token_not_valid","message":"Failed to authenticate the request","more_info":"https://cloud.ibm.com/apidocs/watsonx-ai"}],"trace":"23e1","status_code":401}`
+	if got := ParseErrorBody([]byte(ibm)); got == nil || got.Code != "authentication_token_not_valid" || got.Message != "Failed to authenticate the request" {
+		t.Fatalf("IBM errors parsed as %+v", got)
+	}
+	if got := ParseErrorBody([]byte(`{"error":{"message":"kept"},"errors":"not a list"}`)); got == nil || got.Message != "kept" {
+		t.Fatalf("an unexpected errors member lost the error: %+v", got)
+	}
+	for _, body := range []string{`[]`, `[{"error":{"message":"a"}},{"error":{"message":"b"}}]`, `[{"detail":"x"}]`, `{"errors":[]}`} {
 		if got := ParseErrorBody([]byte(body)); got != nil {
 			t.Fatalf("%s parsed as %+v", body, got)
 		}

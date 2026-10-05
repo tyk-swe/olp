@@ -20,6 +20,7 @@ const (
 	KindVertex           = "vertex_ai"
 	KindBedrock          = "bedrock"
 	KindSageMaker        = connectors.KindSageMaker
+	KindWatsonx          = connectors.KindWatsonx
 	KindPlugin           = connectors.KindPlugin
 )
 
@@ -139,6 +140,10 @@ var kinds = withPresets([]kindCapability{
 	{Kind: KindSageMaker, Label: "Amazon SageMaker AI", Description: "Real-time endpoints serving OpenAI Chat Completions.", DefaultAuthMode: "default_chain",
 		AuthModes: []authCapability{{Mode: "default_chain", Label: "AWS credential chain", Credential: "forbidden"}, {Mode: "static", Label: "AWS credential JSON", Credential: "required"}},
 		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint}},
+	{Kind: KindWatsonx, Label: "IBM watsonx.ai", Description: "Chat API with IBM Cloud IAM authentication.", DefaultAuthMode: "ibm_iam",
+		AuthModes: []authCapability{{Mode: "ibm_iam", Label: "IBM Cloud API key", Credential: "required"}},
+		Fields: []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, {Field: "cloud_project", Label: "Project ID", Required: true},
+			endpoint, {Field: "api_version", Label: "API version date", Required: false}}},
 	// A plugin profile supplies the address, credential placement, model
 	// discovery, and whether a static credential or a grant authenticates.
 	// Without discovery, the operator names a model to probe, as the

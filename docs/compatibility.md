@@ -29,6 +29,8 @@ surfaces. Current protocol, connector, SDK, and media tests are described in
 
 The `sagemaker` kind serves only generation on the OpenAI surface, as the
 `openai_compatible` column shows; see [SageMaker AI](providers/sagemaker.md).
+The `watsonx` kind serves only generation, translated on every surface but
+Bedrock; see [IBM watsonx.ai](providers/watsonx.md).
 
 `native` means the upstream speaks the incoming wire protocol. Bedrock Converse
 is native on the Bedrock surface and translated on OpenAI, Anthropic, and Gemini

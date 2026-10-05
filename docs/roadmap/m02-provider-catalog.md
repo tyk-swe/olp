@@ -106,6 +106,8 @@ Reviewed on 2026-10-05 against each vendor's own documentation.
 
 | Target | Outcome | Source |
 | --- | --- | --- |
+| Amazon SageMaker endpoints | A `sagemaker` kind on SageMaker's [OpenAI-compatible path](https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html), which routes by endpoint and inference component and streams server-sent events, with bearer tokens signed from AWS credentials. It serves the vLLM and SGLang containers and custom containers implementing that path. The LMI container streams JSON lines, not server-sent events, and is not supported. | [SageMaker AI guide](https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html) |
+| IBM watsonx.ai | A `watsonx` kind adapting Chat Completions to the watsonx chat API, with an `ibm_iam` mode. It serves transformed routes only; watsonx.ai software on Cloud Pak for Data is not supported. | [watsonx.ai chat API](https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-api-chat.html?context=wx) |
 | Azure AI Foundry models | Served by the `azure-v1-chat` and `azure-v1-responses` profiles at the resource's `services.ai.azure.com` origin. Microsoft deprecated the `/models` Model Inference API in favour of `/openai/v1`, so no `azure-ai-inference` profile ships. | [Model Inference API specification](https://github.com/Azure/azure-rest-api-specs/blob/main/specification/ai/data-plane/ModelInference/main.tsp), [migration guide](https://learn.microsoft.com/en-us/azure/foundry/how-to/model-inference-to-openai-migration) |
 
 ### M2.3 Media, embedding and rerank providers

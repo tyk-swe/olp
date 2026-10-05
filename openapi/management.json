@@ -6097,11 +6097,12 @@
           "static",
           "azure_default",
           "azure_client_secret",
+          "ibm_iam",
           "static_credential",
           "grant"
         ],
         "type": "string",
-        "description": "How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin."
+        "description": "How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin."
       },
       "ProviderCapabilityOptionsResponse": {
         "properties": {
@@ -6558,6 +6559,7 @@
           "vertex_ai",
           "bedrock",
           "sagemaker",
+          "watsonx",
           "azure_openai",
           "openai_compatible",
           "plugin"
