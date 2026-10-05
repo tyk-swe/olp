@@ -69,7 +69,11 @@
           "auth_mode": "api_key",
           "maintainer": "Groq",
           "documentation_label": "Groq OpenAI compatibility",
-          "documentation_url": "https://console.groq.com/docs/openai"
+          "documentation_url": "https://console.groq.com/docs/openai",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
         },
         {
           "id": "mistral",
@@ -79,7 +83,11 @@
           "auth_mode": "api_key",
           "maintainer": "Mistral AI",
           "documentation_label": "Mistral API",
-          "documentation_url": "https://docs.mistral.ai/api/"
+          "documentation_url": "https://docs.mistral.ai/api/",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
         },
         {
           "id": "openrouter",
@@ -89,7 +97,11 @@
           "auth_mode": "api_key",
           "maintainer": "OpenRouter",
           "documentation_label": "OpenRouter API",
-          "documentation_url": "https://openrouter.ai/docs"
+          "documentation_url": "https://openrouter.ai/docs",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
         },
         {
           "id": "together",
@@ -99,7 +111,11 @@
           "auth_mode": "api_key",
           "maintainer": "Together AI",
           "documentation_label": "Together OpenAI compatibility",
-          "documentation_url": "https://docs.together.ai/docs/openai-api-compatibility"
+          "documentation_url": "https://docs.together.ai/docs/openai-api-compatibility",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
         },
         {
           "id": "vllm",
@@ -109,7 +125,11 @@
           "auth_mode": "none",
           "maintainer": "vLLM",
           "documentation_label": "vLLM OpenAI server",
-          "documentation_url": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html"
+          "documentation_url": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html",
+          "discovery": true,
+          "placeholder": true,
+          "profile_id": null,
+          "profile_revision": null
         },
         {
           "id": "deepseek",
@@ -119,7 +139,11 @@
           "auth_mode": "api_key",
           "maintainer": "DeepSeek",
           "documentation_label": "DeepSeek API",
-          "documentation_url": "https://api-docs.deepseek.com"
+          "documentation_url": "https://api-docs.deepseek.com",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
         },
         {
           "id": "fireworks",
@@ -129,7 +153,11 @@
           "auth_mode": "api_key",
           "maintainer": "Fireworks",
           "documentation_label": "Fireworks API",
-          "documentation_url": "https://docs.fireworks.ai"
+          "documentation_url": "https://docs.fireworks.ai",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
         },
         {
           "id": "deepinfra",
@@ -139,7 +167,11 @@
           "auth_mode": "api_key",
           "maintainer": "DeepInfra",
           "documentation_label": "DeepInfra API",
-          "documentation_url": "https://deepinfra.com/docs"
+          "documentation_url": "https://deepinfra.com/docs",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
         },
         {
           "id": "huggingface",
@@ -149,7 +181,11 @@
           "auth_mode": "api_key",
           "maintainer": "Hugging Face",
           "documentation_label": "Hugging Face API",
-          "documentation_url": "https://huggingface.co/docs/inference-providers"
+          "documentation_url": "https://huggingface.co/docs/inference-providers",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
         },
         {
           "id": "perplexity",
@@ -159,7 +195,11 @@
           "auth_mode": "api_key",
           "maintainer": "Perplexity",
           "documentation_label": "Perplexity API",
-          "documentation_url": "https://docs.perplexity.ai"
+          "documentation_url": "https://docs.perplexity.ai",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
         },
         {
           "id": "cohere",
@@ -169,7 +209,11 @@
           "auth_mode": "api_key",
           "maintainer": "Cohere",
           "documentation_label": "Cohere API",
-          "documentation_url": "https://docs.cohere.com"
+          "documentation_url": "https://docs.cohere.com",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
         },
         {
           "id": "cohere-native-v2",
@@ -179,7 +223,11 @@
           "auth_mode": "api_key",
           "maintainer": "Cohere",
           "documentation_label": "Cohere native v2 API",
-          "documentation_url": "https://docs.cohere.com/reference/embed"
+          "documentation_url": "https://docs.cohere.com/reference/embed",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
         },
         {
           "id": "voyage",
@@ -189,7 +237,11 @@
           "auth_mode": "api_key",
           "maintainer": "Voyage AI",
           "documentation_label": "Voyage AI API",
-          "documentation_url": "https://docs.voyageai.com"
+          "documentation_url": "https://docs.voyageai.com",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
         }
       ]
     },

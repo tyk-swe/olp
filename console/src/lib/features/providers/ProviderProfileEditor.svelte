@@ -8,6 +8,8 @@
     listProviderProfiles
   } from './api/profiles';
   import { providerKeys } from './providerKeys';
+  import { listProviderVendors } from './api/providers';
+  import { vendorSpeaks } from './profiles';
   import NativeValueField from './NativeValueField.svelte';
   import NativeMapEditor from './NativeMapEditor.svelte';
   import OperationDefaultsEditor from './OperationDefaultsEditor.svelte';
@@ -46,8 +48,22 @@
   const kind = $derived(draft?.text(['kind']));
   // A plugin provider's profile is pinned by its plugin profile field.
   const plugin = $derived(kind === 'plugin');
+  const vendors = createQuery(() => ({
+    queryKey: providerKeys.vendors(),
+    queryFn: ({ signal }) => listProviderVendors(signal)
+  }));
+  // Profiles in a generation dialect the vendor's contract does not document
+  // are refused for it, so they are not offered.
+  const vendorDialects = $derived(
+    vendors.data?.find(
+      (vendor) => vendor.id === draft?.text(['options', 'vendor_id'])
+    )?.dialects
+  );
   const compatible = $derived(
-    profiles.data?.filter((profile) => profile.kind === kind) ?? []
+    profiles.data?.filter(
+      (profile) =>
+        profile.kind === kind && vendorSpeaks(profile, vendorDialects)
+    ) ?? []
   );
   const selected = $derived(
     compatible.find(

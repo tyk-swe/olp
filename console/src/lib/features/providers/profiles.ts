@@ -53,6 +53,32 @@ export function declaresModels(
   return !profile?.model_discovery;
 }
 
+/** The generation dialects a vendor's reviewed contract can document. */
+const GENERATION_DIALECTS = [
+  'openai-chat',
+  'openai-responses',
+  'anthropic-messages',
+  'gemini-generate-content',
+  'bedrock-converse'
+];
+
+/**
+ * Whether a vendor may use a profile: a generation profile must be in a
+ * dialect the vendor's reviewed contract documents. A vendor the catalogue
+ * does not describe is restricted only by its connector kind, as the server
+ * restricts it.
+ */
+export function vendorSpeaks(
+  profile: Pick<ProviderProfile, 'dialect'>,
+  dialects: readonly string[] | undefined
+): boolean {
+  return (
+    !dialects ||
+    !GENERATION_DIALECTS.includes(profile.dialect) ||
+    dialects.includes(profile.dialect)
+  );
+}
+
 /** The client surface that speaks a generation dialect natively. */
 export function dialectSurface(
   dialect: string | undefined

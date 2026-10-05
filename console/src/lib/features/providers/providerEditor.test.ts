@@ -103,7 +103,25 @@ const compatibleSpec: ProviderKindCapability = {
       auth_mode: 'api_key',
       maintainer: 'Groq',
       documentation_label: 'OpenAI Compatibility',
-      documentation_url: 'https://console.groq.com/docs/openai'
+      documentation_url: 'https://console.groq.com/docs/openai',
+      discovery: true,
+      placeholder: false,
+      profile_id: null,
+      profile_revision: null
+    },
+    {
+      id: 'exact',
+      label: 'Exact vendor',
+      description: 'A vendor whose contract is the Chat Completions dialect.',
+      endpoint: 'https://api.exact.test/v1',
+      auth_mode: 'api_key',
+      maintainer: 'Exact',
+      documentation_label: 'Exact API',
+      documentation_url: 'https://docs.exact.test',
+      discovery: false,
+      placeholder: false,
+      profile_id: 'compatible-chat',
+      profile_revision: '1'
     }
   ]
 };
@@ -207,6 +225,33 @@ describe('provider editor capability policy', () => {
       endpoint: '',
       authMode: 'api_key'
     });
+  });
+
+  it('selects a preset profile only while the operator has not chosen another', () => {
+    const draft = createProviderDraft(compatibleSpec);
+    selectProviderPreset(draft, compatibleSpec, 'exact');
+    expect(draft).toMatchObject({
+      profileId: 'compatible-chat',
+      profileRevision: '1'
+    });
+    selectProviderPreset(draft, compatibleSpec, 'groq');
+    expect(draft).toMatchObject({ profileId: '', profileRevision: '' });
+
+    draft.profileId = 'compatible-responses';
+    draft.profileRevision = '1';
+    selectProviderPreset(draft, compatibleSpec, 'exact');
+    expect(draft).toMatchObject({
+      profileId: 'compatible-responses',
+      profileRevision: '1'
+    });
+  });
+
+  it('requires a probe model for a preset whose upstream lists no models', () => {
+    const draft = createProviderDraft(compatibleSpec);
+    selectProviderPreset(draft, compatibleSpec, 'groq');
+    expect(requiresProbeModel(draft, compatibleSpec)).toBe(false);
+    selectProviderPreset(draft, compatibleSpec, 'exact');
+    expect(requiresProbeModel(draft, compatibleSpec)).toBe(true);
   });
 
   it('clears the console-only preset selection when provider kind changes', () => {

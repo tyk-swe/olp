@@ -203,6 +203,14 @@
         <strong>{selectedVendor.name}</strong>
         {#if selectedPreset}<span>{selectedPreset.description}</span>{/if}
         {#if selectedVendor.endpoint}<code>{selectedVendor.endpoint}</code>{/if}
+        {#if selectedPreset?.placeholder}<span
+            >The endpoint is a placeholder: replace it with your server's
+            address, and allow a private address in the egress policy.</span
+          >{/if}
+        {#if selectedPreset?.profile_id}<span
+            >Serves strict routes through the {selectedPreset.profile_id} profile,
+            which the vendor's reviewed contract matches exactly.</span
+          >{/if}
         <span
           >Operations: {selectedVendor.operations.map(stateLabel).join(', ')}.
           Reviewed parameters: {selectedVendor.parameters

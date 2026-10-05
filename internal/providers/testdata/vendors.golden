@@ -48,7 +48,12 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://platform.openai.com/docs/api-reference",
-    "endpoint": "https://api.openai.com/v1"
+    "endpoint": "https://api.openai.com/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "openai_compatible",
@@ -97,7 +102,12 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://platform.openai.com/docs/api-reference/chat",
-    "endpoint": null
+    "endpoint": null,
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "anthropic",
@@ -133,7 +143,11 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://docs.anthropic.com",
-    "endpoint": "https://api.anthropic.com/v1"
+    "endpoint": "https://api.anthropic.com/v1",
+    "dialects": [
+      "anthropic-messages"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "google",
@@ -170,7 +184,11 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://ai.google.dev",
-    "endpoint": "https://generativelanguage.googleapis.com/v1beta"
+    "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+    "dialects": [
+      "gemini-generate-content"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "google-vertex",
@@ -207,7 +225,12 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://cloud.google.com/vertex-ai",
-    "endpoint": null
+    "endpoint": null,
+    "dialects": [
+      "gemini-generate-content",
+      "anthropic-messages"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "amazon-bedrock",
@@ -245,7 +268,12 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://docs.aws.amazon.com/bedrock",
-    "endpoint": null
+    "endpoint": null,
+    "dialects": [
+      "bedrock-converse",
+      "anthropic-messages"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "azure",
@@ -296,7 +324,12 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://learn.microsoft.com/azure/ai-services/openai",
-    "endpoint": null
+    "endpoint": null,
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "groq",
@@ -331,7 +364,12 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://console.groq.com/docs/openai",
-    "endpoint": "https://api.groq.com/openai/v1"
+    "endpoint": "https://api.groq.com/openai/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "mistral",
@@ -367,7 +405,12 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://docs.mistral.ai/api/",
-    "endpoint": "https://api.mistral.ai/v1"
+    "endpoint": "https://api.mistral.ai/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "openrouter",
@@ -402,7 +445,12 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://openrouter.ai/docs",
-    "endpoint": "https://openrouter.ai/api/v1"
+    "endpoint": "https://openrouter.ai/api/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "together",
@@ -438,7 +486,12 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://docs.together.ai/docs/openai-api-compatibility",
-    "endpoint": "https://api.together.xyz/v1"
+    "endpoint": "https://api.together.xyz/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "vllm",
@@ -474,7 +527,12 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html",
-    "endpoint": "https://vllm.example.internal/v1"
+    "endpoint": "https://vllm.example.internal/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "deepseek",
@@ -509,7 +567,11 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://api-docs.deepseek.com",
-    "endpoint": "https://api.deepseek.com/v1"
+    "endpoint": "https://api.deepseek.com/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "fireworks",
@@ -544,7 +606,11 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://docs.fireworks.ai",
-    "endpoint": "https://api.fireworks.ai/inference/v1"
+    "endpoint": "https://api.fireworks.ai/inference/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "deepinfra",
@@ -579,7 +645,11 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://deepinfra.com/docs",
-    "endpoint": "https://api.deepinfra.com/v1/openai"
+    "endpoint": "https://api.deepinfra.com/v1/openai",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "huggingface",
@@ -614,7 +684,11 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://huggingface.co/docs/inference-providers",
-    "endpoint": "https://router.huggingface.co/v1"
+    "endpoint": "https://router.huggingface.co/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "perplexity",
@@ -649,7 +723,11 @@
       "reasoning_effort"
     ],
     "documentation_url": "https://docs.perplexity.ai",
-    "endpoint": "https://api.perplexity.ai"
+    "endpoint": "https://api.perplexity.ai",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
   },
   {
     "id": "cohere",
@@ -677,7 +755,27 @@
       "encoding_format"
     ],
     "documentation_url": "https://docs.cohere.com",
-    "endpoint": "https://api.cohere.ai/compatibility/v1"
+    "endpoint": "https://api.cohere.ai/compatibility/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": [
+      "audio",
+      "dimensions",
+      "input_type",
+      "logit_bias",
+      "metadata",
+      "modalities",
+      "n",
+      "parallel_tool_calls",
+      "prediction",
+      "service_tier",
+      "store",
+      "top_logprobs",
+      "truncate",
+      "truncation",
+      "user"
+    ]
   },
   {
     "id": "cohere-native-v2",
@@ -707,7 +805,9 @@
       "priority"
     ],
     "documentation_url": "https://docs.cohere.com/reference/embed",
-    "endpoint": "https://api.cohere.ai/v2"
+    "endpoint": "https://api.cohere.ai/v2",
+    "dialects": [],
+    "unsupported_parameters": []
   },
   {
     "id": "voyage",
@@ -731,6 +831,8 @@
       "encoding_format"
     ],
     "documentation_url": "https://docs.voyageai.com",
-    "endpoint": "https://api.voyageai.com/v1"
+    "endpoint": "https://api.voyageai.com/v1",
+    "dialects": [],
+    "unsupported_parameters": []
   }
 ]

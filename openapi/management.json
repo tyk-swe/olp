@@ -6858,6 +6858,10 @@
           "description": {
             "type": "string"
           },
+          "discovery": {
+            "description": "Whether the upstream lists its models; without discovery the connection test needs a declared probe model.",
+            "type": "boolean"
+          },
           "documentation_label": {
             "type": "string"
           },
@@ -6878,6 +6882,24 @@
           "maintainer": {
             "description": "Organization maintaining the official documentation used for review.",
             "type": "string"
+          },
+          "placeholder": {
+            "description": "Whether the endpoint is a placeholder the operator replaces, as for self-hosted runtimes and account-scoped hosts.",
+            "type": "boolean"
+          },
+          "profile_id": {
+            "description": "Profile a strict route needs, for a vendor whose reviewed contract is the profile's dialect exactly. Onboarding clients copy it into the configuration; the server never infers it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profile_revision": {
+            "description": "Revision of profile_id.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -6888,7 +6910,11 @@
           "auth_mode",
           "maintainer",
           "documentation_label",
-          "documentation_url"
+          "documentation_url",
+          "discovery",
+          "placeholder",
+          "profile_id",
+          "profile_revision"
         ],
         "type": "object"
       },
@@ -10938,6 +10964,13 @@
           "connector": {
             "$ref": "#/components/schemas/ProviderKind"
           },
+          "dialects": {
+            "description": "Generation dialects the vendor documents. A profile in another generation dialect is refused for the vendor.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "discovery": {
             "type": "boolean"
           },
@@ -10967,6 +11000,13 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "unsupported_parameters": {
+            "description": "Request fields refused for the vendor because its documented API cannot represent them.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -10977,7 +11017,9 @@
           "operations",
           "authentication",
           "parameters",
-          "documentation_url"
+          "documentation_url",
+          "dialects",
+          "unsupported_parameters"
         ],
         "type": "object"
       },

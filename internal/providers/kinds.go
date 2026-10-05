@@ -61,6 +61,15 @@ type preset struct {
 	Maintainer         string `json:"maintainer"`
 	DocumentationLabel string `json:"documentation_label"`
 	DocumentationURL   string `json:"documentation_url"`
+	// Discovery reports that the upstream lists its models; without it the
+	// connection test needs a declared probe model.
+	Discovery bool `json:"discovery"`
+	// Placeholder marks an endpoint the operator replaces with their own.
+	Placeholder bool `json:"placeholder"`
+	// ProfileID and ProfileRevision name the profile onboarding selects, so
+	// the provider can serve strict routes. The server never infers it.
+	ProfileID       *string `json:"profile_id"`
+	ProfileRevision *string `json:"profile_revision"`
 }
 
 type kindCapability struct {
@@ -83,6 +92,11 @@ type vendor struct {
 	Parameters       []string `json:"parameters"`
 	DocumentationURL string   `json:"documentation_url"`
 	Endpoint         *string  `json:"endpoint"`
+	// Dialects are the generation dialects the vendor documents; profiles in
+	// other generation dialects are refused for it.
+	Dialects []string `json:"dialects"`
+	// UnsupportedParameters are request fields refused for the vendor.
+	UnsupportedParameters []string `json:"unsupported_parameters"`
 }
 
 type CapabilityInput struct {
@@ -142,8 +156,13 @@ func withPresets(catalogue []kindCapability) []kindCapability {
 			if c.Connector != catalogue[i].Kind || c.Preset == nil {
 				continue
 			}
-			catalogue[i].Presets = append(catalogue[i].Presets, preset{ID: c.ID, Label: c.Name, Description: c.Description, Endpoint: c.Endpoint, AuthMode: c.Preset.AuthMode,
-				Maintainer: c.Maintainer, DocumentationLabel: c.Documentation.Label, DocumentationURL: c.Documentation.URL})
+			entry := preset{ID: c.ID, Label: c.Name, Description: c.Description, Endpoint: c.Endpoint, AuthMode: c.Preset.AuthMode,
+				Maintainer: c.Maintainer, DocumentationLabel: c.Documentation.Label, DocumentationURL: c.Documentation.URL,
+				Discovery: c.Discovery, Placeholder: c.Preset.Placeholder}
+			if profile := c.Preset.Profile; profile != nil {
+				entry.ProfileID, entry.ProfileRevision = new(profile.ID), new(profile.Revision)
+			}
+			catalogue[i].Presets = append(catalogue[i].Presets, entry)
 		}
 	}
 	return catalogue
@@ -160,8 +179,14 @@ func publishedVendors() []vendor {
 		if c.Endpoint != "" {
 			endpoint = new(c.Endpoint)
 		}
+		unsupported := slices.Clone(c.Unsupported)
+		for _, shape := range c.Requests {
+			unsupported = append(unsupported, shape.Unsupported...)
+		}
+		slices.Sort(unsupported)
 		out = append(out, vendor{ID: c.ID, Name: c.Name, Connector: c.Connector, Discovery: c.Discovery, Operations: c.Operations, Authentication: auth,
-			Parameters: c.Parameters, DocumentationURL: c.Documentation.URL, Endpoint: endpoint})
+			Parameters: c.Parameters, DocumentationURL: c.Documentation.URL, Endpoint: endpoint,
+			Dialects: append([]string{}, c.Dialects...), UnsupportedParameters: append([]string{}, slices.Compact(unsupported)...)})
 	}
 	return out
 }

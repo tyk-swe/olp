@@ -4434,10 +4434,13 @@ type ProviderOperationDefaults struct {
 // ProviderPresetResponse defines model for ProviderPresetResponse.
 type ProviderPresetResponse struct {
 	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
-	AuthMode           ProviderAuthMode `json:"auth_mode"`
-	Description        string           `json:"description"`
-	DocumentationLabel string           `json:"documentation_label"`
-	DocumentationUrl   string           `json:"documentation_url"`
+	AuthMode    ProviderAuthMode `json:"auth_mode"`
+	Description string           `json:"description"`
+
+	// Discovery Whether the upstream lists its models; without discovery the connection test needs a declared probe model.
+	Discovery          bool   `json:"discovery"`
+	DocumentationLabel string `json:"documentation_label"`
+	DocumentationUrl   string `json:"documentation_url"`
 
 	// Endpoint Reviewed HTTPS base URL resolved into ordinary provider configuration.
 	Endpoint string `json:"endpoint"`
@@ -4448,6 +4451,15 @@ type ProviderPresetResponse struct {
 
 	// Maintainer Organization maintaining the official documentation used for review.
 	Maintainer string `json:"maintainer"`
+
+	// Placeholder Whether the endpoint is a placeholder the operator replaces, as for self-hosted runtimes and account-scoped hosts.
+	Placeholder bool `json:"placeholder"`
+
+	// ProfileId Profile a strict route needs, for a vendor whose reviewed contract is the profile's dialect exactly. Onboarding clients copy it into the configuration; the server never infers it.
+	ProfileId nullable.Nullable[string] `json:"profile_id"`
+
+	// ProfileRevision Revision of profile_id.
+	ProfileRevision nullable.Nullable[string] `json:"profile_revision"`
 }
 
 // ProviderProfile Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification. A plugin profile's revision is the digest of the plugin module that supplies it; the catalogue lists the profiles of approved plugins.
@@ -5731,7 +5743,10 @@ type Vendor struct {
 	Authentication []ProviderAuthMode `json:"authentication"`
 
 	// Connector Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
-	Connector        ProviderKind              `json:"connector"`
+	Connector ProviderKind `json:"connector"`
+
+	// Dialects Generation dialects the vendor documents. A profile in another generation dialect is refused for the vendor.
+	Dialects         []string                  `json:"dialects"`
 	Discovery        bool                      `json:"discovery"`
 	DocumentationUrl string                    `json:"documentation_url"`
 	Endpoint         nullable.Nullable[string] `json:"endpoint,omitempty"`
@@ -5739,6 +5754,9 @@ type Vendor struct {
 	Name             string                    `json:"name"`
 	Operations       []string                  `json:"operations"`
 	Parameters       []string                  `json:"parameters"`
+
+	// UnsupportedParameters Request fields refused for the vendor because its documented API cannot represent them.
+	UnsupportedParameters []string `json:"unsupported_parameters"`
 }
 
 // ListApiKeysParams defines parameters for ListApiKeys.

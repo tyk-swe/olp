@@ -9,7 +9,9 @@ import {
   type ProviderProfile
 } from './api/profiles';
 import ProviderProfileEditorProbe from './test/ProviderProfileEditorProbe.svelte';
+import { listProviderVendors } from './api/providers';
 
+vi.mock('./api/providers', () => ({ listProviderVendors: vi.fn() }));
 vi.mock('./api/profiles', async (original) => ({
   ...(await original<typeof import('./api/profiles')>()),
   listProviderProfiles: vi.fn(),
@@ -86,6 +88,7 @@ function button(name: string) {
 beforeEach(() => {
   vi.mocked(listProviderProfiles).mockResolvedValue([compatibleChat]);
   vi.mocked(getConfigurationSchemas).mockResolvedValue({});
+  vi.mocked(listProviderVendors).mockResolvedValue([]);
   host = document.createElement('div');
   document.body.append(host);
   client = new QueryClient({

@@ -211,19 +211,34 @@ export function selectProviderPreset(
   spec: ProviderKindCapability,
   presetId: string
 ): ProviderPreset | null {
+  const previous = spec.presets.find(
+    (candidate) => candidate.id === draft.presetId
+  );
   if (draft.presetId !== presetId) {
     draft.options = undefined;
     draft.credential = '';
     draft.credentialHeaders = '';
   }
-  if (!presetId) {
+  const preset = presetId
+    ? spec.presets.find((candidate) => candidate.id === presetId)
+    : undefined;
+  if (presetId && !preset)
+    throw new Error('The selected provider preset is unavailable.');
+  // A preset's profile follows the preset only while the operator has not
+  // chosen another: an untouched profile is replaced, a chosen one is kept.
+  if (
+    draft.profileId === (previous?.profile_id ?? '') &&
+    draft.profileRevision === (previous?.profile_revision ?? '')
+  ) {
+    draft.profileId = preset?.profile_id ?? '';
+    draft.profileRevision = preset?.profile_revision ?? '';
+  }
+  if (!preset) {
     draft.presetId = '';
     draft.endpoint = '';
     draft.authMode = spec.default_auth_mode;
     return null;
   }
-  const preset = spec.presets.find((candidate) => candidate.id === presetId);
-  if (!preset) throw new Error('The selected provider preset is unavailable.');
   draft.presetId = preset.id;
   draft.endpoint = preset.endpoint;
   draft.authMode = preset.auth_mode;
@@ -272,14 +287,11 @@ export function requiresSeedModel(spec: ProviderKindCapability): boolean {
   return requiresField(spec, 'model');
 }
 
-/** Vendors that publish no model list, so their connection test needs a model. */
-const UNLISTED_VENDORS = ['voyage', 'perplexity', 'cohere'];
-
 /**
  * Whether creating the draft needs a probe model: the connection test
  * certifies a declared model when the upstream publishes no model list, as
- * for kinds that require one, some reviewed vendors, and plugin profiles that
- * declare no model discovery.
+ * for kinds that require one, presets whose upstream lists no models, and
+ * plugin profiles that declare no model discovery.
  */
 export function requiresProbeModel(
   draft: Pick<
@@ -298,7 +310,10 @@ export function requiresProbeModel(
       },
       profiles
     );
-  return requiresSeedModel(spec) || UNLISTED_VENDORS.includes(draft.presetId);
+  const preset = spec.presets.find(
+    (candidate) => candidate.id === draft.presetId
+  );
+  return requiresSeedModel(spec) || preset?.discovery === false;
 }
 
 /**

@@ -40,7 +40,11 @@ const spec: ProviderKindCapability = {
       endpoint: 'https://api.groq.com/openai/v1',
       documentation_label: 'Groq',
       documentation_url: 'https://example.test/groq',
-      maintainer: 'Groq'
+      maintainer: 'Groq',
+      discovery: true,
+      placeholder: false,
+      profile_id: null,
+      profile_revision: null
     }
   ]
 };
@@ -54,7 +58,9 @@ function vendor(id: string, name: string): ProviderVendor {
     discovery: true,
     documentation_url: 'https://example.test',
     operations: ['generation'],
-    parameters: []
+    parameters: [],
+    dialects: ['openai-chat', 'openai-responses'],
+    unsupported_parameters: []
   };
 }
 
