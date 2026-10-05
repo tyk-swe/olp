@@ -48,12 +48,42 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: version
         run: echo "value=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      # The release key only CI holds signs the documents the binary embeds,
+      # and a release build trusts only release keys. Ed25519 signatures are
+      # deterministic, so every platform build embeds the same bytes.
+      - name: Sign release documents
+        env:
+          OLP_SIGNING_KEY: ${{ secrets.OLP_SIGNING_KEY }}
+          OLP_SIGNING_KEY_ID: ${{ vars.OLP_SIGNING_KEY_ID }}
+        run: |
+          if [[ -z $OLP_SIGNING_KEY || -z $OLP_SIGNING_KEY_ID ]]; then
+            echo "::error::Set the OLP_SIGNING_KEY secret and OLP_SIGNING_KEY_ID variable; see docs/catalog.md#signing-keys" >&2
+            exit 1
+          fi
+          go run ./internal/signing/cmd/olpsign sign -key-id "$OLP_SIGNING_KEY_ID" internal/catalog/catalog.json
+          go run -tags release ./internal/signing/cmd/olpsign verify internal/catalog/catalog.json
+          go test -tags release -run 'TestEmbeddedCatalog' ./internal/catalog
+      - if: matrix.arch == 'amd64'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: signed-documents
+          path: |
+            internal/catalog/catalog.json
+            internal/catalog/catalog.json.sig
+            internal/catalog/schema.json
+          if-no-files-found: error
+          overwrite: true
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         id: build
         with:
           context: .
           file: deploy/Dockerfile
-          build-args: OLP_VERSION=${{ steps.version.outputs.value }}
+          build-args: |
+            OLP_VERSION=${{ steps.version.outputs.value }}
+            OLP_GO_TAGS=release
           platforms: ${{ matrix.platform }}
           outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
           provenance: mode=max
@@ -199,7 +229,19 @@ jobs:
         with:
           name: management-contract
           path: /tmp/contracts
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: signed-documents
+          path: /tmp/signed
+      - name: Name the reference catalog assets
+        run: |
+          mkdir -p /tmp/catalog
+          cp /tmp/signed/catalog.json /tmp/signed/catalog.json.sig /tmp/catalog/
+          cp /tmp/signed/schema.json /tmp/catalog/catalog.schema.json
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: /tmp/catalog/*
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" --verify-tag --generate-notes /tmp/chart/*.tgz /tmp/contracts/management.json
+        run: gh release create "$RELEASE_TAG" --verify-tag --generate-notes /tmp/chart/*.tgz /tmp/contracts/management.json /tmp/catalog/*

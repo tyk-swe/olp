@@ -2,6 +2,9 @@
 FROM golang:1.27.1-trixie@sha256:3b77fc618ec235a1ab412de7737f120dd507c57e8d87de4cbb7994fb94275ed5 AS go-build
 ARG TARGETARCH
 ARG OLP_VERSION
+# The release workflow builds with the release tag, so the binary trusts only
+# release signing keys for the documents it embeds.
+ARG OLP_GO_TAGS=
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 WORKDIR /src
 ENV CGO_ENABLED=1 GOTOOLCHAIN=local
@@ -16,7 +19,7 @@ COPY openapi ./openapi
 COPY deploy/native /out/native
 RUN version=$(sed -n 's/  "version": "\([^" ]*\)",/\1/p' package.json) && \
     test -n "$version" && test "${OLP_VERSION:-$version}" = "$version" && \
-    mkdir -p /out && go build -mod=readonly -trimpath \
+    mkdir -p /out && go build -mod=readonly -trimpath -tags="$OLP_GO_TAGS" \
       -ldflags="-s -w -X github.com/tyk-swe/olp/internal/process.Version=$version" -o /out/olp ./cmd/olp
 RUN go version -m /out/olp > /out/go-build-info.txt && ldd /out/olp > /out/native-link.txt
 RUN glide_dir="$(go list -m -f '{{.Dir}}' github.com/valkey-io/valkey-glide/go/v2)" && \
