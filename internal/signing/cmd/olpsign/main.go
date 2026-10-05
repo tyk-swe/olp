@@ -3,9 +3,12 @@
 // not part of the olp binary.
 //
 //	olpsign keygen
+//	olpsign fmt [-check] DOCUMENT...
 //	olpsign sign -key-id ID [-seed-file FILE] DOCUMENT...
 //	olpsign verify DOCUMENT...
 //
+// fmt rewrites each document in its canonical form, the exact bytes a
+// signature covers; with -check it only reports a document that is not.
 // sign reads the base64 Ed25519 seed from OLP_SIGNING_KEY, or from -seed-file,
 // and writes DOCUMENT.sig beside each document, keeping other keys'
 // signatures. verify checks each DOCUMENT.sig against the keys this build
@@ -17,6 +20,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -24,6 +28,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/signing"
 )
 
@@ -36,17 +41,64 @@ func main() {
 
 func run(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: olpsign keygen | sign -key-id ID [-seed-file FILE] DOCUMENT... | verify DOCUMENT...")
+		return errors.New("usage: olpsign keygen | fmt [-check] DOCUMENT... | sign -key-id ID [-seed-file FILE] DOCUMENT... | verify DOCUMENT...")
 	}
 	switch args[0] {
 	case "keygen":
 		return keygen(stdout)
+	case "fmt":
+		return format(args[1:], stdout)
 	case "sign":
 		return sign(args[1:], stdout)
 	case "verify":
 		return verify(args[1:], stdout)
 	}
 	return fmt.Errorf("unknown command %q", args[0])
+}
+
+// canonicalizers render each signed document format canonically, by its
+// api_version.
+var canonicalizers = map[string]func([]byte) ([]byte, error){
+	catalog.APIVersion: catalog.Canonical,
+}
+
+func format(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("fmt", flag.ContinueOnError)
+	check := flags.Bool("check", false, "report documents that are not canonical instead of rewriting them")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	for _, path := range flags.Args() {
+		document, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var version struct {
+			APIVersion string `json:"api_version"`
+		}
+		if err := json.Unmarshal(document, &version); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		canonicalize, ok := canonicalizers[version.APIVersion]
+		if !ok {
+			return fmt.Errorf("%s: no signed document format %q", path, version.APIVersion)
+		}
+		canonical, err := canonicalize(document)
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		switch {
+		case bytes.Equal(canonical, document):
+		case *check:
+			return fmt.Errorf("%s is not canonical; run make catalog", path)
+		default:
+			if err := os.WriteFile(path, canonical, 0o644); err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "formatted %s\n", path)
+		}
+	}
+	return nil
 }
 
 func keygen(stdout io.Writer) error {

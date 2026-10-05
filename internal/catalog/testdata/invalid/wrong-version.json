@@ -1,0 +1,109 @@
+{
+  "api_version": "openllmproxy.dev/catalog/v2",
+  "published_at": "2026-10-05T12:00:00Z",
+  "currency": "USD",
+  "estimation": [
+    {
+      "family": "anthropic",
+      "factor": "1.18",
+      "provenance": {
+        "source_url": "https://docs.example.test/count-tokens",
+        "observed_at": "2026-10-01T00:00:00Z"
+      }
+    }
+  ],
+  "vendors": [
+    {
+      "id": "example",
+      "name": "Example",
+      "models": [
+        {
+          "id": "example-large",
+          "aliases": [
+            "example-large-2026-09-01"
+          ],
+          "canonical_model": "example/example-large",
+          "context_length": 200000,
+          "max_output_tokens": 64000,
+          "input_modalities": [
+            "image",
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "supported_parameters": [
+            "temperature",
+            "tools"
+          ],
+          "capabilities": {
+            "tools": true,
+            "prompt_caching": true
+          },
+          "lifecycle": {
+            "deprecated_at": "2026-09-01",
+            "retires_at": "2027-03-01",
+            "replacement": "example-xl",
+            "provenance": {
+              "source_url": "https://docs.example.test/deprecations",
+              "observed_at": "2026-10-05T11:00:00Z"
+            }
+          },
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "3",
+              "cached_input_per_million": "0.3",
+              "cache_write_5m_input_per_million": "3.75",
+              "cache_write_1h_input_per_million": "6",
+              "output_per_million": "15",
+              "unrepresentable": [
+                {
+                  "component": "batch_multiplier",
+                  "detail": "Batch requests are billed at 50% of these rates."
+                },
+                {
+                  "component": "tiers",
+                  "detail": "Input over 200,000 tokens: 6 per million input, 22.5 per million output."
+                }
+              ],
+              "provenance": {
+                "source_url": "https://example.test/pricing",
+                "observed_at": "2026-10-05T11:00:00Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.example.test/models",
+            "observed_at": "2026-10-05T11:00:00Z"
+          }
+        },
+        {
+          "id": "example-voice",
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "audio"
+          ],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "speech",
+              "unit_price": "0.000015",
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://example.test/pricing",
+                "observed_at": "2026-10-05T11:00:00Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://docs.example.test/models",
+            "observed_at": "2026-10-05T11:00:00Z"
+          }
+        }
+      ]
+    }
+  ]
+}

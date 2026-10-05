@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/config"
 	"github.com/tyk-swe/olp/internal/console"
 	"github.com/tyk-swe/olp/internal/coordination"
@@ -23,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/signing"
 )
 
 type MaintenanceOptions struct {
@@ -146,7 +148,13 @@ func Maintenance(ctx context.Context, c config.Config, command string, options M
 			return errors.New("master-key version is active or still referenced; finish rotation before retirement")
 		}
 	}
+	report := map[string]any{"ok": true, "installation_id": installation, "valkey_namespace": database.ValkeyNamespace(installation), "active_version": keys.Active, "stored_versions": versions, "reencrypted": rotated, "dry_run": options.DryRun}
 	if command == "doctor" {
+		referenceCatalog, err := catalog.Embedded()
+		if err != nil {
+			return err
+		}
+		report["reference_catalog"] = map[string]any{"sha256": referenceCatalog.SHA256, "key_id": referenceCatalog.KeyID, "published_at": referenceCatalog.Catalog.PublishedAt, "channel": signing.Channel}
 		if c.ValkeyURL != "" {
 			vc, err := coordination.Configuration(c.ValkeyURL, c.ValkeyCAFile, c.RequestTimeout)
 			if err != nil {
@@ -185,5 +193,5 @@ func Maintenance(ctx context.Context, c config.Config, command string, options M
 		}
 		spool.Close()
 	}
-	return json.NewEncoder(output).Encode(map[string]any{"ok": true, "installation_id": installation, "valkey_namespace": database.ValkeyNamespace(installation), "active_version": keys.Active, "stored_versions": versions, "reencrypted": rotated, "dry_run": options.DryRun})
+	return json.NewEncoder(output).Encode(report)
 }

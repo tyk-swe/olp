@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/config"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/console"
@@ -54,6 +55,14 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
+	// The signed documents a release ships verify before anything starts: a
+	// tampered reference catalog must never feed discovery, prices or token
+	// estimates.
+	referenceCatalog, err := catalog.Embedded()
+	if err != nil {
+		return err
+	}
+	log.Info("reference catalog verified", "sha256", referenceCatalog.SHA256, "key_id", referenceCatalog.KeyID, "published_at", referenceCatalog.Catalog.PublishedAt)
 	warnEgressExceptions(log, c)
 	// Tracing is installed before any listener binds: an invalid endpoint or
 	// header file must stop startup rather than trace half a process.
