@@ -19,8 +19,8 @@
 // can split differently, and cost a token more or less, than it does there. The
 // oracle fixtures hold no such character, and a Go upgrade moves the tables. Every
 // other model, including every name the registry does not recognize, uses the
-// heuristic of four characters per token times a per-family factor, which is 1
-// until the reference catalog supplies measured ones. No name defaults to an
+// heuristic of four characters per token times the per-family factor the signed
+// reference catalog measures, or 1 for a family it has not. No name defaults to an
 // OpenAI encoding, because a wrong tokenizer miscounts without saying so.
 //
 // A Counter reports how a count was made as a Provenance. ProvenanceTokenizer

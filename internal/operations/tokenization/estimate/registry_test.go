@@ -111,3 +111,19 @@ func TestProvenanceNamesAreTheStoredStrings(t *testing.T) {
 		}
 	}
 }
+
+// TestCatalogFactorsCalibrateOnlyFamiliesWithoutATokenizer keeps a measured
+// factor from ever scaling a family the estimator counts exactly.
+func TestCatalogFactorsCalibrateOnlyFamiliesWithoutATokenizer(t *testing.T) {
+	for family, factor := range familyFactors() {
+		if family != FamilyAnthropic && family != FamilyGemini && family != FamilyOther || factor <= 0 {
+			t.Fatalf("the catalog calibrates %s by %v", family, factor)
+		}
+	}
+	for _, model := range []string{"claude-sonnet-4-5", "gemini-2.5-pro", "mystery-model"} {
+		counter := ForModel(model)
+		if counter.factor != familyFactors()[counter.Family()] {
+			t.Fatalf("%s counts with factor %v, the catalog says %v", model, counter.factor, familyFactors()[counter.Family()])
+		}
+	}
+}
