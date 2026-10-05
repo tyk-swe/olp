@@ -119,6 +119,18 @@ var contracts = []Contract{
 	compatiblePreset("deepgram", "Deepgram", "Deepgram", "Deepgram speech recognition and synthesis.", "https://api.deepgram.com/v1", Link{"Deepgram API reference", "https://developers.deepgram.com/reference/deepgram-api-overview"}, Contract{
 		Operations: []string{"speech", "transcription"}, ProbeOperation: "transcription", Parameters: []string{"voice", "response_format", "language"},
 		MediaWires: map[string]string{"speech": "deepgram", "transcription": "deepgram"}, Credential: &Credential{Header: "Authorization", Scheme: "Token "}, AccountProbe: "projects"}, nil),
+	compatiblePreset("stability", "Stability AI", "Stability AI", "Stability AI image generation and inpainting.", "https://api.stability.ai", Link{"Stability AI API reference", "https://platform.stability.ai/docs/api-reference"}, Contract{
+		Operations: []string{"image_generation", "image_edit"}, ProbeOperation: "image_generation", Parameters: []string{"size", "output_format", "response_format"},
+		MediaWires: map[string]string{"image_generation": "stability", "image_edit": "stability"}, AccountProbe: "v1/user/balance",
+		// Stability refuses moderated content with 403, which is no
+		// credential failure.
+		ErrorClasses: []ErrorClass{{Status: 403, Type: "content_moderation", Class: "upstream_client"}}}, nil),
+	compatiblePreset("recraft", "Recraft", "Recraft", "Recraft raster image generation.", "https://external.api.recraft.ai/v1", Link{"Recraft API endpoints", "https://www.recraft.ai/docs/api-reference/endpoints"}, Contract{
+		Operations: []string{"image_generation"}, ProbeOperation: "image_generation", Parameters: []string{"n", "size", "output_format", "response_format"},
+		MediaWires: map[string]string{"image_generation": "recraft"}, AccountProbe: "users/me"}, nil),
+	compatiblePreset("bfl", "Black Forest Labs", "Black Forest Labs", "Black Forest Labs FLUX image generation.", "https://api.bfl.ai/v1", Link{"BFL integration guidelines", "https://docs.bfl.ai/api_integration/integration_guidelines"}, Contract{
+		Operations: []string{"image_generation"}, ProbeOperation: "image_generation", Parameters: []string{"size", "output_format"},
+		MediaWires: map[string]string{"image_generation": "bfl"}, Credential: &Credential{Header: "X-Key"}, AccountProbe: "credits"}, nil),
 	compatiblePreset("voyage", "Voyage AI", "Voyage AI", "Voyage AI compatible API.", "https://api.voyageai.com/v1", Link{"Voyage AI embeddings API", "https://docs.voyageai.com/reference/embeddings-api"}, Contract{
 		Operations: []string{"embeddings", "rerank"}, ProbeOperation: "embeddings",
 		Parameters: []string{"dimensions", "input_type", "truncation", "output_dtype", "encoding_format"},
@@ -220,6 +232,11 @@ func (c Contract) validate() error {
 	for operation, wire := range c.MediaWires {
 		if !c.Serves(operation) || wire == "" {
 			return fmt.Errorf("media wire %q names an unserved operation %q", wire, operation)
+		}
+	}
+	for _, rule := range c.ErrorClasses {
+		if rule.Status < 400 || rule.Status > 599 || !slices.Contains([]string{"credential", "rate_limit", "upstream_server", "upstream_client"}, rule.Class) {
+			return fmt.Errorf("an error class needs an unsuccessful status and a failover class")
 		}
 	}
 	if c.AccountProbe != "" && (strings.HasPrefix(c.AccountProbe, "/") || strings.Contains(c.AccountProbe, "..") || strings.ContainsAny(c.AccountProbe, "#\\")) {

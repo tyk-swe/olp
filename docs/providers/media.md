@@ -29,6 +29,9 @@ defaults do not apply to it.
 | [Groq](https://console.groq.com/docs/speech-to-text) | `transcription`, `translation` | `groq-audio`: `json` is served from `verbose_json` | `GET /openai/v1/models` |
 | [ElevenLabs](https://elevenlabs.io/docs/api-reference/introduction) | `speech`, `transcription` | `elevenlabs` | `GET /v1/user` |
 | [Deepgram](https://developers.deepgram.com/reference/deepgram-api-overview) | `speech`, `transcription` | `deepgram` | `GET /v1/projects` |
+| [Stability AI](https://platform.stability.ai/docs/api-reference) | `image_generation`, `image_edit` | `stability` | `GET /v1/user/balance` |
+| [Recraft](https://www.recraft.ai/docs/api-reference/endpoints) | `image_generation` | `recraft` | `GET /v1/users/me` |
+| [Black Forest Labs](https://docs.bfl.ai/api_integration/integration_guidelines) | `image_generation` | `bfl`: polled | `GET /v1/credits` |
 
 ### xAI
 
@@ -70,4 +73,39 @@ Deepgram bills by.
 
 Neither vendor translates speech to English, so `translation` is declined for
 both, and for AssemblyAI.
+
+### Stability AI
+
+The model selects the Stability service: `stable-image-ultra`,
+`stable-image-core`, or an `sd3.5-*` model, which Stable Diffusion 3.5 names
+in its request. Each returns one image as `b64_json`, in `png`, `jpeg` or
+`webp`, at the aspect ratio of the requested size. Edits inpaint one image
+under its mask, or its transparent areas without one, with the model
+`stable-image-inpaint`. A request Stability's content filter refuses fails as
+the caller's error, `content_filter`, and a 403 Stability names
+`content_moderation` leaves the credential in service.
+
+### Recraft
+
+Recraft generates 1 to 6 raster images at the aspect ratio of the requested
+size, as `url` or `b64_json`, in `png` or `webp`. Requests go to its raster
+path, which refuses vector models: their SVG is no OpenAI image.
+
+### Black Forest Labs
+
+API keys travel in `x-key`. FLUX works asynchronously: the submission names a
+polling URL, which OLP polls each second with the key, within the attempt's
+deadline and at most 240 polls, until the work is ready; it then fetches the
+signed result, which expires in ten minutes, without the key. Every address
+must be on the provider's host or under `bfl.ai`. One image is returned as
+`b64_json`, at the requested size in pixels, in `png` or `jpeg`. A moderated
+request fails as `content_filter`; any other failure after submission is
+ambiguous, since BFL may still bill the work.
+
+### Declined
+
+fal offers no costless authenticated request for ordinary API keys: its
+billing endpoint takes an Admin key, and its model listing takes none, so a
+fal credential could only be certified by billing an image. It stays with
+plugins and custom endpoints.
 

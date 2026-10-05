@@ -57,6 +57,9 @@ type Contract struct {
 	// wire is not OpenAI's; the media codec of the same name translates it.
 	// Such an operation serves transformed routes only.
 	MediaWires map[string]string
+	// ErrorClasses classify the vendor's failures where their status alone
+	// would mislead, ahead of the built-in rules.
+	ErrorClasses []ErrorClass
 	// AccountProbe is an authenticated GET, relative to the endpoint, that
 	// costs nothing and succeeds only for a valid credential. A media
 	// operation's certification rests on it and the reviewed codec, since
@@ -64,6 +67,22 @@ type Contract struct {
 	AccountProbe string
 	// Preset makes the vendor an onboarding preset of its connector kind.
 	Preset *Preset
+}
+
+// ErrorClass classifies the failures with Status and error Type as Class: a
+// failover class, such as upstream_client for the caller's own error.
+type ErrorClass struct {
+	Status      int
+	Type, Class string
+}
+
+// ErrorClassesFor are the vendor's declared failure classes.
+func ErrorClassesFor(vendor string) []ErrorClass {
+	i, ok := index[vendor]
+	if !ok {
+		return nil
+	}
+	return slices.Clone(contracts[i].ErrorClasses)
 }
 
 // Credential is the header an API key travels in, after Scheme.

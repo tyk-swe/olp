@@ -326,3 +326,10 @@ func TestParseErrorBodyReadsGoogleEnvelopes(t *testing.T) {
 		}
 	}
 }
+
+func TestParseErrorBodyNamesStabilityFailures(t *testing.T) {
+	got := ParseErrorBody([]byte(`{"id":"a1","name":"content_moderation","errors":["Your request was flagged."]}`))
+	if got == nil || got.Type != "content_moderation" || got.Message != "Your request was flagged." {
+		t.Fatalf("Stability error parsed as %+v", got)
+	}
+}

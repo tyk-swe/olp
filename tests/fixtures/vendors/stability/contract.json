@@ -1,0 +1,27 @@
+{
+  "vendor": "stability",
+  "documentation_url": "https://platform.stability.ai/docs/api-reference",
+  "reviewed_at": "2026-10-05",
+  "notes": "v2beta services take multipart forms and, under Accept: application/json, return one base64 image with its finish reason. The model selects the service: stable-image-ultra, stable-image-core, an sd3.5 model, or stable-image-inpaint for edits. GET /v1/user/balance proves a key without cost. Errors carry id, name and errors. A 403 named content_moderation is the caller's content, not a credential failure.",
+  "media_models": {
+    "image_generation": "stable-image-core",
+    "image_edit": "stable-image-inpaint"
+  },
+  "endpoints": {
+    "image_generation": "https://api.stability.ai/v2beta/stable-image/generate/core",
+    "image_edit": "https://api.stability.ai/v2beta/stable-image/edit/inpaint"
+  },
+  "unsupported_parameters": [],
+  "responses": {},
+  "error": {
+    "file": "error.json",
+    "basis": "schema",
+    "status": 403,
+    "envelope": {
+      "type": "content_moderation",
+      "code": "",
+      "message": "Your request was flagged by our content moderation system."
+    },
+    "class": "upstream_client"
+  }
+}

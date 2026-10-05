@@ -3,10 +3,9 @@
   "documentation_url": "https://developers.deepgram.com/reference/deepgram-api-overview",
   "reviewed_at": "2026-10-05",
   "notes": "API keys travel as Authorization: Token. Aura models name their voice. Speech reports billed characters in dg-char-count. Pre-recorded listening takes the raw audio as its body and reports metadata.duration. GET /v1/projects proves a key without cost.",
-  "media_model": "aura-2-alloy-en",
   "endpoints": {
     "speech": "https://api.deepgram.com/v1/speak?encoding=mp3&model=aura-2-alloy-en",
-    "transcription": "https://api.deepgram.com/v1/listen?model=aura-2-alloy-en"
+    "transcription": "https://api.deepgram.com/v1/listen?model=nova-3"
   },
   "unsupported_parameters": [],
   "responses": {},
@@ -16,5 +15,9 @@
     "status": 401,
     "envelope": null,
     "class": "credential"
+  },
+  "media_models": {
+    "speech": "aura-2-alloy-en",
+    "transcription": "nova-3"
   }
 }

@@ -30,9 +30,9 @@ type vendorEvidence struct {
 	Notes            string `json:"notes"`
 	// Endpoints are the documented absolute URLs of every served operation.
 	Endpoints map[string]string `json:"endpoints"`
-	// MediaModel is the model the media package's endpoint check names.
-	MediaModel  string   `json:"media_model"`
-	Unsupported []string `json:"unsupported_parameters"`
+	// MediaModels are the models the media package's endpoint check names.
+	MediaModels map[string]string `json:"media_models"`
+	Unsupported []string          `json:"unsupported_parameters"`
 	// Responses are unary results by operation.
 	Responses map[string]struct {
 		File  string          `json:"file"`
@@ -333,7 +333,9 @@ func checkError(t *testing.T, contract vendors.Contract, evidence vendorEvidence
 	case envelope != nil && (stated == nil || stated.Type != envelope.Type || stated.Code != envelope.Code || stated.Message != envelope.Message):
 		t.Fatalf("error envelope = %+v, documented %+v", stated, envelope)
 	}
-	outcome := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: documented.Status, Error: stated})
+	// The vendor's declared failure classes apply ahead of the built-in rules.
+	declared := connectors.Config{VendorID: contract.ID}.Classification()
+	outcome := upstream.Classifier{Declared: declared}.Classify(upstream.Evidence{Reached: true, Status: documented.Status, Error: stated})
 	if string(outcome.Class) != documented.Class {
 		t.Fatalf("error class = %s, documented %s", outcome.Class, documented.Class)
 	}

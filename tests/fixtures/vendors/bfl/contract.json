@@ -1,0 +1,21 @@
+{
+  "vendor": "bfl",
+  "documentation_url": "https://docs.bfl.ai/api_integration/integration_guidelines",
+  "reviewed_at": "2026-10-05",
+  "notes": "API keys travel in x-key. A model's submission answers with a polling_url; the poll reports Pending, Ready with a signed result.sample URL on delivery.*.bfl.ai that expires in ten minutes and takes no credential, or a moderation status. GET /v1/credits proves a key without cost. Validation errors use FastAPI's detail list.",
+  "media_models": {
+    "image_generation": "flux-2-pro"
+  },
+  "endpoints": {
+    "image_generation": "https://api.bfl.ai/v1/flux-2-pro"
+  },
+  "unsupported_parameters": [],
+  "responses": {},
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 422,
+    "envelope": null,
+    "class": "upstream_client"
+  }
+}

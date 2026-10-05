@@ -164,4 +164,43 @@ func TestReviewedVendorMedia(t *testing.T) {
 			t.Fatalf("Deepgram received %q as %s", audio, contentType)
 		}
 	})
+	t.Run("stability images", func(t *testing.T) {
+		var fields map[string]string
+		var accept string
+		fixture := newVendorMediaFixture(t, "user/balance", bearer, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v2beta/stable-image/generate/core" || r.ParseMultipartForm(1<<20) != nil {
+				http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+				return
+			}
+			fields, accept = map[string]string{}, r.Header.Get("Accept")
+			for name, values := range r.MultipartForm.Value {
+				fields[name] = values[0]
+			}
+			if fields["prompt"] == "forbidden" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				w.Write([]byte(`{"id":"a1","name":"content_moderation","errors":["Your request was flagged."]}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; type=image/png")
+			w.Write([]byte(`{"image":"` + pixel + `","finish_reason":"SUCCESS","seed":42}`))
+		})
+		h := newAccessHarness(t)
+		slug, secret := provisionRoute(t, h, map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": fixture.URL, "options": map[string]any{"vendor_id": "stability"}},
+			vendorSecret, "stable-image-core", []any{map[string]any{"operation": "image_generation", "surface": "openai", "mode": "unary"}}, []string{"image_generation"})
+		status, reply, _ := h.gateway("POST", "/v1/images/generations", secret, map[string]any{"model": slug, "prompt": "a small illustration", "size": "1024x1536", "response_format": "b64_json"})
+		data, _ := reply["data"].([]any)
+		if status != http.StatusOK || len(data) != 1 || data[0].(map[string]any)["b64_json"] != pixel || accept != "application/json" || fields["aspect_ratio"] != "2:3" {
+			t.Fatalf("Stability image: %d %v %s %v", status, reply, accept, fields)
+		}
+		// Moderation is the caller's error, which leaves the credential usable.
+		status, reply, _ = h.gateway("POST", "/v1/images/generations", secret, map[string]any{"model": slug, "prompt": "forbidden", "response_format": "b64_json"})
+		if failure, _ := reply["error"].(map[string]any); status == http.StatusOK || failure["code"] != "upstream_rejected" {
+			t.Fatalf("moderated image: %d %v", status, reply)
+		}
+		status, _, _ = h.gateway("POST", "/v1/images/generations", secret, map[string]any{"model": slug, "prompt": "a second illustration", "response_format": "b64_json"})
+		if status != http.StatusOK {
+			t.Fatalf("the credential was cooled down after moderation: %d", status)
+		}
+	})
 }

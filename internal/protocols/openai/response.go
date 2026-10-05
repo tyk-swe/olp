@@ -81,6 +81,7 @@ func ParseErrorBody(body []byte) *UpstreamError {
 	type envelope struct {
 		Error  json.RawMessage `json:"error"`
 		Errors json.RawMessage `json:"errors"`
+		Name   string          `json:"name"`
 	}
 	var single envelope
 	if json.Unmarshal(body, &single) != nil {
@@ -92,7 +93,12 @@ func ParseErrorBody(body []byte) *UpstreamError {
 	}
 	var listed []json.RawMessage
 	if len(single.Error) == 0 && json.Unmarshal(single.Errors, &listed) == nil && len(listed) > 0 {
-		return errorObject(listed[0])
+		stated := errorObject(listed[0])
+		// Stability names the failure beside its list of messages.
+		if stated != nil && stated.Type == "" && single.Name != "" {
+			stated.Type = single.Name
+		}
+		return stated
 	}
 	if len(single.Error) == 0 {
 		return nil
@@ -110,8 +116,10 @@ func errorObject(raw json.RawMessage) *UpstreamError {
 		Code    json.RawMessage `json:"code"`
 		Message string          `json:"message"`
 		// Status is Google's canonical error name, such as RESOURCE_EXHAUSTED,
-		// which stands in for the type.
+		// and Name Stability's, such as content_moderation; either stands in
+		// for the type.
 		Status string `json:"status"`
+		Name   string `json:"name"`
 	}
 	if json.Unmarshal(raw, &detail) != nil {
 		return nil
@@ -122,6 +130,9 @@ func errorObject(raw json.RawMessage) *UpstreamError {
 	}
 	if detail.Type == "" {
 		detail.Type = detail.Status
+	}
+	if detail.Type == "" {
+		detail.Type = detail.Name
 	}
 	return &UpstreamError{Type: detail.Type, Code: code, Message: detail.Message}
 }

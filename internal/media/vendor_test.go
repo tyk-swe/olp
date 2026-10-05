@@ -36,6 +36,9 @@ func mediaProbe(operation string) *Request {
 	if operation == OpTranscription || operation == OpTranslation {
 		r.File = &Part{}
 	}
+	if operation == OpImageEdit {
+		r.Images = []Part{{}}
+	}
 	return r
 }
 
@@ -53,9 +56,9 @@ func TestVendorMediaEndpointsAreDocumented(t *testing.T) {
 		}
 		var evidence struct {
 			Endpoints map[string]string `json:"endpoints"`
-			// MediaModel is the model a media probe names, where the vendor
-			// reads more than its identity from it.
-			MediaModel string `json:"media_model"`
+			// MediaModels are the models media probes name, by operation,
+			// where the vendor reads more than its identity from one.
+			MediaModels map[string]string `json:"media_models"`
 		}
 		if err := json.Unmarshal(raw, &evidence); err != nil {
 			t.Fatal(err)
@@ -66,8 +69,8 @@ func TestVendorMediaEndpointsAreDocumented(t *testing.T) {
 				continue
 			}
 			model := "model"
-			if evidence.MediaModel != "" {
-				model = evidence.MediaModel
+			if named := evidence.MediaModels[operation]; named != "" {
+				model = named
 			}
 			call, _, failure := EncodeConfigured(mediaProbe(operation), config, model)
 			if failure != nil {

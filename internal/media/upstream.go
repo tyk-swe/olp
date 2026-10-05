@@ -228,7 +228,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		}
 		// A non-idempotent call's work may survive a server failure, never a
 		// stated rejection.
-		outcome := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: failure.Upstream})
+		outcome := upstream.Classifier{Declared: target.Config.Classification()}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: failure.Upstream})
 		failure.Class, failure.Ambiguous = outcome.Class, call.Ambiguous && outcome.Acceptance.Unresolved()
 		if failure.Class == ClassRateLimit {
 			failure.RetryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), t.now())
@@ -244,7 +244,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		}
 	}
 
-	result, failure := t.decode(ctx, resp, call, request, firstByte)
+	result, failure := t.decode(ctx, resp, call, request, firstByte, func(next *http.Request) (*http.Response, error) { return client.Do(next) }, target)
 	if failure != nil {
 		resp.Body.Close()
 		failure.Dispatched = true
@@ -310,7 +310,7 @@ func filePartHeader(field, filename, contentType string) textproto.MIMEHeader {
 
 var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"", "\r", "", "\n", "", "\x00", "").Replace
 
-func (t *Transport) decode(ctx context.Context, resp *http.Response, call *UpstreamCall, request *Request, firstByte time.Duration) (*Result, *Failure) {
+func (t *Transport) decode(ctx context.Context, resp *http.Response, call *UpstreamCall, request *Request, firstByte time.Duration, send func(*http.Request) (*http.Response, error), target Target) (*Result, *Failure) {
 	result := &Result{Kind: call.Kind, Status: resp.StatusCode, FirstByte: firstByte}
 	retainJSON := func(body []byte) *Failure {
 		if !call.Strict {
@@ -445,7 +445,16 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		}
 		var decoded *ImageResult
 		var mErr *Error
-		if call.DecodeImages != nil {
+		if call.Next != nil {
+			var failure *Failure
+			decoded, failure = t.follow(ctx, call, body, send, target, stage)
+			if failure != nil {
+				for _, handle := range stagedHandles {
+					t.Spool.Remove(handle)
+				}
+				return nil, failure
+			}
+		} else if call.DecodeImages != nil {
 			decoded, mErr = call.DecodeImages(body, stage)
 		} else if call.Native != "" {
 			expected := int64(1)
@@ -460,7 +469,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			for _, handle := range stagedHandles {
 				t.Spool.Remove(handle)
 			}
-			return nil, &Failure{Class: ClassProtocol, Detail: mErr.Message}
+			return nil, decodeFailure(mErr)
 		}
 		result.Images = decoded
 		return result, nil
@@ -490,6 +499,16 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		return result, nil
 	}
 	return nil, &Failure{Class: ClassProtocol, Detail: "unsupported media response kind"}
+}
+
+// decodeFailure maps a result decoder's error onto a transport failure: a
+// vendor's verdict on the request, such as its content filter's, is the
+// caller's error; anything else violates the vendor's protocol.
+func decodeFailure(err *Error) *Failure {
+	if err.Status >= 400 && err.Status < 500 {
+		return &Failure{Class: ClassUpstreamClient, Status: err.Status, Upstream: &openai.UpstreamError{Type: "invalid_request_error", Code: err.Code, Message: err.Message}, Detail: err.Message}
+	}
+	return &Failure{Class: ClassProtocol, Detail: err.Message}
 }
 
 // stageFailure maps a spool staging error onto a transport failure: an

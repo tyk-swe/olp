@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/tyk-swe/olp/internal/upstream"
+	"github.com/tyk-swe/olp/internal/vendors"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -53,8 +54,13 @@ func errorValue(text string) bool {
 // declares, which the upstream classifier consults ahead of its built-in
 // rules. Only plugin profiles declare one.
 func (c Config) Classification() []upstream.Rule {
-	if c.Plugin == nil {
-		return nil
+	var rules []upstream.Rule
+	if c.Plugin != nil {
+		rules = slices.Clone(c.Plugin.hosting.classification)
 	}
-	return slices.Clone(c.Plugin.hosting.classification)
+	// A reviewed vendor classifies its own misleading statuses.
+	for _, rule := range vendors.ErrorClassesFor(c.VendorID) {
+		rules = append(rules, upstream.Rule{Status: rule.Status, Type: rule.Type, Class: upstream.Class(rule.Class)})
+	}
+	return rules
 }

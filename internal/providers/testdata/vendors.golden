@@ -979,6 +979,76 @@
     "unsupported_parameters": []
   },
   {
+    "id": "stability",
+    "name": "Stability AI",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "image_generation",
+      "image_edit"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "size",
+      "output_format",
+      "response_format"
+    ],
+    "documentation_url": "https://platform.stability.ai/docs/api-reference",
+    "endpoint": "https://api.stability.ai",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "recraft",
+    "name": "Recraft",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "image_generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "n",
+      "size",
+      "output_format",
+      "response_format"
+    ],
+    "documentation_url": "https://www.recraft.ai/docs/api-reference/endpoints",
+    "endpoint": "https://external.api.recraft.ai/v1",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "bfl",
+    "name": "Black Forest Labs",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "image_generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "size",
+      "output_format"
+    ],
+    "documentation_url": "https://docs.bfl.ai/api_integration/integration_guidelines",
+    "endpoint": "https://api.bfl.ai/v1",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
     "id": "voyage",
     "name": "Voyage AI",
     "connector": "openai_compatible",
