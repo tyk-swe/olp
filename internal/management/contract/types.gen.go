@@ -3916,6 +3916,55 @@ type PluginHosting struct {
 	Rewrites *[]PluginRewrite `json:"rewrites,omitempty"`
 }
 
+// PluginIndexEntry A reviewed plugin and its source.
+type PluginIndexEntry struct {
+	Description      string `json:"description"`
+	DocumentationUrl string `json:"documentation_url"`
+	Maintainer       string `json:"maintainer"`
+	Name             string `json:"name"`
+
+	// Path Source directory within the repository.
+	Path string `json:"path"`
+
+	// Releases Reviewed releases, newest first.
+	Releases   []PluginIndexRelease `json:"releases"`
+	Repository string               `json:"repository"`
+}
+
+// PluginIndexRelease A reviewed build of a plugin: an owner installs exactly this module digest and approves exactly these origins.
+type PluginIndexRelease struct {
+	AbiVersion int32 `json:"abi_version"`
+
+	// Approved Whether this digest is installed and its origins approved.
+	Approved bool `json:"approved"`
+
+	// Commit Source revision the digest builds from, reproducibly.
+	Commit string `json:"commit"`
+
+	// Digest Hex SHA-256 of the WebAssembly module.
+	Digest string `json:"digest"`
+
+	// Installed Whether this digest is installed.
+	Installed  bool      `json:"installed"`
+	Origins    []string  `json:"origins"`
+	Profiles   []string  `json:"profiles"`
+	ReviewedAt time.Time `json:"reviewed_at"`
+	SizeBytes  int64     `json:"size_bytes"`
+	Version    string    `json:"version"`
+}
+
+// PluginIndexResponse The signed index of reviewed plugins this release ships.
+type PluginIndexResponse struct {
+	Items []PluginIndexEntry `json:"items"`
+
+	// KeyId Trusted key that verified the index.
+	KeyId       string    `json:"key_id"`
+	PublishedAt time.Time `json:"published_at"`
+
+	// Sha256 SHA-256 digest of the signed index document.
+	Sha256 string `json:"sha256"`
+}
+
 // PluginListResponse defines model for PluginListResponse.
 type PluginListResponse struct {
 	Items []Plugin `json:"items"`

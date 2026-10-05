@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -43,6 +44,9 @@ type Management struct {
 	// Catalog is the reference catalog this release ships, verified at
 	// start-up.
 	Catalog *catalog.Signed
+	// PluginIndex is the signed index of reviewed plugins this release
+	// ships, verified at start-up.
+	PluginIndex *pluginindex.Signed
 }
 
 // Register mounts the whole management API: the published contract, every
@@ -70,7 +74,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	(&resources.Management{Access: m.Access, Pool: m.Access.Pool}).Register(mux)
 	(&management.Overview{Access: m.Access}).Register(mux)
 	(&observability.Management{Access: m.Access, Cache: m.Health, Pool: m.Access.Pool}).Register(mux)
-	(&plugins.Management{Access: m.Access, Runtime: m.PluginRuntime, Host: m.PluginHost, Unconfined: m.Unconfined}).Register(mux)
+	(&plugins.Management{Access: m.Access, Runtime: m.PluginRuntime, Host: m.PluginHost, Unconfined: m.Unconfined, Index: m.PluginIndex}).Register(mux)
 	// Usage, pricing, request history and recovery reporting are part
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.

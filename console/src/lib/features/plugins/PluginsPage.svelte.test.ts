@@ -6,6 +6,7 @@ import { ApiProblem } from '$lib/api/http';
 import { providerKeys } from '$lib/features/providers/providerKeys';
 import {
   approvePlugin,
+  getPluginIndex,
   installPlugin,
   listPlugins,
   listUnconfinedExecutables,
@@ -24,6 +25,7 @@ vi.mock('$lib/features/access/session/useRole.svelte', () => ({
 vi.mock('$lib/features/plugins/api', async (original) => ({
   ...(await original<typeof import('$lib/features/plugins/api')>()),
   approvePlugin: vi.fn(),
+  getPluginIndex: vi.fn(),
   installPlugin: vi.fn(),
   listPlugins: vi.fn(),
   listUnconfinedExecutables: vi.fn(),
@@ -414,5 +416,45 @@ it('marks a permitted unconfined plugin and shows the tier enabled', async () =>
   expect(tier.querySelector('.badge')?.textContent).toBe('Enabled');
   expect(tier.textContent).toContain(
     'Only owners can review and permit unconfined plugins.'
+  );
+});
+
+it('shows the reviewed plugin index and ties an installed digest to it', async () => {
+  vi.mocked(listPlugins).mockResolvedValue(listed([pending]));
+  vi.mocked(getPluginIndex).mockResolvedValue({
+    published_at: '2026-10-05T00:00:00Z',
+    sha256: 'c'.repeat(64),
+    key_id: 'dev-2026a',
+    items: [
+      {
+        name: 'reference',
+        description: 'Reference plugin.',
+        maintainer: 'OpenLLMProxy',
+        documentation_url: 'https://example.test/docs',
+        repository: 'https://github.com/tyk-swe/olp',
+        path: 'sdk/plugin/reference',
+        releases: [
+          {
+            version: '0.1.0',
+            digest: pending.digest,
+            abi_version: 1,
+            size_bytes: 4_738_008,
+            origins: pending.manifest.origins,
+            profiles: ['reference-chat'],
+            commit: 'b'.repeat(40),
+            reviewed_at: '2026-10-05T00:00:00Z',
+            installed: true,
+            approved: false
+          }
+        ]
+      }
+    ]
+  });
+  render();
+  await settle();
+  expect(host.textContent).toContain('Plugin index');
+  expect(host.textContent).toContain('Installed, awaiting approval');
+  expect(host.textContent).toContain(
+    'Listed in the reviewed plugin index as reference 0.1.0.'
   );
 });

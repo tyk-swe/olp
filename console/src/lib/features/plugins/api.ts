@@ -10,6 +10,9 @@ import {
 
 export type Plugin = components['schemas']['Plugin'];
 export type PluginList = components['schemas']['PluginListResponse'];
+export type PluginIndex = components['schemas']['PluginIndexResponse'];
+export type PluginIndexEntry = components['schemas']['PluginIndexEntry'];
+export type PluginIndexRelease = components['schemas']['PluginIndexRelease'];
 export type UnconfinedExecutable =
   components['schemas']['UnconfinedExecutable'];
 export type UnconfinedExecutableReview =
@@ -135,4 +138,15 @@ export function pluginTitle(plugin: {
 /** The first twelve digest characters, enough to tell installs apart. */
 export function shortDigest(digest: string): string {
   return digest.slice(0, 12);
+}
+
+/** The signed index of reviewed plugins, with each digest's install state. */
+export async function getPluginIndex(
+  signal?: AbortSignal
+): Promise<PluginIndex> {
+  const { data, error, response } = await apiClient.GET(
+    '/api/v1/plugin-index',
+    { signal }
+  );
+  return unwrap({ data, error, response });
 }

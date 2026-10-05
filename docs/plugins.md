@@ -71,6 +71,38 @@ approved, and OLP refuses the approval with `plugin_origins_mismatch` unless the
 list matches the declaration. A digest's manifest never changes, so an approval
 never widens; a new digest of the same plugin needs its own approval.
 
+## Reviewed plugin index
+
+Every release ships a signed index of reviewed plugins,
+[`internal/pluginindex/index.json`](../internal/pluginindex/index.json), which
+the binary verifies at start-up exactly as it verifies the
+[reference catalog](catalog.md#canonical-form-and-signature). For each plugin it
+lists the source repository and directory, and for each reviewed release the
+WebAssembly module's SHA-256 digest, ABI version, size, the origins and
+profiles its manifest declares, the source commit the digest builds from and
+when it was reviewed.
+
+**Plugins → Plugin index** shows the index beside what is installed, with
+each release marked not installed, installed or approved, and each installed
+plugin says whether its digest is listed. `GET /api/v1/plugin-index` returns
+the same. Browsing installs nothing: an owner still uploads the module,
+approves exactly its declared origins and, for unconfined plugins, permits it.
+OLP ties an uploaded module to a reviewed release only when its digest
+matches.
+
+The index's plugins build reproducibly: with the same Go toolchain,
+`go run ./internal/pluginindex/cmd/pluginindex check OUT_DIR` rebuilds each
+listed plugin and fails unless its digest is the one listed. Each release runs
+it and publishes the modules it built, `plugin-index.json` and
+`plugin-index.json.sig` as release assets. To verify a module yourself, rebuild
+it from the listed commit with
+`GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -trimpath -buildvcs=false -buildmode=c-shared`
+and compare its `sha256sum` with the listed digest.
+
+A plugin enters the index through a reviewed pull request that adds its
+release with `pluginindex entry DIR`: public source, a reproducible build, a
+justification for every origin, and a review of the upstream's terms of use.
+
 ## Providers from plugin profiles
 
 The profiles of approved plugins appear in `GET /api/v1/provider-profiles` under

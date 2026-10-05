@@ -32,6 +32,7 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/process"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -188,7 +189,11 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	if err != nil {
 		t.Fatal(err)
 	}
-	process.Management{Access: server, Egress: &policy, Runtime: rt, Gateway: gw, Media: mediaJobs, Health: observability.NewCache(), Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog}.Register(mux)
+	pluginIndex, err := pluginindex.Embedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process.Management{Access: server, Egress: &policy, Runtime: rt, Gateway: gw, Media: mediaJobs, Health: observability.NewCache(), Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, PluginIndex: pluginIndex}.Register(mux)
 	gw.Register(mux)
 	httpServer := httptest.NewServer(mux)
 	t.Cleanup(httpServer.Close)

@@ -20,6 +20,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -48,11 +49,15 @@ type Management struct {
 	// Unconfined is the deployment's unconfined tier, or nil where it does
 	// not enable one. No API path lists or permits unconfined plugins then.
 	Unconfined *Unconfined
+	// Index is the signed index of reviewed plugins this release ships,
+	// verified at start-up.
+	Index *pluginindex.Signed
 }
 
 // Register mounts the plugin operations on the management surface.
 func (s *Management) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/plugins", s.list)
+	s.Access.Route(mux, "GET /api/v1/plugin-index", s.index)
 	// Instantiating a module to read its manifest can take seconds.
 	s.Access.Route(mux, "POST /api/v1/plugins", s.install, access.MaxBody(maxModuleBytes), access.Deadline(time.Minute))
 	s.Access.Route(mux, "GET /api/v1/plugins/{plugin_digest}", s.get)

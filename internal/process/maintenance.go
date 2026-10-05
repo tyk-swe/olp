@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/signing"
@@ -155,6 +156,11 @@ func Maintenance(ctx context.Context, c config.Config, command string, options M
 			return err
 		}
 		report["reference_catalog"] = map[string]any{"sha256": referenceCatalog.SHA256, "key_id": referenceCatalog.KeyID, "published_at": referenceCatalog.Catalog.PublishedAt, "channel": signing.Channel}
+		pluginIndex, err := pluginindex.Embedded()
+		if err != nil {
+			return err
+		}
+		report["plugin_index"] = map[string]any{"sha256": pluginIndex.SHA256, "key_id": pluginIndex.KeyID, "published_at": pluginIndex.Index.PublishedAt}
 		if c.ValkeyURL != "" {
 			vc, err := coordination.Configuration(c.ValkeyURL, c.ValkeyCAFile, c.RequestTimeout)
 			if err != nil {

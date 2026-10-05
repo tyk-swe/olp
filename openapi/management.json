@@ -13367,6 +13367,141 @@
           "upstream_models"
         ],
         "type": "object"
+      },
+      "PluginIndexRelease": {
+        "additionalProperties": false,
+        "description": "A reviewed build of a plugin: an owner installs exactly this module digest and approves exactly these origins.",
+        "properties": {
+          "abi_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "approved": {
+            "description": "Whether this digest is installed and its origins approved.",
+            "type": "boolean"
+          },
+          "commit": {
+            "description": "Source revision the digest builds from, reproducibly.",
+            "type": "string"
+          },
+          "digest": {
+            "description": "Hex SHA-256 of the WebAssembly module.",
+            "type": "string"
+          },
+          "installed": {
+            "description": "Whether this digest is installed.",
+            "type": "boolean"
+          },
+          "origins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reviewed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "digest",
+          "abi_version",
+          "size_bytes",
+          "origins",
+          "profiles",
+          "commit",
+          "reviewed_at",
+          "installed",
+          "approved"
+        ],
+        "type": "object"
+      },
+      "PluginIndexEntry": {
+        "additionalProperties": false,
+        "description": "A reviewed plugin and its source.",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "documentation_url": {
+            "type": "string"
+          },
+          "maintainer": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "description": "Source directory within the repository.",
+            "type": "string"
+          },
+          "releases": {
+            "description": "Reviewed releases, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/PluginIndexRelease"
+            },
+            "type": "array"
+          },
+          "repository": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "maintainer",
+          "documentation_url",
+          "repository",
+          "path",
+          "releases"
+        ],
+        "type": "object"
+      },
+      "PluginIndexResponse": {
+        "additionalProperties": false,
+        "description": "The signed index of reviewed plugins this release ships.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PluginIndexEntry"
+            },
+            "type": "array"
+          },
+          "key_id": {
+            "description": "Trusted key that verified the index.",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "SHA-256 digest of the signed index document.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "published_at",
+          "sha256",
+          "key_id",
+          "items"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -30212,6 +30347,49 @@
         ],
         "tags": [
           "providers"
+        ]
+      }
+    },
+    "/api/v1/plugin-index": {
+      "get": {
+        "description": "Lists the reviewed plugins in the signed index this release ships, with whether each reviewed digest is installed and approved. Browsing installs nothing: installing a module, approving its origins and permitting it stay explicit owner actions.",
+        "operationId": "get_plugin_index",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginIndexResponse"
+                }
+              }
+            },
+            "description": "Plugin index"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "This process holds no verified plugin index"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
         ]
       }
     }

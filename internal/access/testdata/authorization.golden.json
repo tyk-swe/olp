@@ -60,6 +60,7 @@
     "GET /api/v1/openapi.json": "YYYYYYYYYYYY",
     "GET /api/v1/operation-dialects": "YYYYYYYYYYYY",
     "GET /api/v1/overview": "YYYYYYYYYYYY",
+    "GET /api/v1/plugin-index": "YYYYYYYYYYYY",
     "GET /api/v1/plugins": "YYYYYYYYYYYY",
     "GET /api/v1/plugins/{plugin_digest}": "YYYYYYYYYYYY",
     "GET /api/v1/pricing/revisions": "Y-Y-Y-Y-Y-Y-",

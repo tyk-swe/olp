@@ -63,9 +63,9 @@ jobs:
             echo "::error::Set the OLP_SIGNING_KEY secret and OLP_SIGNING_KEY_ID variable; see docs/catalog.md#signing-keys" >&2
             exit 1
           fi
-          go run ./internal/signing/cmd/olpsign sign -key-id "$OLP_SIGNING_KEY_ID" internal/catalog/catalog.json
-          go run -tags release ./internal/signing/cmd/olpsign verify internal/catalog/catalog.json
-          go test -tags release -run 'TestEmbeddedCatalog' ./internal/catalog
+          go run ./internal/signing/cmd/olpsign sign -key-id "$OLP_SIGNING_KEY_ID" internal/catalog/catalog.json internal/pluginindex/index.json
+          go run -tags release ./internal/signing/cmd/olpsign verify internal/catalog/catalog.json internal/pluginindex/index.json
+          go test -tags release -run 'TestEmbedded' ./internal/catalog ./internal/pluginindex
       - if: matrix.arch == 'amd64'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -74,6 +74,8 @@ jobs:
             internal/catalog/catalog.json
             internal/catalog/catalog.json.sig
             internal/catalog/schema.json
+            internal/pluginindex/index.json
+            internal/pluginindex/index.json.sig
           if-no-files-found: error
           overwrite: true
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -233,11 +235,21 @@ jobs:
         with:
           name: signed-documents
           path: /tmp/signed
-      - name: Name the reference catalog assets
+      - name: Name the signed release documents
         run: |
           mkdir -p /tmp/catalog
-          cp /tmp/signed/catalog.json /tmp/signed/catalog.json.sig /tmp/catalog/
-          cp /tmp/signed/schema.json /tmp/catalog/catalog.schema.json
+          cp /tmp/signed/catalog/catalog.json /tmp/signed/catalog/catalog.json.sig /tmp/catalog/
+          cp /tmp/signed/catalog/schema.json /tmp/catalog/catalog.schema.json
+          cp /tmp/signed/pluginindex/index.json /tmp/catalog/plugin-index.json
+          cp /tmp/signed/pluginindex/index.json.sig /tmp/catalog/plugin-index.json.sig
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      # Every plugin the reviewed index lists is rebuilt reproducibly from
+      # this commit, and the release fails unless each digest is the one the
+      # index lists, so the modules published here are the reviewed ones.
+      - name: Build the indexed plugins
+        run: go run ./internal/pluginindex/cmd/pluginindex check /tmp/catalog
       - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: /tmp/catalog/*

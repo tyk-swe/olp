@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/signing"
 )
 
@@ -59,7 +60,8 @@ func run(args []string, stdout io.Writer) error {
 // canonicalizers render each signed document format canonically, by its
 // api_version.
 var canonicalizers = map[string]func([]byte) ([]byte, error){
-	catalog.APIVersion: catalog.Canonical,
+	catalog.APIVersion:     catalog.Canonical,
+	pluginindex.APIVersion: pluginindex.Canonical,
 }
 
 func format(args []string, stdout io.Writer) error {
