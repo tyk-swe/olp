@@ -241,11 +241,13 @@ describe('Claude Code betas, credentials and egress', () => {
     const bait = await startBait();
     t.after(() => bait.close());
     const cwd = await workspace('claude');
-    // Retrying through the dead proxy outlives the deadline, which is expected.
-    await assertHeldByTheTrap(bait, (trap) =>
+    // The client retries through the dead proxy until it is stopped, which is
+    // expected; the deadline only bounds how long it may take to start.
+    await assertHeldByTheTrap(bait, (trap, signal) =>
       run(claude, ['-p', 'Say hello.', '--model', route, '--output-format', 'json', '--permission-mode', 'default'], {
         cwd,
-        timeoutMs: 10_000,
+        timeoutMs: 60_000,
+        signal,
         env: clientEnvironment({ ANTHROPIC_BASE_URL: `${bait.origin}/anthropic`, ANTHROPIC_API_KEY: apiKey, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...trap })
       })
     );

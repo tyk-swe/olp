@@ -236,8 +236,8 @@ describe('the proxy trap, held against the requests it refused', () => {
   const node = process.execPath;
 
   /** Run a client program against the bait with the proxy variables of the attempt. */
-  const attempt = (bait, program) => (trap) =>
-    run(node, ['-e', program], { timeoutMs: 15_000, env: clientEnvironment({ BAIT: bait.origin, BAIT_HOST: bait.host, BAIT_PORT: String(bait.port), ...trap }) });
+  const attempt = (bait, program, timeoutMs = 15_000) => (trap, signal) =>
+    run(node, ['-e', program], { timeoutMs, signal, env: clientEnvironment({ BAIT: bait.origin, BAIT_HOST: bait.host, BAIT_PORT: String(bait.port), ...trap }) });
 
   test('accepts a client that asks the proxy for the bait and is refused', async (t) => {
     const bait = await startBait();
@@ -269,6 +269,24 @@ describe('the proxy trap, held against the requests it refused', () => {
     // It connects directly, whatever the environment says.
     const program = "require('node:net').connect(Number(process.env.BAIT_PORT), process.env.BAIT_HOST).on('connect', () => process.exit(1)).on('error', () => process.exit(1))";
     await assert.rejects(assertHeldByTheTrap(bait, attempt(bait, program)), /reached an address outside OLP/);
+  });
+
+  test('stops a client that keeps retrying soon after it asks for the bait, not at its deadline', async (t) => {
+    const bait = await startBait();
+    t.after(bait.close);
+    const program = 'setInterval(() => fetch(process.env.BAIT).catch(() => {}), 100)';
+    const started = Date.now();
+    await assertHeldByTheTrap(bait, attempt(bait, program, 60_000), { watchMs: 500 });
+    assert.ok(Date.now() - started < 30_000, `the retrying client ran ${Date.now() - started} ms`);
+  });
+
+  test('refuses a client that goes round the proxy after it was refused', async (t) => {
+    const bait = await startBait();
+    t.after(bait.close);
+    // It honors the proxy first, then connects directly while it is still watched.
+    const program =
+      "fetch(process.env.BAIT).catch(() => {}).then(() => setTimeout(() => require('node:net').connect(Number(process.env.BAIT_PORT), process.env.BAIT_HOST).on('error', () => {}), 200))";
+    await assert.rejects(assertHeldByTheTrap(bait, attempt(bait, `${program}; setInterval(() => {}, 1000)`, 60_000), { watchMs: 2_000 }), /reached an address outside OLP/);
   });
 
   test('refuses a client that succeeds although it was refused', async (t) => {

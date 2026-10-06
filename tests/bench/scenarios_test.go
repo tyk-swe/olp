@@ -199,6 +199,15 @@ var (
 
 const s6Streams = 10_000
 
+// S6 opens its streams over at most s6MaxWarmup and s6MaxDuration, however
+// long the other scenarios run. The gateway ends a stream thirty seconds after
+// its writes block, which at the readers' pace is soon after it opens, so over
+// the default seventy seconds the first streams are gone before the last open.
+const (
+	s6MaxWarmup   = 3 * time.Second
+	s6MaxDuration = 15 * time.Second
+)
+
 // s6Plan is the shape of the slow-reader scenario. The upstream writes a long
 // completion back to back, and each reader takes it at a few kilobytes a
 // second, so no stream finishes while the run lasts: the generator opens them
@@ -210,11 +219,12 @@ const s6Streams = 10_000
 func s6Plan(s settings) plan {
 	streams := scaled(s6Streams, s.Scale)
 	tokens := s.S6Tokens
+	warmup, duration := min(s.Warmup, s6MaxWarmup), min(s.Duration, s6MaxDuration)
 	p := plan{
 		Dialect: loadgen.OpenAI, StreamShare: 1, PromptTokens: []int{0}, MaxTokens: tokens,
 		Mock: rule(upstreamTTFT, 0, tokens), Models: []string{"bench-chat"}, Baseline: "bench-chat",
 		Concurrency: streams, SlowReadBPS: s.S6BPS,
-		WarmupSeconds: s.Warmup.Seconds(), DurationSeconds: s.Duration.Seconds(), DrainSeconds: s.Duration.Seconds(),
+		WarmupSeconds: warmup.Seconds(), DurationSeconds: duration.Seconds(), DrainSeconds: duration.Seconds(),
 	}
 	p.Rate = math.Max(0.1, float64(streams)/(p.WarmupSeconds+p.DurationSeconds))
 	p.TimeoutSeconds = p.WarmupSeconds + p.DurationSeconds + p.DrainSeconds + 60

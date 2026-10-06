@@ -27,6 +27,12 @@ jobs:
         env:
           OLP_LIVE_OPENAI_API_KEY: ${{ secrets.OLP_LIVE_OPENAI_API_KEY }}
         run: go test -tags=liveproviders -count=1 -timeout=2m ./internal/connectors -run TestLiveProvider
+      # Compares OpenAI's reported prompt tokens with the estimate over the
+      # token corpus, a few hundred one-token completions.
+      - if: inputs.provider == 'openai'
+        env:
+          OLP_LIVE_OPENAI_API_KEY: ${{ secrets.OLP_LIVE_OPENAI_API_KEY }}
+        run: go test -tags=liveproviders -count=1 -timeout=10m -v ./internal/operations/tokenization/estimate -run TestLiveOpenAIPromptTokensMatchTheEstimate
       - if: inputs.provider == 'anthropic'
         env:
           OLP_LIVE_ANTHROPIC_API_KEY: ${{ secrets.OLP_LIVE_ANTHROPIC_API_KEY }}

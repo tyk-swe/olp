@@ -340,7 +340,9 @@ The catalog is advisory and never authoritative on its own:
       `internal/process`, which verifies the embedded catalog through the same
       `catalog.Load`, and the tampered-document and tampered-signature
       refresh tests in `internal/usage`. The release workflow re-signs with the
-      release key, which a maintainer has yet to create.
+      release key `release-2026a`, whose public key is in
+      `internal/signing/keys.go` and whose seed is the repository's
+      `OLP_SIGNING_KEY` secret; no release has been signed with it yet.
 - [x] The catalog covers every model of every catalog vendor with published list
       prices, each component either priced or marked `unrepresentable`.
       *Evidence:* 714 models of 32 vendors, transcribed on 2026-10-05; the

@@ -1362,6 +1362,60 @@ func TestReportsSetEstimatedInputAgainstReportedUsage(t *testing.T) {
 	}
 }
 
+// TestReportsSetEstimatedInputAgainstReportedUsageForEveryFamily seeds one
+// estimated attempt of each family the estimator knows, with the provenance it
+// counts that family with, and expects the family breakdown to set each
+// family's estimate against its reported input, live and once rolled up.
+func TestReportsSetEstimatedInputAgainstReportedUsageForEveryFamily(t *testing.T) {
+	f := repSetup(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	bucket := now.Add(-100 * 24 * time.Hour).Truncate(time.Hour)
+	billable := repFact{Charge: "billable", Observed: true, Complete: true, Media: repText("0.500000")}
+	families := []struct {
+		family, provenance, model string
+		reported, estimated       int64
+	}{
+		{"openai-o200k", "tokenizer", "gpt-4o", 100, 100},
+		{"openai-cl100k", "tokenizer", "gpt-4", 52, 50},
+		{"anthropic", "calibrated", "claude-sonnet-4-5", 100, 120},
+		{"gemini", "heuristic", "gemini-2.5-flash", 100, 80},
+		{"other", "heuristic", "llama-3", 25, 30},
+	}
+	want := map[string]repEstimateTotals{}
+	for _, c := range families {
+		v := billable
+		v.Input, v.Estimate, v.Provenance, v.Family = repCount(c.reported), repCount(c.estimated), c.provenance, c.family
+		repEstimated(f, bucket, "alpha", c.model, v)
+		reported, estimated := fmt.Sprint(c.reported), fmt.Sprint(c.estimated)
+		want[c.family] = repEstimateTotals{1, reported, estimated, reported, 1}
+	}
+
+	window := usage.Filters{Start: bucket, End: bucket.Add(time.Hour), AllProjects: true}
+	read := func(stage string) {
+		t.Helper()
+		report, err := usage.ReadBreakdown(ctx, f.pool, window, usage.DimensionModelFamily, 10)
+		if err != nil {
+			t.Fatalf("%s: read breakdown: %v", stage, err)
+		}
+		got := map[string]repEstimateTotals{}
+		for _, item := range report.Items {
+			got[item.Dimension] = repEstimateOf(item.Totals)
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("%s: families = %v, want %v", stage, got, want)
+		}
+	}
+	read("live")
+	if _, err := usage.RunMaintenance(ctx, f.pool, now); err != nil {
+		t.Fatalf("run maintenance: %v", err)
+	}
+	if total := f.count("SELECT count(*) FROM olp.attempt_usage_hourly"); total != int64(len(families)) {
+		t.Fatalf("hourly rows = %d, want one for each family", total)
+	}
+	read("retained")
+}
+
 func TestUsageMaintenanceRollsUpEstimatesByFamilyAndProvenance(t *testing.T) {
 	f := repSetup(t)
 	ctx := context.Background()
