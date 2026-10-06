@@ -21,7 +21,7 @@ func (s *Server) kindCapabilities(r *http.Request, _ access.Principal) (access.R
 	if kindByName(kind) == nil {
 		return access.Reply{}, access.Fail(400, "invalid_provider_kind", "This provider kind is not available.")
 	}
-	return access.OK(map[string]any{"provider_kind": kind, "capabilities": capabilitiesFor(kind, defaultVendor(kind))}), nil
+	return access.OK(map[string]any{"provider_kind": kind, "capabilities": capabilityOptionsForKind(kind)}), nil
 }
 
 func (s *Server) listVendors(r *http.Request, _ access.Principal) (access.Reply, error) {

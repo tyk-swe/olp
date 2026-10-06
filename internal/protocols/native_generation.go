@@ -200,14 +200,9 @@ func streamCohereEvents(r io.Reader, limit int, emit openai.Emit, observe func(o
 			return protocolError("event name disagrees with its type")
 		}
 		delta, _ := optionalObject(f["delta"])
-		message, _ := optionalObject(delta["message"])
 		switch kind {
 		case "message-start":
 			c.UpstreamID = str(f["id"])
-		case "content-delta":
-			if content, err := optionalObject(message["content"]); err == nil {
-				c.OutputText += str(content["text"])
-			}
 		case "message-end":
 			if present(delta["error"]) {
 				return &openai.UpstreamError{Type: "stream_error", Message: "Cohere ended the stream with an error"}
@@ -219,7 +214,7 @@ func streamCohereEvents(r io.Reader, limit int, emit openai.Emit, observe func(o
 				return err
 			}
 			done = true
-		case "content-start", "content-end", "tool-plan-delta", "tool-call-start", "tool-call-delta", "tool-call-end", "citation-start", "citation-end", "debug":
+		case "content-start", "content-delta", "content-end", "tool-plan-delta", "tool-call-start", "tool-call-delta", "tool-call-end", "citation-start", "citation-end", "debug":
 		default:
 			return protocolError("unknown event " + kind)
 		}

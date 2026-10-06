@@ -127,7 +127,7 @@ func (d *simulatedDemand) measure(target runtime.Target, prompt *estimate.Prompt
 }
 
 func validTuple(operation, surface, mode string) error {
-	if operationregistry.Default.Supports(operation, surface, mode) {
+	if operationregistry.Default.Supports(operation, surface, mode) || operation == "generation" && surface == "native" && (mode == "unary" || mode == "streaming") {
 		return nil
 	}
 	if !slices.Contains(supportedOperations, operation) && !registeredOperation(operation) {

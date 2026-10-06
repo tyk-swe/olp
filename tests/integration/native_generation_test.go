@@ -20,6 +20,19 @@ import (
 func provisionStrictNative(t *testing.T, h *accessHarness, cfg map[string]any, model string) (string, string) {
 	t.Helper()
 	owner := h.owner()
+	options := h.want(owner, "GET", "/api/v1/provider-kinds/openai_compatible/capabilities", nil, nil, 200)
+	for _, mode := range []string{"unary", "streaming"} {
+		matches := 0
+		for _, item := range options["capabilities"].([]any) {
+			option := item.(map[string]any)
+			if option["operation"] == "generation" && option["surface"] == "native" && option["mode"] == mode {
+				matches++
+			}
+		}
+		if matches != 1 {
+			t.Fatalf("expected one native generation/%s option, got %v", mode, options)
+		}
+	}
 	detail := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Native " + cfg["profile_id"].(string), "configuration": cfg, "model": model, "credential": vendorSecret}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	path := "/api/v1/providers/" + detail["id"].(string)
 	models := h.want(owner, "GET", path+"/models", nil, nil, 200)
@@ -43,6 +56,21 @@ func provisionStrictNative(t *testing.T, h *accessHarness, cfg map[string]any, m
 	slug := "native-" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{}, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": model, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
+	dialect := "mistral-fim"
+	request := map[string]any{"model": slug, "prompt": "def f():"}
+	if cfg["profile_id"] == "cohere-v2" {
+		dialect = "cohere-chat-v2"
+		request = map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+	}
+	for _, mode := range []string{"unary", "streaming"} {
+		request["stream"] = mode == "streaming"
+		for _, published := range []bool{false, true} {
+			decision := inspectorSimulation(t, h, owner, draft, published, request, map[string]any{"dialect": dialect, "surface": "native", "mode": mode})
+			if decision["eligible"] != true || decision["interaction"].(map[string]any)["class"] != "native_identity" {
+				t.Fatalf("%s/%s published=%v: %v", dialect, mode, published, decision)
+			}
+		}
+	}
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "native generation", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	h.refresh()
 	return slug, key["secret"].(string)

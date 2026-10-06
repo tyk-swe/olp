@@ -86,6 +86,23 @@ const azureSpec: ProviderKindCapability = {
     { field: 'model', label: 'Seed model', required: false }
   ]
 };
+const sagemakerSpec: ProviderKindCapability = {
+  ...openAiSpec,
+  kind: 'sagemaker',
+  label: 'Amazon SageMaker AI',
+  default_auth_mode: 'default_chain',
+  auth_modes: [
+    {
+      mode: 'default_chain',
+      label: 'AWS credential chain',
+      credential: 'forbidden'
+    }
+  ],
+  fields: [
+    { field: 'cloud_region', label: 'Region', required: true },
+    { field: 'model', label: 'Probe model', required: true }
+  ]
+};
 const compatibleSpec: ProviderKindCapability = {
   ...openAiSpec,
   kind: 'openai_compatible',
@@ -282,6 +299,23 @@ describe('provider editor capability policy', () => {
       placeholder: 'endpoint or endpoint/inference-component'
     });
     expect(probeModelPrompt('openai').label).toBe('Probe model');
+  });
+
+  it('requires a SageMaker endpoint before creating a draft with the default vendor', () => {
+    const draft = createProviderDraft(sagemakerSpec);
+    draft.name = 'SageMaker';
+    draft.cloudRegion = 'us-east-1';
+    expect(draft.presetId).toBe('');
+    expect(draft.options?.vendor_id).toBeFalsy();
+    expect(requiresProbeModel(draft, sagemakerSpec)).toBe(true);
+    expect(validateProviderDraft(draft, sagemakerSpec)).toBe(
+      'Amazon SageMaker AI requires probe model.'
+    );
+    draft.model = 'endpoint/inference-component';
+    expect(validateProviderDraft(draft, sagemakerSpec)).toBeNull();
+    expect(buildCreateProviderInput(draft, sagemakerSpec).model).toBe(
+      'endpoint/inference-component'
+    );
   });
 
   it('clears the console-only preset selection when provider kind changes', () => {

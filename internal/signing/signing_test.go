@@ -117,11 +117,17 @@ func TestDevelopmentSeedMatchesTheDevelopmentKey(t *testing.T) {
 }
 
 func TestBuildTrustFollowsItsChannel(t *testing.T) {
+	if len(releaseKeys) == 0 {
+		t.Fatal("release builds have no trusted signing key")
+	}
 	_, trustsDevelopment := Trusted().Public(DevelopmentKeyID)
 	if trustsDevelopment != (Channel == "development") {
 		t.Fatalf("%s build trusts the development key: %v", Channel, trustsDevelopment)
 	}
 	for _, key := range releaseKeys {
+		if bytes.Equal(key.Public, developmentKey.Public) {
+			t.Fatal("a release key trusts the public development seed")
+		}
 		if _, ok := Trusted().Public(key.ID); !ok {
 			t.Fatalf("%s build does not trust release key %s", Channel, key.ID)
 		}

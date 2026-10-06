@@ -67,7 +67,7 @@ Two kinds of key verify catalogs:
   [`internal/signing/devkey`](../internal/signing/devkey) and protects nothing:
   it lets contributors and CI sign the catalog after an edit with
   `make catalog-sign`. Only builds without the `release` build tag trust it.
-- **Release keys**, listed in [`internal/signing/keys.go`](../internal/signing/keys.go).
+- **Release keys** (`release-2026a`), listed in [`internal/signing/keys.go`](../internal/signing/keys.go).
   Release builds (`-tags release`) trust only these. The release workflow signs
   the catalog with the seed only CI holds, as the `OLP_SIGNING_KEY` secret,
   before it builds the release image, and publishes `catalog.json`,
@@ -76,8 +76,7 @@ Two kinds of key verify catalogs:
 To create the first release key, a maintainer runs
 `go run ./internal/signing/cmd/olpsign keygen` offline, commits the public key
 to `releaseKeys`, and stores the seed as the `OLP_SIGNING_KEY` secret and the
-key identifier as the `OLP_SIGNING_KEY_ID` variable of the repository's release
-environment.
+key identifier as the `OLP_SIGNING_KEY_ID` Actions variable of the repository.
 
 To rotate a key:
 

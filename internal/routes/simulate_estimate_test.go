@@ -179,6 +179,24 @@ func TestSimulationParsesRequestsAsTheGatewayDoes(t *testing.T) {
 	}
 }
 
+func TestSimulationParsesNativeGenerationDialects(t *testing.T) {
+	for _, test := range []struct {
+		dialect string
+		family  openai.Family
+		body    string
+	}{
+		{"mistral-fim", openai.FamilyMistralFIM, `{"prompt":"def f():","suffix":"\n"}`},
+		{"cohere-chat-v2", openai.FamilyCohereChat, `{"messages":[{"role":"user","content":"hi"}]}`},
+	} {
+		for _, strict := range []bool{false, true} {
+			parsed, err := inspectorRequest(json.RawMessage(test.body), "generation", "native", "unary", test.dialect, "route", strict)
+			if err != nil || parsed == nil || parsed.Family != test.family {
+				t.Fatalf("%s strict=%v: parsed %+v, %v", test.dialect, strict, parsed, err)
+			}
+		}
+	}
+}
+
 // strictEstimateSnapshot is estimateSnapshot with a strict route: every target
 // is a provider on the compatible chat profile, which prepares the request the
 // target is sent from the caller's.

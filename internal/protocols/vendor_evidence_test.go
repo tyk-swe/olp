@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/vendors"
 	"github.com/tyk-swe/olp/tests/fixtures"
@@ -281,26 +282,35 @@ func checkStream(t *testing.T, contract vendors.Contract, evidence vendorEvidenc
 	var text strings.Builder
 	wire := generationWire(contract)
 	completion, err := Stream(wire, wire, strings.NewReader(string(stream)), 1<<20, "route", true, func(frame []byte) error {
-		var chunk struct {
-			Choices []struct {
+		return sse.Decode(strings.NewReader(string(frame)), 1<<20, func(event sse.Frame) error {
+			var chunk struct {
+				Choices []struct {
+					Delta struct {
+						Content string `json:"content"`
+					} `json:"delta"`
+				} `json:"choices"`
 				Delta struct {
-					Content string `json:"content"`
+					Message struct {
+						Content struct {
+							Text string `json:"text"`
+						} `json:"content"`
+					} `json:"message"`
 				} `json:"delta"`
-			} `json:"choices"`
-		}
-		if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(string(frame), "data: "))), &chunk) == nil {
-			for _, choice := range chunk.Choices {
-				text.WriteString(choice.Delta.Content)
 			}
-		}
-		return nil
+			if json.Unmarshal([]byte(event.Data), &chunk) == nil {
+				for _, choice := range chunk.Choices {
+					text.WriteString(choice.Delta.Content)
+				}
+				text.WriteString(chunk.Delta.Message.Content.Text)
+			}
+			return nil
+		})
 	})
 	if err != nil {
 		t.Fatalf("stream does not complete: %v", err)
 	}
-	if text.Len() == 0 {
-		// A native dialect's frames are its own; its decoder collects the text.
-		text.WriteString(completion.OutputText)
+	if completion.OutputText != "" {
+		t.Fatal("gateway streams must not retain response text")
 	}
 	if text.String() != evidence.Stream.Text {
 		t.Fatalf("stream text = %q, documented %q", text.String(), evidence.Stream.Text)

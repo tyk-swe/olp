@@ -960,6 +960,11 @@
           "field": "endpoint",
           "label": "Endpoint",
           "required": false
+        },
+        {
+          "field": "model",
+          "label": "Probe model",
+          "required": true
         }
       ],
       "presets": []

@@ -56,6 +56,29 @@ async function save(page: Page, path: string) {
   await savedProvider(page, path);
 }
 
+test('default SageMaker onboarding requires an endpoint before creation', async ({
+  page
+}, info) => {
+  await signIn(page);
+  await page.goto('/providers/new');
+  await page.locator('input[name="kind"][value="sagemaker"]').check();
+  await page
+    .getByLabel('Provider name', { exact: true })
+    .fill('SageMaker draft');
+  await page.getByLabel('Cloud region', { exact: true }).fill('us-east-1');
+  const model = page.getByLabel('SageMaker endpoint', { exact: true });
+  await expect(model).toHaveAttribute('required', '');
+  await expect(model).toHaveValue('');
+  await page.getByRole('button', { name: 'Save and test connection' }).click();
+  await expect(
+    page.getByText('Amazon SageMaker AI requires probe model.', { exact: true })
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/providers\/new$/);
+  await page.locator('form').screenshot({
+    path: info.outputPath('console-sagemaker-required-endpoint.png')
+  });
+});
+
 test('configuration forms retain native source through real saves, conflicts and strict activation', async ({
   page,
   request

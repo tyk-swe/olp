@@ -301,10 +301,6 @@ The catalog is advisory and never authoritative on its own:
 
 **Evidence still to produce**
 
-- No release key exists yet. A maintainer generates one with `olpsign keygen`,
-  commits its public key to `releaseKeys` and stores the seed as the
-  `OLP_SIGNING_KEY` secret ([signing keys](../catalog.md#signing-keys)); until
-  then the release workflow's signing step fails, as intended.
 - The live-provider tests of the M2.2 targets compile under the `liveproviders`
   tag but have not run: they need vendor credentials this work did not have.
 - No token-estimation factor ships. `tests/fixtures/tokens/calibrate.py`

@@ -76,7 +76,7 @@ func TestCohereChatStreamsEndWithMessageEnd(t *testing.T) {
 		frames = append(frames, string(frame))
 		return nil
 	})
-	if err != nil || c.OutputText != "Hi" || c.Usage.InputTokens != 3 || c.FinishReason != "stop" || c.UpstreamID != "s1" || len(frames) != 3 || !strings.Contains(frames[2], "message-end") {
+	if err != nil || c.OutputText != "" || c.Usage.InputTokens != 3 || c.FinishReason != "stop" || c.UpstreamID != "s1" || len(frames) != 3 || !strings.Contains(frames[1], `"text":"Hi"`) || !strings.Contains(frames[2], "message-end") {
 		t.Fatalf("stream = %+v %v %q", c, err, frames)
 	}
 	_, err = Stream(openai.FamilyCohereChat, openai.FamilyCohereChat, strings.NewReader(cohereStream(start, delta)), 1<<16, "route", true, func([]byte) error { return nil })
@@ -93,5 +93,24 @@ func TestCohereChatStreamsEndWithMessageEnd(t *testing.T) {
 	}
 	if _, err = Stream(openai.FamilyCohereChat, openai.FamilyChat, strings.NewReader(cohereStream(start, delta, end)), 1<<16, "route", true, func([]byte) error { return nil }); err == nil {
 		t.Fatal("a Cohere stream was translated")
+	}
+}
+
+func TestCohereGatewayStreamsRetainOnlyMetadata(t *testing.T) {
+	start := `{"id":"s1","type":"message-start"}`
+	text := strings.Repeat("a", 400)
+	delta := `{"delta":{"message":{"content":{"text":"` + text + `"}}},"type":"content-delta"}`
+	end := `{"delta":{"finish_reason":"COMPLETE","usage":{"billed_units":{"input_tokens":3,"output_tokens":100}}},"type":"message-end"}`
+	stream := cohereStream(start) + strings.Repeat(cohereStream(delta), 100) + cohereStream(end)
+	forwarded := 0
+	c, err := Stream(openai.FamilyCohereChat, openai.FamilyCohereChat, strings.NewReader(stream), 1024, "route", true, func(frame []byte) error {
+		forwarded += strings.Count(string(frame), text)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forwarded != 100 || c.OutputText != "" || len(c.Body) != 0 || len(c.ToolCalls) != 0 || c.Usage.OutputTokens != 100 || c.FinishReason != "stop" || c.UpstreamID != "s1" {
+		t.Fatalf("forwarded %d deltas, retained %+v", forwarded, c)
 	}
 }

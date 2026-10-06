@@ -139,7 +139,7 @@ var kinds = withPresets([]kindCapability{
 	// for inference components, which operators declare.
 	{Kind: KindSageMaker, Label: "Amazon SageMaker AI", Description: "Real-time endpoints serving OpenAI Chat Completions.", DefaultAuthMode: "default_chain",
 		AuthModes: []authCapability{{Mode: "default_chain", Label: "AWS credential chain", Credential: "forbidden"}, {Mode: "static", Label: "AWS credential JSON", Credential: "required"}},
-		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint}},
+		Fields:    []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, endpoint, {Field: "model", Label: "Probe model", Required: true}}},
 	{Kind: KindWatsonx, Label: "IBM watsonx.ai", Description: "Chat API with IBM Cloud IAM authentication.", DefaultAuthMode: "ibm_iam",
 		AuthModes: []authCapability{{Mode: "ibm_iam", Label: "IBM Cloud API key", Credential: "required"}},
 		Fields: []fieldCapability{{Field: "cloud_region", Label: "Region", Required: true}, {Field: "cloud_project", Label: "Project ID", Required: true},
@@ -252,6 +252,26 @@ func capabilitiesFor(kind, vendor string) []CapabilityInput {
 	for _, c := range CapabilityOptions {
 		if certifiable(kind, vendor, c) {
 			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// Kind options include tuples available through an explicit profile, even
+// when the kind's Automatic connector cannot serve them.
+func capabilityOptionsForKind(kind string) []CapabilityInput {
+	out := []CapabilityInput{}
+	profiles := connectors.Profiles()
+	for _, tuple := range CapabilityOptions {
+		profiled := slices.ContainsFunc(profiles, func(profile connectors.Profile) bool {
+			if profile.Kind != kind {
+				return false
+			}
+			cfg := Configuration{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision}
+			return configurationCertifiable(&cfg, tuple) && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
+		})
+		if certifiable(kind, defaultVendor(kind), tuple) || profiled {
+			out = append(out, tuple)
 		}
 	}
 	return out

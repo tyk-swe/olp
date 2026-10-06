@@ -154,3 +154,22 @@ func TestCloudKindsConfigureFromTheirDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestSageMakerOnboardingRequiresADeclaredModel(t *testing.T) {
+	kind := kindByName(KindSageMaker)
+	if !slices.ContainsFunc(kind.Fields, func(field fieldCapability) bool { return field.Field == "model" && field.Required }) {
+		t.Fatal("SageMaker's default vendor has no discovery; onboarding must require a probe model")
+	}
+}
+
+func TestKindCapabilityOptionsIncludeProfileTuples(t *testing.T) {
+	for _, mode := range []string{ModeUnary, ModeStreaming} {
+		tuple := CapabilityInput{OperationGeneration, "native", mode}
+		if !slices.Contains(capabilityOptionsForKind(KindOpenAICompatible), tuple) {
+			t.Fatalf("compatible profiles' tuple is not published: %+v", tuple)
+		}
+		if slices.Contains(capabilityOptionsForKind(KindOpenAI), tuple) {
+			t.Fatalf("OpenAI has no native generation profile but publishes %+v", tuple)
+		}
+	}
+}
