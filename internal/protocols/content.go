@@ -55,6 +55,33 @@ func InspectInputText(r *openai.Request, fn TextSlot) (*openai.Request, error) {
 	case openai.FamilyRerank:
 		w.field(fields, "query", w.text)
 		w.field(fields, "documents", w.stringOrList)
+	case openai.FamilyBedrockRerank:
+		w.field(fields, "queries", func(raw json.RawMessage) json.RawMessage {
+			return w.list(raw, func(item *json.RawMessage) {
+				*item = w.object(*item, func(query map[string]json.RawMessage) {
+					w.field(query, "textQuery", func(raw json.RawMessage) json.RawMessage {
+						return w.object(raw, func(text map[string]json.RawMessage) {
+							w.field(text, "text", w.text)
+						})
+					})
+				})
+			})
+		})
+		w.field(fields, "sources", func(raw json.RawMessage) json.RawMessage {
+			return w.list(raw, func(item *json.RawMessage) {
+				*item = w.object(*item, func(source map[string]json.RawMessage) {
+					w.field(source, "inlineDocumentSource", func(raw json.RawMessage) json.RawMessage {
+						return w.object(raw, func(inline map[string]json.RawMessage) {
+							w.field(inline, "textDocument", func(raw json.RawMessage) json.RawMessage {
+								return w.object(raw, func(text map[string]json.RawMessage) {
+									w.field(text, "text", w.text)
+								})
+							})
+						})
+					})
+				})
+			})
+		})
 	case openai.FamilyAnthropic, openai.FamilyAnthropicCount:
 		w.field(fields, "system", w.textOrParts)
 		w.field(fields, "messages", func(raw json.RawMessage) json.RawMessage {

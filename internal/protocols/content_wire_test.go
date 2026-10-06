@@ -20,6 +20,7 @@ func TestInspectInputTextDestinationWireFamilies(t *testing.T) {
 		{openai.FamilyGeminiEmbeddingsBatch, `{"requests":[{"model":"m","content":{"parts":[{"text":"s3cr3t"}]}},{"model":"m","content":{"parts":[{"text":"two s3cr3t"}]},"taskType":"RETRIEVAL_DOCUMENT","title":"s3cr3t title"}]}`, 3},
 		{openai.FamilyVertexEmbeddings, `{"instances":[{"title":"s3cr3t","content":"s3cr3t body"}]}`, 2},
 		{openai.FamilyBedrockEmbeddings, `{"inputText":"s3cr3t"}`, 1},
+		{openai.FamilyBedrockRerank, `{"queries":[{"type":"TEXT","textQuery":{"text":"find s3cr3t"}}],"sources":[{"type":"INLINE","inlineDocumentSource":{"type":"TEXT","textDocument":{"text":"one s3cr3t"}}},{"type":"INLINE","inlineDocumentSource":{"type":"TEXT","textDocument":{"text":"two s3cr3t"}}}]}`, 3},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.family), func(t *testing.T) {
@@ -48,6 +49,35 @@ func TestInspectInputTextDestinationWireFamilies(t *testing.T) {
 	}
 	if InputInspectable(openai.FamilyBedrockInvoke) {
 		t.Fatal("bedrock_invoke must not claim input inspection coverage")
+	}
+}
+
+func TestInspectInputTextBedrockRerankBlockStopsWalk(t *testing.T) {
+	for _, blocked := range []string{"query", "document"} {
+		t.Run(blocked, func(t *testing.T) {
+			body, err := encodeBedrockRerank(Object{"query": raw("query"), "documents": raw([]string{"document", "later document"})}, rerankARN)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := openai.NewEnvelope(openai.FamilyBedrockRerank, "route", false, decodeFields(t, string(body)))
+			hits := 0
+			found := false
+			out := inspectInputText(t, r, func(text string) (string, bool) {
+				hits++
+				found = text == blocked
+				return text, found
+			})
+			want := 1
+			if blocked == "document" {
+				want = 2
+			}
+			if !found || hits != want {
+				t.Fatalf("blocked=%v, inspected %d texts, want %d", found, hits, want)
+			}
+			if diff := sameJSON(t, out.OIF().Document().Bytes(), string(body)); diff != "" {
+				t.Fatal(diff)
+			}
+		})
 	}
 }
 

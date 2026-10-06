@@ -37,7 +37,7 @@ func encodeRunwayCreate(r *Request, model string) (*UpstreamCall, *Error) {
 	if len(r.Extra) > 0 {
 		return nil, invalidMedia("Runway does not support the requested video parameters.")
 	}
-	fields := map[string]any{"model": model, "promptText": r.Prompt}
+	fields := map[string]any{"model": model, "promptText": r.Prompt, "ratio": "1280:720"}
 	if r.Size != nil {
 		var width, height int
 		if _, err := fmt.Sscanf(*r.Size, "%dx%d", &width, &height); err != nil || width < 1 || height < 1 {
