@@ -60,3 +60,34 @@ func TestVertexOpenAIRefusesOtherAddresses(t *testing.T) {
 		}
 	}
 }
+
+func TestVertexOpenAIBindingsSeparateAliasesFromModels(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		alias string
+		model string
+		valid bool
+	}{
+		{"logical alias", "logical-model", "google/gemini-2.5-flash", true},
+		{"empty alias", "", "google/gemini-2.5-flash", false},
+		{"invalid alias", "logical\nmodel", "google/gemini-2.5-flash", false},
+		{"missing publisher", "logical-model", "gemini-2.5-flash", false},
+		{"invalid upstream path", "logical-model", "google/../secrets", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := vertexOpenAI()
+			c.Bindings = map[string]Binding{tc.alias: {Model: tc.model}}
+			if err := c.Validate(&egress.Policy{}); (err == nil) != tc.valid {
+				t.Fatalf("Validate binding %q -> %q: %v, want valid=%v", tc.alias, tc.model, err, tc.valid)
+			}
+			if tc.valid {
+				if got := c.Model(tc.alias); got != tc.model {
+					t.Fatalf("Model(%q) = %q, want %q", tc.alias, got, tc.model)
+				}
+				if _, err := c.URL(openai.FamilyChat, tc.alias, false); err != nil {
+					t.Fatalf("bound model URL: %v", err)
+				}
+			}
+		})
+	}
+}

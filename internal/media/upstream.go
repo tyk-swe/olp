@@ -266,7 +266,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	if failure != nil {
 		resp.Body.Close()
 		failure.Dispatched = true
-		failure.Ambiguous = failure.Ambiguous || call.Ambiguous
+		failure.Ambiguous = failure.Class != ClassUpstreamClient && (failure.Ambiguous || call.Ambiguous)
 		return nil, failure
 	}
 	if result.Body == nil {
