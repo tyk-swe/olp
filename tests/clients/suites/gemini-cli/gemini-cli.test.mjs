@@ -142,11 +142,13 @@ describe('Gemini CLI against the gateway', () => {
     const bait = await startBait();
     t.after(() => bait.close());
     const cwd = await workspace('gemini');
-    // Retrying through the dead proxy outlives the deadline, which is expected.
-    await assertHeldByTheTrap(bait, (trap) =>
+    // The client retries through the dead proxy until it is stopped, which is
+    // expected; the deadline only bounds how long it may take to start.
+    await assertHeldByTheTrap(bait, (trap, signal) =>
       run(gemini, ['--skip-trust', '--model', models.gemini, '--prompt', 'Say hello.', '--output-format', 'json'], {
         cwd,
-        timeoutMs: 10_000,
+        timeoutMs: 60_000,
+        signal,
         env: clientEnvironment({ GOOGLE_GEMINI_BASE_URL: `${bait.origin}/gemini`, GEMINI_API_KEY: apiKey, ...trap })
       })
     );

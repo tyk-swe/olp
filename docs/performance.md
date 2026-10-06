@@ -15,8 +15,8 @@ target that is judged at any scale, zero lost request-metadata events, was met
 in every smoke run of S1 to S3, which says nothing about full rate. The only
 measurements in this guide are from a reduced-rate smoke run on a shared 8 vCPU
 development virtual machine ([Smoke run](#smoke-run)): OLP's scenarios S1 to S6
-at 30% of the roadmap's rates or less, and one scenario of the LiteLLM
-comparison at 5%, to show that the script runs. They show that the harness works
+at 30% of the roadmap's rates or less, and the LiteLLM comparison of S1 to S5 at
+3%, to show that the script runs end to end. They show that the harness works
 and what its output looks like. They are not reference numbers, they are not
 comparable with LiteLLM's published figures, they say nothing about whether a
 target that needs full scale or a comparison is met, and they must not be quoted
@@ -124,8 +124,9 @@ load runs. Everything else is a smoke run.
 S6 is OLP only: no target compares it, and its socket buffers at full scale need
 more TCP memory than most single hosts have. Its streams must also all open
 within the thirty seconds after which the gateway ends a stream whose writes are
-blocked, which the default 70 seconds of warmup and measured period do not allow
-([Smoke run](#s6-held-streams)). The
+blocked, so S6 opens them over at most 3 seconds of warmup and 15 measured
+whatever `OLP_BENCH_WARMUP` and `OLP_BENCH_DURATION` say: over the default 70
+seconds the first were gone before the last opened ([Smoke run](#s6-held-streams)). The
 [scenario guide](../tests/bench/README.md#scenarios) has each scenario's mock
 behavior, how the gateway is sized for it and what to know when reading it.
 
@@ -218,7 +219,7 @@ run them, rather than the development compose file's.
 The other variables, such as the drain period and S6's, are in the
 [scenario guide](../tests/bench/README.md#scenarios). A smoke run is the same
 command with a smaller `OLP_BENCH_SCALE`; [Smoke run](#smoke-run) records the
-settings of one, and the shortened warmup and period that S6 needs.
+settings of one.
 
 ### Where results land
 
@@ -310,12 +311,14 @@ comparison's constants for them are marked as published.
   `gateway.derived_limits`, so S2 and S6 are never queued in a default pool. It
   also means the scenarios measure the pool a tuned or profiled provider uses,
   not the shared transport.
-- **Request metadata outlasts the load.** One metadata consumer persists an event
-  at a time, in a PostgreSQL transaction of its own, so at the rates of S1 to S3
-  the events of a run arrive minutes after its load ends: in the
-  [smoke run](#smoke-run), S1 at 300 requests per second produced 21,000 events,
-  11,288 of them still to arrive when its load ended, and the harness waited
-  68.7 seconds for them, at 164 events a second. A run at full rate produces
+- **Request metadata outlasts the load.** One metadata consumer persists a page
+  of up to 100 events in a PostgreSQL transaction, but each event is still about
+  ten statements, so at the rates of S1 to S3 the events of a run arrive minutes
+  after its load ends: S1 at 300 requests per second produces 21,000 events, and
+  on the [smoke run](#smoke-run)'s machine 7,654 of them were still to arrive
+  when its load ended and the harness waited 31.0 seconds for them, at 247 events
+  a second (68.7 seconds at 164 events a second when each event had a transaction
+  of its own). A run at full rate produces
   70,000 to 210,000. The harness waits for as long as events
   keep landing and reports how long that took and at what pace (`drain` in the
   result), so a late event is counted as delivered and a lost one is not. Read
@@ -666,6 +669,7 @@ cancels them at the end.
 | --- | --- | --- | --- |
 | Defaults: 10 s warmup and 60 s measured, streams opened over 70 s | 150 | 66 | NO, twice |
 | `OLP_BENCH_WARMUP=3s OLP_BENCH_DURATION=15s`, streams opened over 18 s | 150 | 150 | yes |
+| `OLP_BENCH_SCALE=0.1` at the defaults, which S6 now shortens to 18 s | 1,000 | 997 | yes, bounded by the kernel |
 
 At the default settings the gateway ended every stream at 30.2 to 30.5 seconds
 (150 of 150 `client_cancelled` records with that duration in the gateway's log
@@ -699,36 +703,73 @@ was not checked beyond the arithmetic. The default settings' first run, with
 streams opened over 70 seconds, spent 304.71 ms for each stream and added 2.22,
 2.90 and 11.23 ms of time to first token at p50, p95 and p99.
 
+After S6 began opening its streams over at most 18 seconds, it was run once at
+1,000 streams, with the same pins and `OLP_BENCH_SCALE=0.1` at the default
+warmup and period. Every stream reached the mock but 8, and the gateway held 997
+at once, so the window holds. The machine did not: the harness warned before the
+run that the held streams' socket buffers need about 6.8 GiB on loopback and the
+kernel starts limiting TCP memory at 1.4 GiB (`net.ipv4.tcp_mem`), and under
+that limit the gateway's own commands to Valkey and PostgreSQL on loopback timed
+out. Time to first token grew to 7.68, 15.61 and 19.20 seconds at p50, p95 and
+p99, 8 of the 833 measured streams failed with `502`, the gateway spent
+62.64 CPU ms for each stream (1.89 of its 2 CPUs over the 33-second run), its
+resident set peaked at 311.9 MiB, and all 1,001 metadata events were delivered.
+These figures measure the kernel's limit as much as the gateway; a larger run
+needs `tcp_mem` raised, or the generator and the mock on other hosts.
+
 ### The comparison script
 
-`scripts/bench-compare.sh` was run for S1 on this tree, to confirm that it still
-works, in a result directory of its own, with the same pins (LiteLLM's two
-workers on CPUs 0-1) and these settings:
+`scripts/bench-compare.sh` was run for S1 to S5 on 2026-10-06, on `ed2586cb` with
+the tree of the change that batches the metadata consumer, in a result directory
+of its own, with the same pins (LiteLLM's two workers on CPUs 0-1) and these
+settings:
 
 ```sh
-OLP_BENCH_SCALE=0.05 OLP_BENCH_DURATION=10s OLP_BENCH_WARMUP=3s BENCH_SCENARIOS=S1 \
-  OLP_BENCH_GATEWAY_CPUS=0-1 OLP_BENCH_MOCK_CPUS=2-3 OLP_BENCH_LOADGEN_CPUS=4-5 \
-  OLP_BENCH_OUT=.local/bench-compare scripts/bench-compare.sh
+OLP_BENCH_SCALE=0.03 OLP_BENCH_GATEWAY_CPUS=0-1 OLP_BENCH_MOCK_CPUS=2-3 \
+  OLP_BENCH_LOADGEN_CPUS=4-5 OLP_BENCH_OUT=.local/bench-compare scripts/bench-compare.sh
 ```
 
-It ran to the end and wrote `compare.json` and `compare.md`. The table is copied
-only as proof of that: each load was 500 requests over 10 seconds, so its p99 is
-five samples, and the script judged none of the targets that need full scale
-(four were `not_checked` at scale 0.05); the one target judged at any scale,
-`request-metadata-lost`, was `met`. The baselines of the two sessions differed by
-0, -0.06 and -0.16 ms at p50, p95 and p99.
+Every scenario ran to the end against both gateways and the script wrote
+`compare.json` and `compare.md`. S1 was run a second time on its own, because
+the script it runs was edited while the first ran, and the summary was written
+again over the five scenarios with `scripts/bench-compare.mjs`. Each load ran for
+the default 60 seconds after 10 of warmup, at 30 requests a second, and S3 at
+90. The script judged none of the 14 targets that need full scale, and
+`request-metadata-lost`, the one judged at any scale, was `met` for S1 to S3.
+The load average at the start of a run ranged from 0.9 to 12.3, and Go unit
+tests pinned to CPUs 6-7 ran during S2.
 
-| Scenario | Gateway | p50 ms | p95 ms | p99 ms | rps/vCPU | req/cpu-s | cpu ms/req | peak MiB | errors % | Valid |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| S1 | OLP | 1.49 | 4.66 | 5.79 | 25.0 | 214.1 | 4.67 | 188 | 0.000 | yes |
-| S1 | LiteLLM | 12.53 | 25.14 | 29.66 | 25.1 | 56.1 | 17.84 | 1566 | 0.000 | yes |
+| Scenario | Gateway | p50 ms | p95 ms | p99 ms | TTFT p95 ms | rps/vCPU | req/cpu-s | cpu ms/req | peak MiB | errors % | Valid |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| S1 | OLP | 1.38 | 1.92 | 2.05 | - | 15.0 | 218.8 | 4.57 | 193 | 0.000 | yes |
+| S1 | LiteLLM | 15.39 | 24.40 | 37.49 | - | 15.0 | 50.8 | 19.68 | 1543 | 0.000 | yes |
+| S2 | OLP | 2.05 | 10.24 | 29.70 | 10.14 | 15.0 | 83.3 | 12.01 | 193 | 0.000 | yes |
+| S2 | LiteLLM | 8,400.90 | 16,460.80 | 20,292.61 | 16,566.05 | 12.5 | 13.1 | 76.34 | 1762 | 0.000 | yes |
+| S3 | OLP | 6.34 | 14.82 | 22.27 | 13.23 | 45.0 | 112.9 | 8.86 | 191 | 0.000 | yes |
+| S3 | LiteLLM | 23,246.27 | 35,336.70 | 39,792.45 | 35,104.42 | 16.9 | 15.9 | 62.85 | 3478 | 47.039 | NO |
+| S4 | OLP | 1.55 | 2.67 | 2.88 | - | 15.0 | 206.3 | 4.85 | 189 | 0.000 | yes |
+| S4 | LiteLLM | 21.94 | 53.92 | 109.38 | - | 15.0 | 44.5 | 22.46 | 1544 | 0.000 | yes |
+| S5 | OLP | 2.05 | 2.05 | 2.05 | 2.64 | 15.0 | 76.2 | 13.13 | 189 | 0.000 | yes |
+| S5 | LiteLLM | 31.74 | 65.54 | 101.38 | 63.55 | 15.0 | 22.1 | 45.34 | 1566 | 0.000 | yes |
 
-LiteLLM ran as `ghcr.io/berriai/litellm:v1.103.2@sha256:f63fb81b831b170ec16851e23c36ac5bf52ef106b271406429524a2ed730bbfd`
-in the `production` profile. Its memory is the cgroup's, which is not the same
-measurement as OLP's resident set ([reading a comparison](#reading-a-comparison)).
-The earlier smoke run of S2 to S5 against LiteLLM, made on a busier machine with
-an earlier revision of the harness, has been removed with this one: it is in the
-history of this file, and was not made on this tree.
+- **LiteLLM did not keep up with S2 and S3 on two workers.** In S2 its added
+  latency reached seconds while every request still succeeded. In S3 the
+  generator dropped 1,144 requests because 1,034 were already waiting on
+  LiteLLM, offered 60.6% of the schedule, and 47.04% of the requests that were
+  sent failed, so its run is invalid and both of S3's comparative targets read
+  "the LiteLLM run was not valid". This says what two workers did on this
+  machine at these rates, not what LiteLLM does when it is sized for them.
+- **S5's OLP latencies are one histogram step.** S5's streams last about
+  1.28 seconds, where the generator's histogram resolves about a millisecond, so
+  the gateway's and the baseline's percentiles differ by two steps at p50, p95
+  and p99 alike.
+
+LiteLLM ran as `ghcr.io/berriai/litellm:v1.103.2@sha256:f63fb81b831b170ec16851e23c36ac5bf52ef106b271406429524a2ed730bbfd`,
+in the `high-throughput` profile for S3 and `production` for the others. Its
+memory is the cgroup's, which is not the same measurement as OLP's resident set
+([reading a comparison](#reading-a-comparison)). The earlier comparison of S1
+alone at 5%, and an earlier smoke run of S2 to S5 against LiteLLM made with an
+earlier revision of the harness, are in the history of this file.
 
 ### Reading these figures
 

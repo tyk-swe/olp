@@ -261,11 +261,16 @@ differ from the library suites in three ways.
   is used. `assertHeldByTheTrap` runs the agent with the proxy variables
   pointed at a stand-in that records the host and port each request or CONNECT
   asks for and refuses it, and asserts that the agent asked for the bait and
-  never connected to it. An agent that fails for another reason, such as a flag
-  it no longer knows, asks for nothing, and is not taken for one that was held;
-  nor does any traffic leave the machine. The helper tests in `suites/harness`
-  prove the bait counts connections that bypass the trap and that the helper
-  refuses an agent that never asks.
+  never connected to it. An agent retries through the dead proxy until it is
+  stopped, so the helper stops it five seconds after its first request; the
+  run's own deadline, a minute, only bounds how long the agent may take to
+  start, which on a hosted runner has taken Gemini CLI over ten seconds. An
+  agent that fails for another reason, such as a flag it no longer knows, asks
+  for nothing, and is not taken for one that was held; nor does any traffic
+  leave the machine. The helper tests in `suites/harness` prove the bait counts
+  connections that bypass the trap, that the helper refuses an agent that never
+  asks or that goes round the proxy after it was refused, and that it stops a
+  client soon after its first request rather than at its deadline.
 
 A tap sits between each agent and the gateway, and `assertPassedThrough` holds
 what the agent sent against what the upstream received, on every route the

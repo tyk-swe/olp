@@ -417,10 +417,6 @@ for later.
   [performance](../performance.md#reference-results), and a reproduction from a
   clean checkout. The comparison script has run to the end only for S1, at 5% of
   its rate. `OLP_QUALIFY_BENCH` has never been executed.
-- The `bench` CI job has not run on a hosted runner; this change is its first
-  run, and it compares only `BenchmarkSign`, because every other benchmark is
-  absent at the base. A repository maintainer must create the
-  `allow-removed-benchmarks` label, which the workflow reads when it starts.
 - Sizing S3. The smoke run spent 10.06 CPU ms of gateway per request at 90
   requests per second, about 30 vCPU at 3,000 requests per second by arithmetic,
   before the CPUs the mock and the load generator need; CPU per request fell as
@@ -436,14 +432,24 @@ for later.
   second, before anything else Valkey does for those requests: S3's one key may
   saturate the thread that runs them, which a full-rate run has not tried. The
   key's budget keys share a hash tag, so clustering does not spread it.
-- S6 has not run above 150 streams. At the default warmup and period the
-  streams open over 70 seconds but the gateway ends a stream thirty seconds after
-  its writes block, so the window must be shortened; the 273 CPU ms spent for
-  each stream held needs checking at scale.
-- The request-metadata consumer persists one event per PostgreSQL transaction,
-  116 to 164 events a second in the smoke run, so at the rates of S1 to S3 events
+- S6 at scale needs a host whose kernel allows the held streams' socket
+  buffers. S6 now opens its streams over at most 3 seconds of warmup and 15
+  measured, because the gateway ends a stream thirty seconds after its writes
+  block. At 1,000 streams on the smoke machine every stream reached the gateway,
+  but they need about 6.8 GiB of socket buffers on loopback and the kernel limits
+  TCP memory from 1.4 GiB (`net.ipv4.tcp_mem`), so the kernel bounded the run:
+  time to first token was 7.7 s at the median, Valkey and PostgreSQL commands
+  timed out, and 8 of the 833 measured streams failed with `502`. A run
+  needs `tcp_mem` raised or the generator and the mock on other hosts, where the
+  273 CPU ms spent for each stream held at 150 streams needs checking.
+- The request-metadata consumer persists a page of up to 100 events in one
+  PostgreSQL transaction, which raised S1 at 300 requests a second from 164 to
+  247 events a second and cut the wait after the load from 68.7 to 31.0 seconds.
+  Each event is still about ten statements, each a round trip, about 4 ms an
+  event against PostgreSQL on loopback, so at the rates of S1 to S3 events still
   arrive minutes after the load ends. The harness waits and counts them, and more
-  workers share the stream, but batching `processEntries` is the follow-up.
+  workers share the stream; persisting a page with set-based statements is the
+  follow-up.
 
 **Product decisions for later**
 
@@ -503,10 +509,12 @@ for later.
       a clean checkout, and `docs/performance.md` publishes the results.
       *Remaining:* the harness, the comparison and the release-qualification line
       exist and every scenario has run at reduced rates
-      ([smoke run](../performance.md#smoke-run)), but no full-rate run has been
-      made on reference hardware, the comparison has run to the end only for S1 at
-      5% of its rate, and [reference results](../performance.md#reference-results)
-      reads "None yet".
+      ([smoke run](../performance.md#smoke-run)), S6 up to 1,000 streams, and
+      the comparison has run to the end for S1 to S5 at 3% of their rates; but
+      no full-rate run has been made on reference hardware, and
+      [reference results](../performance.md#reference-results) reads "None yet".
+      At 3% LiteLLM's two workers on two CPUs already fell behind on S2 and
+      S3, and its S3 run was invalid.
 - [ ] OLP meets every [target](#targets) above.
       *Remaining:* no target that needs full scale or a comparison has been
       judged. Each is `not_checked` below full scale and `needs_comparison` in a
@@ -519,8 +527,10 @@ for later.
       *Evidence:* the `bench` job runs `scripts/bench-gate.sh`, and
       `scripts/check-benchstat.mjs` fails on a reproduced regression above 10%;
       the script's tests pass, and a deliberate slowdown of `BenchmarkSign` made
-      the gate exit 1 locally. The job has not yet run on a hosted runner (see
-      [open items](#open-items)).
+      the gate exit 1 locally. The job passed on a hosted runner in the CI run of
+      #349 (run `37435909930`), where it compared only `BenchmarkSign`, the one
+      benchmark at its base; later pull requests compare every benchmark. The
+      `allow-removed-benchmarks` label exists.
 - [ ] Estimates for OpenAI encodings match the provider-reported prompt tokens
       exactly on the text fixtures of the protocol corpus, and usage reports
       show estimation error for every family.
@@ -528,21 +538,25 @@ for later.
       `cl100k_base` with `tiktoken` on `tests/fixtures/tokens`, and a framing test
       compares the OpenAI Cookbook's message counts. The usage reports set the
       estimate against the reported input tokens by route, `model_family` and
-      `estimate_provenance`, and integration tests cover them end to end, but they
-      seed three families (`openai-o200k`, `anthropic` and `unknown`) and not
-      every one. Go's newer Unicode tables can split a newly assigned character
-      differently from `tiktoken`.
-      *Remaining:* the comparison with provider-reported prompt tokens. None has
-      been made: the `tiktoken` fixtures are that tokenizer's output, not usage a
-      provider reported, the protocol corpus carries only synthetic usage
-      (`prompt_tokens: 3`), and no live provider comparison has been run. It needs
-      recorded provider responses with their prompts, or a live run. For a prompt
+      `estimate_provenance`, and integration tests cover them end to end;
+      `TestReportsSetEstimatedInputAgainstReportedUsageForEveryFamily` seeds an
+      estimated attempt of each of the five families and reads each family's
+      error live and once rolled up. Go's newer Unicode tables can split a newly
+      assigned character differently from `tiktoken`.
+      `TestLiveOpenAIPromptTokensMatchTheEstimate` (`liveproviders` tag, the
+      `openai` choice of the live-providers workflow) sends every `o200k_base`
+      text fixture to OpenAI in a chat request and fails when an exact estimate
+      differs from the reported `prompt_tokens`.
+      *Remaining:* running it. The repository has no `OLP_LIVE_OPENAI_API_KEY`
+      secret, so no estimate has been compared with usage a provider reported:
+      the `tiktoken` fixtures are that tokenizer's output, and the protocol corpus
+      carries only synthetic usage (`prompt_tokens: 3`). For a prompt
       past the first 32 KiB of text the estimate is calibrated and not exact
       ([decision 3](#decisions-to-settle)), so the criterion can hold only for
       prompts within that bound.
-- [ ] The client qualification suite passes in CI for every client above, and
+- [x] The client qualification suite passes in CI for every client above, and
       `docs/clients.md` documents each configuration.
-      *Done:* `docs/clients.md` documents each configuration, and all nine suites
+      *Evidence:* `docs/clients.md` documents each configuration, and all nine suites
       passed locally on the final tree and in the full `make integration` run at
       `4a3508d5`; `make integration`, which CI runs, includes them. Two surfaces
       are qualified differently from the table above: Codex's stored-response
@@ -551,9 +565,12 @@ for later.
       serve, and the typed `429` of a key's own limit waits for a Valkey-backed
       lane ([open items](../clients.md#open-items)). The coding agents run only
       through routes to their own vendor ([open items](#open-items)).
-      *Remaining:* a passing run on a hosted runner. The suites have not run
-      there, and a runner that cannot bind `127.0.0.2` or does not allow Codex's
-      sandbox fails the egress and Codex tests
+      Every suite passed on a GitHub-hosted `ubuntu-26.04` runner in
+      the integration job of #349 (run `37435909930`). The next run, on `main`,
+      failed when Gemini CLI took longer than the egress test's 10-second deadline
+      to first ask the trap's proxy for the bait; the egress tests of the three
+      coding agents now stop the client five seconds after that first request, and
+      give it a minute to start
       ([requirements](../clients.md#running-the-suites)).
 - [x] Rate-limit headers appear on both surfaces and match the key's Valkey
       windows in integration tests; metadata headers appear only when the key

@@ -88,9 +88,10 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 /**
  * Run a client to completion. stdin is closed so nothing waits for input, and
  * the whole process group is killed at the deadline, shell commands included.
- * A client that outlives it fails the test with everything it printed.
+ * A client that outlives it fails the test with everything it printed. An
+ * aborted `signal` stops the client the same way before its deadline.
  */
-export function run(command, args, { cwd, env, timeoutMs = 80_000 } = {}) {
+export function run(command, args, { cwd, env, timeoutMs = 80_000, signal } = {}) {
   return new Promise((resolve, reject) => {
     const started = Date.now();
     const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
@@ -100,12 +101,16 @@ export function run(command, args, { cwd, env, timeoutMs = 80_000 } = {}) {
     child.stderr.setEncoding('utf8').on('data', (chunk) => (stderr += chunk));
     // The group is the client's process id, which is not set when it fails to start.
     if (child.pid !== undefined) running.add(child.pid);
-    const deadline = setTimeout(() => {
+    const stop = (why) => {
       killGroup(child.pid);
-      reject(new Error(`${path.basename(command)} did not finish within ${timeoutMs} ms\n--- stdout\n${stdout}\n--- stderr\n${stderr}`));
-    }, timeoutMs);
+      reject(new Error(`${path.basename(command)} ${why}\n--- stdout\n${stdout}\n--- stderr\n${stderr}`));
+    };
+    const deadline = setTimeout(() => stop(`did not finish within ${timeoutMs} ms`), timeoutMs);
+    const abort = () => stop(`was stopped after ${Date.now() - started} ms, still running`);
+    signal?.addEventListener('abort', abort, { once: true });
     child.on('error', (error) => {
       clearTimeout(deadline);
+      signal?.removeEventListener('abort', abort);
       reject(error);
     });
     // The client has exited. Anything it left running dies with it, which also
@@ -119,9 +124,10 @@ export function run(command, args, { cwd, env, timeoutMs = 80_000 } = {}) {
         child.stderr.destroy();
       }, 2000).unref();
     });
-    child.on('close', (code, signal) => {
+    child.on('close', (code, killedBy) => {
       clearTimeout(deadline);
-      resolve({ code, signal, stdout, stderr, durationMs: Date.now() - started });
+      signal?.removeEventListener('abort', abort);
+      resolve({ code, signal: killedBy, stdout, stderr, durationMs: Date.now() - started });
     });
   });
 }
@@ -223,12 +229,12 @@ export async function startBait() {
 /**
  * Assert a client pointed at the bait was held by the proxy trap: it never
  * connected, and it did not succeed either, since nothing answered it. A run
- * that timed out was still trying when it was killed.
+ * that timed out or was stopped was still trying when it was killed.
  */
 export function assertHeld(bait, outcome) {
   assert.deepEqual(bait.connections, [], 'the client reached an address outside OLP');
   if (outcome instanceof Error) {
-    assert.match(outcome.message, /did not finish within/, 'the client could not be run');
+    assert.match(outcome.message, /did not finish within|was stopped after/, 'the client could not be run');
   } else {
     assert.notEqual(outcome.code, 0, `the client succeeded without reaching anything:\n${outcome.stdout}`);
   }
@@ -238,17 +244,24 @@ export function assertHeld(bait, outcome) {
  * A stand-in for the dead proxy of the trap, which records where a client asks
  * it to go: the authority of each absolute-form request and CONNECT, and which
  * it refuses all. A client that honors the proxy environment shows up in
- * `attempts`; one that goes round it shows up at the bait.
+ * `attempts`; one that goes round it shows up at the bait. `asked` settles
+ * the first time a client asks for `authority`.
  */
-async function startTrap() {
+async function startTrap(authority) {
   const attempts = [];
+  let settle;
+  const asked = new Promise((resolve) => (settle = resolve));
+  const record = (target) => {
+    attempts.push(target);
+    if (target === authority) settle();
+  };
   const server = http.createServer((request, response) => {
-    attempts.push(/^[a-z][a-z0-9+.-]*:\/\//i.test(request.url) ? new URL(request.url).host : request.headers.host);
+    record(/^[a-z][a-z0-9+.-]*:\/\//i.test(request.url) ? new URL(request.url).host : request.headers.host);
     request.resume();
     response.writeHead(403, { connection: 'close' }).end();
   });
   server.on('connect', (request, socket) => {
-    attempts.push(request.url);
+    record(request.url);
     socket.end('HTTP/1.1 403 Forbidden\r\nconnection: close\r\n\r\n');
   });
   await new Promise((resolve, reject) => server.once('error', reject).listen(0, '127.0.0.1', resolve));
@@ -258,7 +271,7 @@ async function startTrap() {
       server.close(resolve);
       server.closeAllConnections();
     });
-  return { url, attempts, close };
+  return { url, attempts, asked, close };
 }
 
 /**
@@ -272,15 +285,25 @@ async function startTrap() {
  * environment, and resolves to the outcome of {@link run} or rejects with its
  * error. The proxy it is given is a stand-in that records the request and
  * refuses it, so the client reaches nothing outside the machine either way.
+ *
+ * A client that keeps retrying is watched for `watchMs` after it first asks for
+ * the bait, long enough to see it give up on the proxy and go round it, and then
+ * stopped through the signal `attempt` receives as its second argument. How long
+ * the client takes to start does not count, so its own deadline can be generous.
  */
-export async function assertHeldByTheTrap(bait, attempt) {
-  const trap = await startTrap();
+export async function assertHeldByTheTrap(bait, attempt, { watchMs = 5_000 } = {}) {
+  const authority = `${bait.host}:${bait.port}`;
+  const trap = await startTrap(authority);
+  const watch = new AbortController();
+  let watching;
+  trap.asked.then(() => (watching = setTimeout(() => watch.abort(), watchMs)));
   try {
-    const outcome = await attempt({ HTTP_PROXY: trap.url, HTTPS_PROXY: trap.url, ALL_PROXY: trap.url }).catch((error) => error);
+    const outcome = await attempt({ HTTP_PROXY: trap.url, HTTPS_PROXY: trap.url, ALL_PROXY: trap.url }, watch.signal).catch((error) => error);
     assertHeld(bait, outcome);
     const described = outcome instanceof Error ? outcome.message : `exit code ${outcome.code}\n--- stdout\n${outcome.stdout}\n--- stderr\n${outcome.stderr}`;
-    assert.ok(trap.attempts.includes(`${bait.host}:${bait.port}`), `the client never asked the proxy for the bait, so being held proves nothing (it asked for: ${trap.attempts.join(', ') || 'nothing'}): ${described}`);
+    assert.ok(trap.attempts.includes(authority), `the client never asked the proxy for the bait, so being held proves nothing (it asked for: ${trap.attempts.join(', ') || 'nothing'}): ${described}`);
   } finally {
+    clearTimeout(watching);
     await trap.close();
   }
 }

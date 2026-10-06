@@ -356,6 +356,45 @@ func TestRequestMetadataConsumerReplaysACommittedEventAsADuplicate(t *testing.T)
 	acctSameMoney(t, fixture, &daily, "0.0105")
 }
 
+func TestRequestMetadataConsumerAccountsForAPageInOneTransaction(t *testing.T) {
+	t.Parallel()
+	fixture := acctSeed(t, acctPool(t))
+	acctPriceGPT4o(t, fixture)
+	valkey, _, stream := acctKeyspace(t)
+
+	// Every delivery is in the stream before the consumer starts, so they are
+	// read as one page. The stream is at least once, so the page can carry the
+	// same event twice, and the second copy must see the first although
+	// neither has committed yet.
+	const events = 40
+	var repeated []byte
+	for index := range events {
+		payload, err := usage.Encode(acctBillableEvent(t, fixture))
+		if err != nil {
+			t.Fatalf("encode event: %v", err)
+		}
+		acctPublish(t, valkey, stream, payload)
+		if index == events/2 {
+			repeated = payload
+		}
+	}
+	acctPublish(t, valkey, stream, repeated)
+
+	acctConsumer(t, fixture.Pool, valkey, stream, "pager", nil, usage.ReclaimIdle)
+	acctEventually(t, "the page to be acknowledged", func() bool {
+		return acctStreamLength(t, valkey, stream) == 0
+	})
+	if count := acctCount(t, fixture, `SELECT count(*) FROM olp.attempt_usage_facts`); count != events {
+		t.Fatalf("facts = %d, want one per event", count)
+	}
+	acctEventually(t, "the page to be counted", func() bool {
+		_, _, duplicates, processed := acctCounters(t, fixture.Pool)
+		return duplicates == 1 && processed == events+1
+	})
+	daily, _ := acctWindow(t, fixture, "day")
+	acctSameMoney(t, fixture, &daily, "0.42")
+}
+
 func TestRequestMetadataConsumerRebuildsAGroupLostWithItsStream(t *testing.T) {
 	t.Parallel()
 	fixture := acctSeed(t, acctPool(t))

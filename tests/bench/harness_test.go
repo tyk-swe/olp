@@ -386,6 +386,17 @@ func TestHarnessPlansMatchTheRoadmap(t *testing.T) {
 	if got := p6.Rate * (p6.WarmupSeconds + p6.DurationSeconds); got < 9999 || got > 10001 {
 		t.Errorf("S6 opens %.0f streams over its schedule", got)
 	}
+	// The gateway ends a stream thirty seconds after its writes block, so S6
+	// opens them over less than that whatever the other scenarios run for, and
+	// keeps a shorter schedule it is given.
+	if p6.WarmupSeconds != 3 || p6.DurationSeconds != 15 || p6.DrainSeconds != 15 {
+		t.Errorf("S6 opens its streams over %.0f s of warmup and %.0f s measured, and holds them for %.0f s", p6.WarmupSeconds, p6.DurationSeconds, p6.DrainSeconds)
+	}
+	short := s
+	short.Warmup, short.Duration = time.Second, 5*time.Second
+	if p := s6.plan(short); p.WarmupSeconds != 1 || p.DurationSeconds != 5 {
+		t.Errorf("S6 lengthens a shorter schedule to %.0f s and %.0f s", p.WarmupSeconds, p.DurationSeconds)
+	}
 
 	s.Scale = 0.05
 	if p := s1.plan(s); p.Rate != 50 {

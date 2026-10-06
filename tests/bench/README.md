@@ -165,7 +165,7 @@ The settings are environment variables, all optional.
 | Variable | Meaning |
 | --- | --- |
 | `OLP_BENCH_SCALE` | Multiplies every rate and concurrency; 1 is the roadmap's full rates. Prompt sizes do not scale. |
-| `OLP_BENCH_DURATION`, `OLP_BENCH_WARMUP` | The measured period (default 60s) and the warmup before it (10s). S6 opens its streams over the two and then holds them for as long as the measured period; the gateway ends a stream thirty seconds after its writes block, so S6 needs the two to add up to less than that (see [below](#what-to-know-when-reading-a-run)). |
+| `OLP_BENCH_DURATION`, `OLP_BENCH_WARMUP` | The measured period (default 60s) and the warmup before it (10s). S6 opens its streams over at most 3 seconds of warmup and 15 measured, whatever these say, and then holds them for as long as its measured period: the gateway ends a stream thirty seconds after its writes block, so S6 must open them all within less than that (see [below](#what-to-know-when-reading-a-run)). |
 | `OLP_BENCH_GATEWAY_CPUS`, `OLP_BENCH_MOCK_CPUS`, `OLP_BENCH_LOADGEN_CPUS` | Pin the process to CPUs, as `taskset` lists them (`0-1`, `2,4-5`). The gateway's vCPUs are the CPUs it may run on, read back from `/proc` as proof the pin took, and are what RPS per vCPU divides by. |
 | `OLP_BENCH_ENFORCE` | `1` fails the test on a missed target. See below. |
 | `OLP_BENCH_DRAIN` | How long the wait for request metadata may go without any arriving before it gives up (90s). The wait lasts as long as metadata keeps landing. |
@@ -354,16 +354,17 @@ how to read the table and the record to fill in for a published run are in
   6 bytes a second (`OLP_BENCH_S6_READ_BPS=1`) to stall them instead, which
   tests the gateway's 30-second write deadline: it ends each stream thirty
   seconds after the stream's writes block (the gateway's log calls it
-  `client_cancelled`), so keep the time to open the streams, the warmup plus
-  the measured period, under thirty seconds, or the first will be gone before
-  the last is open and the run is flagged invalid. That holds at the default
-  pace too, since the readers' 8 KiB a second does not drain the send buffers
-  within thirty seconds: in smoke runs at 150 streams on a 2-vCPU gateway, the
-  default warmup and period, which open them over 70 seconds, left the gateway
-  holding 66 at once, twice, and in the gateway's log of the second run every
-  one of the 150 was ended at 30.2 to 30.5 seconds; a 3-second warmup and a
-  15-second period held all 150 and the run was valid
-  ([smoke run](../../docs/performance.md#smoke-run)). Filling a
+  `client_cancelled`), so the streams must all open within thirty seconds, or
+  the first will be gone before the last is open and the run is flagged
+  invalid. That holds at the default pace too, since the readers' 8 KiB a
+  second does not drain the send buffers within thirty seconds: in smoke runs
+  at 150 streams on a 2-vCPU gateway, the default warmup and period, which
+  opened them over 70 seconds, left the gateway holding 66 at once, twice, and
+  in the gateway's log of the second run every one of the 150 was ended at 30.2
+  to 30.5 seconds; a 3-second warmup and a 15-second period held all 150 and the
+  run was valid ([smoke run](../../docs/performance.md#smoke-run)). S6 therefore
+  opens its streams over at most those 18 seconds, whatever `OLP_BENCH_WARMUP`
+  and `OLP_BENCH_DURATION` say, and keeps a shorter schedule. Filling a
   stream's buffers also costs the gateway CPU: 273 CPU milliseconds for each
   stream held, net of idle, in that valid run (`gateway_cpu_ms_per_request`),
   for the default 40,000 tokens.
