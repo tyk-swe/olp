@@ -54,7 +54,7 @@ func TestPluginProvidersTakeNoKindDefaults(t *testing.T) {
 	if problem, ok := errors.AsType[*access.Problem](vendor.Validate(&egress.Policy{})); !ok || problem.Field != "configuration.options.vendor_id" {
 		t.Fatal("a plugin provider acquired a vendor")
 	}
-	for _, capability := range capabilitiesFor(KindPlugin, defaultVendor(KindPlugin)) {
+	for _, capability := range capabilitiesFor(KindPlugin, vendors.DefaultFor(KindPlugin)) {
 		if capability.Operation != OperationGeneration || capability.Surface == "bedrock" {
 			t.Fatalf("the plugin kind offers %+v", capability)
 		}
@@ -149,7 +149,7 @@ func TestCloudKindsConfigureFromTheirDefaults(t *testing.T) {
 		{Configuration{Kind: KindWatsonx, AuthMode: "ibm_iam", CloudRegion: new("eu-de"), CloudProject: new("8f3b2c1d-1234-4abc-9def-0123456789ab"), APIVersion: new("2026-09-25")}, "https://eu-de.ml.cloud.ibm.com"},
 	} {
 		test.cfg.Normalize()
-		if err := test.cfg.Validate(&egress.Policy{}); err != nil || value(test.cfg.Endpoint) != test.endpoint || value(test.cfg.Options.VendorID) != defaultVendor(test.cfg.Kind) {
+		if err := test.cfg.Validate(&egress.Policy{}); err != nil || value(test.cfg.Endpoint) != test.endpoint || value(test.cfg.Options.VendorID) != vendors.DefaultFor(test.cfg.Kind) {
 			t.Fatalf("%s configuration = %s %v, %v", test.cfg.Kind, value(test.cfg.Endpoint), value(test.cfg.Options.VendorID), err)
 		}
 	}

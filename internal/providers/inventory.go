@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 func (s *Server) kinds(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -86,10 +87,10 @@ func (s *Server) inventory(r *http.Request, principal access.Principal) (access.
 			return access.Reply{}, metadataErr
 		}
 		if vendorID == "" {
-			vendorID = defaultVendor(providerKind)
+			vendorID = vendors.DefaultFor(providerKind)
 		}
 		items = append(items, map[string]any{"available": available, "metadata": facts, "provider_id": providerID, "provider_name": providerName, "provider_kind": providerKind, "model": modelJSON(m),
-			"lifecycle": catalogLifecycle(s.Catalog, vendorID, m.UpstreamModel, metadata)})
+			"lifecycle": s.Catalog.Lifecycle(vendorID, m.UpstreamModel, canonicalModel(metadata))})
 	}
 	if err = rows.Err(); err != nil {
 		return access.Reply{}, err

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files from the current behavior")
@@ -55,9 +57,9 @@ func TestOnboardingCatalogueIsReviewed(t *testing.T) {
 func TestCertifiableTuplesAreReviewed(t *testing.T) {
 	var out strings.Builder
 	for _, kind := range kinds {
-		candidates := []string{defaultVendor(kind.Kind)}
+		candidates := []string{vendors.DefaultFor(kind.Kind)}
 		for _, v := range vendorCatalogue {
-			if v.Connector == kind.Kind && v.ID != defaultVendor(kind.Kind) {
+			if v.Connector == kind.Kind && v.ID != vendors.DefaultFor(kind.Kind) {
 				candidates = append(candidates, v.ID)
 			}
 		}

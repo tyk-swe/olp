@@ -171,6 +171,21 @@ func (c Contract) Request(operation string) RequestShape {
 	return shape
 }
 
+// Shape is the reviewed shape of a vendor's requests for an operation, as
+// Contract.Request returns it, with the vendor's name for refusals. A vendor
+// without a contract keeps its dialect's shape. Request paths read it on
+// every call, so it is shared rather than copied: callers must not modify it.
+func Shape(vendor, operation string) (name string, shape RequestShape, reviewed bool) {
+	i, ok := index[vendor]
+	if !ok {
+		return "", RequestShape{}, false
+	}
+	if shape, ok := shapes[i][operation]; ok {
+		return contracts[i].Name, shape, true
+	}
+	return contracts[i].Name, RequestShape{Unsupported: contracts[i].Unsupported}, true
+}
+
 // All returns detached copies of every contract in catalogue order.
 func All() []Contract {
 	out := make([]Contract, len(contracts))

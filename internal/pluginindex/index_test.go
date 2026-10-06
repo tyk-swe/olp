@@ -71,7 +71,7 @@ func TestInvalidIndexesAreRefused(t *testing.T) {
 		}
 	}
 	encoded, _ := json.Marshal(map[string]any{"api_version": "openllmproxy.dev/plugin-index/v2"})
-	if _, err := Decode(encoded); !errors.Is(err, ErrUnsupportedVersion) {
+	if _, err := Decode(encoded); !errors.Is(err, signing.ErrUnsupportedVersion) {
 		t.Fatalf("another format version: %v", err)
 	}
 }

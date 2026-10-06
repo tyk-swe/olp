@@ -26,7 +26,9 @@ type Signed struct {
 	SHA256 string
 	// KeyID is the trusted key that verified the signature.
 	KeyID string
-	index map[string]map[string]*Model
+	// index finds a vendor's models by identifier and alias, byCanonical by
+	// canonical model; the first model to name a canonical model keeps it.
+	index, byCanonical map[string]map[string]*Model
 }
 
 // Match is how a lookup name matched a catalog model.
@@ -54,18 +56,22 @@ func Load(document, signature []byte, keys signing.Keyring) (*Signed, error) {
 		return nil, fmt.Errorf("reference catalog: %w", err)
 	}
 	digest := sha256.Sum256(document)
-	signed := &Signed{Catalog: c, SHA256: hex.EncodeToString(digest[:]), KeyID: keyID, index: map[string]map[string]*Model{}}
+	signed := &Signed{Catalog: c, SHA256: hex.EncodeToString(digest[:]), KeyID: keyID,
+		index: map[string]map[string]*Model{}, byCanonical: map[string]map[string]*Model{}}
 	for i := range c.Vendors {
 		vendor := &c.Vendors[i]
-		names := map[string]*Model{}
+		names, canonicals := map[string]*Model{}, map[string]*Model{}
 		for j := range vendor.Models {
 			model := &vendor.Models[j]
 			names[model.ID] = model
 			for _, alias := range model.Aliases {
 				names[alias] = model
 			}
+			if _, named := canonicals[model.CanonicalModel]; !named && model.CanonicalModel != "" {
+				canonicals[model.CanonicalModel] = model
+			}
 		}
-		signed.index[vendor.ID] = names
+		signed.index[vendor.ID], signed.byCanonical[vendor.ID] = names, canonicals
 	}
 	return signed, nil
 }
@@ -95,13 +101,8 @@ func (s *Signed) Lookup(vendorID string, names ...string) (*Model, Match, bool) 
 		}
 	}
 	for _, name := range names {
-		if name == "" {
-			continue
-		}
-		for _, model := range s.vendorModels(vendorID) {
-			if model.CanonicalModel == name {
-				return model, MatchCanonical, true
-			}
+		if model, ok := s.byCanonical[vendorID][name]; ok {
+			return model, MatchCanonical, true
 		}
 	}
 	return nil, "", false
@@ -144,19 +145,6 @@ func (l *Lifecycle) View() *LifecycleView {
 		view.Replacement = new(l.Replacement)
 	}
 	return view
-}
-
-func (s *Signed) vendorModels(vendorID string) []*Model {
-	for i := range s.Catalog.Vendors {
-		if vendor := &s.Catalog.Vendors[i]; vendor.ID == vendorID {
-			out := make([]*Model, len(vendor.Models))
-			for j := range vendor.Models {
-				out[j] = &vendor.Models[j]
-			}
-			return out
-		}
-	}
-	return nil
 }
 
 // ModelCount is the number of models the catalog describes.

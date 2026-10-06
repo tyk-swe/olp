@@ -9,17 +9,14 @@ import "slices"
 //
 // https://console.groq.com/docs/speech-to-text
 func init() {
-	registerCodec("groq-audio", codec{encode: map[string]func(*Request, string) (*UpstreamCall, *Error){
-		OpTranscription: encodeGroqAudio,
-		OpTranslation:   encodeGroqAudio,
-	}})
+	registerCodec("groq-audio", codec{
+		OpTranscription: modelOnly(encodeGroqAudio),
+		OpTranslation:   modelOnly(encodeGroqAudio),
+	})
 }
 
 func encodeGroqAudio(r *Request, model string) (*UpstreamCall, *Error) {
-	format := "json"
-	if r.Format != nil {
-		format = *r.Format
-	}
+	format := transcriptionFormat(r)
 	switch {
 	case r.Stream:
 		return nil, invalidMedia("Groq does not stream transcripts.")
@@ -40,12 +37,6 @@ func encodeGroqAudio(r *Request, model string) (*UpstreamCall, *Error) {
 	if failure != nil || format != "json" {
 		return call, failure
 	}
-	call.DecodeTranscription = func(body []byte) (*TranscriptionResult, *Error) {
-		result, failure := DecodeTranscriptionJSON(body)
-		if result != nil {
-			result.TextOnly = true
-		}
-		return result, failure
-	}
+	call.DecodeTranscription = DecodeTranscriptionJSON
 	return call, nil
 }

@@ -1691,7 +1691,8 @@ func EncodeVideoDeleteResponse(result *VideoDeleteResult, localID string) ([]byt
 // TranscriptionResult is a decoded transcription.
 type TranscriptionResult struct {
 	// TextOnly renders the transcript as OpenAI's json format, its text
-	// alone, for a client that asked for json of a vendor sent verbose_json.
+	// alone, for a client that asked for json of a vendor whose own
+	// transcript says more.
 	TextOnly bool
 	// Tokens is the usage of a vendor that bills transcripts by token.
 	Tokens          *ImageUsage

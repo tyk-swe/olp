@@ -212,7 +212,8 @@ func (c Config) WrapRequest(body []byte, model string) []byte {
 // body as it is, such as an upstream error.
 func (c Config) UnwrapResponse(body []byte) []byte {
 	if c.Kind == KindWatsonx {
-		return watsonxResult(body, "chat.completion")
+		result, _ := watsonxResult(body, "chat.completion")
+		return result
 	}
 	e := c.envelope()
 	if e == nil || e.response == "" {

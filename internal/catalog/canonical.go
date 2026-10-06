@@ -1,11 +1,11 @@
 package catalog
 
 import (
-	"bytes"
-	"encoding/json"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/signing"
 )
 
 // Encode renders a catalog in canonical form: two-space indented JSON with a
@@ -25,14 +25,7 @@ func Encode(c *Catalog) ([]byte, error) {
 		normalized.Vendors[i].Models = normalizeModels(normalized.Vendors[i].Models)
 	}
 	slices.SortFunc(normalized.Vendors, func(a, b Vendor) int { return strings.Compare(a.ID, b.ID) })
-	var out bytes.Buffer
-	encoder := json.NewEncoder(&out)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(normalized); err != nil {
-		return nil, err
-	}
-	return out.Bytes(), nil
+	return signing.EncodeDocument(normalized)
 }
 
 // Canonical decodes, validates and re-encodes a catalog document.

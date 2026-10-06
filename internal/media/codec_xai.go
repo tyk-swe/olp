@@ -1,7 +1,6 @@
 package media
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 )
@@ -11,9 +10,9 @@ import (
 //
 // https://docs.x.ai/developers/rest-api-reference/inference/images
 func init() {
-	registerCodec("xai-images", codec{encode: map[string]func(*Request, string) (*UpstreamCall, *Error){
-		OpImageGeneration: encodeXAIImage,
-	}})
+	registerCodec("xai-images", codec{
+		OpImageGeneration: modelOnly(encodeXAIImage),
+	})
 }
 
 // imageAspectRatios are the aspect ratios of OpenAI's image sizes.
@@ -32,10 +31,7 @@ func encodeXAIImage(r *Request, model string) (*UpstreamCall, *Error) {
 	case r.Format != nil && *r.Format != "url" && *r.Format != "b64_json":
 		return nil, invalidMedia("xAI returns images as url or b64_json.")
 	}
-	fields := map[string]any{"model": model, "prompt": r.Prompt}
-	if r.Count != nil {
-		fields["n"] = *r.Count
-	}
+	fields := map[string]any{"model": model, "prompt": r.Prompt, "n": r.Count, "response_format": r.Format, "user": r.User}
 	if r.Size != nil {
 		ratio, ok := imageAspectRatios[*r.Size]
 		if !ok {
@@ -43,15 +39,9 @@ func encodeXAIImage(r *Request, model string) (*UpstreamCall, *Error) {
 		}
 		fields["aspect_ratio"] = ratio
 	}
-	if r.Format != nil {
-		fields["response_format"] = *r.Format
-	}
-	if r.User != nil {
-		fields["user"] = *r.User
-	}
-	body, err := json.Marshal(fields)
-	if err != nil {
-		return nil, invalidMedia("The image request could not be encoded.")
+	body, failure := jsonDoc(fields, nil)
+	if failure != nil {
+		return nil, failure
 	}
 	return &UpstreamCall{Method: http.MethodPost, Path: "images/generations", JSON: body, Kind: ResponseImages, Ambiguous: true,
 		DecodeImages: decodeXAIImages}, nil

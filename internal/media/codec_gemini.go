@@ -20,11 +20,11 @@ import (
 // https://ai.google.dev/gemini-api/docs/speech-generation
 // https://ai.google.dev/gemini-api/docs/audio
 func init() {
-	registerCodec("gemini", codec{encode: map[string]func(*Request, string) (*UpstreamCall, *Error){
-		OpImageGeneration: encodeGeminiImage,
-		OpSpeech:          encodeGeminiSpeech,
-		OpTranscription:   encodeGeminiTranscription,
-	}})
+	registerCodec("gemini", codec{
+		OpImageGeneration: modelOnly(encodeGeminiImage),
+		OpSpeech:          modelOnly(encodeGeminiSpeech),
+		OpTranscription:   modelOnly(encodeGeminiTranscription),
+	})
 }
 
 // geminiTranscriptPrompt asks a model for the transcript of the audio it hears.
@@ -122,7 +122,7 @@ func decodeGeminiImage(body []byte, stage func(string, int) (*Artifact, *Error))
 				return nil, failure
 			}
 			handle := staged.Handle
-			return &ImageResult{CreatedAt: nowUnix(), Images: []ImageArtifact{{Handle: &handle}}, Usage: result.tokens()}, nil
+			return &ImageResult{CreatedAt: time.Now().Unix(), Images: []ImageArtifact{{Handle: &handle}}, Usage: result.tokens()}, nil
 		}
 	}
 	return nil, Fail(http.StatusBadRequest, "no_image", "The model answered without an image.")
@@ -196,10 +196,7 @@ func decodeGeminiSpeech(body []byte, format string) (*AudioResult, *Error) {
 }
 
 func encodeGeminiTranscription(r *Request, model string) (*UpstreamCall, *Error) {
-	format := "json"
-	if r.Format != nil {
-		format = *r.Format
-	}
+	format := transcriptionFormat(r)
 	switch {
 	case format != "json" && format != "text":
 		return nil, invalidMedia("Gemini transcripts are served as json or text.")
@@ -242,8 +239,6 @@ func encodeGeminiTranscription(r *Request, model string) (*UpstreamCall, *Error)
 					text.WriteString(*part.Text)
 				}
 			}
-			return &TranscriptionResult{Text: strings.TrimSpace(text.String()), TextOnly: true, Tokens: result.tokens()}, nil
+			return &TranscriptionResult{Text: strings.TrimSpace(text.String()), Tokens: result.tokens()}, nil
 		}}, nil
 }
-
-func nowUnix() int64 { return time.Now().Unix() }

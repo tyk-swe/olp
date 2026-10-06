@@ -16,13 +16,13 @@ import (
 // https://platform.stability.ai/docs/api-reference
 // https://www.recraft.ai/docs/api-reference/endpoints
 func init() {
-	registerCodec("stability", codec{encode: map[string]func(*Request, string) (*UpstreamCall, *Error){
-		OpImageGeneration: encodeStabilityImage,
-		OpImageEdit:       encodeStabilityEdit,
-	}})
-	registerCodec("recraft", codec{encode: map[string]func(*Request, string) (*UpstreamCall, *Error){
-		OpImageGeneration: encodeRecraftImage,
-	}})
+	registerCodec("stability", codec{
+		OpImageGeneration: modelOnly(encodeStabilityImage),
+		OpImageEdit:       modelOnly(encodeStabilityEdit),
+	})
+	registerCodec("recraft", codec{
+		OpImageGeneration: modelOnly(encodeRecraftImage),
+	})
 }
 
 // refuseImageControls refuses the OpenAI image controls a vendor has no
@@ -64,8 +64,8 @@ func stabilityService(model string) (string, bool) {
 	return "", false
 }
 
-func stabilityFields(r *Request, vendor string) ([]Field, *Error) {
-	if failure := refuseImageControls(r, vendor, "b64_json"); failure != nil {
+func stabilityFields(r *Request) ([]Field, *Error) {
+	if failure := refuseImageControls(r, "Stability", "b64_json"); failure != nil {
 		return nil, failure
 	}
 	if r.Count != nil && *r.Count != 1 {
@@ -83,7 +83,7 @@ func encodeStabilityImage(r *Request, model string) (*UpstreamCall, *Error) {
 	if service == "" {
 		return nil, invalidMedia("The model is not a Stability generation service: stable-image-ultra, stable-image-core or an sd3.5 model.")
 	}
-	fields, failure := stabilityFields(r, "Stability")
+	fields, failure := stabilityFields(r)
 	if failure != nil {
 		return nil, failure
 	}
@@ -110,7 +110,7 @@ func encodeStabilityEdit(r *Request, model string) (*UpstreamCall, *Error) {
 	if len(r.Images) != 1 || r.Size != nil {
 		return nil, invalidMedia("Stability inpaints one image at its own size.")
 	}
-	fields, failure := stabilityFields(r, "Stability")
+	fields, failure := stabilityFields(r)
 	if failure != nil {
 		return nil, failure
 	}
@@ -160,22 +160,13 @@ func encodeRecraftImage(r *Request, model string) (*UpstreamCall, *Error) {
 	if failure != nil {
 		return nil, failure
 	}
-	fields := map[string]any{"prompt": r.Prompt, "model": model}
-	if r.Count != nil {
-		fields["n"] = *r.Count
-	}
+	fields := map[string]any{"prompt": r.Prompt, "model": model, "n": r.Count, "response_format": r.Format, "image_format": r.OutputFormat}
 	if ratio != "" {
 		fields["size"] = ratio
 	}
-	if r.Format != nil {
-		fields["response_format"] = *r.Format
-	}
-	if r.OutputFormat != nil {
-		fields["image_format"] = *r.OutputFormat
-	}
-	body, err := json.Marshal(fields)
-	if err != nil {
-		return nil, invalidMedia("The image request could not be encoded.")
+	body, failure := jsonDoc(fields, nil)
+	if failure != nil {
+		return nil, failure
 	}
 	// The raster path refuses vector models, whose SVG is no OpenAI image.
 	return &UpstreamCall{Method: http.MethodPost, Path: "images/generations/raster", JSON: body, Kind: ResponseImages, Ambiguous: true}, nil
@@ -188,9 +179,9 @@ func encodeRecraftImage(r *Request, model string) (*UpstreamCall, *Error) {
 //
 // https://docs.bfl.ai/api_integration/integration_guidelines
 func init() {
-	registerCodec("bfl", codec{encode: map[string]func(*Request, string) (*UpstreamCall, *Error){
-		OpImageGeneration: encodeBFLImage,
-	}})
+	registerCodec("bfl", codec{
+		OpImageGeneration: modelOnly(encodeBFLImage),
+	})
 }
 
 // bflPoll is how long the work waits between polls.
@@ -206,7 +197,7 @@ func encodeBFLImage(r *Request, model string) (*UpstreamCall, *Error) {
 	if r.OutputFormat != nil && *r.OutputFormat != "png" && *r.OutputFormat != "jpeg" {
 		return nil, invalidMedia("Black Forest Labs returns png or jpeg images.")
 	}
-	fields := map[string]any{"prompt": r.Prompt}
+	fields := map[string]any{"prompt": r.Prompt, "output_format": r.OutputFormat}
 	if r.Size != nil && *r.Size != "auto" {
 		var width, height int
 		if _, err := fmt.Sscanf(*r.Size, "%dx%d", &width, &height); err != nil || width < 64 || height < 64 {
@@ -214,12 +205,9 @@ func encodeBFLImage(r *Request, model string) (*UpstreamCall, *Error) {
 		}
 		fields["width"], fields["height"] = width, height
 	}
-	if r.OutputFormat != nil {
-		fields["output_format"] = *r.OutputFormat
-	}
-	body, err := json.Marshal(fields)
-	if err != nil {
-		return nil, invalidMedia("The image request could not be encoded.")
+	body, failure := jsonDoc(fields, nil)
+	if failure != nil {
+		return nil, failure
 	}
 	return &UpstreamCall{Method: http.MethodPost, Path: url.PathEscape(model), Accept: "application/json", JSON: body, Kind: ResponseImages, Ambiguous: true,
 		Next: nextBFLStep, StepDomains: []string{"bfl.ai"}}, nil

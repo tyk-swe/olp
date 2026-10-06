@@ -149,7 +149,7 @@ func TestFetchedCatalogsVerifyBeforeAnyPriceIsRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fetched.Catalog == nil || fetched.Catalog.KeyID != "test-release" || len(fetched.Document.Prices) != 1 || !fetched.Published.Equal(published) {
+	if fetched.Catalog == nil || fetched.Catalog.KeyID != "test-release" || len(fetched.Document.Prices) != 1 || !fetched.Catalog.Catalog.PublishedAt.Equal(published) {
 		t.Fatalf("fetched = %+v", fetched)
 	}
 

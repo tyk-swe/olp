@@ -13,7 +13,7 @@ export function sourceFormatLabel(source: Pick<PricingSource, 'format'>) {
 }
 
 /** Where a source's document comes from. */
-export function sourceAddress(source: Pick<PricingSource, 'format' | 'url'>) {
+export function sourceAddress(source: Pick<PricingSource, 'url'>) {
   return source.url ?? 'Catalog bundled with this release';
 }
 

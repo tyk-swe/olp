@@ -46,26 +46,17 @@ type Config struct {
 // is served at.
 func DefaultProfileEndpoint(kind, profileID, region, project string) string {
 	endpoint := DefaultEndpoint(kind, region, project)
-	if kind != "vertex_ai" || endpoint == "" {
-		return endpoint
-	}
-	switch profileID {
-	case "vertex-anthropic":
-		return strings.TrimSuffix(endpoint, "/publishers/google") + "/publishers/anthropic"
-	case "vertex-openai":
-		return strings.TrimSuffix(endpoint, "/publishers/google") + "/endpoints/openapi"
+	if path := hostings[profileHosting(profileID)].vertexPath; kind == "vertex_ai" && path != "" {
+		return strings.TrimSuffix(endpoint, hostings["vertex-google"].vertexPath) + path
 	}
 	return endpoint
 }
 
+// DefaultEndpoint is the endpoint a provider of kind gets when it names none:
+// the address its cloud fields resolve to, or its default vendor's reviewed
+// endpoint.
 func DefaultEndpoint(kind, region, project string) string {
 	switch kind {
-	case "openai":
-		return "https://api.openai.com/v1"
-	case "anthropic":
-		return "https://api.anthropic.com/v1"
-	case "gemini":
-		return "https://generativelanguage.googleapis.com/v1beta"
 	case "vertex_ai":
 		host := region + "-aiplatform.googleapis.com"
 		if region == "global" {
@@ -87,7 +78,8 @@ func DefaultEndpoint(kind, region, project string) string {
 		}
 		return "https://" + region + ".ml.cloud.ibm.com"
 	}
-	return ""
+	contract, _ := vendors.Lookup(vendors.DefaultFor(kind))
+	return contract.Endpoint
 }
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
@@ -308,24 +300,25 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 		}
 		path = "/rerank"
 	}
-	if c.Hosting() == "vertex-anthropic" && wire == openai.FamilyAnthropic {
+	hosting, traits := c.Hosting(), c.traits()
+	if hosting == "vertex-anthropic" && wire == openai.FamilyAnthropic {
 		action := "rawPredict"
 		if stream {
 			action = "streamRawPredict"
 		}
 		return base + "/models/" + url.PathEscape(model) + ":" + action, nil
 	}
-	if c.Hosting() == "bedrock-anthropic-invoke" && wire == openai.FamilyAnthropic {
+	if hosting == "bedrock-anthropic-invoke" && wire == openai.FamilyAnthropic {
 		action := "invoke"
 		if stream {
 			action = "invoke-with-response-stream"
 		}
 		return base + "/model/" + url.PathEscape(model) + "/" + action, nil
 	}
-	if c.Hosting() == "azure-responses-legacy" && (wire == openai.FamilyResponses || wire == openai.FamilyInputTokens) {
+	if hosting == "azure-responses-legacy" && (wire == openai.FamilyResponses || wire == openai.FamilyInputTokens) {
 		return base + "/openai" + path + "?api-version=" + url.QueryEscape(c.APIVersion), nil
 	}
-	if c.traits().deployment {
+	if traits.deployment {
 		if model != c.Deployment && !c.hasDeployment(model) {
 			var metadata struct {
 				Deployment string `json:"deployment"`
@@ -342,7 +335,7 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 		}
 		base += "/openai/deployments/" + url.PathEscape(model)
 	}
-	if c.traits().apiVersion {
+	if traits.apiVersion {
 		path += "?api-version=" + url.QueryEscape(c.APIVersion)
 	}
 	return base + path, nil
@@ -369,8 +362,8 @@ func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
 	if strings.HasPrefix(path, "/") || strings.Contains(path, "..") || strings.ContainsAny(path, "\\?#") {
 		return "", errors.New("invalid upstream resource path")
 	}
-	base := c.profileBase()
-	if c.traits().deployment {
+	base, traits := c.profileBase(), c.traits()
+	if traits.deployment {
 		deployment := c.Model(model)
 		if deployment != c.Deployment && !c.hasDeployment(deployment) {
 			var metadata struct {
@@ -393,7 +386,7 @@ func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
 	}
 	u := base + "/" + path
 	merged := url.Values{}
-	if c.traits().apiVersion {
+	if traits.apiVersion {
 		merged.Set("api-version", c.APIVersion)
 	}
 	for name, values := range query {
@@ -419,8 +412,8 @@ func (c Config) ResourceURL(model, path string, query url.Values) (string, error
 	if strings.Contains(path, "..") || strings.ContainsAny(path, "\\?#") {
 		return "", errors.New("invalid upstream resource path")
 	}
-	base := c.profileBase()
-	if c.traits().deployment {
+	base, traits := c.profileBase(), c.traits()
+	if traits.deployment {
 		if strings.HasPrefix(path, "deployments/") {
 			deployment := c.Model(model)
 			if deployment == "" {
@@ -433,7 +426,7 @@ func (c Config) ResourceURL(model, path string, query url.Values) (string, error
 		}
 	}
 	merged := url.Values{}
-	if c.traits().apiVersion {
+	if traits.apiVersion {
 		merged.Set("api-version", c.APIVersion)
 	}
 	for name, values := range query {

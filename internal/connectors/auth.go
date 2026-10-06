@@ -480,8 +480,6 @@ func (a *Auth) googleToken(ctx context.Context, c Config, secret []byte) (*cloud
 	return token, nil
 }
 
-const azureScope = "https://cognitiveservices.azure.com/.default"
-
 func (a *Auth) azureToken(ctx context.Context, c Config, secret []byte) (azcore.AccessToken, error) {
 	key := cacheKey(c, secret)
 	a.mu.Lock()

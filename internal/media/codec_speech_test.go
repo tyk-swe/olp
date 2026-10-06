@@ -73,7 +73,7 @@ func TestVendorTranscriptsReadAsOpenAIFormats(t *testing.T) {
 			if failure != nil {
 				t.Fatalf("%s: %s", test.name, failure.Message)
 			}
-			result, failure := call.DecodeTranscription([]byte(test.body))
+			result, failure := DecodeTranscript(call, format, []byte(test.body))
 			if failure != nil || result.DurationSeconds == nil || *result.DurationSeconds != 2.5 {
 				t.Fatalf("%s decoded %+v %v", test.name, result, failure)
 			}

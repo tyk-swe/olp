@@ -22,7 +22,7 @@ type stubAzureCredential struct {
 
 func (c *stubAzureCredential) GetToken(ctx context.Context, opts policy.TokenRequestOptions) (azcore.AccessToken, error) {
 	c.calls.Add(1)
-	if len(opts.Scopes) != 1 || opts.Scopes[0] != azureScope {
+	if len(opts.Scopes) != 1 || opts.Scopes[0] != cognitiveServicesScope {
 		return azcore.AccessToken{}, errors.New("unexpected scope")
 	}
 	if c.err != nil {

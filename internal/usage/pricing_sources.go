@@ -350,8 +350,7 @@ func (s *Server) updatePricingSource(r *http.Request, _ access.Principal) (acces
 type fetchedSource struct {
 	Document  sourceDocument
 	Canonical []byte
-	Catalog   *SnapshotCatalog
-	Published time.Time
+	Catalog   *catalog.Signed
 	Skipped   []SkippedPrice
 }
 
@@ -422,7 +421,7 @@ func (s *Server) fetchPriceDocument(ctx context.Context, rawURL string) (fetched
 		return fetchedSource{}, access.Fail(422, "invalid_source_document",
 			"The pricing source document does not declare a valid currency.")
 	}
-	return s.validatedSource(doc, nil, time.Time{}, nil)
+	return s.validatedSource(doc, nil, nil)
 }
 
 // fetchCatalog reads a signed reference catalog: the one this release ships,
@@ -450,7 +449,7 @@ func (s *Server) fetchCatalog(ctx context.Context, rawURL *string) (fetchedSourc
 		case errors.Is(err, signing.ErrInvalidSignature) || errors.Is(err, signing.ErrUnknownKey) || errors.Is(err, signing.ErrMalformedSignature):
 			return fetchedSource{}, access.Fail(422, "catalog_signature_invalid",
 				"The catalog's signature does not verify against the keys this release trusts.")
-		case errors.Is(err, catalog.ErrUnsupportedVersion):
+		case errors.Is(err, signing.ErrUnsupportedVersion):
 			return fetchedSource{}, access.Fail(422, "catalog_unsupported_version",
 				"The catalog is in a format this release cannot read.")
 		case err != nil:
@@ -466,11 +465,10 @@ func (s *Server) fetchCatalog(ctx context.Context, rawURL *string) (fetchedSourc
 			"The catalog is older than the one this release ships.")
 	}
 	doc, skipped := catalogDocument(signed.Catalog, s.VendorKind)
-	provenance := &SnapshotCatalog{SHA256: signed.SHA256, PublishedAt: signed.Catalog.PublishedAt.UTC().Format(time.RFC3339), KeyID: signed.KeyID}
-	return s.validatedSource(doc, provenance, signed.Catalog.PublishedAt, skipped)
+	return s.validatedSource(doc, signed, skipped)
 }
 
-func (s *Server) validatedSource(doc sourceDocument, provenance *SnapshotCatalog, published time.Time, skipped []SkippedPrice) (fetchedSource, error) {
+func (s *Server) validatedSource(doc sourceDocument, signed *catalog.Signed, skipped []SkippedPrice) (fetchedSource, error) {
 	normalized, currency, err := validatePrices(doc.Prices, s.VendorKind)
 	if err != nil {
 		return fetchedSource{}, err
@@ -483,7 +481,7 @@ func (s *Server) validatedSource(doc sourceDocument, provenance *SnapshotCatalog
 	if skipped == nil {
 		skipped = []SkippedPrice{}
 	}
-	return fetchedSource{Document: doc, Canonical: canonicalSourceDocument(doc), Catalog: provenance, Published: published, Skipped: skipped}, nil
+	return fetchedSource{Document: doc, Canonical: canonicalSourceDocument(doc), Catalog: signed, Skipped: skipped}, nil
 }
 
 // signatureURL is where a fetched catalog's detached signature lives: the
@@ -554,11 +552,11 @@ func (s *Server) refreshPricingSource(r *http.Request, principal access.Principa
 	}
 	var catalogSHA256, catalogKeyID *string
 	var catalogPublishedAt *time.Time
-	if fetched.Catalog != nil {
-		if err = advanceCatalog(r.Context(), tx, source.ID, fetched.Published); err != nil {
+	if signed := fetched.Catalog; signed != nil {
+		if err = advanceCatalog(r.Context(), tx, source.ID, signed.Catalog.PublishedAt); err != nil {
 			return access.Reply{}, err
 		}
-		catalogSHA256, catalogKeyID, catalogPublishedAt = &fetched.Catalog.SHA256, &fetched.Catalog.KeyID, &fetched.Published
+		catalogSHA256, catalogKeyID, catalogPublishedAt = &signed.SHA256, &signed.KeyID, &signed.Catalog.PublishedAt
 	}
 	// A snapshot is immutable: refetching identical prices keeps the first
 	// snapshot and the catalog provenance it was taken from.

@@ -245,8 +245,6 @@ func kindByName(name string) *kindCapability {
 	return &kinds[i]
 }
 
-func defaultVendor(kind string) string { return vendors.DefaultFor(kind) }
-
 func capabilitiesFor(kind, vendor string) []CapabilityInput {
 	out := []CapabilityInput{}
 	for _, c := range CapabilityOptions {
@@ -260,17 +258,18 @@ func capabilitiesFor(kind, vendor string) []CapabilityInput {
 // Kind options include tuples available through an explicit profile, even
 // when the kind's Automatic connector cannot serve them.
 func capabilityOptionsForKind(kind string) []CapabilityInput {
+	var profiles []Configuration
+	for _, profile := range connectors.Profiles() {
+		if profile.Kind == kind {
+			profiles = append(profiles, Configuration{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision})
+		}
+	}
 	out := []CapabilityInput{}
-	profiles := connectors.Profiles()
 	for _, tuple := range CapabilityOptions {
-		profiled := slices.ContainsFunc(profiles, func(profile connectors.Profile) bool {
-			if profile.Kind != kind {
-				return false
-			}
-			cfg := Configuration{Kind: kind, ProfileID: profile.ID, ProfileRevision: profile.Revision}
+		profiled := slices.ContainsFunc(profiles, func(cfg Configuration) bool {
 			return configurationCertifiable(&cfg, tuple) && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 		})
-		if certifiable(kind, defaultVendor(kind), tuple) || profiled {
+		if certifiable(kind, vendors.DefaultFor(kind), tuple) || profiled {
 			out = append(out, tuple)
 		}
 	}

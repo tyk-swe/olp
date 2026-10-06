@@ -7,14 +7,11 @@
 package pluginindex
 
 import (
-	"bytes"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"regexp"
 	"slices"
@@ -76,31 +73,11 @@ var (
 	version    = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$`)
 )
 
-// ErrUnsupportedVersion reports an index in a format this build cannot read.
-var ErrUnsupportedVersion = errors.New("the plugin index format version is not supported")
-
 // Decode parses an index document strictly.
 func Decode(document []byte) (*Index, error) {
-	if len(document) > MaxBytes {
-		return nil, errors.New("the plugin index exceeds its size limit")
-	}
-	var head struct {
-		APIVersion string `json:"api_version"`
-	}
-	if err := json.Unmarshal(document, &head); err != nil {
-		return nil, fmt.Errorf("the plugin index is not a JSON object: %w", err)
-	}
-	if head.APIVersion != APIVersion {
-		return nil, fmt.Errorf("%w: %q", ErrUnsupportedVersion, head.APIVersion)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(document))
-	decoder.DisallowUnknownFields()
 	var index Index
-	if err := decoder.Decode(&index); err != nil {
-		return nil, fmt.Errorf("the plugin index is malformed: %w", err)
-	}
-	if decoder.Decode(new(json.RawMessage)) != io.EOF {
-		return nil, errors.New("the plugin index has data after its document")
+	if err := signing.DecodeDocument(document, "the plugin index", APIVersion, MaxBytes, &index); err != nil {
+		return nil, err
 	}
 	return &index, nil
 }
@@ -155,14 +132,7 @@ func Encode(x *Index) ([]byte, error) {
 		slices.SortStableFunc(p.Releases, func(a, b Release) int { return b.ReviewedAt.Compare(a.ReviewedAt) })
 	}
 	slices.SortFunc(normalized.Plugins, func(a, b Plugin) int { return strings.Compare(a.Name, b.Name) })
-	var out bytes.Buffer
-	encoder := json.NewEncoder(&out)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(normalized); err != nil {
-		return nil, err
-	}
-	return out.Bytes(), nil
+	return signing.EncodeDocument(normalized)
 }
 
 // Canonical decodes, validates and re-encodes an index document.

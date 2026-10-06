@@ -149,7 +149,8 @@
               ></tr
             ></thead
           ><tbody
-            >{#each activeRoutes.data.items as item (item.id)}<tr
+            >{#each activeRoutes.data.items as item (item.id)}{@const retiringCount =
+                retiringTargets(item.latest_revision.targets)}<tr
                 ><td
                   ><strong><code>{item.slug}</code></strong><br /><small
                     >{item.project_name ?? 'Installation-wide'}</small
@@ -163,10 +164,8 @@
                     >{item.revision_count} total</small
                   ></td
                 ><td>{item.latest_revision.operations.join(', ')}</td><td
-                  >{item.latest_revision.targets
-                    .length}{#if retiringTargets(item.latest_revision.targets)}<br
-                    /><span class="badge warning"
-                      >{retiringTargets(item.latest_revision.targets)} retiring</span
+                  >{item.latest_revision.targets.length}{#if retiringCount}<br
+                    /><span class="badge warning">{retiringCount} retiring</span
                     >{/if}</td
                 ><td>{formatDate(item.latest_revision.activated_at)}</td><td
                   >{item.created_by_email ?? 'A removed account'}</td
@@ -240,7 +239,8 @@
               ></tr
             ></thead
           ><tbody
-            >{#each drafts.data.items as item (item.id)}<tr
+            >{#each drafts.data.items as item (item.id)}{@const retiringCount =
+                retiringTargets(item.targets)}<tr
                 ><td
                   ><a class="route-link" href={resolve(`/routes/${item.id}`)}
                     >{item.slug}</a
@@ -254,9 +254,8 @@
                     class="badge">{item.state}</span
                   ></td
                 ><td>{item.operations.join(', ')}</td><td
-                  >{item.targets.length}{#if retiringTargets(item.targets)}<br
-                    /><span class="badge warning"
-                      >{retiringTargets(item.targets)} retiring</span
+                  >{item.targets.length}{#if retiringCount}<br /><span
+                      class="badge warning">{retiringCount} retiring</span
                     >{/if}</td
                 ><td
                   >{formatInteger(item.overall_timeout_ms)} ms / {item.max_attempts}</td

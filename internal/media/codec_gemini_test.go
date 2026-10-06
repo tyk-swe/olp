@@ -77,7 +77,7 @@ func TestGeminiTranscriptionInlinesTheAudio(t *testing.T) {
 	if failure != nil || json.Unmarshal(body, &sent) != nil || !strings.Contains(string(body), base64.StdEncoding.EncodeToString([]byte("RIFFaudio"))) || !strings.Contains(string(body), `"mimeType":"audio/wav"`) {
 		t.Fatalf("body = %s %v", body, failure)
 	}
-	result, failure := call.DecodeTranscription([]byte(`{"candidates":[{"content":{"parts":[{"text":"Hello world.\n"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":80,"candidatesTokenCount":4,"totalTokenCount":84}}`))
+	result, failure := DecodeTranscript(call, "json", []byte(`{"candidates":[{"content":{"parts":[{"text":"Hello world.\n"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":80,"candidatesTokenCount":4,"totalTokenCount":84}}`))
 	if failure != nil || result.Text != "Hello world." || result.Tokens.InputTokens != 80 {
 		t.Fatalf("decoded %+v %v", result, failure)
 	}

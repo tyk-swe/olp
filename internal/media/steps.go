@@ -19,18 +19,19 @@ const maxSteps = 240
 // is a request within the attempt's deadline, until one fetches the work's
 // product, or a response is the work's result, which it returns for the
 // call's decoder. A response that names no next step repeats the
-// last poll. The submission was dispatched, so every failure here is
-// ambiguous: the vendor may yet finish, and bill, the work.
+// last poll. The submission was dispatched, so every failure here is too; the
+// transport decides, as for the call's other failures, whether the vendor may
+// yet finish, and bill, the work.
 func (t *Transport) follow(ctx context.Context, call *UpstreamCall, body []byte, send func(*http.Request) (*http.Response, error), target Target) (*stepResponse, []byte, *Failure) {
 	fail := func(class FailureClass, detail string) (*stepResponse, []byte, *Failure) {
-		return nil, nil, &Failure{Class: class, Dispatched: true, Ambiguous: true, Detail: detail}
+		return nil, nil, &Failure{Class: class, Dispatched: true, Detail: detail}
 	}
 	step, mErr := call.Next(body)
 	var last *Step
 	for range maxSteps {
 		if mErr != nil {
 			failure := decodeFailure(mErr)
-			failure.Dispatched, failure.Ambiguous = true, failure.Class != ClassUpstreamClient
+			failure.Dispatched = true
 			return nil, nil, failure
 		}
 		if step != nil && step.Done {
@@ -83,7 +84,7 @@ type stepResponse struct {
 // step sends one request of a vendor's work.
 func (t *Transport) step(ctx context.Context, step *Step, call *UpstreamCall, send func(*http.Request) (*http.Response, error), target Target) (*stepResponse, *Failure) {
 	fail := func(class FailureClass, detail string) (*stepResponse, *Failure) {
-		return nil, &Failure{Class: class, Dispatched: true, Ambiguous: true, Detail: detail}
+		return nil, &Failure{Class: class, Dispatched: true, Detail: detail}
 	}
 	if !t.stepAllowed(step.URL, call.StepDomains, target.Config.Endpoint, step.Credentials) {
 		return fail(ClassProtocol, "the vendor directed its work to an address outside its domains")

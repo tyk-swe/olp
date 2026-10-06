@@ -100,10 +100,10 @@ func TestCatalogSuggestionsMatchAStoredCanonicalModel(t *testing.T) {
 	if len(suggestions) != 1 || suggestions[0].MatchedBy != "canonical_model" {
 		t.Fatalf("suggestions = %+v", suggestions)
 	}
-	if lifecycle := catalogLifecycle(signed, "anthropic", "house-sonnet", cfg.Options.Models["house-sonnet"]); lifecycle == nil || *lifecycle.Replacement != "claude-sonnet-5-5" {
+	if lifecycle := signed.Lifecycle("anthropic", "house-sonnet", canonicalModel(cfg.Options.Models["house-sonnet"])); lifecycle == nil || *lifecycle.Replacement != "claude-sonnet-5-5" {
 		t.Fatalf("lifecycle = %+v", lifecycle)
 	}
-	if catalogLifecycle(signed, "google", "house-sonnet", nil) != nil {
+	if signed.Lifecycle("google", "house-sonnet", canonicalModel(nil)) != nil {
 		t.Fatal("a lifecycle matched under another vendor")
 	}
 }

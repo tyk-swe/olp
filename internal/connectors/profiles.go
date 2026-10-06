@@ -219,6 +219,19 @@ func profileView(id, revision string) (Profile, error) {
 	return Profile{}, errors.New("unknown provider profile or unsupported profile revision")
 }
 
+// profileHosting is the hosting of the built-in profile with an identifier,
+// or "" for an unknown one.
+func profileHosting(id string) string {
+	profileMu.RLock()
+	defer profileMu.RUnlock()
+	for _, p := range profileRegistry {
+		if p.ID == id {
+			return p.Hosting
+		}
+	}
+	return ""
+}
+
 func LookupProfile(id, revision string) (Profile, error) {
 	p, err := profileView(id, revision)
 	if err != nil {
@@ -576,15 +589,7 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 		}
 		return nil
 	case "vertex-google", "vertex-anthropic", "vertex-openai":
-		want := "/v1/projects/" + c.CloudProject + "/locations/" + c.CloudRegion
-		switch c.Hosting() {
-		case "vertex-google":
-			want += "/publishers/google"
-		case "vertex-anthropic":
-			want += "/publishers/anthropic"
-		default:
-			want += "/endpoints/openapi"
-		}
+		want := "/v1/projects/" + c.CloudProject + "/locations/" + c.CloudRegion + c.traits().vertexPath
 		if u.Path != want {
 			return errors.New("Vertex endpoint path must match the profile's publisher or endpoint, project and location")
 		}

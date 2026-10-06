@@ -191,8 +191,8 @@ func streamCohereEvents(r io.Reader, limit int, emit openai.Emit, observe func(o
 				return err
 			}
 		}
-		f, err := object([]byte(frame.Data))
-		if err != nil {
+		f := event.Source().Fields()
+		if f == nil {
 			return protocolError("event is not a JSON object")
 		}
 		kind := str(f["type"])

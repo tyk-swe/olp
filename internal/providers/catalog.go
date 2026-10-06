@@ -6,7 +6,6 @@ import (
 	"maps"
 	"net/http"
 	"reflect"
-	"slices"
 
 	"github.com/jackc/pgx/v5"
 
@@ -20,12 +19,8 @@ import (
 // the provider's configuration, so certified capabilities return to declared:
 // the catalog never certifies anything.
 
-// catalogLifecycle is the documented lifecycle of a provider's model, matched
-// by its upstream name or the canonical model its facts declare.
-func catalogLifecycle(signed *catalog.Signed, vendorID, upstream string, metadata json.RawMessage) *catalog.LifecycleView {
-	return signed.Lifecycle(vendorID, upstream, canonicalModel(metadata))
-}
-
+// canonicalModel is the canonical model a provider model's facts declare, by
+// which the catalog also matches it.
 func canonicalModel(metadata json.RawMessage) string {
 	var facts struct {
 		CanonicalModel string `json:"canonical_model"`
@@ -197,20 +192,26 @@ func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (
 		if err != nil {
 			return access.Reply{}, err
 		}
+		byModel := make(map[string]*catalogSuggestion, len(suggestions))
+		for i := range suggestions {
+			if _, seen := byModel[suggestions[i].UpstreamModel]; !seen {
+				byModel[suggestions[i].UpstreamModel] = &suggestions[i]
+			}
+		}
 		next := current.Configuration
 		next.Options.Models = maps.Clone(current.Configuration.Options.Models)
 		if next.Options.Models == nil {
 			next.Options.Models = map[string]json.RawMessage{}
 		}
 		for _, name := range input.UpstreamModels {
-			i := slices.IndexFunc(suggestions, func(suggestion catalogSuggestion) bool { return suggestion.UpstreamModel == name })
+			suggestion := byModel[name]
 			switch {
-			case i < 0:
+			case suggestion == nil:
 				return access.Reply{}, access.Fail(422, "catalog_model_unmatched", "The reference catalog has no facts for "+name+".")
-			case suggestions[i].Conflict != nil:
+			case suggestion.Conflict != nil:
 				return access.Reply{}, access.Fail(422, "privacy_evidence", "The facts of "+name+" attest a privacy declaration; keep them and edit the model's facts instead.")
 			}
-			merged, _, err := applyCatalogFacts(next.Options.Models[name], suggestions[i].Facts)
+			merged, _, err := applyCatalogFacts(next.Options.Models[name], suggestion.Facts)
 			if err != nil {
 				return access.Reply{}, err
 			}

@@ -47,29 +47,27 @@ func sagemakerModelValid(model string) bool {
 // SageMakerEndpoint is the SageMaker AI Runtime endpoint of an AWS region, in
 // the domain of the region's partition.
 func SageMakerEndpoint(region string) (string, error) {
-	bedrock, err := BedrockEndpoint(region, false)
-	if err != nil {
-		return "", err
-	}
-	domain, ok := strings.CutPrefix(bedrock, "https://bedrock-runtime."+region+".")
-	if !ok || domain == "" || strings.Contains(domain, "/") {
-		return "", fmt.Errorf("AWS region %s has no SageMaker AI Runtime endpoint", region)
-	}
-	return "https://runtime.sagemaker." + region + "." + domain, nil
+	return awsEndpoint("runtime.sagemaker", "SageMaker AI Runtime", region)
 }
 
 // PollyEndpoint is the Amazon Polly endpoint of an AWS region, in the domain
 // of the region's partition.
 func PollyEndpoint(region string) (string, error) {
+	return awsEndpoint("polly", "Amazon Polly", region)
+}
+
+// awsEndpoint is the endpoint of an AWS service host in a region, in the
+// domain the SDK's partition rules give the region's Bedrock Runtime.
+func awsEndpoint(host, service, region string) (string, error) {
 	bedrock, err := BedrockEndpoint(region, false)
 	if err != nil {
 		return "", err
 	}
 	domain, ok := strings.CutPrefix(bedrock, "https://bedrock-runtime."+region+".")
 	if !ok || domain == "" || strings.Contains(domain, "/") {
-		return "", fmt.Errorf("AWS region %s has no Amazon Polly endpoint", region)
+		return "", fmt.Errorf("AWS region %s has no %s endpoint", region, service)
 	}
-	return "https://polly." + region + "." + domain, nil
+	return "https://" + host + "." + region + "." + domain, nil
 }
 
 func sagemakerURL(base string, wire openai.Family, model string) (string, error) {
@@ -88,11 +86,19 @@ func sagemakerURL(base string, wire openai.Family, model string) (string, error)
 // it, and containers such as vLLM refuse a name they do not serve but accept
 // an empty one, as AWS's own example sends.
 func sagemakerBody(body []byte) []byte {
+	return rewriteObject(body, func(fields map[string]json.RawMessage) {
+		fields["model"] = json.RawMessage(`""`)
+	})
+}
+
+// rewriteObject edits the members of a JSON object body; a body that is not
+// an object is returned as it is.
+func rewriteObject(body []byte, edit func(fields map[string]json.RawMessage)) []byte {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
 		return body
 	}
-	fields["model"] = json.RawMessage(`""`)
+	edit(fields)
 	out, err := json.Marshal(fields)
 	if err != nil {
 		return body

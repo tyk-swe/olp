@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 type mediaProbeTransport func(*http.Request) (*http.Response, error)
@@ -97,7 +98,7 @@ func TestMediaCertificationDoesNotBorrowChatEvidence(t *testing.T) {
 		})
 	}
 	for _, kind := range []string{KindOpenAICompatible, KindAzure} {
-		for _, tuple := range capabilitiesFor(kind, defaultVendor(kind)) {
+		for _, tuple := range capabilitiesFor(kind, vendors.DefaultFor(kind)) {
 			switch tuple.Operation {
 			case "generation", "token_count", "embeddings", "moderation":
 			case "batch", "realtime":

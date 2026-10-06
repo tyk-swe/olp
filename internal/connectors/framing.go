@@ -18,7 +18,7 @@ import (
 
 // EventStream reports the hosting framing independently from the payload dialect.
 func (c Config) EventStream() bool {
-	return c.ProfileID != "" && c.traits().eventStream
+	return c.traits().eventStream
 }
 
 // StreamPayload removes only the qualified hosting envelope, retaining the native

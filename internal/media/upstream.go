@@ -266,7 +266,9 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	if failure != nil {
 		resp.Body.Close()
 		failure.Dispatched = true
-		failure.Ambiguous = failure.Class != ClassUpstreamClient && (failure.Ambiguous || call.Ambiguous)
+		// A call that may create work leaves it unresolved on any failure but
+		// the vendor's stated verdict on the request.
+		failure.Ambiguous = call.Ambiguous && failure.Class != ClassUpstreamClient
 		return nil, failure
 	}
 	if result.Body == nil {
@@ -390,7 +392,6 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			}
 			asset, _, failure := t.follow(ctx, call, body, send, target)
 			if failure != nil {
-				failure.Ambiguous = false // Reading content creates nothing.
 				return nil, failure
 			}
 			if asset == nil {
@@ -457,11 +458,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 				return nil, failure
 			}
 		}
-		decode := DecodeTranscriptionJSON
-		if call.DecodeTranscription != nil {
-			decode = call.DecodeTranscription
-		}
-		decoded, mErr := decode(body)
+		decoded, mErr := DecodeTranscript(call, format, body)
 		if mErr != nil {
 			return nil, decodeFailure(mErr)
 		}
@@ -483,11 +480,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			return nil, failure
 		}
 		var stagedHandles []Handle
-		stage := func(b64 string, index int) (*Artifact, *Error) {
-			raw, err := base64.StdEncoding.DecodeString(b64)
-			if err != nil {
-				return nil, protocolError("The provider image payload is not valid base64.")
-			}
+		stageRaw := func(raw []byte, index int) (*Artifact, *Error) {
 			staged, sErr := t.Spool.Put(ctx, Upload{
 				Filename:      "image-" + strconv.Itoa(index) + ".png",
 				ContentType:   "image/png",
@@ -500,6 +493,13 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			stagedHandles = append(stagedHandles, staged.Handle)
 			return staged, nil
 		}
+		stage := func(b64 string, index int) (*Artifact, *Error) {
+			raw, err := base64.StdEncoding.DecodeString(b64)
+			if err != nil {
+				return nil, protocolError("The provider image payload is not valid base64.")
+			}
+			return stageRaw(raw, index)
+		}
 		var decoded *ImageResult
 		var mErr *Error
 		if call.Next != nil {
@@ -508,9 +508,9 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 				return nil, failure
 			}
 			if asset == nil {
-				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Ambiguous: true, Detail: "the vendor's work ended without an image"}
+				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Detail: "the vendor's work ended without an image"}
 			}
-			staged, sErr := stage(base64.StdEncoding.EncodeToString(asset.body), 0)
+			staged, sErr := stageRaw(asset.body, 0)
 			if sErr != nil {
 				return nil, stageFailure(sErr)
 			}
@@ -606,6 +606,21 @@ func (t *Transport) decodeAudio(ctx context.Context, resp *http.Response, call *
 		return nil, stageFailure(SpoolError(err))
 	}
 	result.Artifact, result.ContentType, result.Tokens = artifact, artifact.ContentType, decoded.Tokens
+	return result, nil
+}
+
+// DecodeTranscript reads a call's JSON transcription result for a client that
+// asked for format: with the call's own decoder, whose vendor transcript a
+// json client receives as its text alone, or as OpenAI's transcription JSON.
+func DecodeTranscript(call *UpstreamCall, format string, body []byte) (*TranscriptionResult, *Error) {
+	if call.DecodeTranscription == nil {
+		return DecodeTranscriptionJSON(body)
+	}
+	result, failure := call.DecodeTranscription(body)
+	if failure != nil {
+		return nil, failure
+	}
+	result.TextOnly = format == "json"
 	return result, nil
 }
 

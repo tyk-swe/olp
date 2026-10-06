@@ -49,7 +49,7 @@ func TestGroqAudioReportsItsDuration(t *testing.T) {
 	if call.Path != "audio/transcriptions" || format != "verbose_json" || call.DecodeTranscription == nil {
 		t.Fatalf("call = %+v", call)
 	}
-	result, failure := call.DecodeTranscription([]byte(`{"task":"transcribe","language":"english","duration":12.5,"text":"Hello there.","segments":[{"id":0,"start":0,"end":1.2,"text":"Hello there."}],"x_groq":{"id":"req_1"}}`))
+	result, failure := DecodeTranscript(call, "json", []byte(`{"task":"transcribe","language":"english","duration":12.5,"text":"Hello there.","segments":[{"id":0,"start":0,"end":1.2,"text":"Hello there."}],"x_groq":{"id":"req_1"}}`))
 	if failure != nil || result.DurationSeconds == nil || *result.DurationSeconds != 12.5 {
 		t.Fatalf("decoded %+v %v", result, failure)
 	}

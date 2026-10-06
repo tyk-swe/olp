@@ -63,55 +63,44 @@ func WatsonxVersion(configured string) string {
 
 // watsonxBody adapts an OpenAI chat body to the watsonx chat API.
 func (c Config) watsonxBody(body []byte) []byte {
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(body, &fields) != nil || fields == nil {
-		return body
-	}
-	if model, named := fields["model"]; named {
-		fields["model_id"] = model
-		delete(fields, "model")
-	}
-	fields["project_id"], _ = json.Marshal(c.CloudProject)
-	// The address selects streaming, and every stream reports its usage.
-	delete(fields, "stream")
-	delete(fields, "stream_options")
-	// watsonx keeps tool_choice for a named function and spells the modes
-	// none, auto and required as tool_choice_option.
-	if choice := fields["tool_choice"]; len(choice) > 0 && choice[0] == '"' {
-		fields["tool_choice_option"] = choice
-		delete(fields, "tool_choice")
-	}
-	out, err := json.Marshal(fields)
-	if err != nil {
-		return body
-	}
-	return out
+	return rewriteObject(body, func(fields map[string]json.RawMessage) {
+		if model, named := fields["model"]; named {
+			fields["model_id"] = model
+			delete(fields, "model")
+		}
+		fields["project_id"], _ = json.Marshal(c.CloudProject)
+		// The address selects streaming, and every stream reports its usage.
+		delete(fields, "stream")
+		delete(fields, "stream_options")
+		// watsonx keeps tool_choice for a named function and spells the modes
+		// none, auto and required as tool_choice_option.
+		if choice := fields["tool_choice"]; len(choice) > 0 && choice[0] == '"' {
+			fields["tool_choice_option"] = choice
+			delete(fields, "tool_choice")
+		}
+	})
 }
 
 // watsonxResult reads a watsonx chat result or chunk as its Chat Completions
 // object: named by its model, without the model_id, timestamp and system
-// notices watsonx adds, which no OpenAI client reads.
-func watsonxResult(body []byte, object string) []byte {
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(body, &fields) != nil || fields == nil {
-		return body
-	}
-	if model, named := fields["model_id"]; named {
-		if _, present := fields["model"]; !present {
-			fields["model"] = model
+// notices watsonx adds, which no OpenAI client reads. It reports whether the
+// object carries usage.
+func watsonxResult(body []byte, object string) (result []byte, usage bool) {
+	result = rewriteObject(body, func(fields map[string]json.RawMessage) {
+		if model, named := fields["model_id"]; named {
+			if _, present := fields["model"]; !present {
+				fields["model"] = model
+			}
+			delete(fields, "model_id")
 		}
-		delete(fields, "model_id")
-	}
-	delete(fields, "created_at")
-	delete(fields, "system")
-	if _, typed := fields["object"]; !typed {
-		fields["object"] = json.RawMessage(strconv.Quote(object))
-	}
-	out, err := json.Marshal(fields)
-	if err != nil {
-		return body
-	}
-	return out
+		delete(fields, "created_at")
+		delete(fields, "system")
+		if _, typed := fields["object"]; !typed {
+			fields["object"] = json.RawMessage(strconv.Quote(object))
+		}
+		usage = len(fields["usage"]) > 0 && string(fields["usage"]) != "null"
+	})
+	return result, usage
 }
 
 // watsonxStream reads a watsonx chat stream as a Chat Completions stream. The
@@ -153,13 +142,8 @@ func (s *watsonxStream) Read(p []byte) (int, error) {
 			s.pending = []byte("data: [DONE]\n\n")
 			continue
 		}
-		chunk := watsonxResult([]byte(frame.Data), "chat.completion.chunk")
-		var reported struct {
-			Usage json.RawMessage `json:"usage"`
-		}
-		if json.Unmarshal(chunk, &reported) == nil && len(reported.Usage) > 0 && string(reported.Usage) != "null" {
-			s.terminal = true
-		}
+		chunk, usage := watsonxResult([]byte(frame.Data), "chat.completion.chunk")
+		s.terminal = s.terminal || usage
 		s.pending = sse.Frame{Data: string(chunk)}.Encode()
 	}
 	n := copy(p, s.pending)

@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // Limits is the connection quota configuration persisted for distributed limits enforcement.
@@ -92,7 +93,7 @@ func (c *Configuration) Normalize() {
 			c.Options.VendorID = nil
 		}
 	case c.VendorMissing():
-		c.Options.VendorID = new(defaultVendor(c.Kind))
+		c.Options.VendorID = new(vendors.DefaultFor(c.Kind))
 	}
 }
 

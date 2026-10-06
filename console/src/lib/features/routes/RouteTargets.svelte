@@ -42,6 +42,7 @@
     </div>{/if}
   <ol class="targets">
     {#each editor.targets as target, index (index)}
+      {@const notice = targetNotice(target)}
       <li>
         <span class="target-number" aria-hidden="true">{index + 1}</span>
         <div class="target-fields">
@@ -136,7 +137,7 @@
               ).join(', ')}</span
             >{/if}
         </div>
-        {#if targetNotice(target)}{@const notice = targetNotice(target)!}
+        {#if notice}
           <p class="target-lifecycle" class:danger={notice.tone === 'danger'}>
             <strong
               >{notice.tone === 'danger' ? 'Retired:' : 'Retiring:'}</strong

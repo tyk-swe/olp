@@ -17,12 +17,12 @@ import (
 //
 // https://docs.dev.runwayml.com/api
 func init() {
-	registerCodec("runway", codec{encode: map[string]func(*Request, string) (*UpstreamCall, *Error){
-		OpVideoCreate:  encodeRunwayCreate,
-		OpVideoGet:     encodeRunwayGet,
-		OpVideoContent: encodeRunwayContent,
-		OpVideoDelete:  encodeRunwayDelete,
-	}})
+	registerCodec("runway", codec{
+		OpVideoCreate:  modelOnly(encodeRunwayCreate),
+		OpVideoGet:     modelOnly(encodeRunwayGet),
+		OpVideoContent: modelOnly(encodeRunwayContent),
+		OpVideoDelete:  modelOnly(encodeRunwayDelete),
+	})
 }
 
 // runwayTask is the path of one Runway task, whose IDs are UUIDs.

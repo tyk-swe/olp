@@ -266,7 +266,7 @@ func encodeTransformed(r *openai.Request, wire openai.Family, kind, vendor, mode
 	if !native {
 		sourceDefaults = nil
 	}
-	_, shape := vendorShape(vendor, r.Family.Operation())
+	_, shape, _ := vendors.Shape(vendor, r.Family.Operation())
 	if err := refuseRewriteConflicts(shape, r); err != nil {
 		return nil, wire, err
 	}

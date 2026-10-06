@@ -29,6 +29,9 @@ type hostingTraits struct {
 	// model is the syntax of the hosting's upstream model names, where it
 	// differs from its kind's.
 	model *regexp.Regexp
+	// vertexPath is the path a Vertex hosting's endpoint ends with after
+	// its project and location.
+	vertexPath string
 }
 
 const cognitiveServicesScope = "https://cognitiveservices.azure.com/.default"
@@ -41,23 +44,26 @@ var hostings = map[string]hostingTraits{
 	"bedrock-anthropic-invoke": {awsService: "bedrock", eventStream: true},
 	"bedrock-invoke":           {awsService: "bedrock"},
 	"sagemaker-openai":         {awsService: "sagemaker", awsBearer: true},
+	"vertex-google":            {vertexPath: "/publishers/google"},
+	"vertex-anthropic":         {vertexPath: "/publishers/anthropic"},
 	// Vertex's OpenAI-compatible endpoint serves Google, partner and open
 	// models by publisher/model name.
-	"vertex-openai": {model: regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}/[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$`)},
+	"vertex-openai": {vertexPath: "/endpoints/openapi",
+		model: regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}/[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$`)},
 }
 
-// automaticHostings are the traits of a provider without a profile, by kind.
-var automaticHostings = map[string]hostingTraits{
-	"azure_openai": {deployment: true, apiVersion: true, azureScope: cognitiveServicesScope},
-	"bedrock":      {awsService: "bedrock"},
-	KindSageMaker:  {awsService: "sagemaker", awsBearer: true},
+// automaticHostings are the hostings of a provider without a profile, by kind.
+var automaticHostings = map[string]string{
+	"azure_openai": "azure-deployment",
+	"bedrock":      "bedrock-invoke",
+	KindSageMaker:  "sagemaker-openai",
 }
 
 // traits are the hosting traits of the connector: its profile's hosting, or
 // its kind's automatic hosting.
 func (c Config) traits() hostingTraits {
 	if c.ProfileID == "" {
-		return automaticHostings[c.Kind]
+		return hostings[automaticHostings[c.Kind]]
 	}
 	return hostings[c.Hosting()]
 }

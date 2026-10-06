@@ -7,17 +7,6 @@ import (
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
-// vendorShape is the reviewed shape of a vendor's requests for an operation,
-// with the vendor's name for refusals. A vendor without a contract keeps its
-// dialect's shape.
-func vendorShape(vendor, operation string) (string, vendors.RequestShape) {
-	contract, ok := vendors.Lookup(vendor)
-	if !ok {
-		return "", vendors.RequestShape{}
-	}
-	return contract.Name, contract.Request(operation)
-}
-
 // validateProfile refuses a request outside the vendor's reviewed contract:
 // an operation the vendor does not serve, a field it cannot represent, or
 // non-text input where it requires text.
@@ -26,7 +15,7 @@ func validateProfile(vendor string, family openai.Family, f Object) error {
 	if !vendors.Serves(vendor, operation) {
 		return requestError("operation", "Operation is outside the configured vendor contract")
 	}
-	name, shape := vendorShape(vendor, operation)
+	name, shape, _ := vendors.Shape(vendor, operation)
 	for _, field := range shape.Unsupported {
 		if present(f[field]) {
 			return requestError(field, name+" cannot represent "+field)

@@ -197,8 +197,12 @@ var contracts = []Contract{
 	selfHostedPreset("docker-model-runner", "Docker Model Runner", "Docker Model Runner; port 12434 on the host by default.", "https://model-runner.example.internal/engines/v1", Link{"Docker Model Runner API", "https://docs.docker.com/ai/model-runner/api-reference/"}, Contract{Operations: []string{"generation", "embeddings"}, Dialects: chatDialect, Requests: chatTokenLimit}),
 }
 
-// index maps vendor identifiers to their position in contracts.
-var index = map[string]int{}
+// index maps vendor identifiers to their position in contracts, and shapes
+// holds each contract's request shapes as Contract.Request returns them.
+var (
+	index  = map[string]int{}
+	shapes = make([]map[string]RequestShape, len(contracts))
+)
 
 func init() {
 	for i, c := range contracts {
@@ -209,6 +213,10 @@ func init() {
 			panic(fmt.Sprintf("vendor contract %q is declared twice", c.ID))
 		}
 		index[c.ID] = i
+		shapes[i] = make(map[string]RequestShape, len(c.Requests))
+		for operation := range c.Requests {
+			shapes[i][operation] = c.Request(operation)
+		}
 	}
 }
 

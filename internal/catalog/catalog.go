@@ -10,15 +10,14 @@
 package catalog
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"regexp"
 	"slices"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/signing"
 )
 
 // APIVersion identifies the catalog document format.
@@ -127,8 +126,7 @@ var (
 	vendorID    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 	modelID     = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$`)
 	canonical   = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-	component   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
-	operation   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+	snakeName   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	currency    = regexp.MustCompile(`^[A-Z]{3}$`)
 	modalities  = []string{"audio", "embeddings", "file", "image", "text", "video"}
 	familyNames = []string{"anthropic", "gemini", "other"}
@@ -137,32 +135,12 @@ var (
 // Decode parses a catalog document strictly: unknown members, trailing data
 // and another format version are refused. Decode does not validate.
 func Decode(document []byte) (*Catalog, error) {
-	if len(document) > MaxBytes {
-		return nil, errors.New("the catalog exceeds its size limit")
-	}
-	var version struct {
-		APIVersion string `json:"api_version"`
-	}
-	if err := json.Unmarshal(document, &version); err != nil {
-		return nil, fmt.Errorf("the catalog is not a JSON object: %w", err)
-	}
-	if version.APIVersion != APIVersion {
-		return nil, fmt.Errorf("%w: %q", ErrUnsupportedVersion, version.APIVersion)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(document))
-	decoder.DisallowUnknownFields()
 	var c Catalog
-	if err := decoder.Decode(&c); err != nil {
-		return nil, fmt.Errorf("the catalog is malformed: %w", err)
-	}
-	if decoder.Decode(new(json.RawMessage)) != io.EOF {
-		return nil, errors.New("the catalog has data after its document")
+	if err := signing.DecodeDocument(document, "the catalog", APIVersion, MaxBytes, &c); err != nil {
+		return nil, err
 	}
 	return &c, nil
 }
-
-// ErrUnsupportedVersion reports a catalog in a format this build cannot read.
-var ErrUnsupportedVersion = errors.New("the catalog format version is not supported")
 
 // Validate checks every rule the schema states and the ones it cannot:
 // uniqueness, ordering of dates, and provenance no later than publication.
@@ -244,7 +222,7 @@ func (c *Catalog) validateModel(m *Model, names map[string]bool) error {
 	}
 	operations := map[string]bool{}
 	for _, p := range m.Prices {
-		if !operation.MatchString(p.Operation) || operations[p.Operation] {
+		if !snakeName.MatchString(p.Operation) || operations[p.Operation] {
 			return fmt.Errorf("operation %q is malformed or priced twice", p.Operation)
 		}
 		operations[p.Operation] = true
@@ -278,7 +256,7 @@ func (c *Catalog) validatePrice(p Price) error {
 	}
 	seen := map[string]bool{}
 	for _, u := range p.Unrepresentable {
-		if !component.MatchString(u.Component) || u.Detail == "" || seen[u.Component] {
+		if !snakeName.MatchString(u.Component) || u.Detail == "" || seen[u.Component] {
 			return fmt.Errorf("unrepresentable component %q is malformed, unexplained or repeated", u.Component)
 		}
 		seen[u.Component] = true

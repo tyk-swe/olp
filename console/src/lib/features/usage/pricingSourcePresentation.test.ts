@@ -12,12 +12,12 @@ describe('pricing source presentation', () => {
       'Signed reference catalog'
     );
     expect(sourceFormatLabel({ format: 'prices' })).toBe('Price list');
-    expect(sourceAddress({ format: 'catalog', url: null })).toBe(
+    expect(sourceAddress({ url: null })).toBe(
       'Catalog bundled with this release'
     );
-    expect(
-      sourceAddress({ format: 'catalog', url: 'https://example.test/c.json' })
-    ).toBe('https://example.test/c.json');
+    expect(sourceAddress({ url: 'https://example.test/c.json' })).toBe(
+      'https://example.test/c.json'
+    );
   });
 
   it('labels the signed catalog a snapshot came from', () => {

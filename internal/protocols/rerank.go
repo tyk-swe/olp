@@ -13,11 +13,11 @@ import (
 // shape. Rerank has no common wire, so a vendor without one is refused.
 func encodeRerank(vendor string, f Object) ([]byte, error) {
 	delete(f, "stream")
-	contract, ok := vendors.Lookup(vendor)
-	if !ok || !contract.Serves("rerank") {
+	_, shape, reviewed := vendors.Shape(vendor, "rerank")
+	if !reviewed || !vendors.Serves(vendor, "rerank") {
 		return nil, requestError("operation", "The selected provider does not support rerank")
 	}
-	conform(contract.Request("rerank"), f)
+	conform(shape, f)
 	return json.Marshal(f)
 }
 

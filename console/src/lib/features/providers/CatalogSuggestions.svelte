@@ -13,7 +13,7 @@
   } from '$lib/features/providers/catalogSuggestions';
   import { lifecycleNotice } from '$lib/features/providers/models/lifecycle';
   import { metadataFacts } from '$lib/features/providers/models/modelMetadata';
-  import { formatDate } from '$lib/format';
+  import { formatDate, stateLabel } from '$lib/format';
   import type { RunProviderAction } from './providerEditor';
 
   let {
@@ -89,9 +89,8 @@
             <span>
               <code>{item.upstream_model}</code>
               {#if item.catalog_model !== item.upstream_model}<small
-                  >matched {item.catalog_model} by {item.matched_by.replace(
-                    '_',
-                    ' '
+                  >matched {item.catalog_model} by {stateLabel(
+                    item.matched_by
                   )}</small
                 >{/if}
             </span>

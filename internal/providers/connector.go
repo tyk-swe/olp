@@ -914,11 +914,7 @@ func decodeMediaProbe(call *media.UpstreamCall, operation string, data []byte) *
 			mErr = media.Fail(502, "provider_protocol_error", "The upstream returned no audio.")
 		}
 	case "transcription":
-		decode := media.DecodeTranscriptionJSON
-		if call.DecodeTranscription != nil {
-			decode = call.DecodeTranscription
-		}
-		_, mErr = decode(data)
+		_, mErr = media.DecodeTranscript(call, "json", data)
 	}
 	return mErr
 }
