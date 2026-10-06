@@ -37,10 +37,6 @@ func TestRunwayVideoLifecycle(t *testing.T) {
 			writeJSON(w, map[string]any{"creditBalance": 100})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/text_to_video":
 			created = decodeBody(t, r)
-			if created["ratio"] != "1280:720" {
-				http.Error(w, `{"error":"ratio must be 1280:720"}`, http.StatusBadRequest)
-				return
-			}
 			writeJSON(w, map[string]any{"id": task, "estimatedCost": 50})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/tasks/"+task:
 			if polls.Add(1) == 1 {
@@ -87,7 +83,7 @@ func TestRunwayVideoLifecycle(t *testing.T) {
 	if status != http.StatusOK || deleted["deleted"] != true || deletes.Load() != 1 {
 		t.Fatalf("video delete: %d %v after %d deletions", status, deleted, deletes.Load())
 	}
-	if created["duration"] != float64(4) {
-		t.Fatalf("Runway was not sent OpenAI's default duration: %v", created)
+	if created["duration"] != float64(4) || created["ratio"] != "1280:720" {
+		t.Fatalf("Runway was not sent the default duration and ratio: %v", created)
 	}
 }

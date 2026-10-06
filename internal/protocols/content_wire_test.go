@@ -53,26 +53,25 @@ func TestInspectInputTextDestinationWireFamilies(t *testing.T) {
 }
 
 func TestInspectInputTextBedrockRerankBlockStopsWalk(t *testing.T) {
-	for _, blocked := range []string{"query", "document"} {
-		t.Run(blocked, func(t *testing.T) {
-			body, err := encodeBedrockRerank(Object{"query": raw("query"), "documents": raw([]string{"document", "later document"})}, rerankARN)
-			if err != nil {
-				t.Fatal(err)
-			}
+	body, err := encodeBedrockRerank(Object{"query": raw("query"), "documents": raw([]string{"document", "later document"})}, rerankARN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		blocked string
+		hits    int
+	}{{"query", 1}, {"document", 2}} {
+		t.Run(tc.blocked, func(t *testing.T) {
 			r := openai.NewEnvelope(openai.FamilyBedrockRerank, "route", false, decodeFields(t, string(body)))
 			hits := 0
 			found := false
 			out := inspectInputText(t, r, func(text string) (string, bool) {
 				hits++
-				found = text == blocked
+				found = text == tc.blocked
 				return text, found
 			})
-			want := 1
-			if blocked == "document" {
-				want = 2
-			}
-			if !found || hits != want {
-				t.Fatalf("blocked=%v, inspected %d texts, want %d", found, hits, want)
+			if !found || hits != tc.hits {
+				t.Fatalf("blocked=%v, inspected %d texts, want %d", found, hits, tc.hits)
 			}
 			if diff := sameJSON(t, out.OIF().Document().Bytes(), string(body)); diff != "" {
 				t.Fatal(diff)
