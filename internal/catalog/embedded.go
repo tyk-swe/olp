@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -80,6 +81,23 @@ func Load(document, signature []byte, keys signing.Keyring) (*Signed, error) {
 // build trusts. A process refuses to start when it does not verify.
 var Embedded = sync.OnceValues(func() (*Signed, error) {
 	return Load(document, signature, signing.Trusted())
+})
+
+// EmbeddedEstimation is the estimation factors of the catalog this release
+// ships, verified against the keys this build trusts. A token counter reads
+// only these, so the rest of the catalog is not kept: holding every model in
+// each process that estimates would cost its allocation-heavy work.
+var EmbeddedEstimation = sync.OnceValues(func() ([]Estimation, error) {
+	if _, err := signing.Trusted().Verify(document, signature); err != nil {
+		return nil, fmt.Errorf("reference catalog signature: %w", err)
+	}
+	var section struct {
+		Estimation []Estimation `json:"estimation"`
+	}
+	if err := json.Unmarshal(document, &section); err != nil {
+		return nil, fmt.Errorf("reference catalog estimation: %w", err)
+	}
+	return section.Estimation, nil
 })
 
 // Source is the provenance tag of facts taken from this catalog.

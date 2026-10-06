@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -108,6 +109,11 @@ func TestEmbeddedCatalogVerifies(t *testing.T) {
 	}
 	if signed.Source() != "catalog@"+signed.SHA256 || len(signed.SHA256) != 64 {
 		t.Fatalf("source = %s", signed.Source())
+	}
+	// Counters read the estimation section alone; it is the validated one.
+	estimation, err := EmbeddedEstimation()
+	if err != nil || !reflect.DeepEqual(estimation, signed.Catalog.Estimation) {
+		t.Fatalf("estimation = %+v %v, want %+v", estimation, err, signed.Catalog.Estimation)
 	}
 }
 

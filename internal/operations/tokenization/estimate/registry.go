@@ -58,11 +58,11 @@ const (
 // verify; a tool that cannot verify it keeps the heuristic.
 var familyFactors = sync.OnceValue(func() map[Family]float64 {
 	factors := map[Family]float64{}
-	signed, err := catalog.Embedded()
+	estimation, err := catalog.EmbeddedEstimation()
 	if err != nil {
 		return factors
 	}
-	for _, e := range signed.Catalog.Estimation {
+	for _, e := range estimation {
 		if factor, err := e.Factor.Float64(); err == nil {
 			factors[Family(e.Family)] = factor
 		}
