@@ -22,6 +22,7 @@
   import { errorMessage } from '$lib/api/http';
   import { formatInteger, stateLabel } from '$lib/format';
   import { metadataFacts } from '$lib/features/providers/models/modelMetadata';
+  import { lifecycleNotice } from '$lib/features/providers/models/lifecycle';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
 
   const access = useRole();
@@ -283,11 +284,16 @@
       ><tbody>
         {#each inventory as entry (`${entry.provider_id}-${entry.model.id}`)}
           {@const facts = metadataFacts(entry.metadata)}
+          {@const lifecycle = lifecycleNotice(entry.lifecycle)}
           <tr>
             <td
               ><strong>{entry.model.display_name}</strong><br /><code
                 >{entry.model.upstream_model}</code
-              >{#if facts.length}<details class="model-facts">
+              >{#if lifecycle}<small
+                  class="lifecycle-notice"
+                  class:danger={lifecycle.tone === 'danger'}
+                  >{lifecycle.text}</small
+                >{/if}{#if facts.length}<details class="model-facts">
                   <summary>Upstream metadata</summary>
                   <dl>
                     {#each facts as fact (fact.label)}<div>
@@ -460,5 +466,14 @@
     .filter-choice {
       display: grid;
     }
+  }
+  .lifecycle-notice {
+    display: block;
+    margin-top: 0.3rem;
+    color: var(--warning);
+    font-size: var(--text-caption);
+  }
+  .lifecycle-notice.danger {
+    color: var(--danger);
   }
 </style>

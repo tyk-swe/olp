@@ -1,0 +1,37 @@
+{
+  "id": "066b366b8e8beeafd3b8b49f89e00648",
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "**9.9 is bigger than 9.11.**",
+        "reasoning_content": "The user is asking which is bigger",
+        "role": "assistant",
+        "name": "MiniMax AI",
+        "audio_content": ""
+      }
+    }
+  ],
+  "created": 1780220779,
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "object": "chat.completion",
+  "usage": {
+    "total_tokens": 484,
+    "total_characters": 0,
+    "prompt_tokens": 172,
+    "completion_tokens": 312,
+    "prompt_tokens_details": {
+      "cached_tokens": 159
+    }
+  },
+  "input_sensitive": false,
+  "output_sensitive": false,
+  "input_sensitive_type": 0,
+  "output_sensitive_type": 0,
+  "output_sensitive_int": 0,
+  "base_resp": {
+    "status_code": 0,
+    "status_msg": ""
+  }
+}

@@ -2,12 +2,14 @@ package providers
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/vendors"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -52,7 +54,7 @@ func TestPluginProvidersTakeNoKindDefaults(t *testing.T) {
 	if problem, ok := errors.AsType[*access.Problem](vendor.Validate(&egress.Policy{})); !ok || problem.Field != "configuration.options.vendor_id" {
 		t.Fatal("a plugin provider acquired a vendor")
 	}
-	for _, capability := range capabilitiesFor(KindPlugin, defaultVendor(KindPlugin)) {
+	for _, capability := range capabilitiesFor(KindPlugin, vendors.DefaultFor(KindPlugin)) {
 		if capability.Operation != OperationGeneration || capability.Surface == "bedrock" {
 			t.Fatalf("the plugin kind offers %+v", capability)
 		}
@@ -106,5 +108,68 @@ func TestPluginProviderOptionsFollowTheirProfile(t *testing.T) {
 	builtin.Normalize()
 	if problem, ok := errors.AsType[*access.Problem](builtin.Validate(&egress.Policy{})); !ok || problem.Field != "configuration.options.plugin_options" {
 		t.Fatalf("a built-in provider took plugin options: %v", problem)
+	}
+}
+
+func TestEveryVendorContractNamesAKindThatServesIt(t *testing.T) {
+	for _, contract := range vendors.All() {
+		kind := kindByName(contract.Connector)
+		if kind == nil {
+			t.Fatalf("%s names unknown connector kind %s", contract.ID, contract.Connector)
+		}
+		if contract.Preset != nil && !slices.ContainsFunc(kind.AuthModes, func(a authCapability) bool { return a.Mode == contract.Preset.AuthMode }) {
+			t.Fatalf("%s presets authentication %s, which %s does not accept", contract.ID, contract.Preset.AuthMode, kind.Kind)
+		}
+		for _, operation := range contract.Operations {
+			served := false
+			for _, option := range CapabilityOptions {
+				served = served || option.Operation == operation && connectors.Supports(contract.Connector, contract.ID, operation, option.Surface, option.Mode)
+				// An operation in a native dialect is served through the
+				// vendor's preset profile.
+				if ref := contract.Preset; ref != nil && ref.Profile != nil {
+					profiled := connectors.Config{Kind: contract.Connector, VendorID: contract.ID, ProfileID: ref.Profile.ID, ProfileRevision: ref.Profile.Revision}
+					served = served || option.Operation == operation && profiled.Supports(operation, option.Surface, option.Mode)
+				}
+			}
+			if !served {
+				t.Fatalf("%s lists %s, which its connector kind never serves", contract.ID, operation)
+			}
+		}
+	}
+}
+
+// TestCloudKindsConfigureFromTheirDefaults covers the SageMaker and watsonx
+// kinds: a region, and watsonx's project, give each its regional endpoint.
+func TestCloudKindsConfigureFromTheirDefaults(t *testing.T) {
+	for _, test := range []struct {
+		cfg      Configuration
+		endpoint string
+	}{
+		{Configuration{Kind: KindSageMaker, AuthMode: "default_chain", CloudRegion: new("eu-central-1")}, "https://runtime.sagemaker.eu-central-1.amazonaws.com"},
+		{Configuration{Kind: KindWatsonx, AuthMode: "ibm_iam", CloudRegion: new("eu-de"), CloudProject: new("8f3b2c1d-1234-4abc-9def-0123456789ab"), APIVersion: new("2026-09-25")}, "https://eu-de.ml.cloud.ibm.com"},
+	} {
+		test.cfg.Normalize()
+		if err := test.cfg.Validate(&egress.Policy{}); err != nil || value(test.cfg.Endpoint) != test.endpoint || value(test.cfg.Options.VendorID) != vendors.DefaultFor(test.cfg.Kind) {
+			t.Fatalf("%s configuration = %s %v, %v", test.cfg.Kind, value(test.cfg.Endpoint), value(test.cfg.Options.VendorID), err)
+		}
+	}
+}
+
+func TestSageMakerOnboardingRequiresADeclaredModel(t *testing.T) {
+	kind := kindByName(KindSageMaker)
+	if !slices.ContainsFunc(kind.Fields, func(field fieldCapability) bool { return field.Field == "model" && field.Required }) {
+		t.Fatal("SageMaker's default vendor has no discovery; onboarding must require a probe model")
+	}
+}
+
+func TestKindCapabilityOptionsIncludeProfileTuples(t *testing.T) {
+	for _, mode := range []string{ModeUnary, ModeStreaming} {
+		tuple := CapabilityInput{OperationGeneration, "native", mode}
+		if !slices.Contains(capabilityOptionsForKind(KindOpenAICompatible), tuple) {
+			t.Fatalf("compatible profiles' tuple is not published: %+v", tuple)
+		}
+		if slices.Contains(capabilityOptionsForKind(KindOpenAI), tuple) {
+			t.Fatalf("OpenAI has no native generation profile but publishes %+v", tuple)
+		}
 	}
 }

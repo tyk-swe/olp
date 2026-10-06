@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl-evidence","object":"chat.completion.chunk","created":1759622400,"model":"model","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-evidence","object":"chat.completion.chunk","created":1759622400,"model":"model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":1,"total_tokens":10}}
+
+data: [DONE]
+

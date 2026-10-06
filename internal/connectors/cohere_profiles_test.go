@@ -33,12 +33,12 @@ func TestCohereNativeV2ProfilesCannotUseCompatibilityEndpoint(t *testing.T) {
 		if err != nil || endpoint != "https://api.cohere.ai/v2/"+test.path {
 			t.Fatalf("native endpoint %s: %v", endpoint, err)
 		}
-		config.Endpoint = coherePresetEndpoint
+		config.Endpoint = "https://api.cohere.ai/compatibility/v1"
 		if err := config.Validate(&egress.Policy{}); err == nil || !strings.Contains(err.Error(), "/v2 endpoint") {
 			t.Fatalf("compatibility endpoint silently accepted by native v2 profile: %v", err)
 		}
 	}
-	compatible := Config{Kind: "openai_compatible", AuthMode: "api_key", ProfileID: "compatible-chat", ProfileRevision: "1", Endpoint: coherePresetEndpoint, VendorID: "cohere"}
+	compatible := Config{Kind: "openai_compatible", AuthMode: "api_key", ProfileID: "compatible-chat", ProfileRevision: "1", Endpoint: "https://api.cohere.ai/compatibility/v1", VendorID: "cohere"}
 	if err := compatible.Validate(&egress.Policy{}); err != nil {
 		t.Fatalf("existing Cohere compatibility path changed: %v", err)
 	}

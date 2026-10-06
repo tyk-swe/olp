@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { expect, test } from '../playwright';
 import { signInGatewayOwner } from '../gateway/signIn';
 import { manage } from '../helpers/management';
@@ -47,7 +47,9 @@ test('manages real project pools, draft routes, publications and overlapping tok
   // Seed the same current-grant metadata as the Go code-mode fixtures. The
   // browser exercises real account, pool and publication APIs without login
   // to a subscription service or an inference probe.
-  const providerID = randomUUID();
+  // A time-ordered identifier, as the server assigns, so the fixture lists
+  // among providers by creation like any other.
+  const providerID = uuidv7();
   const credentialID = randomUUID();
   const profile = await manage<{ id: string }>(page, 'GET', '/api/v1/profile');
   const databaseURL = new URL(process.env.OLP_DATABASE_URL!);
@@ -290,3 +292,12 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
     fullPage: true
   });
 });
+
+function uuidv7(): string {
+  const bytes = randomBytes(16);
+  bytes.writeUIntBE(Date.now(), 0, 6);
+  bytes[6] = (bytes[6] & 0x0f) | 0x70;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}

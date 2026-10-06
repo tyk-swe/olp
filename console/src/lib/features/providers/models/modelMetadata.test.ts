@@ -1,6 +1,10 @@
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { formatDate } from '$lib/format';
-import { metadataFacts, type ModelMetadata } from './modelMetadata';
+import {
+  metadataFacts,
+  sourceLabel,
+  type ModelMetadata
+} from './modelMetadata';
 
 const unknown: ModelMetadata = {
   canonical_model: null,
@@ -64,4 +68,15 @@ it('names modalities, privacy declarations, and the observation', () => {
     { label: 'Source', value: 'vendor documentation' },
     { label: 'Observed', value: formatDate('2026-03-04T12:30:00Z') }
   ]);
+});
+
+describe('sourceLabel', () => {
+  it('names facts from the reference catalog by its digest', () => {
+    expect(sourceLabel(`catalog@${'a'.repeat(64)}`)).toBe(
+      'Reference catalog (aaaaaaaaaaaa…)'
+    );
+    expect(sourceLabel('https://api.example.test/v1/models')).toBe(
+      'https://api.example.test/v1/models'
+    );
+  });
 });

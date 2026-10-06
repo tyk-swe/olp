@@ -27,6 +27,7 @@ import {
   providerStatusTone,
   requiresCredential,
   requiresGrant,
+  probeModelPrompt,
   requiresProbeModel,
   requiresSeedModel,
   selectPluginProfile,
@@ -85,6 +86,23 @@ const azureSpec: ProviderKindCapability = {
     { field: 'model', label: 'Seed model', required: false }
   ]
 };
+const sagemakerSpec: ProviderKindCapability = {
+  ...openAiSpec,
+  kind: 'sagemaker',
+  label: 'Amazon SageMaker AI',
+  default_auth_mode: 'default_chain',
+  auth_modes: [
+    {
+      mode: 'default_chain',
+      label: 'AWS credential chain',
+      credential: 'forbidden'
+    }
+  ],
+  fields: [
+    { field: 'cloud_region', label: 'Region', required: true },
+    { field: 'model', label: 'Probe model', required: true }
+  ]
+};
 const compatibleSpec: ProviderKindCapability = {
   ...openAiSpec,
   kind: 'openai_compatible',
@@ -103,7 +121,25 @@ const compatibleSpec: ProviderKindCapability = {
       auth_mode: 'api_key',
       maintainer: 'Groq',
       documentation_label: 'OpenAI Compatibility',
-      documentation_url: 'https://console.groq.com/docs/openai'
+      documentation_url: 'https://console.groq.com/docs/openai',
+      discovery: true,
+      placeholder: false,
+      profile_id: null,
+      profile_revision: null
+    },
+    {
+      id: 'exact',
+      label: 'Exact vendor',
+      description: 'A vendor whose contract is the Chat Completions dialect.',
+      endpoint: 'https://api.exact.test/v1',
+      auth_mode: 'api_key',
+      maintainer: 'Exact',
+      documentation_label: 'Exact API',
+      documentation_url: 'https://docs.exact.test',
+      discovery: false,
+      placeholder: false,
+      profile_id: 'compatible-chat',
+      profile_revision: '1'
     }
   ]
 };
@@ -207,6 +243,79 @@ describe('provider editor capability policy', () => {
       endpoint: '',
       authMode: 'api_key'
     });
+  });
+
+  it('selects a preset profile only while the operator has not chosen another', () => {
+    const draft = createProviderDraft(compatibleSpec);
+    selectProviderPreset(draft, compatibleSpec, 'exact');
+    expect(draft).toMatchObject({
+      profileId: 'compatible-chat',
+      profileRevision: '1'
+    });
+    selectProviderPreset(draft, compatibleSpec, 'groq');
+    expect(draft).toMatchObject({ profileId: '', profileRevision: '' });
+
+    draft.profileId = 'compatible-responses';
+    draft.profileRevision = '1';
+    selectProviderPreset(draft, compatibleSpec, 'exact');
+    expect(draft).toMatchObject({
+      profileId: 'compatible-responses',
+      profileRevision: '1'
+    });
+  });
+
+  it('requires a probe model for a preset whose upstream lists no models', () => {
+    const draft = createProviderDraft(compatibleSpec);
+    selectProviderPreset(draft, compatibleSpec, 'groq');
+    expect(requiresProbeModel(draft, compatibleSpec)).toBe(false);
+    selectProviderPreset(draft, compatibleSpec, 'exact');
+    expect(requiresProbeModel(draft, compatibleSpec)).toBe(true);
+  });
+
+  it('requires a probe model for a kind whose vendor lists no models', () => {
+    const vendors = [
+      { id: 'amazon-sagemaker', discovery: false },
+      { id: 'openai', discovery: true }
+    ];
+    const sagemaker = {
+      kind: 'sagemaker' as const,
+      presetId: '',
+      options: { ...emptyProviderOptions(), vendor_id: 'amazon-sagemaker' }
+    };
+    const openai = {
+      kind: 'openai' as const,
+      presetId: '',
+      options: { ...emptyProviderOptions(), vendor_id: 'openai' }
+    };
+    expect(requiresProbeModel(sagemaker, openAiSpec, undefined, vendors)).toBe(
+      true
+    );
+    expect(requiresProbeModel(openai, openAiSpec, undefined, vendors)).toBe(
+      false
+    );
+    expect(requiresProbeModel(sagemaker, openAiSpec)).toBe(false);
+    expect(probeModelPrompt('sagemaker')).toEqual({
+      label: 'SageMaker endpoint',
+      placeholder: 'endpoint or endpoint/inference-component'
+    });
+    expect(probeModelPrompt('openai').label).toBe('Probe model');
+  });
+
+  it('requires a SageMaker endpoint before creating a draft with the default vendor', () => {
+    const draft = createProviderDraft(sagemakerSpec);
+    draft.name = 'SageMaker';
+    draft.cloudRegion = 'us-east-1';
+    expect(draft.presetId).toBe('');
+    expect(draft.options?.vendor_id).toBeFalsy();
+    expect(requiresProbeModel(draft, sagemakerSpec)).toBe(true);
+    expect(validateProviderDraft(draft, sagemakerSpec)).toBe(
+      'Amazon SageMaker AI requires probe model.'
+    );
+    draft.model = 'endpoint/inference-component';
+    expect(validateProviderDraft(draft, sagemakerSpec)).toBeNull();
+    expect(buildCreateProviderInput(draft, sagemakerSpec).model).toBe(
+      'endpoint/inference-component'
+    );
   });
 
   it('clears the console-only preset selection when provider kind changes', () => {

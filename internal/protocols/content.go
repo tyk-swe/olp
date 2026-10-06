@@ -24,17 +24,7 @@ const inspectMaxDepth = 64
 // family. Callers enforcing input content policy must not dispatch a body whose
 // family it cannot inspect.
 func InputInspectable(family openai.Family) bool {
-	switch family {
-	case openai.FamilyChat, openai.FamilyResponses, openai.FamilyInputTokens,
-		openai.FamilyEmbeddings, openai.FamilyModeration, openai.FamilyRerank,
-		openai.FamilyAnthropic, openai.FamilyAnthropicCount,
-		openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyGeminiCount,
-		openai.FamilyBedrock, "bedrock_count",
-		openai.FamilyGeminiEmbeddings, openai.FamilyGeminiEmbeddingsBatch,
-		openai.FamilyVertexEmbeddings, openai.FamilyBedrockEmbeddings:
-		return true
-	}
-	return false
+	return (&inspector{}).inputFields(family, nil)
 }
 
 // InspectInputText inspects declared input text and structured tool data. An
@@ -42,7 +32,27 @@ func InputInspectable(family openai.Family) bool {
 func InspectInputText(r *openai.Request, fn TextSlot) (*openai.Request, error) {
 	fields := r.Document()
 	w := &inspector{fn: fn}
-	switch r.Family {
+	w.inputFields(r.Family, fields)
+	// Configured tool/schema text is part of the effective invocation too. Arrays
+	// remain ordered and atomic; the explicit mutation policy controls text values.
+	for _, name := range []string{"tools", "functions", "toolConfig", "response_format"} {
+		w.field(fields, name, w.stringValues)
+	}
+	if w.err != nil {
+		return nil, w.err
+	}
+	out := r.WithFields(fields, oif.ExplicitTransform)
+	if !out.OIF().Document().Valid() {
+		return nil, errors.New("input content policy rewrite produced an invalid document")
+	}
+	return out, nil
+}
+
+// inputFields walks the declared prompt text of a family's body and reports
+// whether it knows the family. InputInspectable calls it with no fields, so the
+// gate and the walk cannot drift apart.
+func (w *inspector) inputFields(family openai.Family, fields map[string]json.RawMessage) bool {
+	switch family {
 	case openai.FamilyChat:
 		w.field(fields, "messages", func(raw json.RawMessage) json.RawMessage {
 			return w.messageList(raw, inspectOpenAIMessage)
@@ -55,6 +65,21 @@ func InspectInputText(r *openai.Request, fn TextSlot) (*openai.Request, error) {
 	case openai.FamilyRerank:
 		w.field(fields, "query", w.text)
 		w.field(fields, "documents", w.stringOrList)
+	case openai.FamilyBedrockRerank:
+		w.field(fields, "queries", func(raw json.RawMessage) json.RawMessage {
+			return w.list(raw, func(item *json.RawMessage) {
+				*item = w.object(*item, func(query map[string]json.RawMessage) {
+					w.path(query, w.text, "textQuery", "text")
+				})
+			})
+		})
+		w.field(fields, "sources", func(raw json.RawMessage) json.RawMessage {
+			return w.list(raw, func(item *json.RawMessage) {
+				*item = w.object(*item, func(source map[string]json.RawMessage) {
+					w.path(source, w.text, "inlineDocumentSource", "textDocument", "text")
+				})
+			})
+		})
 	case openai.FamilyAnthropic, openai.FamilyAnthropicCount:
 		w.field(fields, "system", w.textOrParts)
 		w.field(fields, "messages", func(raw json.RawMessage) json.RawMessage {
@@ -107,20 +132,10 @@ func InspectInputText(r *openai.Request, fn TextSlot) (*openai.Request, error) {
 		})
 	case openai.FamilyBedrockEmbeddings:
 		w.field(fields, "inputText", w.text)
+	default:
+		return false
 	}
-	// Configured tool/schema text is part of the effective invocation too. Arrays
-	// remain ordered and atomic; the explicit mutation policy controls text values.
-	for _, name := range []string{"tools", "functions", "toolConfig", "response_format"} {
-		w.field(fields, name, w.stringValues)
-	}
-	if w.err != nil {
-		return nil, w.err
-	}
-	out := r.WithFields(fields, oif.ExplicitTransform)
-	if !out.OIF().Document().Valid() {
-		return nil, errors.New("input content policy rewrite produced an invalid document")
-	}
-	return out, nil
+	return true
 }
 
 func (w *inspector) stringValues(raw json.RawMessage) json.RawMessage {
@@ -461,6 +476,19 @@ func (w *inspector) field(fields map[string]json.RawMessage, name string, transf
 	if raw, ok := fields[name]; ok {
 		fields[name] = transform(raw)
 	}
+}
+
+// path walks nested objects along names and transforms the last field.
+func (w *inspector) path(fields map[string]json.RawMessage, transform func(json.RawMessage) json.RawMessage, names ...string) {
+	if len(names) == 1 {
+		w.field(fields, names[0], transform)
+		return
+	}
+	w.field(fields, names[0], func(raw json.RawMessage) json.RawMessage {
+		return w.object(raw, func(inner map[string]json.RawMessage) {
+			w.path(inner, transform, names[1:]...)
+		})
+	})
 }
 
 func (w *inspector) text(raw json.RawMessage) json.RawMessage {

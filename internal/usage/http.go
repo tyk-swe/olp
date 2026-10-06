@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/signing"
 )
 
 // Server exposes the read side of accounting — usage reports, request history,
@@ -25,6 +27,12 @@ type Server struct {
 	VendorKind func(vendor string) (string, bool)
 
 	Egress *egress.Policy
+
+	// Catalog is the reference catalog this release ships, verified at
+	// start-up; a catalog pricing source without a URL reads it.
+	Catalog *catalog.Signed
+	// CatalogKeys verify catalogs a pricing source fetches.
+	CatalogKeys signing.Keyring
 }
 
 // Register mounts the accounting routes. The patterns are more specific than
@@ -40,6 +48,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/pricing/revisions", s.listPricingRevisions)
 	// A revision may carry thousands of rates, well past the default body cap.
 	s.Access.Route(mux, "POST /api/v1/pricing/revisions", s.createPricingRevision, access.MaxBody(1<<20))
+	s.Access.Route(mux, "GET /api/v1/reference-catalog", s.referenceCatalog)
 	s.Access.Route(mux, "GET /api/v1/pricing/sources", s.listPricingSources)
 	s.Access.Route(mux, "POST /api/v1/pricing/sources", s.createPricingSource)
 	s.Access.Route(mux, "GET /api/v1/pricing/sources/{pricing_source_id}", s.getPricingSource)

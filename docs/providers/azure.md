@@ -27,6 +27,22 @@ File uploads name the route through `X-OLP-Route`, and the gateway pins each
 provider resource to one revision, slot, and credential — see the
 [compatibility matrix](../compatibility.md).
 
+## Media
+
+An Azure OpenAI deployment serves `image_generation`, `speech` and
+`transcription` on transformed routes, through OpenAI's media wire at
+`/openai/deployments/{deployment}/...` with the provider's dated API version:
+speech needs a preview version, such as `2025-04-01-preview`. Azure's v1 API
+offers no media in general availability, so the `azure-v1-*` profiles do not
+serve it.
+
+Azure has no costless way to show that a deployment serves a media operation,
+so certification makes the smallest real call, as Vertex and Bedrock image
+certification does: one low-quality image, two characters of speech, or a
+tenth of a second of silence to transcribe. Each certification bills that
+call. Streaming, edits, variations, translation and video are not certified
+for Azure.
+
 ## Testing
 
 ```sh

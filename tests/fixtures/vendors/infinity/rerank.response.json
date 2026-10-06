@@ -1,0 +1,22 @@
+{
+  "object": "rerank",
+  "results": [
+    {
+      "relevance_score": 0.92,
+      "index": 0,
+      "document": null
+    },
+    {
+      "relevance_score": 0.04,
+      "index": 1,
+      "document": null
+    }
+  ],
+  "model": "mixedbread-ai/mxbai-rerank-xsmall-v1",
+  "usage": {
+    "prompt_tokens": 21,
+    "total_tokens": 21
+  },
+  "id": "infinity-2a9e",
+  "created": 1759680000
+}

@@ -24,3 +24,16 @@ func TestMediaSimulationUsesNativeOperationModes(t *testing.T) {
 		}
 	}
 }
+
+func TestSimulationAdmitsNativeGenerationModes(t *testing.T) {
+	for _, mode := range []string{"unary", "streaming"} {
+		if err := validTuple("generation", "native", mode); err != nil {
+			t.Fatalf("native generation/%s rejected: %v", mode, err)
+		}
+	}
+	for _, tuple := range [][3]string{{"generation", "native", "async"}, {"generation", "native", "realtime"}, {"unknown", "native", "unary"}} {
+		if err := validTuple(tuple[0], tuple[1], tuple[2]); err == nil {
+			t.Errorf("invalid native tuple accepted: %v", tuple)
+		}
+	}
+}

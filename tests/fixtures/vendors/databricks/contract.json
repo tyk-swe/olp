@@ -1,0 +1,43 @@
+{
+  "vendor": "databricks",
+  "documentation_url": "https://docs.databricks.com/aws/en/machine-learning/foundation-model-apis/api-reference",
+  "reviewed_at": "2026-10-05",
+  "notes": "The workspace host is the operator's. The documented example has an empty message and null id; the fixture fills them as the schema does. Only max_tokens is documented. Stream and error bodies are undocumented.",
+  "endpoints": {
+    "generation": "https://your-workspace.cloud.databricks.com/ai-gateway/mlflow/v1/chat/completions",
+    "embeddings": "https://your-workspace.cloud.databricks.com/ai-gateway/mlflow/v1/embeddings"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 7,
+        "output_tokens": 74,
+        "total_tokens": 81
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "dialect",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  }
+}

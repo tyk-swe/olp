@@ -10,6 +10,8 @@ export type PricingSourceSnapshot = Schemas['PricingSourceSnapshot'];
 export type PricingSourceRefresh = Schemas['PricingSourceRefreshResponse'];
 export type PricingSourceDiff = Schemas['PricingSourceDiff'];
 export type PublishPricingSourceInput = Schemas['PublishPricingSourceRequest'];
+export type PricingSourceFormat = Schemas['PricingSourceFormat'];
+export type ReferenceCatalog = Schemas['ReferenceCatalog'];
 
 export async function listPricingSources(
   signal?: AbortSignal
@@ -30,7 +32,8 @@ export async function listPricingSourcePage(
 
 export async function createPricingSource(input: {
   name: string;
-  url: string;
+  format?: PricingSourceFormat;
+  url?: string | null;
   enabled?: boolean;
 }): Promise<PricingSource> {
   const response = await apiClient.POST('/api/v1/pricing/sources', {
@@ -42,7 +45,7 @@ export async function createPricingSource(input: {
 
 export async function updatePricingSource(
   source: PricingSource,
-  input: { name?: string; url?: string; enabled?: boolean }
+  input: { name?: string; url?: string | null; enabled?: boolean }
 ): Promise<PricingSource> {
   const response = await apiClient.PATCH(
     '/api/v1/pricing/sources/{pricing_source_id}',
@@ -100,5 +103,15 @@ export async function publishPricingSnapshot(
       body: input
     }
   );
+  return unwrap(response);
+}
+
+/** The signed reference catalog this release ships. */
+export async function getReferenceCatalog(
+  signal?: AbortSignal
+): Promise<ReferenceCatalog> {
+  const response = await apiClient.GET('/api/v1/reference-catalog', {
+    signal
+  });
   return unwrap(response);
 }

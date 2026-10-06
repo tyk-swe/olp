@@ -1,0 +1,7 @@
+{
+  "id": "a1b2c3d4",
+  "name": "content_moderation",
+  "errors": [
+    "Your request was flagged by our content moderation system."
+  ]
+}

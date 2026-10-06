@@ -1,0 +1,22 @@
+{
+  "vendor": "assemblyai",
+  "documentation_url": "https://www.assemblyai.com/docs/pre-recorded-audio/api-reference/transcripts/submit",
+  "reviewed_at": "2026-10-05",
+  "notes": "API keys travel in Authorization without a scheme. Audio is uploaded to /v2/upload, a transcript submitted with its upload_url and speech_models, and polled until completed or error; audio_duration is in seconds and word times in milliseconds. DELETE /v2/transcript/{id} removes the transcript and its audio. GET /v2/transcript?limit=1 proves a key without cost. The EU region is api.eu.assemblyai.com.",
+  "endpoints": {
+    "transcription": "https://api.assemblyai.com/v2/upload"
+  },
+  "unsupported_parameters": [],
+  "responses": {},
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 401,
+    "envelope": {
+      "type": "",
+      "code": "",
+      "message": "Authentication error, API token missing/invalid"
+    },
+    "class": "credential"
+  }
+}

@@ -316,7 +316,7 @@ func (s *Server) compensateCreate(ctx context.Context, reserved media.JobRecord,
 	if target == nil {
 		return false
 	}
-	call, failure := media.Encode(&media.Request{Op: media.OpVideoDelete, JobID: upstreamID, Route: reserved.RouteSlug}, target.Target.Config.Kind, target.Model)
+	call, failure := media.EncodeJob(&media.Request{Op: media.OpVideoDelete, JobID: upstreamID, Route: reserved.RouteSlug}, target.Target.Config, target.Model)
 	if failure != nil {
 		return false
 	}
@@ -443,7 +443,9 @@ func (s *Server) admitVideoRequest(parent context.Context, x *execution, authori
 // returns the attempt fact for the caller to record. A list polls its jobs
 // concurrently, so the call states the attempt in its fact and leaves the
 // execution to the caller.
-func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.JobRecord, call *media.UpstreamCall, request *media.Request) (*media.Result, *attemptFailure, AttemptFact) {
+// videoJobCall makes one call on an existing job, encoded in the wire of the
+// vendor the job's pinned provider revision names.
+func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.JobRecord, request *media.Request) (*media.Result, *attemptFailure, AttemptFact) {
 	fact := AttemptFact{
 		TargetID:           record.ID,
 		ProviderID:         record.ProviderID,
@@ -467,6 +469,13 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 	// current release still apply to subsequent requests for the retained job.
 	provider, slot := target.Provider, target.Slot
 	fact.VendorID = provider.VendorID
+	call, encodeFailure := media.EncodeJob(request, target.Config, record.UpstreamModel)
+	if encodeFailure != nil {
+		fact.Class = classProtocol
+		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.recordEvidence(false)
+		return nil, &attemptFailure{class: classProtocol}, fact
+	}
 	var strictTemplate *mediacontract.Template
 	if record.StrictContract {
 		var err error
@@ -729,11 +738,7 @@ func (s *Server) refreshListRecord(ctx context.Context, x *execution, record med
 			return record, nil, false, nil
 		}
 	}
-	call, failure := media.Encode(&media.Request{Op: media.OpVideoGet, JobID: *record.UpstreamJobID, Route: record.RouteSlug}, "openai", record.UpstreamModel)
-	if failure != nil {
-		return record, nil, false, nil
-	}
-	result, transportFailure, fact := s.videoJobCall(ctx, x, &record, call, &media.Request{Op: media.OpVideoGet, Route: record.RouteSlug})
+	result, transportFailure, fact := s.videoJobCall(ctx, x, &record, &media.Request{Op: media.OpVideoGet, JobID: *record.UpstreamJobID, Route: record.RouteSlug})
 	if transportFailure != nil {
 		if transportFailure.quota != "" || transportFailure.class == classLimitsUnavailable {
 			return record, &fact, false, transportFailure.toError()
@@ -791,12 +796,7 @@ func (s *Server) videoGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = videoJobRoute(record)
-	call, failure := media.Encode(&media.Request{Op: media.OpVideoGet, JobID: *record.UpstreamJobID, Route: record.RouteSlug}, "openai", record.UpstreamModel)
-	if failure != nil {
-		s.mediaFail(x, w, mediaError(failure))
-		return
-	}
-	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, call, &media.Request{Op: media.OpVideoGet, Route: record.RouteSlug})
+	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, &media.Request{Op: media.OpVideoGet, JobID: *record.UpstreamJobID, Route: record.RouteSlug})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
 	x.noteJobAttempt(fact)
 	if transportFailure != nil {
@@ -877,12 +877,7 @@ func (s *Server) videoContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = videoJobRoute(record)
-	call, failure := media.Encode(&media.Request{Op: media.OpVideoContent, JobID: *record.UpstreamJobID, Variant: variant, Route: record.RouteSlug}, "openai", record.UpstreamModel)
-	if failure != nil {
-		s.mediaFail(x, w, mediaError(failure))
-		return
-	}
-	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, call, &media.Request{Op: media.OpVideoContent, Route: record.RouteSlug})
+	result, transportFailure, fact := s.videoJobCall(r.Context(), x, record, &media.Request{Op: media.OpVideoContent, JobID: *record.UpstreamJobID, Variant: variant, Route: record.RouteSlug})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
 	x.noteJobAttempt(fact)
 	if transportFailure != nil {
@@ -942,12 +937,7 @@ func (s *Server) videoDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = videoJobRoute(&record)
-	call, failure := media.Encode(&media.Request{Op: media.OpVideoDelete, JobID: *record.UpstreamJobID, Route: record.RouteSlug}, "openai", record.UpstreamModel)
-	if failure != nil {
-		s.mediaFail(x, w, mediaError(failure))
-		return
-	}
-	result, transportFailure, fact := s.videoJobCall(r.Context(), x, &record, call, &media.Request{Op: media.OpVideoDelete, Route: record.RouteSlug})
+	result, transportFailure, fact := s.videoJobCall(r.Context(), x, &record, &media.Request{Op: media.OpVideoDelete, JobID: *record.UpstreamJobID, Route: record.RouteSlug})
 	x.dispatched = transportFailure == nil || transportFailure.dispatched
 	x.noteJobAttempt(fact)
 	deleted := false

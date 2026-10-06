@@ -1,0 +1,43 @@
+{
+  "vendor": "llamacpp",
+  "documentation_url": "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
+  "reviewed_at": "2026-10-05",
+  "notes": "Self-hosted; --api-key enables Bearer authentication. /v1/models always has one element. The rerank response shape is undocumented, so rerank is not reviewed.",
+  "endpoints": {
+    "generation": "https://llamacpp.example.internal/v1/chat/completions",
+    "embeddings": "https://llamacpp.example.internal/v1/embeddings"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "dialect",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "dialect",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 401,
+    "envelope": {
+      "type": "authentication_error",
+      "code": "401",
+      "message": "Invalid API Key"
+    },
+    "class": "credential"
+  }
+}

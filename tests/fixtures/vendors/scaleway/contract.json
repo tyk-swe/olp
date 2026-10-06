@@ -1,0 +1,52 @@
+{
+  "vendor": "scaleway",
+  "documentation_url": "https://www.scaleway.com/en/docs/generative-apis/api-cli/using-chat-api/",
+  "reviewed_at": "2026-10-05",
+  "notes": "The unsupported parameters follow the Generative APIs specification, which supersedes the older chat page. A project-scoped base https://api.scaleway.ai/{project_id}/v1 also exists.",
+  "endpoints": {
+    "generation": "https://api.scaleway.ai/v1/chat/completions",
+    "embeddings": "https://api.scaleway.ai/v1/embeddings"
+  },
+  "unsupported_parameters": [
+    "audio",
+    "metadata",
+    "modalities",
+    "prediction",
+    "service_tier",
+    "store",
+    "user",
+    "web_search_options"
+  ],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "400",
+      "message": "Invalid request"
+    },
+    "class": "upstream_client"
+  }
+}

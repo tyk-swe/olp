@@ -15,16 +15,21 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // Server serves the route management surface.
 type Server struct {
 	Access *access.Server
 	Inputs func() *usage.RoutingInputs
+	// Catalog is the reference catalog this release ships, whose documented
+	// retirements targets carry.
+	Catalog *catalog.Signed
 	// UnconfinedPlugins is set where the deployment enables unconfined
 	// plugins; previews plan as its gateways do.
 	UnconfinedPlugins bool
@@ -105,6 +110,8 @@ type resolved struct {
 	Certified     map[string]bool
 	AuthMode      string
 	Slots         []runtime.Slot
+	// Lifecycle is the target model's documented deprecation and retirement.
+	Lifecycle *catalog.LifecycleView
 }
 
 func (r *resolved) available() bool {
@@ -112,8 +119,9 @@ func (r *resolved) available() bool {
 }
 
 // resolve looks up every provider model referenced by the targets against the
-// providers' activated revisions, which is what the gateway will serve.
-func resolve(ctx context.Context, q access.Queryer, targets []runtime.PublishedTarget) (map[string]*resolved, error) {
+// providers' activated revisions, which is what the gateway will serve, and
+// the reference catalog's documented lifecycle of each.
+func (s *Server) resolve(ctx context.Context, q access.Queryer, targets []runtime.PublishedTarget) (map[string]*resolved, error) {
 	ids := make([]string, 0, len(targets))
 	for _, t := range targets {
 		ids = append(ids, t.ProviderModelID)
@@ -121,7 +129,9 @@ func resolve(ctx context.Context, q access.Queryer, targets []runtime.PublishedT
 	rows, err := q.Query(ctx, `SELECT m.id::text,p.id::text,p.name,m.upstream_model,p.state,
 		coalesce(r.models,'[]'::jsonb),coalesce(r.configuration->>'auth_mode','none'),
 		coalesce(r.slots,'[]'::jsonb),
-		ARRAY(SELECT c.id::text FROM olp.provider_credentials c WHERE c.provider_id=p.id AND c.revoked_at IS NULL)
+		ARRAY(SELECT c.id::text FROM olp.provider_credentials c WHERE c.provider_id=p.id AND c.revoked_at IS NULL),
+		coalesce(coalesce(r.configuration,p.configuration)->'options'->>'vendor_id',''),coalesce(r.configuration->>'kind',p.kind),
+		coalesce(coalesce(r.configuration,p.configuration)->'options'->'models'->m.upstream_model->>'canonical_model','')
 		FROM olp.provider_models m JOIN olp.providers p ON p.id=m.provider_id
 		LEFT JOIN olp.provider_revisions r ON r.id=p.active_revision_id
 		WHERE m.id=ANY($1::uuid[])`, ids)
@@ -134,10 +144,15 @@ func resolve(ctx context.Context, q access.Queryer, targets []runtime.PublishedT
 		var id string
 		var models, slots []byte
 		var credentials []string
+		var vendorID, kind, canonical string
 		r := &resolved{Certified: map[string]bool{}}
-		if err = rows.Scan(&id, &r.ProviderID, &r.ProviderName, &r.ProviderModel, &r.ProviderState, &models, &r.AuthMode, &slots, &credentials); err != nil {
+		if err = rows.Scan(&id, &r.ProviderID, &r.ProviderName, &r.ProviderModel, &r.ProviderState, &models, &r.AuthMode, &slots, &credentials, &vendorID, &kind, &canonical); err != nil {
 			return nil, err
 		}
+		if vendorID == "" {
+			vendorID = vendors.DefaultFor(kind)
+		}
+		r.Lifecycle = s.Catalog.Lifecycle(vendorID, r.ProviderModel, canonical)
 		if err = json.Unmarshal(slots, &r.Slots); err != nil {
 			return nil, err
 		}
@@ -172,7 +187,11 @@ func targetJSON(t runtime.PublishedTarget, live *resolved) map[string]any {
 	if live != nil {
 		name, model, providerID = live.ProviderName, live.ProviderModel, live.ProviderID
 	}
-	return map[string]any{"id": t.ID, "provider_model_id": t.ProviderModelID, "provider_id": providerID, "provider_name": name, "provider_model": model, "available": live.available(), "priority": t.Priority, "weight": t.Weight, "timeout_ms": t.TimeoutMS, "position": t.Position}
+	var lifecycle *catalog.LifecycleView
+	if live != nil {
+		lifecycle = live.Lifecycle
+	}
+	return map[string]any{"id": t.ID, "provider_model_id": t.ProviderModelID, "provider_id": providerID, "provider_name": name, "provider_model": model, "available": live.available(), "priority": t.Priority, "weight": t.Weight, "timeout_ms": t.TimeoutMS, "position": t.Position, "lifecycle": lifecycle}
 }
 
 func targetsJSON(targets []runtime.PublishedTarget, live map[string]*resolved) []map[string]any {
@@ -192,7 +211,7 @@ func (d *draft) detail(live map[string]*resolved) map[string]any {
 }
 
 func (s *Server) draftDetail(ctx context.Context, q access.Queryer, d *draft) (access.Reply, error) {
-	live, err := resolve(ctx, q, d.Targets)
+	live, err := s.resolve(ctx, q, d.Targets)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -356,7 +375,7 @@ func (s *Server) drafts(r *http.Request, p access.Principal) (access.Reply, erro
 		return access.Reply{}, err
 	}
 	rows.Close()
-	live, err := resolve(r.Context(), s.Access.Pool, all)
+	live, err := s.resolve(r.Context(), s.Access.Pool, all)
 	if err != nil {
 		return access.Reply{}, err
 	}

@@ -1,0 +1,43 @@
+{
+  "vendor": "zhipu",
+  "documentation_url": "https://docs.bigmodel.cn/cn/guide/develop/openai/introduction",
+  "reviewed_at": "2026-10-05",
+  "notes": "The path prefix is /api/paas/v4. Only max_tokens is documented. Usage appears only in the last stream chunk.",
+  "endpoints": {
+    "generation": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+    "embeddings": "https://open.bigmodel.cn/api/paas/v4/embeddings"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "documented",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 401,
+    "envelope": {
+      "type": "",
+      "code": "1001",
+      "message": "Header 中未收到 Authentication 参数，无法进行身份验证"
+    },
+    "class": "credential"
+  }
+}

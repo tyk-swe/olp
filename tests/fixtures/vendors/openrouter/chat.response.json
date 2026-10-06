@@ -1,0 +1,24 @@
+{
+  "id": "gen-xxxxxxxxxxxxxx",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "native_finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "Hello there!"
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 4,
+    "total_tokens": 14,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "cost": 0.00014
+  },
+  "model": "openai/gpt-4o"
+}

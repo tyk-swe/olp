@@ -40,7 +40,7 @@ func Compile(c Config) (*Template, error) {
 	if !slices.Contains(p.Operations, "batch") || !slices.Contains([]string{"direct-openai", "azure-deployment", "azure-v1"}, p.Hosting) || !c.Provider.Supports("batch", "openai", "unary") {
 		return nil, refusal("/profile", "native_batch_contract", "This provider profile has no strict batch contract.")
 	}
-	if !connectors.ModelValid(c.Provider.Kind, c.Provider.Model(c.Model)) {
+	if !c.Provider.ValidModel(c.Provider.Model(c.Model)) {
 		return nil, refusal("/model", "serving_binding", "The batch serving model is invalid.")
 	}
 	defaults, _, err := c.Provider.DefaultsFor("batch", c.Model)

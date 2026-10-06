@@ -3,7 +3,10 @@ package estimate
 import (
 	"math"
 	"strings"
+	"sync"
 	"unicode/utf8"
+
+	"github.com/tyk-swe/olp/internal/catalog"
 )
 
 // Family groups the models that share a tokenizer, which is what an estimate
@@ -47,14 +50,25 @@ const (
 	ProvenanceHeuristic Provenance = "heuristic"
 )
 
-// Calibration factors scale the heuristic for families that have no public
-// tokenizer. They stay at 1 until the reference catalog (roadmap M2.4) carries
-// measured values; a factor other than 1 makes the heuristic count calibrated.
-const (
-	anthropicFactor = 1.0
-	geminiFactor    = 1.0
-	otherFactor     = 1.0
-)
+// familyFactors scale the heuristic for families that have no public
+// tokenizer. They come from the signed reference catalog, each measured
+// against the vendor's own token counts; a family the catalog has not measured
+// keeps the plain heuristic, and a factor other than 1 makes the heuristic
+// count calibrated. A process refuses to start with a catalog that does not
+// verify; a tool that cannot verify it keeps the heuristic.
+var familyFactors = sync.OnceValue(func() map[Family]float64 {
+	factors := map[Family]float64{}
+	estimation, err := catalog.EmbeddedEstimation()
+	if err != nil {
+		return factors
+	}
+	for _, e := range estimation {
+		if factor, err := e.Factor.Float64(); err == nil {
+			factors[Family(e.Family)] = factor
+		}
+	}
+	return factors
+})
 
 // CharsPerToken is the ratio the heuristic charges text at. Four characters
 // per token is a conservative portable approximation across tokenizers.
@@ -92,12 +106,10 @@ func ForModel(model string) Counter {
 		return Counter{family: family, encoding: O200kBase}
 	case FamilyOpenAICL100k:
 		return Counter{family: family, encoding: CL100kBase}
-	case FamilyAnthropic:
-		return Counter{family: family, factor: anthropicFactor}
-	case FamilyGemini:
-		return Counter{family: family, factor: geminiFactor}
+	case FamilyAnthropic, FamilyGemini:
+		return Counter{family: family, factor: familyFactors()[family]}
 	default:
-		return Counter{family: FamilyOther, factor: otherFactor}
+		return Counter{family: FamilyOther, factor: familyFactors()[FamilyOther]}
 	}
 }
 

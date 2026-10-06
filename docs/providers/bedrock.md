@@ -9,8 +9,23 @@ unchanged.
 Beyond Converse, two InvokeModel families qualify by model prefix:
 `amazon.titan-embed-text-*` models serve single-input embeddings and
 `amazon.titan-image-generator-*` models serve `image_generation` with the
-`TEXT_IMAGE` task. Both normalize to the OpenAI surface and are described in
+`TEXT_IMAGE` task. The Stability text-to-image models `stability.sd3-5-large-*`,
+`stability.stable-image-core-*` and `stability.stable-image-ultra-*` serve
+`image_generation` too: one image per request, with the `1024x1024`,
+`1536x1024` and `1024x1536` sizes sent as aspect ratios and `output_format`
+as `png`, `jpeg` or `webp`. A request Stability's filter refuses fails with
+`content_filter`. Both normalize to the OpenAI surface and are described in
 [the compatibility matrix](../compatibility.md).
+
+Rerank models, such as `amazon.rerank-v1:0` and `cohere.rerank-v3-5:0`, serve
+`/v1/rerank` through the Bedrock Agent Runtime's
+[Rerank API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Rerank.html)
+at `bedrock-agent-runtime.{region}`, which OLP reaches only from the region's
+default Bedrock Runtime endpoint. The request names the model by its regional
+foundation-model ARN, `truncation` is refused, and documents return from the
+request when `return_documents` asks for them. AWS bills a query for every
+hundred documents, which is the usage OLP records. Inference needs
+`bedrock:Rerank` and `bedrock:InvokeModel` on the model.
 
 ## Bedrock SDK ingress
 

@@ -1,0 +1,47 @@
+name: Catalog drift
+# Compares the reference catalog with what each vendor lists and keeps one
+# issue up to date for a maintainer to review. Corrections land as reviewed
+# pull requests that re-sign the catalog; nothing here edits it.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+defaults:
+  run:
+    shell: bash
+jobs:
+  report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: live-providers
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Compare the catalog with vendor listings
+        env:
+          OPENAI_API_KEY: ${{ secrets.OLP_LIVE_OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.OLP_LIVE_ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.OLP_LIVE_GEMINI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.OLP_LIVE_MISTRAL_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.OLP_LIVE_GROQ_API_KEY }}
+          XAI_API_KEY: ${{ secrets.OLP_LIVE_XAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.OLP_LIVE_DEEPSEEK_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.OLP_LIVE_CEREBRAS_API_KEY }}
+          MOONSHOT_API_KEY: ${{ secrets.OLP_LIVE_MOONSHOT_API_KEY }}
+        run: go run ./internal/catalog/cmd/catalogdrift > "$RUNNER_TEMP/drift.md"
+      - name: Update the catalog-drift issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          number=$(gh issue list --label catalog-drift --state open --json number --jq '.[0].number // empty')
+          if [[ -n $number ]]; then
+            gh issue edit "$number" --body-file "$RUNNER_TEMP/drift.md"
+          else
+            gh label create catalog-drift --description 'Reference catalog drift report' --color c5def5 2>/dev/null || true
+            gh issue create --title 'Reference catalog drift' --label catalog-drift --body-file "$RUNNER_TEMP/drift.md"
+          fi

@@ -127,7 +127,7 @@ func (d *simulatedDemand) measure(target runtime.Target, prompt *estimate.Prompt
 }
 
 func validTuple(operation, surface, mode string) error {
-	if operationregistry.Default.Supports(operation, surface, mode) {
+	if operationregistry.Default.Supports(operation, surface, mode) || operation == "generation" && surface == "native" && (mode == "unary" || mode == "streaming") {
 		return nil
 	}
 	if !slices.Contains(supportedOperations, operation) && !registeredOperation(operation) {
@@ -170,7 +170,7 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 	if err := ValidateFidelityPolicy(d.Fidelity, d.ContentPolicy); err != nil {
 		return access.Reply{}, err
 	}
-	live, err := resolve(r.Context(), s.Access.Pool, d.Targets)
+	live, err := s.resolve(r.Context(), s.Access.Pool, d.Targets)
 	if err != nil {
 		return access.Reply{}, err
 	}

@@ -18,6 +18,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // Profile links independently owned dialect, hosting and authentication contracts.
@@ -77,9 +78,12 @@ var profileRegistry = []Profile{
 	{ID: "azure-v1-responses", Label: "Azure v1 Responses", Kind: "azure_openai", Dialect: "openai-responses", DialectRevision: "v1", Hosting: "azure-v1"},
 	{ID: "vertex-gemini", Label: "Vertex Google publisher", Kind: "vertex_ai", Dialect: "gemini-generate-content", DialectRevision: "v1", Hosting: "vertex-google"},
 	{ID: "vertex-anthropic", Label: "Vertex Anthropic publisher", Kind: "vertex_ai", Dialect: "anthropic-messages", DialectRevision: "vertex-2023-10-16", Hosting: "vertex-anthropic"},
+	{ID: "vertex-openai", Label: "Vertex OpenAI-compatible Chat Completions", Kind: "vertex_ai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "vertex-openai"},
 	{ID: "bedrock-converse", Label: "Bedrock Converse", Kind: "bedrock", Dialect: "bedrock-converse", Hosting: "bedrock-converse"},
 	{ID: "bedrock-anthropic-invoke", Label: "Bedrock Anthropic Invoke", Kind: "bedrock", Dialect: "anthropic-messages", DialectRevision: "bedrock-2023-05-31", Hosting: "bedrock-anthropic-invoke"},
 	{ID: "bedrock-invoke", Label: "Bedrock model-specific Invoke", Kind: "bedrock", Dialect: "bedrock-invoke", Hosting: "bedrock-invoke"},
+	{ID: "mistral-fim", Label: "Mistral fill-in-the-middle", Kind: "openai_compatible", Dialect: "mistral-fim", DialectRevision: "v1", Hosting: "direct-compatible"},
+	{ID: "sagemaker-openai-chat", Label: "SageMaker OpenAI-compatible Chat Completions", Kind: KindSageMaker, Dialect: "openai-chat", DialectRevision: "v1", Hosting: "sagemaker-openai"},
 }
 
 func init() {
@@ -121,11 +125,20 @@ func init() {
 				p.Authentication = []string{"adc", "service_account"}
 				p.Operations = append(p.Operations, "image_generation")
 			}
+			if p.Hosting == "vertex-openai" {
+				p.Operations = []string{"generation"}
+				p.QuerySettings = []string{}
+				p.Documentation = "https://cloud.google.com/vertex-ai/generative-ai/docs/migrate/openai/overview"
+			}
 			if p.Hosting == "vertex-anthropic" {
 				p.Operations = []string{"generation"}
 				p.SemanticHeaders = []string{"Anthropic-Beta"}
 				p.Documentation = "https://platform.claude.com/docs/en/build-with-claude/claude-on-vertex-ai"
 			}
+		case KindSageMaker:
+			p.Authentication = []string{"static", "default_chain"}
+			p.Operations = []string{"generation"}
+			p.Documentation = "https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html"
 		case "bedrock":
 			p.Authentication = []string{"static", "default_chain"}
 			p.Documentation = "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html"
@@ -141,6 +154,11 @@ func init() {
 		// Interactions and Live have independent request and event grammars.
 		// Their profile tuples cannot fall through GenerateContent's codec.
 		switch p.Dialect {
+		case "mistral-fim":
+			p.Operations = []string{"generation"}
+			p.Authentication = []string{"api_key"}
+			p.SemanticHeaders = []string{}
+			p.Documentation = "https://docs.mistral.ai/api/endpoint/fim"
 		case "gemini-interactions":
 			p.Operations = []string{"generation"}
 			p.Authentication = []string{"api_key"}
@@ -199,6 +217,19 @@ func profileView(id, revision string) (Profile, error) {
 		}
 	}
 	return Profile{}, errors.New("unknown provider profile or unsupported profile revision")
+}
+
+// profileHosting is the hosting of the built-in profile with an identifier,
+// or "" for an unknown one.
+func profileHosting(id string) string {
+	profileMu.RLock()
+	defer profileMu.RUnlock()
+	for _, p := range profileRegistry {
+		if p.ID == id {
+			return p.Hosting
+		}
+	}
+	return ""
 }
 
 func LookupProfile(id, revision string) (Profile, error) {
@@ -305,8 +336,8 @@ func (c Config) ValidateProfile() error {
 			}
 		}
 	}
-	if p.Dialect == "openai-responses" && slices.Contains([]string{"deepseek", "fireworks", "deepinfra", "huggingface", "perplexity", "cohere"}, c.VendorID) {
-		return errors.New("this vendor's declared dialect does not include Responses")
+	if _, generation := generationFamily(p.Dialect); generation && !vendors.Speaks(c.VendorID, p.Dialect) {
+		return errors.New("the vendor's reviewed contract does not include the profile's dialect")
 	}
 	if len(c.SemanticHeaders) > 16 || len(c.QuerySettings) > 16 {
 		return errors.New("use at most 16 semantic headers and query settings")
@@ -360,7 +391,7 @@ func (c Config) TargetFamily(source openai.Family) (openai.Family, error) {
 	}
 	switch operation {
 	case "generation":
-		if family, ok := generationFamily(p.Dialect); ok {
+		if family, ok := generationFamily(p.OperationDialect("generation")); ok {
 			return family, nil
 		}
 	case "token_count":
@@ -408,6 +439,10 @@ func generationFamily(dialect string) (openai.Family, bool) {
 		return openai.FamilyGemini, true
 	case "bedrock-converse":
 		return openai.FamilyBedrock, true
+	case "mistral-fim":
+		return openai.FamilyMistralFIM, true
+	case "cohere-chat-v2":
+		return openai.FamilyCohereChat, true
 	}
 	return "", false
 }
@@ -419,13 +454,20 @@ func (c Config) Supports(operation, surface, mode string) bool {
 	}
 	if c.ProfileID != "" {
 		if p, err := c.profile(); err == nil {
+			// A native generation dialect serves its own clients on the
+			// native surface, and is never translated to or from another.
+			if family, ok := generationFamily(p.OperationDialect("generation")); ok && family.Surface() == "native" && operation == "generation" {
+				return surface == "native" && (mode == "unary" || mode == "streaming") && slices.Contains(p.Operations, operation) && vendors.Serves(c.VendorID, operation)
+			}
 			switch p.Dialect {
 			case "gemini-interactions":
 				return operation == "generation" && surface == "gemini" && (mode == "unary" || mode == "streaming")
 			case "gemini-live":
 				return operation == "realtime" && surface == "gemini" && mode == "realtime"
 			}
-			if codec, ok := operationregistry.Lookup(p.OperationDialect(operation)); ok && codec.Operation.ID == operation {
+			// An operation outside the profile has no dialect of its own; the
+			// default dialect OperationDialect names for it does not apply.
+			if codec, ok := operationregistry.Lookup(p.OperationDialect(operation)); ok && codec.Operation.ID == operation && slices.Contains(p.Operations, operation) {
 				if operationregistry.Default.SupportsTarget(codec.Identity, surface, mode) {
 					return true
 				}
@@ -459,6 +501,9 @@ func (c Config) host(req *http.Request, credential []byte) ([]string, error) {
 	}
 	if c.Kind == "anthropic" && c.ProfileID == "" {
 		req.Header.Set("Anthropic-Version", anthropicMessagesRevision)
+	}
+	for name, value := range vendors.HeadersFor(c.VendorID) {
+		req.Header.Set(name, value)
 	}
 	if c.Plugin != nil {
 		return c.Plugin.place(req, credential, c.PluginOptions)
@@ -508,23 +553,8 @@ func (p Profile) BindIngressSemanticHeader(name, value string) (bool, error) {
 	return true, nil
 }
 
-func (c Config) AzureScope() string {
-	if c.Hosting() == "azure-v1" {
-		return "https://ai.azure.com/.default"
-	}
-	return "https://cognitiveservices.azure.com/.default"
-}
-
-func (c Config) profileBase() string {
-	base := strings.TrimRight(c.Endpoint, "/")
-	if c.Hosting() == "azure-v1" && !strings.HasSuffix(base, "/openai/v1") {
-		base += "/openai/v1"
-	}
-	return base
-}
-
 func (c Config) validateProfileEndpoint(u *url.URL) error {
-	if (c.ProfileID == "cohere-embed-v2" || c.ProfileID == "cohere-rerank-v2") &&
+	if (c.ProfileID == "cohere-embed-v2" || c.ProfileID == "cohere-rerank-v2" || c.ProfileID == "cohere-v2") &&
 		strings.EqualFold(u.Hostname(), "api.cohere.ai") && strings.TrimRight(u.Path, "/") != "/v2" {
 		return errors.New("Cohere native v2 requires the /v2 endpoint; the compatibility/v1 preset is a separate API")
 	}
@@ -558,14 +588,10 @@ func (c Config) validateProfileEndpoint(u *url.URL) error {
 			return errors.New("legacy Azure Responses requires a dated API version")
 		}
 		return nil
-	case "vertex-google", "vertex-anthropic":
-		publisher := "google"
-		if c.Hosting() == "vertex-anthropic" {
-			publisher = "anthropic"
-		}
-		want := "/v1/projects/" + c.CloudProject + "/locations/" + c.CloudRegion + "/publishers/" + publisher
+	case "vertex-google", "vertex-anthropic", "vertex-openai":
+		want := "/v1/projects/" + c.CloudProject + "/locations/" + c.CloudRegion + c.traits().vertexPath
 		if u.Path != want {
-			return errors.New("Vertex endpoint path must match the profile publisher, project and location")
+			return errors.New("Vertex endpoint path must match the profile's publisher or endpoint, project and location")
 		}
 	}
 	return nil

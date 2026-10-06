@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -52,7 +53,10 @@ type Server struct {
 	Quotas     QuotaSource
 	// Plugins runs plugins' grant enrollment steps, and carries the probes of
 	// profiles whose unconfined plugin carries their traffic.
-	Plugins     *plugins.Host
+	Plugins *plugins.Host
+	// Catalog is the reference catalog this release ships, whose facts
+	// discovery offers beside a provider's models.
+	Catalog     *catalog.Signed
 	Log         *slog.Logger
 	client      *http.Client
 	connections *egress.ConnectionClientCache

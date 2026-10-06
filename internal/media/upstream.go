@@ -90,8 +90,13 @@ type Result struct {
 	Artifact      *Artifact     // staged binary response
 	Body          io.ReadCloser // SSE response body; the caller drains it
 	ContentType   string
-	Source        oif.Document    // bounded immutable native JSON result for strict media
-	BlobSource    *oif.BlobResult // existing spool owns the bytes and lifecycle
+	// BilledCharacters is the characters a speech call bills, as the vendor
+	// reports them, and Tokens the tokens it bills, for a vendor that bills
+	// speech by token.
+	BilledCharacters *int64
+	Tokens           *ImageUsage
+	Source           oif.Document    // bounded immutable native JSON result for strict media
+	BlobSource       *oif.BlobResult // existing spool owns the bytes and lifecycle
 }
 
 const errorBodyLimit = 64 * 1024
@@ -110,18 +115,45 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		return nil, &Failure{Class: ClassConnect, Detail: "provider endpoint rejected by egress policy"}
 	}
 	endpoint, err := target.Config.MediaURL(call.Path, target.Model, call.Query)
+	if call.URL != "" {
+		endpoint, err = call.URL, nil
+		if _, e := t.Egress.ValidateEndpoint(call.URL); e != nil {
+			err = e
+		}
+	}
 	if err != nil {
 		return nil, &Failure{Class: ClassProtocol, Detail: "media endpoint could not be built"}
+	}
+	if call.SigningService != "" {
+		target.Config.SigningService = call.SigningService
 	}
 
 	var body io.Reader = http.NoBody
 	contentType := ""
 	var pipe *io.PipeReader
 	var multipartDone chan error
+	var contentLength int64
+	if call.JSONFrom != nil {
+		inlined, failure := call.JSONFrom(t.readPart)
+		if failure != nil {
+			return nil, &Failure{Class: ClassProtocol, Detail: failure.Message}
+		}
+		call.JSON = inlined
+	}
 	switch {
 	case call.JSON != nil:
 		body = bytes.NewReader(call.JSON)
 		contentType = "application/json"
+	case call.Upload != nil:
+		opened, err := t.Spool.Open(call.Upload.Handle)
+		if err != nil {
+			return nil, &Failure{Class: ClassConnect, Detail: "staged media upload is unavailable"}
+		}
+		defer opened.File.Close()
+		body, contentType, contentLength = opened.File, call.Upload.ContentType, opened.Artifact.ContentLength
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
 	case len(call.Fields) > 0:
 		reader, writer := io.Pipe()
 		form := multipart.NewWriter(writer)
@@ -146,6 +178,9 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
+	}
+	if contentLength > 0 {
+		req.ContentLength = contentLength
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
 	if call.Accept != "" {
@@ -195,7 +230,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 			Ambiguous: call.Ambiguous && outcome.Acceptance.Unresolved(), Detail: "upstream transport failed"}
 	}
 	firstByte := t.now().Sub(started)
-	if resp.StatusCode != http.StatusOK && !(call.Kind == ResponseVideoJob && resp.StatusCode == http.StatusCreated) {
+	if resp.StatusCode != http.StatusOK && !(call.Kind == ResponseVideoJob && resp.StatusCode == http.StatusCreated) && !(call.NoContent && resp.StatusCode == http.StatusNoContent) {
 		// A provider can reject headers before reading the upload. Stop the
 		// producer and preserve the definitive HTTP rejection in that case.
 		if pipe != nil {
@@ -211,7 +246,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		}
 		// A non-idempotent call's work may survive a server failure, never a
 		// stated rejection.
-		outcome := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: failure.Upstream})
+		outcome := upstream.Classifier{Declared: target.Config.Classification()}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: failure.Upstream})
 		failure.Class, failure.Ambiguous = outcome.Class, call.Ambiguous && outcome.Acceptance.Unresolved()
 		if failure.Class == ClassRateLimit {
 			failure.RetryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), t.now())
@@ -227,11 +262,13 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		}
 	}
 
-	result, failure := t.decode(ctx, resp, call, request, firstByte)
+	result, failure := t.decode(ctx, resp, call, request, firstByte, func(next *http.Request) (*http.Response, error) { return client.Do(next) }, target)
 	if failure != nil {
 		resp.Body.Close()
 		failure.Dispatched = true
-		failure.Ambiguous = failure.Ambiguous || call.Ambiguous
+		// A call that may create work leaves it unresolved on any failure but
+		// the vendor's stated verdict on the request.
+		failure.Ambiguous = call.Ambiguous && failure.Class != ClassUpstreamClient
 		return nil, failure
 	}
 	if result.Body == nil {
@@ -293,7 +330,7 @@ func filePartHeader(field, filename, contentType string) textproto.MIMEHeader {
 
 var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"", "\r", "", "\n", "", "\x00", "").Replace
 
-func (t *Transport) decode(ctx context.Context, resp *http.Response, call *UpstreamCall, request *Request, firstByte time.Duration) (*Result, *Failure) {
+func (t *Transport) decode(ctx context.Context, resp *http.Response, call *UpstreamCall, request *Request, firstByte time.Duration, send func(*http.Request) (*http.Response, error), target Target) (*Result, *Failure) {
 	result := &Result{Kind: call.Kind, Status: resp.StatusCode, FirstByte: firstByte}
 	retainJSON := func(body []byte) *Failure {
 		if !call.Strict {
@@ -318,6 +355,9 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		result.Body = resp.Body
 		return result, nil
 	case ResponseBinary:
+		if call.DecodeAudio != nil {
+			return t.decodeAudio(ctx, resp, call, request, result)
+		}
 		contentType := binaryContentType(resp, "audio/")
 		if call.Strict {
 			original := resp.Header.Get("Content-Type")
@@ -327,6 +367,11 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			}
 			contentType = original
 		}
+		// Without the vendor's count, the call stays billing-uncertain; the
+		// audio it billed for is still delivered.
+		if billed, err := strconv.ParseInt(resp.Header.Get(call.CharacterHeader), 10, 64); call.CharacterHeader != "" && err == nil && billed >= 0 {
+			result.BilledCharacters = &billed
+		}
 		artifact, failure := t.stageResponse(ctx, resp, contentType, request)
 		if failure != nil {
 			return nil, stageFailure(failure)
@@ -335,6 +380,31 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		result.ContentType = artifact.ContentType
 		return result, nil
 	case ResponseVideoContent:
+		if call.Next != nil {
+			// The vendor names its product in a job object; the work's
+			// last step fetches it.
+			if !requireContentType(resp, "application/json") {
+				return nil, &Failure{Class: ClassProtocol, Detail: "video job response is not JSON"}
+			}
+			body, failure := t.collect(resp)
+			if failure != nil {
+				return nil, failure
+			}
+			asset, _, failure := t.follow(ctx, call, body, send, target)
+			if failure != nil {
+				return nil, failure
+			}
+			if asset == nil {
+				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Detail: "the vendor named no video content"}
+			}
+			contentType := strings.ToLower(strings.TrimSpace(strings.Split(asset.contentType, ";")[0]))
+			artifact, err := t.Spool.Put(ctx, Upload{Filename: "video-content", ContentType: contentType, MaximumLength: int64(len(asset.body)), Body: bytes.NewReader(asset.body)})
+			if err != nil {
+				return nil, stageFailure(SpoolError(err))
+			}
+			result.Artifact, result.ContentType = artifact, artifact.ContentType
+			return result, nil
+		}
 		base := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
 		if call.Strict {
 			original := resp.Header.Get("Content-Type")
@@ -359,7 +429,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		if request != nil && request.Format != nil {
 			format = *request.Format
 		}
-		if TranscriptionFormatIsText(format) {
+		if TranscriptionFormatIsText(format) && call.DecodeTranscription == nil {
 			if !transcriptionTextContentType(resp, format) {
 				return nil, &Failure{Class: ClassProtocol,
 					Detail: "transcription response content type does not match the requested format"}
@@ -382,11 +452,21 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		if failure := retainJSON(body); failure != nil {
 			return nil, failure
 		}
-		decoded, mErr := DecodeTranscriptionJSON(body)
+		if call.Next != nil {
+			var failure *Failure
+			if _, body, failure = t.follow(ctx, call, body, send, target); failure != nil {
+				return nil, failure
+			}
+		}
+		decoded, mErr := DecodeTranscript(call, format, body)
 		if mErr != nil {
-			return nil, &Failure{Class: ClassProtocol, Detail: mErr.Message}
+			return nil, decodeFailure(mErr)
 		}
 		result.Transcription = decoded
+		if format == "text" {
+			// A vendor that answers in JSON serves a text client its text.
+			result.Text = []byte(decoded.Text)
+		}
 		return result, nil
 	case ResponseImages:
 		if !requireContentType(resp, "application/json") {
@@ -400,11 +480,7 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			return nil, failure
 		}
 		var stagedHandles []Handle
-		stage := func(b64 string, index int) (*Artifact, *Error) {
-			raw, err := base64.StdEncoding.DecodeString(b64)
-			if err != nil {
-				return nil, protocolError("The provider image payload is not valid base64.")
-			}
+		stageRaw := func(raw []byte, index int) (*Artifact, *Error) {
 			staged, sErr := t.Spool.Put(ctx, Upload{
 				Filename:      "image-" + strconv.Itoa(index) + ".png",
 				ContentType:   "image/png",
@@ -417,9 +493,32 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			stagedHandles = append(stagedHandles, staged.Handle)
 			return staged, nil
 		}
+		stage := func(b64 string, index int) (*Artifact, *Error) {
+			raw, err := base64.StdEncoding.DecodeString(b64)
+			if err != nil {
+				return nil, protocolError("The provider image payload is not valid base64.")
+			}
+			return stageRaw(raw, index)
+		}
 		var decoded *ImageResult
 		var mErr *Error
-		if call.Native != "" {
+		if call.Next != nil {
+			asset, _, failure := t.follow(ctx, call, body, send, target)
+			if failure != nil {
+				return nil, failure
+			}
+			if asset == nil {
+				return nil, &Failure{Class: ClassProtocol, Dispatched: true, Detail: "the vendor's work ended without an image"}
+			}
+			staged, sErr := stageRaw(asset.body, 0)
+			if sErr != nil {
+				return nil, stageFailure(sErr)
+			}
+			handle := staged.Handle
+			decoded = &ImageResult{CreatedAt: t.now().Unix(), Images: []ImageArtifact{{Handle: &handle}}}
+		} else if call.DecodeImages != nil {
+			decoded, mErr = call.DecodeImages(body, stage)
+		} else if call.Native != "" {
 			expected := int64(1)
 			if request != nil && request.Count != nil {
 				expected = *request.Count
@@ -432,11 +531,15 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			for _, handle := range stagedHandles {
 				t.Spool.Remove(handle)
 			}
-			return nil, &Failure{Class: ClassProtocol, Detail: mErr.Message}
+			return nil, decodeFailure(mErr)
 		}
 		result.Images = decoded
 		return result, nil
 	case ResponseVideoJob, ResponseVideoList, ResponseVideoDelete:
+		if call.NoContent && resp.StatusCode == http.StatusNoContent {
+			result.Deleted = &VideoDeleteResult{Deleted: true}
+			return result, nil
+		}
 		if !requireContentType(resp, "application/json") {
 			return nil, &Failure{Class: ClassProtocol, Detail: "video response is not JSON"}
 		}
@@ -448,12 +551,14 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 			return nil, failure
 		}
 		var mErr *Error
-		switch call.Kind {
-		case ResponseVideoJob:
+		switch {
+		case call.DecodeVideo != nil:
+			result.Video, mErr = call.DecodeVideo(body)
+		case call.Kind == ResponseVideoJob:
 			result.Video, mErr = DecodeVideoObject(body)
-		case ResponseVideoList:
+		case call.Kind == ResponseVideoList:
 			result.List, mErr = DecodeVideoListResponse(body)
-		case ResponseVideoDelete:
+		case call.Kind == ResponseVideoDelete:
 			result.Deleted, mErr = DecodeVideoDeleteResponse(body)
 		}
 		if mErr != nil {
@@ -462,6 +567,71 @@ func (t *Transport) decode(ctx context.Context, resp *http.Response, call *Upstr
 		return result, nil
 	}
 	return nil, &Failure{Class: ClassProtocol, Detail: "unsupported media response kind"}
+}
+
+// readPart reads an uploaded file a JSON body inlines, within the audio
+// upload bound.
+func (t *Transport) readPart(part *Part) ([]byte, *Error) {
+	opened, err := t.Spool.Open(part.Handle)
+	if err != nil {
+		return nil, Fail(http.StatusInternalServerError, "media_unavailable", "The uploaded file is unavailable.")
+	}
+	defer opened.File.Close()
+	data, err := io.ReadAll(io.LimitReader(opened.File, DefaultAudioUploadLimit+1))
+	if err != nil || int64(len(data)) > DefaultAudioUploadLimit {
+		return nil, Fail(http.StatusRequestEntityTooLarge, "file_too_large", "The uploaded file exceeds the inline upload bound.")
+	}
+	return data, nil
+}
+
+// decodeAudio stages the speech a vendor returned inside JSON.
+func (t *Transport) decodeAudio(ctx context.Context, resp *http.Response, call *UpstreamCall, request *Request, result *Result) (*Result, *Failure) {
+	if !requireContentType(resp, "application/json") {
+		return nil, &Failure{Class: ClassProtocol, Detail: "speech response is not JSON"}
+	}
+	body, failure := t.collect(resp)
+	if failure != nil {
+		return nil, failure
+	}
+	decoded, mErr := call.DecodeAudio(body)
+	if mErr != nil {
+		return nil, decodeFailure(mErr)
+	}
+	name := "speech"
+	if request != nil {
+		name = request.Op + "-response"
+	}
+	artifact, err := t.Spool.Put(ctx, Upload{Filename: name, ContentType: decoded.ContentType, MaximumLength: int64(len(decoded.Audio)), Body: bytes.NewReader(decoded.Audio)})
+	if err != nil {
+		return nil, stageFailure(SpoolError(err))
+	}
+	result.Artifact, result.ContentType, result.Tokens = artifact, artifact.ContentType, decoded.Tokens
+	return result, nil
+}
+
+// DecodeTranscript reads a call's JSON transcription result for a client that
+// asked for format: with the call's own decoder, whose vendor transcript a
+// json client receives as its text alone, or as OpenAI's transcription JSON.
+func DecodeTranscript(call *UpstreamCall, format string, body []byte) (*TranscriptionResult, *Error) {
+	if call.DecodeTranscription == nil {
+		return DecodeTranscriptionJSON(body)
+	}
+	result, failure := call.DecodeTranscription(body)
+	if failure != nil {
+		return nil, failure
+	}
+	result.TextOnly = format == "json"
+	return result, nil
+}
+
+// decodeFailure maps a result decoder's error onto a transport failure: a
+// vendor's verdict on the request, such as its content filter's, is the
+// caller's error; anything else violates the vendor's protocol.
+func decodeFailure(err *Error) *Failure {
+	if err.Status >= 400 && err.Status < 500 {
+		return &Failure{Class: ClassUpstreamClient, Status: err.Status, Upstream: &openai.UpstreamError{Type: "invalid_request_error", Code: err.Code, Message: err.Message}, Detail: err.Message}
+	}
+	return &Failure{Class: ClassProtocol, Detail: err.Message}
 }
 
 // stageFailure maps a spool staging error onto a transport failure: an

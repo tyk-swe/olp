@@ -1,0 +1,82 @@
+{
+  "api_version": "openllmproxy.dev/plugin-index/v1",
+  "published_at": "2026-10-05T16:10:00Z",
+  "plugins": [
+    {
+      "name": "codex",
+      "description": "Codex device enrollment for OLP code-mode. Enrollment does not qualify inference.",
+      "maintainer": "OpenLLMProxy",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/plugins/codex/README.md",
+      "repository": "https://github.com/tyk-swe/olp",
+      "path": "plugins/codex",
+      "releases": [
+        {
+          "version": "0.1.0",
+          "digest": "6fa626c3fd1773d8a46259e296de596d7d9e67e3e733e2771ba946a5adb610e2",
+          "abi_version": 1,
+          "size_bytes": 5353122,
+          "origins": [
+            "https://auth.openai.com",
+            "https://chatgpt.com"
+          ],
+          "profiles": [
+            "codex-subscription"
+          ],
+          "commit": "531354f829421e75b190defe406dc9049af7d111",
+          "reviewed_at": "2026-10-05T16:09:39Z"
+        }
+      ]
+    },
+    {
+      "name": "opencode-go",
+      "description": "OpenCode Go API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
+      "maintainer": "OpenLLMProxy",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/plugins/opencode-go/README.md",
+      "repository": "https://github.com/tyk-swe/olp",
+      "path": "plugins/opencode-go",
+      "releases": [
+        {
+          "version": "0.1.0",
+          "digest": "8c8373711bbabc394d0f42e0e70a8b6c8b56fdb5a96780880ee56d337665fd15",
+          "abi_version": 1,
+          "size_bytes": 5202650,
+          "origins": [
+            "https://opencode.ai"
+          ],
+          "profiles": [
+            "opencode-go"
+          ],
+          "commit": "531354f829421e75b190defe406dc9049af7d111",
+          "reviewed_at": "2026-10-05T16:09:39Z"
+        }
+      ]
+    },
+    {
+      "name": "zai-coding",
+      "description": "Z.ai GLM Coding Plan API-key enrollment for OLP code-mode. Enrollment does not qualify inference.",
+      "maintainer": "OpenLLMProxy",
+      "documentation_url": "https://github.com/tyk-swe/olp/blob/main/plugins/zai-coding/README.md",
+      "repository": "https://github.com/tyk-swe/olp",
+      "path": "plugins/zai-coding",
+      "releases": [
+        {
+          "version": "0.1.0",
+          "digest": "ff2d4443e1dee38efc4f1e7818f120dd2d369b2160776e6495787ee026e1a5fa",
+          "abi_version": 1,
+          "size_bytes": 5203788,
+          "origins": [
+            "https://api.z.ai",
+            "https://open.bigmodel.cn",
+            "https://z.ai"
+          ],
+          "profiles": [
+            "bigmodel-coding-plan",
+            "zai-coding-plan"
+          ],
+          "commit": "531354f829421e75b190defe406dc9049af7d111",
+          "reviewed_at": "2026-10-05T16:09:39Z"
+        }
+      ]
+    }
+  ]
+}

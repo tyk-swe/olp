@@ -32,6 +32,13 @@ func registerUnaryProfiles() {
 		completeProfileMetadata(&profile)
 		profileRegistry = append(profileRegistry, profile)
 	}
+	// Cohere's native v2 API serves chat, embed and rerank on one hosting, so
+	// one profile carries the three dialects and one provider serves them.
+	cohere := Profile{ID: "cohere-v2", Revision: ProfileRevision, Label: "Cohere native v2", Kind: "openai_compatible", Dialect: "cohere-embed-v2", DialectRevision: "v2", Hosting: "direct-compatible",
+		Authentication: []string{"api_key"}, Transport: "http", Operations: []string{"embeddings", "rerank", "generation"}, OperationDialects: map[string]string{"embeddings": "cohere-embed-v2", "rerank": "cohere-rerank-v2", "generation": "cohere-chat-v2"},
+		SemanticHeaders: []string{}, QuerySettings: []string{}, Documentation: "https://docs.cohere.com/reference/embed", Strict: true}
+	completeProfileMetadata(&cohere)
+	profileRegistry = append(profileRegistry, cohere)
 }
 
 // RegisterOperationProfile composes a trusted registered unary codec with an

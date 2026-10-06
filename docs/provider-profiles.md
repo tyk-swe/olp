@@ -49,9 +49,11 @@ listing; otherwise operators declare its providers' models.
 | `azure-v1-chat`, `azure-v1-responses` | `/openai/v1/chat/completions` or `/openai/v1/responses`; no dated API-version setting. |
 | `vertex-gemini` | Configured project/location, Google publisher and Gemini dialect. |
 | `vertex-anthropic` | Anthropic publisher, `:rawPredict` / `:streamRawPredict`; body version `vertex-2023-10-16`, model selected in URL. |
+| `vertex-openai` | `/endpoints/openapi/chat/completions` under the configured project/location; models named `publisher/model`, such as `google/gemini-2.5-flash` or `meta/llama-3.3-70b-instruct-maas`. |
 | `bedrock-converse` | `/model/{model}/converse` or `/converse-stream`. |
 | `bedrock-anthropic-invoke` | `/model/{model}/invoke` or `/invoke-with-response-stream`; body version `bedrock-2023-05-31`. |
 | `bedrock-invoke` | Qualified model-specific native Invoke surface; no generation/Chat fallback. |
+| `sagemaker-openai-chat` | `/endpoints/{endpoint}[/inference-components/{component}]/openai/v1/chat/completions`; see [SageMaker AI](providers/sagemaker.md). |
 
 Each built-in composition currently has OLP profile revision `1`. This identifies
 OLP's component composition, not an immutable provider/model release. Undated
@@ -62,7 +64,15 @@ is represented by GenerateContent here.
 Azure v1 accepts a resource origin or a base ending in `/openai/v1`. The Entra
 scope for this profile is `https://ai.azure.com/.default`; the `azure-legacy-*`
 profiles use `https://cognitiveservices.azure.com/.default`. Vertex endpoints
-must match the configured project, location and profile publisher. Bedrock
+must match the configured project, location and profile publisher, or for
+`vertex-openai` the project's `endpoints/openapi` address. When a Vertex provider
+names no endpoint, OLP derives the address from the profile.
+
+Azure AI Foundry Models, such as DeepSeek, Grok and Llama deployments, use the
+`azure-v1-chat` and `azure-v1-responses` profiles at the resource's
+`https://{resource}.services.ai.azure.com` origin, with the deployment name as
+the model. Microsoft has deprecated the separate Model Inference API under
+`/models`, so OLP has no profile for it. Bedrock
 signing happens only after the final URL, body and semantic headers have been
 constructed. Anthropic Invoke streaming unwraps bounded AWS event envelopes into
 native Anthropic events; it does not decode the stream as Converse or
@@ -90,6 +100,32 @@ foreign aliases and uninspectable content under restrictive policy refuse
 before dispatch. Cohere's v2 API does not define sparse or token-multivector
 output; TEI remains the scoped native contract for those layouts. No
 cross-dialect mapping or live-model quality claim is implied.
+
+## Native generation dialects
+
+Some vendor generation APIs have no counterpart in another dialect. Clients
+speak them as they are, at `POST /native/{dialect}/models/{route}`, on strict
+routes whose targets are certified for `generation` on the `native` surface:
+
+| Dialect | Profile | Upstream |
+| --- | --- | --- |
+| `mistral-fim` | `mistral-fim`, with the `mistral` preset | [`/v1/fim/completions`](https://docs.mistral.ai/api/endpoint/fim) |
+| `cohere-chat-v2` | `cohere-v2`, the `cohere-native-v2` preset's profile | [`/v2/chat`](https://docs.cohere.com/reference/chat) |
+
+OLP validates the envelope, binds the route's model in place of the body's
+`model`, which may be absent or name the route, and forwards everything else
+unchanged: Cohere's documents, citation options, tools and thinking reach
+Cohere, and its citations, tool plans and documents return byte for byte. The
+result and every streamed event are checked against the dialect's grammar and
+metered: fill-in-the-middle as chat completion chunks ending in `[DONE]`, and
+Cohere by the billed units its `message-end` event reports, which leave out its
+own preamble. A stream that ends before its terminal event is truncated.
+
+A native generation dialect is never translated. Its profile serves no other
+surface, and an OpenAI, Anthropic or Gemini request to its route finds no
+eligible target; an automatic `cohere-native-v2` provider has no Chat
+Completions to send at all, so it does not generate. Input content policies
+cannot inspect these dialects and refuse them.
 
 ## Defaults, bindings and semantic configuration
 

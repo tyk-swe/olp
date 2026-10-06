@@ -1,0 +1,12 @@
+{
+  "detail": [
+    {
+      "loc": [
+        "body",
+        "prompt"
+      ],
+      "msg": "Field required",
+      "type": "missing"
+    }
+  ]
+}

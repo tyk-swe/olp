@@ -1,0 +1,43 @@
+{
+  "vendor": "moonshot",
+  "documentation_url": "https://platform.kimi.ai/docs/api/chat",
+  "reviewed_at": "2026-10-05",
+  "notes": "Keys are bound to the international platform. Some models fix temperature, top_p, n and penalties, which is model-specific. Responses serves kimi-k3 only and is not reviewed.",
+  "endpoints": {
+    "generation": "https://api.moonshot.ai/v1/chat/completions"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 19,
+        "output_tokens": 21,
+        "total_tokens": 40,
+        "cached_input_tokens": 10
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 400,
+    "envelope": {
+      "type": "content_filter",
+      "code": "",
+      "message": "The request was rejected because it was considered high risk"
+    },
+    "class": "upstream_client"
+  }
+}

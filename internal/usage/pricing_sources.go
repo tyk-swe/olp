@@ -11,6 +11,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -19,12 +20,23 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/signing"
+)
+
+// Source formats: a price list document, or a signed reference catalog.
+const (
+	FormatPrices  = "prices"
+	FormatCatalog = "catalog"
 )
 
 type Source struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	URL       string    `json:"url"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Format is how the source document is read. A catalog source without
+	// a URL reads the catalog this release ships.
+	Format    string    `json:"format"`
+	URL       *string   `json:"url"`
 	Enabled   bool      `json:"enabled"`
 	ETag      string    `json:"etag"`
 	CreatedBy string    `json:"created_by"`
@@ -40,6 +52,9 @@ type SourceSnapshot struct {
 	PriceCount int             `json:"price_count"`
 	FetchedAt  time.Time       `json:"fetched_at"`
 	Document   json.RawMessage `json:"document"`
+	// Catalog is the signed catalog the snapshot was mapped from, for a
+	// catalog source.
+	Catalog *SnapshotCatalog `json:"catalog"`
 }
 
 type SourceDiff struct {
@@ -55,6 +70,8 @@ type SourceRefresh struct {
 	Source   Source         `json:"source"`
 	Snapshot SourceSnapshot `json:"snapshot"`
 	Diff     SourceDiff     `json:"diff"`
+	// Skipped are catalog prices this build cannot store.
+	Skipped []SkippedPrice `json:"skipped"`
 }
 
 const sourceFetchTimeout = 15 * time.Second
@@ -65,17 +82,24 @@ type sourceDocument struct {
 	Currency    string     `json:"currency"`
 	EffectiveAt *time.Time `json:"effective_at"`
 	Prices      []Price    `json:"prices"`
+	// Unrepresentable are the components a catalog lists that no price
+	// holds; publishing a snapshot never prices them.
+	Unrepresentable []UnrepresentablePrice `json:"unrepresentable,omitempty"`
 }
 
-const sourceColumns = `SELECT id::text, name, url, enabled, etag::text, created_by::text,
-        created_at, updated_at FROM olp.pricing_sources`
+const sourceReturning = `id::text, name, format, url, enabled, etag::text, created_by::text,
+        created_at, updated_at`
 
-const snapshotColumns = `SELECT id::text, source_id::text, sha256, document,
-        fetched_at FROM olp.pricing_source_snapshots`
+const sourceColumns = `SELECT ` + sourceReturning + ` FROM olp.pricing_sources`
+
+const snapshotReturning = `id::text, source_id::text, sha256, document, fetched_at,
+        catalog_sha256, catalog_published_at, catalog_key_id`
+
+const snapshotColumns = `SELECT ` + snapshotReturning + ` FROM olp.pricing_source_snapshots`
 
 func scanSource(row pgx.Row) (Source, error) {
 	var source Source
-	err := row.Scan(&source.ID, &source.Name, &source.URL, &source.Enabled,
+	err := row.Scan(&source.ID, &source.Name, &source.Format, &source.URL, &source.Enabled,
 		&source.ETag, &source.CreatedBy, &source.CreatedAt, &source.UpdatedAt)
 	source.CreatedAt = source.CreatedAt.UTC()
 	source.UpdatedAt = source.UpdatedAt.UTC()
@@ -85,10 +109,15 @@ func scanSource(row pgx.Row) (Source, error) {
 func scanSnapshot(row pgx.Row) (SourceSnapshot, error) {
 	var snapshot SourceSnapshot
 	var document []byte
+	var catalogSHA256, catalogKeyID *string
+	var catalogPublishedAt *time.Time
 	err := row.Scan(&snapshot.ID, &snapshot.SourceID, &snapshot.SHA256,
-		&document, &snapshot.FetchedAt)
+		&document, &snapshot.FetchedAt, &catalogSHA256, &catalogPublishedAt, &catalogKeyID)
 	if err != nil {
 		return snapshot, err
+	}
+	if catalogSHA256 != nil && catalogPublishedAt != nil && catalogKeyID != nil {
+		snapshot.Catalog = &SnapshotCatalog{SHA256: *catalogSHA256, PublishedAt: catalogPublishedAt.UTC().Format(time.RFC3339), KeyID: *catalogKeyID}
 	}
 	snapshot.FetchedAt = snapshot.FetchedAt.UTC()
 	snapshot.Document = json.RawMessage(document)
@@ -106,9 +135,10 @@ func loadSource(ctx context.Context, q access.Queryer, id string) (Source, error
 }
 
 type sourceInput struct {
-	Name    string `json:"name"`
-	URL     string `json:"url"`
-	Enabled *bool  `json:"enabled"`
+	Name    string  `json:"name"`
+	Format  string  `json:"format"`
+	URL     *string `json:"url"`
+	Enabled *bool   `json:"enabled"`
 }
 
 func (s *Server) listPricingSources(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -171,7 +201,7 @@ func (s *Server) createPricingSource(r *http.Request, _ access.Principal) (acces
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
-	if err = s.validateSourceInput(input); err != nil {
+	if err = s.validateSourceInput(&input); err != nil {
 		return access.Reply{}, err
 	}
 	enabled := true
@@ -180,10 +210,10 @@ func (s *Server) createPricingSource(r *http.Request, _ access.Principal) (acces
 	}
 	id, etag := access.NewID(), access.NewID()
 	source, err := scanSource(tx.QueryRow(r.Context(),
-		`INSERT INTO olp.pricing_sources (id, name, url, enabled, etag, created_by)
-		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id::text, name, url, enabled, etag::text, created_by::text, created_at, updated_at`,
-		id, strings.TrimSpace(input.Name), strings.TrimSpace(input.URL), enabled, etag, principal.UserID()))
+		`INSERT INTO olp.pricing_sources (id, name, format, url, enabled, etag, created_by)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 RETURNING `+sourceReturning,
+		id, strings.TrimSpace(input.Name), input.Format, input.URL, enabled, etag, principal.UserID()))
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -199,11 +229,27 @@ func (s *Server) createPricingSource(r *http.Request, _ access.Principal) (acces
 	return access.Commit(r, tx, result)
 }
 
-func (s *Server) validateSourceInput(input sourceInput) error {
+// validateSourceInput normalizes a new source: a price list needs a URL, and
+// a catalog source without one reads the catalog this release ships.
+func (s *Server) validateSourceInput(input *sourceInput) error {
 	if err := access.ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
-	return s.validateSourceURL(input.URL)
+	if input.Format == "" {
+		input.Format = FormatPrices
+	}
+	if input.Format != FormatPrices && input.Format != FormatCatalog {
+		return access.Invalid("format", "Use prices or catalog.")
+	}
+	if input.URL == nil {
+		if input.Format == FormatPrices {
+			return access.Invalid("url", "A price list source needs a URL.")
+		}
+		return nil
+	}
+	trimmed := strings.TrimSpace(*input.URL)
+	input.URL = &trimmed
+	return s.validateSourceURL(trimmed)
 }
 
 func (s *Server) validateSourceURL(raw string) error {
@@ -225,6 +271,9 @@ func (s *Server) updatePricingSource(r *http.Request, _ access.Principal) (acces
 		return access.Reply{}, access.Invalid("source", "Send at least one field to update.")
 	}
 	for field := range patch {
+		if field == "format" {
+			return access.Reply{}, access.Invalid(field, "A source keeps its format; create another source instead.")
+		}
 		if field != "name" && field != "url" && field != "enabled" {
 			return access.Reply{}, access.Invalid(field, "Unknown pricing source field.")
 		}
@@ -264,10 +313,17 @@ func (s *Server) updatePricingSource(r *http.Request, _ access.Principal) (acces
 		if err = json.Unmarshal(raw, &rawURL); err != nil {
 			return access.Reply{}, access.Invalid("url", "Use a valid source URL.")
 		}
-		if err = s.validateSourceURL(rawURL); err != nil {
-			return access.Reply{}, err
+		if rawURL == nil {
+			if source.Format == FormatPrices {
+				return access.Reply{}, access.Invalid("url", "A price list source needs a URL.")
+			}
+		} else {
+			trimmed := strings.TrimSpace(*rawURL)
+			if err = s.validateSourceURL(trimmed); err != nil {
+				return access.Reply{}, err
+			}
+			rawURL = &trimmed
 		}
-		rawURL = strings.TrimSpace(rawURL)
 	}
 	if raw, ok := patch["enabled"]; ok {
 		if err = json.Unmarshal(raw, &enabled); err != nil {
@@ -277,7 +333,7 @@ func (s *Server) updatePricingSource(r *http.Request, _ access.Principal) (acces
 	source, err = scanSource(tx.QueryRow(r.Context(),
 		`UPDATE olp.pricing_sources SET name=$2, url=$3, enabled=$4, etag=$5, updated_at=now()
 		 WHERE id=$1
-		 RETURNING id::text, name, url, enabled, etag::text, created_by::text, created_at, updated_at`,
+		 RETURNING `+sourceReturning,
 		id, name, rawURL, enabled, access.NewID()))
 	if err != nil {
 		return access.Reply{}, err
@@ -289,35 +345,67 @@ func (s *Server) updatePricingSource(r *http.Request, _ access.Principal) (acces
 	return access.Commit(r, tx, access.Detail(source, source.ETag))
 }
 
-func (s *Server) fetchSourceDocument(ctx context.Context, rawURL string) (sourceDocument, []byte, error) {
+// fetchedSource is a fetched, validated source document and its canonical
+// bytes, with the signed catalog it was mapped from, for a catalog source.
+type fetchedSource struct {
+	Document  sourceDocument
+	Canonical []byte
+	Catalog   *catalog.Signed
+	Skipped   []SkippedPrice
+}
+
+func (s *Server) fetchSource(ctx context.Context, source Source) (fetchedSource, error) {
+	if source.Format == FormatCatalog {
+		return s.fetchCatalog(ctx, source.URL)
+	}
+	if source.URL == nil {
+		return fetchedSource{}, errors.New("stored price list source has no URL")
+	}
+	return s.fetchPriceDocument(ctx, *source.URL)
+}
+
+// fetchBounded GETs a source document through the egress policy. A price
+// list must declare JSON; a signed catalog may come as anything, because its
+// signature, not its media type, establishes what it is.
+func (s *Server) fetchBounded(ctx context.Context, rawURL string, limit int64, requireJSON bool) ([]byte, error) {
 	if s.Egress == nil {
-		return sourceDocument{}, nil, access.Fail(503, "egress_policy_unavailable",
+		return nil, access.Fail(503, "egress_policy_unavailable",
 			"Source fetching is not configured on this installation.")
 	}
 	client := s.Egress.Client(sourceFetchTimeout)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return sourceDocument{}, nil, access.Fail(422, "invalid_url", "The source URL is not permitted by egress policy.")
+		return nil, access.Fail(422, "invalid_url", "The source URL is not permitted by egress policy.")
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return sourceDocument{}, nil, access.Fail(502, "source_fetch_failed", "The pricing source could not be fetched.")
+		return nil, access.Fail(502, "source_fetch_failed", "The pricing source could not be fetched.")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return sourceDocument{}, nil, access.Fail(502, "source_fetch_failed", "The pricing source did not answer successfully.")
+		return nil, access.Fail(502, "source_fetch_failed", "The pricing source did not answer successfully.")
 	}
-	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
-		io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return sourceDocument{}, nil, access.Fail(415, "invalid_source_document",
-			"The pricing source did not return a JSON document.")
+	if requireJSON {
+		mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
+		if err != nil || mediaType != "application/json" {
+			io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+			return nil, access.Fail(415, "invalid_source_document",
+				"The pricing source did not return a JSON document.")
+		}
 	}
-	body, err := readBounded(response.Body, maxSourceDocumentBytes)
+	body, err := readBounded(response.Body, limit)
 	if err != nil {
-		return sourceDocument{}, nil, access.Fail(413, "source_document_too_large",
-			"The pricing source document exceeds the 4 MiB limit.")
+		return nil, access.Fail(413, "source_document_too_large",
+			fmt.Sprintf("The pricing source document exceeds the %d MiB limit.", limit>>20))
+	}
+	return body, nil
+}
+
+func (s *Server) fetchPriceDocument(ctx context.Context, rawURL string) (fetchedSource, error) {
+	body, err := s.fetchBounded(ctx, rawURL, maxSourceDocumentBytes, true)
+	if err != nil {
+		return fetchedSource{}, err
 	}
 	var doc sourceDocument
 	decoder := json.NewDecoder(bytes.NewReader(body))
@@ -325,24 +413,87 @@ func (s *Server) fetchSourceDocument(ctx context.Context, rawURL string) (source
 	var trailing any
 	if err := decoder.Decode(&doc); err != nil || doc.Prices == nil ||
 		decoder.Decode(&trailing) != io.EOF {
-		return sourceDocument{}, nil, access.Fail(422, "invalid_source_document",
+		return fetchedSource{}, access.Fail(422, "invalid_source_document",
 			"The pricing source document is not a valid pricing catalogue.")
 	}
 	doc.Currency = strings.ToUpper(strings.TrimSpace(doc.Currency))
 	if len(doc.Currency) != 3 || !currencyLetters(doc.Currency) {
-		return sourceDocument{}, nil, access.Fail(422, "invalid_source_document",
+		return fetchedSource{}, access.Fail(422, "invalid_source_document",
 			"The pricing source document does not declare a valid currency.")
 	}
+	return s.validatedSource(doc, nil, nil)
+}
+
+// fetchCatalog reads a signed reference catalog: the one this release ships,
+// or one fetched with its detached signature at the same URL plus ".sig".
+// The signature must verify against the keys this build trusts before any
+// price in it is read, and a catalog older than the one this release ships
+// is refused.
+func (s *Server) fetchCatalog(ctx context.Context, rawURL *string) (fetchedSource, error) {
+	signed := s.Catalog
+	if rawURL != nil {
+		document, err := s.fetchBounded(ctx, *rawURL, catalog.MaxBytes, false)
+		if err != nil {
+			return fetchedSource{}, err
+		}
+		signatureAt, err := signatureURL(*rawURL)
+		if err != nil {
+			return fetchedSource{}, access.Fail(422, "invalid_url", "The source URL is not permitted by egress policy.")
+		}
+		signature, err := s.fetchBounded(ctx, signatureAt, signing.MaxSignatureFile, false)
+		if err != nil {
+			return fetchedSource{}, err
+		}
+		signed, err = catalog.Load(document, signature, s.CatalogKeys)
+		switch {
+		case errors.Is(err, signing.ErrInvalidSignature) || errors.Is(err, signing.ErrUnknownKey) || errors.Is(err, signing.ErrMalformedSignature):
+			return fetchedSource{}, access.Fail(422, "catalog_signature_invalid",
+				"The catalog's signature does not verify against the keys this release trusts.")
+		case errors.Is(err, signing.ErrUnsupportedVersion):
+			return fetchedSource{}, access.Fail(422, "catalog_unsupported_version",
+				"The catalog is in a format this release cannot read.")
+		case err != nil:
+			return fetchedSource{}, access.Fail(422, "invalid_source_document", "The catalog is not a valid reference catalog.")
+		}
+	}
+	if signed == nil {
+		return fetchedSource{}, access.Fail(503, "reference_catalog_unavailable",
+			"This process holds no verified reference catalog.")
+	}
+	if s.Catalog != nil && signed.Catalog.PublishedAt.Before(s.Catalog.Catalog.PublishedAt) {
+		return fetchedSource{}, access.Fail(422, "catalog_outdated",
+			"The catalog is older than the one this release ships.")
+	}
+	doc, skipped := catalogDocument(signed.Catalog, s.VendorKind)
+	return s.validatedSource(doc, signed, skipped)
+}
+
+func (s *Server) validatedSource(doc sourceDocument, signed *catalog.Signed, skipped []SkippedPrice) (fetchedSource, error) {
 	normalized, currency, err := validatePrices(doc.Prices, s.VendorKind)
 	if err != nil {
-		return sourceDocument{}, nil, err
+		return fetchedSource{}, err
 	}
 	doc.Prices = normalized
 	if currency != doc.Currency {
-		return sourceDocument{}, nil, access.Fail(422, "invalid_source_document",
+		return fetchedSource{}, access.Fail(422, "invalid_source_document",
 			"The pricing source currency does not match its prices.")
 	}
-	return doc, canonicalSourceDocument(doc), nil
+	if skipped == nil {
+		skipped = []SkippedPrice{}
+	}
+	return fetchedSource{Document: doc, Canonical: canonicalSourceDocument(doc), Catalog: signed, Skipped: skipped}, nil
+}
+
+// signatureURL is where a fetched catalog's detached signature lives: the
+// catalog's URL with ".sig" appended to its path.
+func signatureURL(rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Path == "" {
+		return "", errors.New("the catalog URL has no path")
+	}
+	u.Path += ".sig"
+	u.RawPath = ""
+	return u.String(), nil
 }
 
 func canonicalSourceDocument(doc sourceDocument) []byte {
@@ -350,7 +501,7 @@ func canonicalSourceDocument(doc sourceDocument) []byte {
 	slices.SortFunc(prices, func(a, b Price) int {
 		return strings.Compare(a.dimensionKey(), b.dimensionKey())
 	})
-	canonical := sourceDocument{Currency: doc.Currency, EffectiveAt: doc.EffectiveAt, Prices: prices}
+	canonical := sourceDocument{Currency: doc.Currency, EffectiveAt: doc.EffectiveAt, Prices: prices, Unrepresentable: doc.Unrepresentable}
 	data, err := json.Marshal(canonical)
 	if err != nil {
 		return nil
@@ -378,13 +529,13 @@ func (s *Server) refreshPricingSource(r *http.Request, principal access.Principa
 	if err != nil {
 		return access.Reply{}, err
 	}
-	doc, canonical, err := s.fetchSourceDocument(r.Context(), source.URL)
+	fetched, err := s.fetchSource(r.Context(), source)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	digest := sha256.Sum256(canonical)
+	digest := sha256.Sum256(fetched.Canonical)
 	sum := hex.EncodeToString(digest[:])
-	diff, err := s.diffLatest(r.Context(), doc.Prices)
+	diff, err := s.diffLatest(r.Context(), fetched.Document.Prices)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -399,12 +550,22 @@ func (s *Server) refreshPricingSource(r *http.Request, principal access.Principa
 	if err != nil {
 		return access.Reply{}, err
 	}
+	var catalogSHA256, catalogKeyID *string
+	var catalogPublishedAt *time.Time
+	if signed := fetched.Catalog; signed != nil {
+		if err = advanceCatalog(r.Context(), tx, source.ID, signed.Catalog.PublishedAt); err != nil {
+			return access.Reply{}, err
+		}
+		catalogSHA256, catalogKeyID, catalogPublishedAt = &signed.SHA256, &signed.KeyID, &signed.Catalog.PublishedAt
+	}
+	// A snapshot is immutable: refetching identical prices keeps the first
+	// snapshot and the catalog provenance it was taken from.
 	snapshot, err := scanSnapshot(tx.QueryRow(r.Context(),
-		`INSERT INTO olp.pricing_source_snapshots (id, source_id, sha256, document)
-		 VALUES ($1, $2, $3, $4::jsonb)
+		`INSERT INTO olp.pricing_source_snapshots (id, source_id, sha256, document, catalog_sha256, catalog_published_at, catalog_key_id)
+		 VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
 		 ON CONFLICT (source_id, sha256) DO UPDATE SET source_id = EXCLUDED.source_id
-		 RETURNING id::text, source_id::text, sha256, document, fetched_at`,
-		access.NewID(), source.ID, sum, string(canonical)))
+		 RETURNING `+snapshotReturning,
+		access.NewID(), source.ID, sum, string(fetched.Canonical), catalogSHA256, catalogPublishedAt, catalogKeyID))
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -412,8 +573,22 @@ func (s *Server) refreshPricingSource(r *http.Request, principal access.Principa
 		"pricing_source", source.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	refresh := SourceRefresh{Source: source, Snapshot: snapshot, Diff: diff}
+	refresh := SourceRefresh{Source: source, Snapshot: snapshot, Diff: diff, Skipped: fetched.Skipped}
 	return access.Commit(r, tx, access.OK(refresh))
+}
+
+// advanceCatalog records the newest catalog a source took, refusing an older
+// one: a replayed signed catalog must never roll the source's prices back.
+func advanceCatalog(ctx context.Context, tx pgx.Tx, sourceID string, published time.Time) error {
+	var newest *time.Time
+	if err := tx.QueryRow(ctx, "SELECT catalog_published_at FROM olp.pricing_sources WHERE id=$1 FOR UPDATE", sourceID).Scan(&newest); err != nil {
+		return err
+	}
+	if newest != nil && published.Before(*newest) {
+		return access.Fail(422, "catalog_outdated", "The catalog is older than one this source already took.")
+	}
+	_, err := tx.Exec(ctx, "UPDATE olp.pricing_sources SET catalog_published_at=$2 WHERE id=$1", sourceID, published)
+	return err
 }
 
 func (s *Server) diffLatest(ctx context.Context, candidate []Price) (SourceDiff, error) {

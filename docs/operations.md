@@ -342,6 +342,20 @@ overrides. A source is advisory: negotiated rates need publish-time overrides,
 because the published revision — not the raw source document — is what
 accounting prices against. Revisions record their source name and snapshot for
 provenance, and all entries share the installation's single pricing currency.
+A source in the `catalog` format reads the signed
+[reference catalog](catalog.md): without a URL, the catalog this release ships,
+which refreshes with no network access; with one, a catalog fetched beside its
+detached signature at the same URL plus `.sig`. Refresh verifies the signature
+against the keys the binary trusts before any price is read, refuses a catalog
+older than the one this release ships or than one the source already took, and
+maps every model and alias to a vendor-scoped price. The snapshot records the
+catalog's digest, publication time and signing key, lists the components the
+catalog marks unrepresentable, and the refresh reports any price naming a
+vendor or operation this release does not know. Because the egress policy
+refuses redirects, fetch a newer catalog from a host that serves it directly,
+such as `https://raw.githubusercontent.com/tyk-swe/olp/main/internal/catalog/catalog.json`,
+and allow that host in the egress policy. `GET /api/v1/reference-catalog`
+describes the bundled catalog.
 No list price applies to a [plugin provider](plugins.md#providers-from-plugin-profiles):
 its attempts stay unpriced until a revision carries a price scoped to that
 provider, and a `plugin` price must name its `provider_id`.

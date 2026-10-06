@@ -43,6 +43,7 @@ const (
 	FamilyVertexEmbeddings      Family = "vertex_embeddings"
 	FamilyBedrockEmbeddings     Family = "bedrock_embeddings"
 	FamilyRerank                Family = "rerank"
+	FamilyBedrockRerank         Family = "bedrock_rerank"
 	// Media families name their operation tag directly so the accounting
 	// envelope and selection registry agree on the operation string.
 	FamilyImageGeneration Family = "image_generation"
@@ -62,6 +63,12 @@ const (
 	FamilyRealtime      Family = "realtime"
 	FamilyBedrock       Family = "bedrock"
 	FamilyBedrockInvoke Family = "bedrock_invoke"
+
+	// Native generation families are vendor dialects a client speaks as
+	// they are, at /native/{dialect}/models/{route}: OLP binds the route's
+	// model and meters the result, and never translates them.
+	FamilyMistralFIM Family = "mistral_fim"
+	FamilyCohereChat Family = "cohere_chat"
 )
 
 func (f Family) Operation() string {
@@ -73,7 +80,7 @@ func (f Family) Operation() string {
 		return "embeddings"
 	case FamilyModeration:
 		return "moderation"
-	case FamilyRerank:
+	case FamilyRerank, FamilyBedrockRerank:
 		return "rerank"
 	case FamilyImageGeneration, FamilyImageEdit, FamilyImageVariation, FamilySpeech,
 		FamilyTranscription, FamilyTranslation, FamilyVideoCreate, FamilyVideoList, FamilyVideoGet,
@@ -95,6 +102,8 @@ func (f Family) Surface() string {
 		return "gemini"
 	case FamilyBedrock, FamilyBedrockInvoke:
 		return "bedrock"
+	case FamilyMistralFIM, FamilyCohereChat:
+		return "native"
 	}
 	return "openai"
 }

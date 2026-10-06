@@ -6,8 +6,11 @@
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { pluginKeys } from '$lib/features/plugins/pluginKeys';
   import UnconfinedPlugins from '$lib/features/plugins/UnconfinedPlugins.svelte';
+  import PluginIndexSection from '$lib/features/plugins/PluginIndex.svelte';
+  import { indexEntryForDigest } from '$lib/features/plugins/pluginIndex';
   import {
     approvePlugin,
+    getPluginIndex,
     installPlugin,
     listPlugins,
     pluginProblem,
@@ -22,6 +25,10 @@
   const canManage = $derived(access.can('plugins.manage'));
   const queryClient = useQueryClient();
 
+  const pluginIndex = createQuery(() => ({
+    queryKey: pluginKeys.index(),
+    queryFn: ({ signal }) => getPluginIndex(signal)
+  }));
   const plugins = createQuery(() => ({
     queryKey: pluginKeys.list(),
     queryFn: ({ signal }) => listPlugins(signal)
@@ -176,6 +183,7 @@
   <div class="plugin-list">
     {#each plugins.data.items as plugin (plugin.digest)}
       {@const approved = Boolean(plugin.approved_at)}
+      {@const listed = indexEntryForDigest(pluginIndex.data, plugin.digest)}
       {@const headingId = `plugin-${plugin.digest}`}
       <article class="card plugin" aria-labelledby={headingId}>
         <header>
@@ -184,6 +192,11 @@
             {#if plugin.manifest.description}<p>
                 {plugin.manifest.description}
               </p>{/if}
+            <p class="listing">
+              {listed
+                ? `Listed in the reviewed plugin index as ${listed.plugin.name} ${listed.release.version}.`
+                : 'Not listed in the reviewed plugin index: review its source and origins yourself before approving.'}
+            </p>
           </div>
           <div class="badges">
             {#if plugin.executable}<span class="badge danger">Unconfined</span
@@ -344,6 +357,8 @@
   </div>
 {/if}
 
+{#if pluginIndex.data}<PluginIndexSection index={pluginIndex.data} />{/if}
+
 {#if plugins.data}
   <UnconfinedPlugins
     enabled={plugins.data.unconfined_plugins_enabled}
@@ -487,5 +502,10 @@
       display: grid;
       grid-template-columns: minmax(0, 1fr);
     }
+  }
+  .listing {
+    margin: 0.3rem 0 0;
+    color: var(--foreground-muted);
+    font-size: var(--text-body-sm);
   }
 </style>

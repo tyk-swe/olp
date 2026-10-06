@@ -1,5 +1,6 @@
 <script lang="ts">
   import { routeKeys } from '$lib/features/routes/routeKeys';
+  import { retiringTargets } from '$lib/features/routes/routeEditor';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -148,7 +149,8 @@
               ></tr
             ></thead
           ><tbody
-            >{#each activeRoutes.data.items as item (item.id)}<tr
+            >{#each activeRoutes.data.items as item (item.id)}{@const retiringCount =
+                retiringTargets(item.latest_revision.targets)}<tr
                 ><td
                   ><strong><code>{item.slug}</code></strong><br /><small
                     >{item.project_name ?? 'Installation-wide'}</small
@@ -162,7 +164,9 @@
                     >{item.revision_count} total</small
                   ></td
                 ><td>{item.latest_revision.operations.join(', ')}</td><td
-                  >{item.latest_revision.targets.length}</td
+                  >{item.latest_revision.targets.length}{#if retiringCount}<br
+                    /><span class="badge warning">{retiringCount} retiring</span
+                    >{/if}</td
                 ><td>{formatDate(item.latest_revision.activated_at)}</td><td
                   >{item.created_by_email ?? 'A removed account'}</td
                 ><td class="row-actions"
@@ -235,7 +239,8 @@
               ></tr
             ></thead
           ><tbody
-            >{#each drafts.data.items as item (item.id)}<tr
+            >{#each drafts.data.items as item (item.id)}{@const retiringCount =
+                retiringTargets(item.targets)}<tr
                 ><td
                   ><a class="route-link" href={resolve(`/routes/${item.id}`)}
                     >{item.slug}</a
@@ -249,7 +254,9 @@
                     class="badge">{item.state}</span
                   ></td
                 ><td>{item.operations.join(', ')}</td><td
-                  >{item.targets.length}</td
+                  >{item.targets.length}{#if retiringCount}<br /><span
+                      class="badge warning">{retiringCount} retiring</span
+                    >{/if}</td
                 ><td
                   >{formatInteger(item.overall_timeout_ms)} ms / {item.max_attempts}</td
                 ><td>{formatDate(item.updated_at)}</td><td

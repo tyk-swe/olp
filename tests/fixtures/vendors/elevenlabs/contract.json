@@ -1,0 +1,19 @@
+{
+  "vendor": "elevenlabs",
+  "documentation_url": "https://elevenlabs.io/docs/api-reference/introduction",
+  "reviewed_at": "2026-10-05",
+  "notes": "API keys travel in xi-api-key. Speech names an ElevenLabs voice ID and returns audio, with the characters it bills in character-cost. Speech-to-text answers JSON with audio_duration_secs. GET /v1/user proves a key without cost. Errors nest a typed detail object.",
+  "endpoints": {
+    "speech": "https://api.elevenlabs.io/v1/text-to-speech/alloy?output_format=mp3_44100_128",
+    "transcription": "https://api.elevenlabs.io/v1/speech-to-text"
+  },
+  "unsupported_parameters": [],
+  "responses": {},
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 401,
+    "envelope": null,
+    "class": "credential"
+  }
+}

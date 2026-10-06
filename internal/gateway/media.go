@@ -725,14 +725,27 @@ func mediaUsage(request *media.Request, result *media.Result) *openai.Usage {
 		}
 		usage := &openai.Usage{}
 		if result.Images.Usage != nil {
-			usage.InputTokens = result.Images.Usage.InputTokens
-			usage.OutputTokens = result.Images.Usage.OutputTokens
-			usage.TotalTokens = result.Images.Usage.TotalTokens
+			usage = tokenUsage(result.Images.Usage)
 		}
 		units := strconv.Itoa(len(result.Images.Images))
 		usage.MediaUnits = &units
 		return usage
+	case media.ResponseBinary:
+		// Speech usage is the characters a vendor reports billing. A count
+		// of the request's own characters would be no evidence: OpenAI, for
+		// one, bills its speech models by tokens.
+		if result.Tokens != nil {
+			return tokenUsage(result.Tokens)
+		}
+		if result.BilledCharacters == nil {
+			return nil
+		}
+		units := strconv.FormatInt(*result.BilledCharacters, 10)
+		return &openai.Usage{MediaUnits: &units}
 	case media.ResponseTranscription:
+		if result.Transcription != nil && result.Transcription.Tokens != nil {
+			return tokenUsage(result.Transcription.Tokens)
+		}
 		if result.Transcription == nil || result.Transcription.DurationSeconds == nil {
 			return nil
 		}
@@ -746,6 +759,11 @@ func mediaUsage(request *media.Request, result *media.Result) *openai.Usage {
 		return &openai.Usage{MediaUnits: &units}
 	}
 	return nil
+}
+
+// tokenUsage is the accounting usage of a vendor that bills media by token.
+func tokenUsage(tokens *media.ImageUsage) *openai.Usage {
+	return &openai.Usage{InputTokens: tokens.InputTokens, OutputTokens: tokens.OutputTokens, TotalTokens: tokens.TotalTokens}
 }
 
 // writeMediaResult renders the successful media response.

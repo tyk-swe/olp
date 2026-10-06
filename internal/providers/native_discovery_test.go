@@ -58,3 +58,23 @@ func TestNativeDiscoveryFollowsBoundedPagesAndPreservesFacts(t *testing.T) {
 		})
 	}
 }
+
+// TestWatsonxDiscoveryListsChatFoundationModels covers watsonx's listing: the
+// foundation model specifications that serve chat, by model ID and label.
+func TestWatsonxDiscoveryListsChatFoundationModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if r.URL.Path != "/ml/v1/foundation_model_specs" || query.Get("version") != "2025-10-25" || query.Get("filters") != "function_text_chat" || query.Get("limit") != "200" {
+			t.Errorf("listing request = %s", r.URL)
+		}
+		fmt.Fprint(w, `{"total_count":2,"limit":200,"first":{"href":"x"},"resources":[{"model_id":"ibm/granite-3-8b-instruct","label":"granite-3-8b-instruct","provider":"IBM"},{"model_id":"meta-llama/llama-3-3-70b-instruct","label":"llama-3-3-70b-instruct"}]}`)
+	}))
+	defer server.Close()
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	cfg := Configuration{Kind: KindWatsonx, AuthMode: AuthNone, Endpoint: new(server.URL), CloudRegion: new("us-south"), CloudProject: new("8f3b2c1d-1234-4abc-9def-0123456789ab")}
+	cfg.Normalize()
+	models, err := New(nil, policy, nil).listModelFacts(context.Background(), &cfg, nil)
+	if err != nil || len(models) != 2 || models[0].Name != "ibm/granite-3-8b-instruct" || models[0].Display != "granite-3-8b-instruct" || models[1].Name != "meta-llama/llama-3-3-70b-instruct" {
+		t.Fatalf("discovery = %+v, %v", models, err)
+	}
+}

@@ -72,21 +72,78 @@ type Field struct {
 
 // UpstreamCall is the exact upstream HTTP request for one media operation.
 type UpstreamCall struct {
-	Method    string
-	Path      string
-	Query     url.Values
-	Accept    string
-	JSON      []byte
-	Fields    []Field
+	Method string
+	Path   string
+	// URL addresses a call at another service of the connector's cloud, in
+	// place of Path under its endpoint; SigningService signs it for that
+	// service.
+	URL            string
+	SigningService string
+	Query          url.Values
+	Accept         string
+	JSON           []byte
+	Fields         []Field
+	// Upload is a staged file sent as the whole request body, for vendors
+	// that take raw audio rather than a multipart form.
+	Upload    *Part
 	Stream    bool
 	Kind      ResponseKind
 	Native    string
 	Strict    bool // local decoding contract; never an upstream wire member
 	Ambiguous bool // the request is not idempotent; post-dispatch failure is ambiguous
+	// DecodeImages and DecodeTranscription read a vendor wire's JSON result
+	// in place of the OpenAI decoders.
+	DecodeImages        func(body []byte, stage func(b64 string, index int) (*Artifact, *Error)) (*ImageResult, *Error)
+	DecodeTranscription func(body []byte) (*TranscriptionResult, *Error)
+	// DecodeVideo reads a vendor's video job object, and NoContent marks a
+	// call the vendor answers with 204 and no body, such as a deletion.
+	DecodeVideo func(body []byte) (*VideoJobResult, *Error)
+	NoContent   bool
+	// DecodeAudio reads a vendor's JSON speech result: the audio it carries
+	// and the tokens it bills.
+	DecodeAudio func(body []byte) (*AudioResult, *Error)
+	// JSONFrom builds a JSON body that inlines uploaded files, whose bytes
+	// read returns, in place of JSON.
+	JSONFrom func(read func(*Part) ([]byte, *Error)) ([]byte, *Error)
+	// CharacterHeader names the response header in which a vendor reports
+	// the characters a speech call bills.
+	CharacterHeader string
+	// Next continues a vendor's asynchronous work from each JSON response,
+	// its submission's first: the next request, until a step fetches the
+	// image itself or marks the response its result. A step's URL must be
+	// on the provider endpoint's host or under one of StepDomains.
+	Next        func(body []byte) (*Step, *Error)
+	StepDomains []string
 	// Inject carries W3C trace-context headers the caller allows upstream.
 	// Only request-path calls set it; reconciliation traffic does not
 	// propagate client trace context.
 	Inject http.Header
+}
+
+// AudioResult is speech a vendor returned inside JSON.
+type AudioResult struct {
+	Audio       []byte
+	ContentType string
+	Tokens      *ImageUsage
+}
+
+// Step is the next request of a vendor's asynchronous work: a request of an
+// absolute URL after Wait, GET unless Method names another, with JSON as its
+// body and the provider's credential only when the vendor requires it there.
+type Step struct {
+	Method      string
+	URL         string
+	JSON        []byte
+	Wait        time.Duration
+	Credentials bool
+	// Asset marks the step that fetches the work's product, which ends it:
+	// a response of a content type with this prefix, such as image/ or
+	// video/.
+	Asset string
+	// Done marks the response just read as the work's result, which the
+	// call's decoder reads; Cleanup, if any, then deletes the vendor's copy.
+	Done    bool
+	Cleanup *Step
 }
 
 // Request is a validated media operation bound for upstream dispatch. Staged
@@ -1119,7 +1176,8 @@ type ImageArtifact struct {
 	RevisedPrompt *string
 }
 
-// ImageUsage is the token usage an image response reported.
+// ImageUsage is the token usage a media response reported, such as an image
+// model's, or a speech or transcription model's that bills by token.
 type ImageUsage struct {
 	InputTokens  int64
 	OutputTokens int64
@@ -1199,6 +1257,9 @@ func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage f
 		} `json:"predictions"`
 		Images []string `json:"images"`
 		Error  *string  `json:"error"`
+		// FinishReasons is a Stability model's verdict on each image; any but
+		// null reports a filtered request or an inference error.
+		FinishReasons []*string `json:"finish_reasons"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
@@ -1221,6 +1282,15 @@ func DecodeNativeImageResponse(kind string, body []byte, expected int64, stage f
 			encoded = append(encoded, prediction.BytesBase64Encoded)
 		}
 	case "bedrock":
+		for _, reason := range wire.FinishReasons {
+			switch {
+			case reason == nil:
+			case strings.HasPrefix(*reason, "Filter reason:"):
+				return nil, Fail(http.StatusBadRequest, "content_filter", "The provider's content filter refused the image request.")
+			default:
+				return nil, protocolError("The provider reported an image inference error.")
+			}
+		}
 		if wire.Images == nil {
 			return nil, protocolError("The provider image response has no images.")
 		}
@@ -1620,6 +1690,12 @@ func EncodeVideoDeleteResponse(result *VideoDeleteResult, localID string) ([]byt
 
 // TranscriptionResult is a decoded transcription.
 type TranscriptionResult struct {
+	// TextOnly renders the transcript as OpenAI's json format, its text
+	// alone, for a client that asked for json of a vendor whose own
+	// transcript says more.
+	TextOnly bool
+	// Tokens is the usage of a vendor that bills transcripts by token.
+	Tokens          *ImageUsage
 	Text            string
 	Language        *string
 	DurationSeconds *float64
@@ -1710,6 +1786,13 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 // EncodeTranscriptionJSON renders the client transcription JSON document.
 func EncodeTranscriptionJSON(result *TranscriptionResult) ([]byte, *Error) {
 	doc := map[string]any{"text": result.Text}
+	if result.TextOnly {
+		body, err := json.Marshal(doc)
+		if err != nil {
+			return nil, protocolError("The provider transcription could not be encoded.")
+		}
+		return body, nil
+	}
 	if result.Language != nil {
 		doc["language"] = *result.Language
 	}
@@ -1835,9 +1918,16 @@ func encodeVertexImage(r *Request, model string) (*UpstreamCall, *Error) {
 		JSON: body, Kind: ResponseImages, Native: "vertex_ai", Ambiguous: true}, nil
 }
 
+// bedrockStabilityImageModels are the Stability text-to-image models Bedrock
+// serves through InvokeModel, each returning one image per call.
+var bedrockStabilityImageModels = []string{"stability.sd3-5-large-", "stability.stable-image-core-", "stability.stable-image-ultra-"}
+
 func encodeBedrockImage(r *Request, model string) (*UpstreamCall, *Error) {
+	if slices.ContainsFunc(bedrockStabilityImageModels, func(prefix string) bool { return strings.HasPrefix(model, prefix) }) {
+		return encodeBedrockStabilityImage(r, model)
+	}
 	if !strings.HasPrefix(model, "amazon.titan-image-generator-") {
-		return nil, invalidMedia("The configured model is not a qualified Bedrock Titan image model.")
+		return nil, invalidMedia("The configured model is not a qualified Bedrock Titan or Stability image model.")
 	}
 	if err := rejectNativeImageFields(r); err != nil {
 		return nil, err
@@ -1873,6 +1963,41 @@ func encodeBedrockImage(r *Request, model string) (*UpstreamCall, *Error) {
 			"height":         height,
 		},
 	})
+	if err != nil {
+		return nil, invalidMedia("The native image request could not be encoded.")
+	}
+	return &UpstreamCall{Method: http.MethodPost, Path: "model/" + url.PathEscape(model) + "/invoke",
+		JSON: body, Kind: ResponseImages, Native: "bedrock", Ambiguous: true}, nil
+}
+
+// encodeBedrockStabilityImage requests one image from a Stability model on
+// Bedrock, at the aspect ratio of the requested size.
+//
+// https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-diffusion-3-5-large.html
+func encodeBedrockStabilityImage(r *Request, model string) (*UpstreamCall, *Error) {
+	generic := *r
+	generic.OutputFormat = nil
+	if err := rejectNativeImageFields(&generic); err != nil {
+		return nil, err
+	}
+	if r.Count != nil && *r.Count != 1 {
+		return nil, invalidMedia("Stability models on Bedrock generate one image per request.")
+	}
+	fields := map[string]any{"prompt": r.Prompt}
+	if r.Size != nil {
+		aspect, ok := map[string]string{"1024x1024": "1:1", "1536x1024": "3:2", "1024x1536": "2:3"}[*r.Size]
+		if !ok {
+			return nil, invalidMedia("The size is not supported by the Bedrock Stability target.")
+		}
+		fields["aspect_ratio"] = aspect
+	}
+	if r.OutputFormat != nil {
+		if !slices.Contains([]string{"png", "jpeg", "webp"}, *r.OutputFormat) {
+			return nil, invalidMedia("The output format is not supported by the Bedrock Stability target.")
+		}
+		fields["output_format"] = *r.OutputFormat
+	}
+	body, err := json.Marshal(fields)
 	if err != nil {
 		return nil, invalidMedia("The native image request could not be encoded.")
 	}

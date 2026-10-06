@@ -91,7 +91,7 @@ func TestGoogleServiceAccountRefreshADCBoundsAndPublicTokenEgress(t *testing.T) 
 		t.Fatalf("provider exception relaxed token egress: %v", e)
 	}
 	// Test-only token endpoint: production always keeps Google's public-only client.
-	a.googleClient = a.client
+	a.publicClient = a.client
 	for _, want := range []string{"Bearer token-1", "Bearer token-2", "Bearer token-2"} {
 		req, _ = http.NewRequest("POST", "https://provider.example", nil)
 		if _, e = a.Apply(context.Background(), req, cfg, secret, nil); e != nil || req.Header.Get("Authorization") != want {

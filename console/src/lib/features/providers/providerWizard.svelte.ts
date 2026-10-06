@@ -37,6 +37,7 @@ import {
   type ProviderCredential
 } from '$lib/features/providers/api/credentials';
 import type { ProviderProfile } from '$lib/features/providers/api/profiles';
+import type { ProviderVendor } from '$lib/features/providers/api/providers';
 import {
   cancelGrantEnrollment,
   continueGrantEnrollment,
@@ -240,6 +241,9 @@ export class ProviderWizardState {
       // The connection form loads the profile catalogue.
       profiles: this.queryClient.getQueryData<ProviderProfile[]>(
         providerKeys.profiles()
+      ),
+      vendors: this.queryClient.getQueryData<ProviderVendor[]>(
+        providerKeys.vendors()
       )
     });
     if (issue) {

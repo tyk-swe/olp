@@ -1,0 +1,21 @@
+{
+  "model": "databricks-claude-sonnet-4-5",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "Hello!"
+      },
+      "index": 0,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 7,
+    "completion_tokens": 74,
+    "total_tokens": 81
+  },
+  "object": "chat.completion",
+  "id": "chatcmpl-evidence",
+  "created": 1698824353
+}

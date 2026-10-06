@@ -1,0 +1,43 @@
+{
+  "vendor": "nscale",
+  "documentation_url": "https://docs.nscale.com/api-reference/inference/create-chat-completion",
+  "reviewed_at": "2026-10-05",
+  "notes": "Service tokens authenticate; API keys stopped working on 2025-11-01. A 429 means insufficient credit. The stream terminal is undocumented.",
+  "endpoints": {
+    "generation": "https://inference.api.nscale.com/v1/chat/completions",
+    "embeddings": "https://inference.api.nscale.com/v1/embeddings"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 56,
+        "output_tokens": 31,
+        "total_tokens": 87
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "dialect",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 429,
+    "envelope": {
+      "type": "",
+      "code": "TOO_MANY_REQUESTS",
+      "message": "You have insufficient credit to run this request"
+    },
+    "class": "rate_limit"
+  }
+}

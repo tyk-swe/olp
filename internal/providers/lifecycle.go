@@ -15,6 +15,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -177,7 +178,7 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	if input.Model != nil {
-		surface, operation := "openai", "generation"
+		surface, operation := "openai", probeOperation(&input.Configuration)
 		switch input.Configuration.Kind {
 		case KindAnthropic:
 			surface = "anthropic"
@@ -186,7 +187,14 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		}
 		if input.Configuration.ProfileID != "" {
 			profile, _ := input.Configuration.transport().Profile()
+			if _, native := protocols.NativeGenerationFamily(profile.OperationDialect("generation")); native && operation == "generation" {
+				surface = "native"
+			}
 			switch profile.Dialect {
+			case "openai-chat", "openai-responses":
+				// Vertex's OpenAI-compatible profile speaks OpenAI, whatever
+				// its kind's native surface.
+				surface = "openai"
 			case "anthropic-messages":
 				surface = "anthropic"
 			case "gemini-generate-content":
@@ -196,9 +204,6 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 			case "bedrock-invoke":
 				surface, operation = "bedrock", "bedrock_invoke"
 			}
-		}
-		if value(input.Configuration.Options.VendorID) == "voyage" {
-			operation = "embeddings"
 		}
 		// A dedicated operation profile, such as an embeddings or rerank
 		// dialect, declares the tuple it can actually certify.
@@ -270,23 +275,7 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = input.Configuration.Pin(r.Context(), tx, s.Unconfined); err != nil {
 		return access.Reply{}, err
 	}
-	if err = input.Configuration.Validate(s.Egress); err != nil {
-		return access.Reply{}, err
-	}
-	if input.Configuration.transportFingerprint() != current.Configuration.transportFingerprint() {
-		if err = invalidateEvidence(r.Context(), tx, id); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	if err := s.validateNetworkReference(r.Context(), tx, id, &input.Configuration); err != nil {
-		return access.Reply{}, err
-	}
-	configuration, err := json.Marshal(input.Configuration)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	etag := access.NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=true,updated_at=now() WHERE id=$1", id, input.Name, input.Configuration.Kind, configuration, etag); err != nil {
+	if err = s.storeDraft(r.Context(), tx, id, input.Name, &current.Configuration, &input.Configuration); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.update", "provider", id, "success"); err != nil {
@@ -299,9 +288,39 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 	return access.Commit(r, tx, result)
 }
 
+// storeDraft saves next as the provider's draft configuration. A change to
+// anything the transport fingerprint covers returns every certified
+// capability to declared, so certification evidence never outlives the
+// configuration it was gathered under.
+func (s *Server) storeDraft(ctx context.Context, tx pgx.Tx, id, name string, previous, next *Configuration) error {
+	if err := next.Validate(s.Egress); err != nil {
+		return err
+	}
+	if next.transportFingerprint() != previous.transportFingerprint() {
+		if err := invalidateEvidence(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+	if err := s.validateNetworkReference(ctx, tx, id, next); err != nil {
+		return err
+	}
+	configuration, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=true,updated_at=now() WHERE id=$1", id, name, next.Kind, configuration, access.NewID())
+	return err
+}
+
 // mutation runs a locked, replay-protected provider mutation that needs
 // If-Match and Idempotency-Key.
 func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error)) (access.Reply, error) {
+	return s.mutationWith(r, action, nil, fn)
+}
+
+// mutationWith is mutation for a request whose body input a replay must
+// match.
+func (s *Server) mutationWith(r *http.Request, action string, input any, fn func(ctx context.Context, tx pgx.Tx, p access.Principal, current *record) (access.Reply, error)) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "provider_id")
 	if err != nil {
@@ -325,7 +344,7 @@ func (s *Server) mutation(r *http.Request, action string, fn func(ctx context.Co
 	if err := p.Project(current.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
-	claim, replayed, err := a.Replay(r, tx, p, nil)
+	claim, replayed, err := a.Replay(r, tx, p, input)
 	if err != nil {
 		return access.Reply{}, err
 	}

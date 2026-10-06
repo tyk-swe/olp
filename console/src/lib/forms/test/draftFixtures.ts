@@ -46,6 +46,7 @@ export const draft: RouteDraft = {
   fidelity: { mode: 'strict' },
   targets: [
     {
+      lifecycle: null,
       id: 'target-a',
       available: true,
       position: 0,

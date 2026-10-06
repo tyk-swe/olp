@@ -1,0 +1,2360 @@
+[
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "connector": "openai",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "token_count",
+      "embeddings",
+      "moderation",
+      "batch",
+      "realtime",
+      "image_generation",
+      "image_edit",
+      "image_variation",
+      "speech",
+      "transcription",
+      "translation",
+      "video_create",
+      "video_list",
+      "video_get",
+      "video_content",
+      "video_delete"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://platform.openai.com/docs/api-reference",
+    "endpoint": "https://api.openai.com/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "openai_compatible",
+    "name": "OpenAI-compatible",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "token_count",
+      "embeddings",
+      "moderation",
+      "image_generation",
+      "image_edit",
+      "image_variation",
+      "speech",
+      "transcription",
+      "translation",
+      "video_create",
+      "video_list",
+      "video_get",
+      "video_content",
+      "video_delete"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://platform.openai.com/docs/api-reference/chat",
+    "endpoint": null,
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "connector": "anthropic",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "token_count"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.anthropic.com",
+    "endpoint": "https://api.anthropic.com/v1",
+    "dialects": [
+      "anthropic-messages"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "google",
+    "name": "Google Gemini",
+    "connector": "gemini",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "token_count",
+      "embeddings",
+      "image_generation",
+      "speech",
+      "transcription"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://ai.google.dev",
+    "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+    "dialects": [
+      "gemini-generate-content"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "google-vertex",
+    "name": "Google Vertex AI",
+    "connector": "vertex_ai",
+    "discovery": false,
+    "operations": [
+      "generation",
+      "token_count",
+      "embeddings",
+      "image_generation",
+      "speech",
+      "transcription"
+    ],
+    "authentication": [
+      "adc",
+      "service_account"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://cloud.google.com/vertex-ai",
+    "endpoint": null,
+    "dialects": [
+      "gemini-generate-content",
+      "anthropic-messages",
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "amazon-bedrock",
+    "name": "Amazon Bedrock",
+    "connector": "bedrock",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "token_count",
+      "embeddings",
+      "bedrock_invoke",
+      "image_generation",
+      "rerank",
+      "speech"
+    ],
+    "authentication": [
+      "default_chain",
+      "static"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.aws.amazon.com/bedrock",
+    "endpoint": null,
+    "dialects": [
+      "bedrock-converse",
+      "anthropic-messages"
+    ],
+    "unsupported_parameters": [
+      "truncation"
+    ]
+  },
+  {
+    "id": "amazon-sagemaker",
+    "name": "Amazon SageMaker AI",
+    "connector": "sagemaker",
+    "discovery": false,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "default_chain",
+      "static"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html",
+    "endpoint": null,
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "ibm-watsonx",
+    "name": "IBM watsonx.ai",
+    "connector": "watsonx",
+    "discovery": true,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "ibm_iam"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "n",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-api-chat.html?context=wx",
+    "endpoint": null,
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": [
+      "audio",
+      "logit_bias",
+      "metadata",
+      "modalities",
+      "parallel_tool_calls",
+      "prediction",
+      "service_tier",
+      "store",
+      "user",
+      "web_search_options"
+    ]
+  },
+  {
+    "id": "azure",
+    "name": "Azure OpenAI",
+    "connector": "azure_openai",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "token_count",
+      "embeddings",
+      "moderation",
+      "batch",
+      "realtime",
+      "image_generation",
+      "image_edit",
+      "image_variation",
+      "speech",
+      "transcription",
+      "translation",
+      "video_create",
+      "video_list",
+      "video_get",
+      "video_content",
+      "video_delete"
+    ],
+    "authentication": [
+      "api_key",
+      "azure_default",
+      "azure_client_secret"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://learn.microsoft.com/azure/ai-services/openai",
+    "endpoint": null,
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "groq",
+    "name": "Groq",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "transcription",
+      "translation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://console.groq.com/docs/openai",
+    "endpoint": "https://api.groq.com/openai/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": [
+      "logit_bias",
+      "logprobs",
+      "top_logprobs"
+    ]
+  },
+  {
+    "id": "mistral",
+    "name": "Mistral",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.mistral.ai/api/endpoint/chat",
+    "endpoint": "https://api.mistral.ai/v1",
+    "dialects": [
+      "openai-chat",
+      "mistral-fim"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://openrouter.ai/docs/api/reference/overview",
+    "endpoint": "https://openrouter.ai/api/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "together",
+    "name": "Together AI",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation",
+      "embeddings",
+      "rerank"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.together.ai/docs/openai-api-compatibility",
+    "endpoint": "https://api.together.ai/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": [
+      "logit_bias",
+      "metadata",
+      "prediction",
+      "service_tier",
+      "store",
+      "truncation"
+    ]
+  },
+  {
+    "id": "vllm",
+    "name": "vLLM",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/",
+    "endpoint": "https://vllm.example.internal/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": [
+      "user"
+    ]
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://api-docs.deepseek.com/api/create-chat-completion",
+    "endpoint": "https://api.deepseek.com",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": [
+      "frequency_penalty",
+      "presence_penalty"
+    ]
+  },
+  {
+    "id": "fireworks",
+    "name": "Fireworks",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.fireworks.ai/tools-sdks/openai-compatibility",
+    "endpoint": "https://api.fireworks.ai/inference/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "deepinfra",
+    "name": "DeepInfra",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.deepinfra.com/chat/overview",
+    "endpoint": "https://api.deepinfra.com/v1/openai",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "huggingface",
+    "name": "Hugging Face",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://huggingface.co/docs/inference-providers/tasks/chat-completion",
+    "endpoint": "https://router.huggingface.co/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "cohere",
+    "name": "Cohere",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation",
+      "embeddings",
+      "rerank"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "max_output_tokens",
+      "top_p",
+      "stop",
+      "seed",
+      "tools",
+      "response_format",
+      "encoding_format"
+    ],
+    "documentation_url": "https://docs.cohere.com/docs/compatibility-api",
+    "endpoint": "https://api.cohere.ai/compatibility/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": [
+      "audio",
+      "dimensions",
+      "input_type",
+      "logit_bias",
+      "metadata",
+      "modalities",
+      "n",
+      "parallel_tool_calls",
+      "prediction",
+      "service_tier",
+      "store",
+      "top_logprobs",
+      "truncate",
+      "truncation",
+      "user"
+    ]
+  },
+  {
+    "id": "cohere-native-v2",
+    "name": "Cohere native v2",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "embeddings",
+      "rerank",
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "input_type",
+      "texts",
+      "images",
+      "inputs",
+      "embedding_types",
+      "output_dimension",
+      "truncate",
+      "max_tokens",
+      "top_n",
+      "max_tokens_per_doc",
+      "priority",
+      "messages",
+      "documents",
+      "citation_options",
+      "tools",
+      "tool_choice",
+      "strict_tools",
+      "response_format",
+      "safety_mode",
+      "temperature",
+      "p",
+      "k",
+      "seed",
+      "stop_sequences",
+      "frequency_penalty",
+      "presence_penalty",
+      "logprobs",
+      "thinking"
+    ],
+    "documentation_url": "https://docs.cohere.com/reference/embed",
+    "endpoint": "https://api.cohere.ai/v2",
+    "dialects": [
+      "cohere-chat-v2"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "jina",
+    "name": "Jina AI",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "embeddings",
+      "rerank"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "task",
+      "dimensions",
+      "embedding_type",
+      "normalized",
+      "late_chunking",
+      "truncate",
+      "top_n",
+      "return_documents",
+      "max_doc_length"
+    ],
+    "documentation_url": "https://api.jina.ai/openapi.json",
+    "endpoint": "https://api.jina.ai/v1",
+    "dialects": [],
+    "unsupported_parameters": [
+      "truncation"
+    ]
+  },
+  {
+    "id": "elevenlabs",
+    "name": "ElevenLabs",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "speech",
+      "transcription"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "voice",
+      "speed",
+      "response_format",
+      "language"
+    ],
+    "documentation_url": "https://elevenlabs.io/docs/api-reference/introduction",
+    "endpoint": "https://api.elevenlabs.io/v1",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "deepgram",
+    "name": "Deepgram",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "speech",
+      "transcription"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "voice",
+      "response_format",
+      "language"
+    ],
+    "documentation_url": "https://developers.deepgram.com/reference/deepgram-api-overview",
+    "endpoint": "https://api.deepgram.com/v1",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "assemblyai",
+    "name": "AssemblyAI",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "transcription"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "language",
+      "response_format"
+    ],
+    "documentation_url": "https://www.assemblyai.com/docs/pre-recorded-audio/api-reference/transcripts/submit",
+    "endpoint": "https://api.assemblyai.com",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "runway",
+    "name": "Runway",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "video_create",
+      "video_list",
+      "video_get",
+      "video_content",
+      "video_delete"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "seconds",
+      "size",
+      "input_reference"
+    ],
+    "documentation_url": "https://docs.dev.runwayml.com/api",
+    "endpoint": "https://api.dev.runwayml.com/v1",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "stability",
+    "name": "Stability AI",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "image_generation",
+      "image_edit"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "size",
+      "output_format",
+      "response_format"
+    ],
+    "documentation_url": "https://platform.stability.ai/docs/api-reference",
+    "endpoint": "https://api.stability.ai",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "recraft",
+    "name": "Recraft",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "image_generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "n",
+      "size",
+      "output_format",
+      "response_format"
+    ],
+    "documentation_url": "https://www.recraft.ai/docs/api-reference/endpoints",
+    "endpoint": "https://external.api.recraft.ai/v1",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "bfl",
+    "name": "Black Forest Labs",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "image_generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "size",
+      "output_format"
+    ],
+    "documentation_url": "https://docs.bfl.ai/api_integration/integration_guidelines",
+    "endpoint": "https://api.bfl.ai/v1",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "voyage",
+    "name": "Voyage AI",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "embeddings",
+      "rerank"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "dimensions",
+      "input_type",
+      "truncation",
+      "output_dtype",
+      "encoding_format"
+    ],
+    "documentation_url": "https://docs.voyageai.com/reference/embeddings-api",
+    "endpoint": "https://api.voyageai.com/v1",
+    "dialects": [],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "xai",
+    "name": "xAI",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "image_generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.x.ai/developers/rest-api-reference/inference/chat-completions",
+    "endpoint": "https://api.x.ai/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": [
+      "logit_bias"
+    ]
+  },
+  {
+    "id": "cerebras",
+    "name": "Cerebras",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://inference-docs.cerebras.ai/resources/openai",
+    "endpoint": "https://api.cerebras.ai/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": [
+      "prediction",
+      "service_tier"
+    ]
+  },
+  {
+    "id": "sambanova",
+    "name": "SambaNova",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.sambanova.ai/docs/en/features/openai-compatibility",
+    "endpoint": "https://api.sambanova.ai/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": [
+      "frequency_penalty",
+      "presence_penalty"
+    ]
+  },
+  {
+    "id": "nebius",
+    "name": "Nebius Token Factory",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.tokenfactory.nebius.com/api-reference/inference/create-chat-completion",
+    "endpoint": "https://api.tokenfactory.nebius.com/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "novita",
+    "name": "Novita AI",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.novita.ai/api-reference/model-apis-llm-create-chat-completion",
+    "endpoint": "https://api.novita.ai/openai/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "nvidia-nim",
+    "name": "NVIDIA NIM",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.api.nvidia.com/nim/reference/create_chat_completion_v1_chat_completions_post",
+    "endpoint": "https://integrate.api.nvidia.com/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "featherless",
+    "name": "Featherless",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://featherless.ai/docs/completions",
+    "endpoint": "https://api.featherless.ai/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "baseten",
+    "name": "Baseten",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.baseten.co/reference/inference-api/chat-completions",
+    "endpoint": "https://inference.baseten.co/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "moonshot",
+    "name": "Moonshot AI",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://platform.kimi.ai/docs/api/chat",
+    "endpoint": "https://api.moonshot.ai/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "moonshot-cn",
+    "name": "Moonshot AI (China)",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://platform.kimi.com/docs/api/chat",
+    "endpoint": "https://api.moonshot.cn/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "dashscope",
+    "name": "Alibaba Cloud Model Studio",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions",
+    "endpoint": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "dashscope-cn",
+    "name": "Alibaba Cloud Model Studio (China)",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions",
+    "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "zai",
+    "name": "Z.ai",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.z.ai/api-reference/llm/chat-completion",
+    "endpoint": "https://api.z.ai/api/paas/v4",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "zhipu",
+    "name": "Zhipu BigModel",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.bigmodel.cn/cn/guide/develop/openai/introduction",
+    "endpoint": "https://open.bigmodel.cn/api/paas/v4",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "minimax",
+    "name": "MiniMax",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://platform.minimax.io/docs/api-reference/text-chat-openai",
+    "endpoint": "https://api.minimax.io/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": [
+      "frequency_penalty",
+      "logit_bias",
+      "presence_penalty"
+    ]
+  },
+  {
+    "id": "minimax-cn",
+    "name": "MiniMax (China)",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://platform.minimax.cn/docs/api-reference/text-chat-openai",
+    "endpoint": "https://api.minimax.cn/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": [
+      "frequency_penalty",
+      "logit_bias",
+      "presence_penalty"
+    ]
+  },
+  {
+    "id": "volcengine-ark",
+    "name": "Volcengine Ark",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://www.volcengine.com/docs/82379/1494384",
+    "endpoint": "https://ark.cn-beijing.volces.com/api/v3",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "byteplus-modelark",
+    "name": "BytePlus ModelArk",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.byteplus.com/en/docs/ModelArk/1494384",
+    "endpoint": "https://ark.ap-southeast.bytepluses.com/api/v3",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "scaleway",
+    "name": "Scaleway Generative APIs",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://www.scaleway.com/en/docs/generative-apis/api-cli/using-chat-api/",
+    "endpoint": "https://api.scaleway.ai/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": [
+      "audio",
+      "metadata",
+      "modalities",
+      "prediction",
+      "service_tier",
+      "store",
+      "user",
+      "web_search_options"
+    ]
+  },
+  {
+    "id": "ovhcloud",
+    "name": "OVHcloud AI Endpoints",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-capabilities",
+    "endpoint": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "nscale",
+    "name": "Nscale",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.nscale.com/api-reference/inference/create-chat-completion",
+    "endpoint": "https://inference.api.nscale.com/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "databricks",
+    "name": "Databricks",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.databricks.com/aws/en/machine-learning/foundation-model-apis/api-reference",
+    "endpoint": "https://your-workspace.cloud.databricks.com/ai-gateway/mlflow/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "snowflake-cortex",
+    "name": "Snowflake Cortex",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-rest-api",
+    "endpoint": "https://your-account.snowflakecomputing.com/api/v2/cortex/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": [
+      "service_tier",
+      "store"
+    ]
+  },
+  {
+    "id": "cloudflare-workers-ai",
+    "name": "Cloudflare Workers AI",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/",
+    "endpoint": "https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "vercel-ai-gateway",
+    "name": "Vercel AI Gateway",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions",
+    "endpoint": "https://ai-gateway.vercel.sh/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "ollama",
+    "name": "Ollama",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.ollama.com/api/openai-compatibility",
+    "endpoint": "https://ollama.example.internal/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": [
+      "logit_bias",
+      "logprobs",
+      "n",
+      "tool_choice",
+      "top_logprobs",
+      "user"
+    ]
+  },
+  {
+    "id": "lmstudio",
+    "name": "LM Studio",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://lmstudio.ai/docs/developer/openai-compat",
+    "endpoint": "https://lmstudio.example.internal/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "llamacpp",
+    "name": "llama.cpp server",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
+    "endpoint": "https://llamacpp.example.internal/v1",
+    "dialects": [
+      "openai-chat",
+      "openai-responses"
+    ],
+    "unsupported_parameters": []
+  },
+  {
+    "id": "infinity",
+    "name": "Infinity",
+    "connector": "openai_compatible",
+    "discovery": true,
+    "operations": [
+      "embeddings",
+      "rerank"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "dimensions",
+      "encoding_format",
+      "top_n",
+      "return_documents",
+      "raw_scores"
+    ],
+    "documentation_url": "https://github.com/michaelfeil/infinity/blob/main/docs/assets/openapi.json",
+    "endpoint": "https://infinity.example.internal",
+    "dialects": [],
+    "unsupported_parameters": [
+      "truncation"
+    ]
+  },
+  {
+    "id": "docker-model-runner",
+    "name": "Docker Model Runner",
+    "connector": "openai_compatible",
+    "discovery": false,
+    "operations": [
+      "generation",
+      "embeddings"
+    ],
+    "authentication": [
+      "api_key",
+      "headers",
+      "none"
+    ],
+    "parameters": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "max_completion_tokens",
+      "max_output_tokens",
+      "stop",
+      "tools",
+      "tool_choice",
+      "response_format",
+      "seed",
+      "presence_penalty",
+      "frequency_penalty",
+      "logit_bias",
+      "n",
+      "user",
+      "reasoning",
+      "reasoning_effort"
+    ],
+    "documentation_url": "https://docs.docker.com/ai/model-runner/api-reference/",
+    "endpoint": "https://model-runner.example.internal/engines/v1",
+    "dialects": [
+      "openai-chat"
+    ],
+    "unsupported_parameters": []
+  }
+]

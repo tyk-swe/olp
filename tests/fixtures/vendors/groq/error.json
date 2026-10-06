@@ -1,0 +1,6 @@
+{
+  "error": {
+    "message": "String - description of the specific error",
+    "type": "invalid_request_error"
+  }
+}

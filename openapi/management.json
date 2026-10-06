@@ -2305,17 +2305,23 @@
             "description": "Defaults to true.",
             "type": "boolean"
           },
+          "format": {
+            "$ref": "#/components/schemas/PricingSourceFormat",
+            "description": "Defaults to prices."
+          },
           "name": {
             "type": "string"
           },
           "url": {
-            "description": "Document URL validated by the installation egress policy.",
-            "type": "string"
+            "description": "Document URL validated by the installation egress policy. Required for prices; omit for a catalog source to read the catalog this release ships. A fetched catalog is verified with its detached signature at the same URL plus .sig.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "name",
-          "url"
+          "name"
         ],
         "type": "object"
       },
@@ -5555,6 +5561,9 @@
             "format": "uuid",
             "type": "string"
           },
+          "format": {
+            "$ref": "#/components/schemas/PricingSourceFormat"
+          },
           "id": {
             "format": "uuid",
             "type": "string"
@@ -5567,7 +5576,11 @@
             "type": "string"
           },
           "url": {
-            "type": "string"
+            "description": "Document URL. A catalog source without one reads the catalog this release ships.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -5578,7 +5591,8 @@
           "etag",
           "created_by",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "format"
         ],
         "type": "object"
       },
@@ -5651,6 +5665,13 @@
               "$ref": "#/components/schemas/PriceRequest"
             },
             "type": "array"
+          },
+          "unrepresentable": {
+            "description": "Components a catalog lists that no price holds; publishing never prices them.",
+            "items": {
+              "$ref": "#/components/schemas/UnrepresentablePrice"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -5684,6 +5705,12 @@
           "diff": {
             "$ref": "#/components/schemas/PricingSourceDiff"
           },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/SkippedPrice"
+            },
+            "type": "array"
+          },
           "snapshot": {
             "$ref": "#/components/schemas/PricingSourceSnapshot"
           },
@@ -5694,12 +5721,23 @@
         "required": [
           "source",
           "snapshot",
-          "diff"
+          "diff",
+          "skipped"
         ],
         "type": "object"
       },
       "PricingSourceSnapshot": {
         "properties": {
+          "catalog": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PricingSourceSnapshotCatalog"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "currency": {
             "type": "string"
           },
@@ -5734,7 +5772,8 @@
           "currency",
           "price_count",
           "fetched_at",
-          "document"
+          "document",
+          "catalog"
         ],
         "type": "object"
       },
@@ -6058,11 +6097,12 @@
           "static",
           "azure_default",
           "azure_client_secret",
+          "ibm_iam",
           "static_credential",
           "grant"
         ],
         "type": "string",
-        "description": "How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin."
+        "description": "How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin."
       },
       "ProviderCapabilityOptionsResponse": {
         "properties": {
@@ -6518,6 +6558,8 @@
           "gemini",
           "vertex_ai",
           "bedrock",
+          "sagemaker",
+          "watsonx",
           "azure_openai",
           "openai_compatible",
           "plugin"
@@ -6629,6 +6671,17 @@
           "available": {
             "type": "boolean"
           },
+          "lifecycle": {
+            "description": "The model's deprecation and retirement as the reference catalog documents them, or null when it documents none.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelLifecycle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "metadata": {
             "$ref": "#/components/schemas/ModelMetadata"
           },
@@ -6652,7 +6705,8 @@
           "provider_id",
           "provider_name",
           "provider_kind",
-          "model"
+          "model",
+          "lifecycle"
         ],
         "type": "object"
       },
@@ -6858,6 +6912,10 @@
           "description": {
             "type": "string"
           },
+          "discovery": {
+            "description": "Whether the upstream lists its models; without discovery the connection test needs a declared probe model.",
+            "type": "boolean"
+          },
           "documentation_label": {
             "type": "string"
           },
@@ -6878,6 +6936,24 @@
           "maintainer": {
             "description": "Organization maintaining the official documentation used for review.",
             "type": "string"
+          },
+          "placeholder": {
+            "description": "Whether the endpoint is a placeholder the operator replaces, as for self-hosted runtimes and account-scoped hosts.",
+            "type": "boolean"
+          },
+          "profile_id": {
+            "description": "Profile a strict route needs, for a vendor whose reviewed contract is the profile's dialect exactly. Onboarding clients copy it into the configuration; the server never infers it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profile_revision": {
+            "description": "Revision of profile_id.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -6888,7 +6964,11 @@
           "auth_mode",
           "maintainer",
           "documentation_label",
-          "documentation_url"
+          "documentation_url",
+          "discovery",
+          "placeholder",
+          "profile_id",
+          "profile_revision"
         ],
         "type": "object"
       },
@@ -8998,6 +9078,17 @@
             "format": "uuid",
             "type": "string"
           },
+          "lifecycle": {
+            "description": "The model's deprecation and retirement as the reference catalog documents them, or null when it documents none.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelLifecycle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "position": {
             "format": "int32",
             "type": "integer"
@@ -9039,7 +9130,8 @@
           "priority",
           "weight",
           "timeout_ms",
-          "position"
+          "position",
+          "lifecycle"
         ],
         "type": "object"
       },
@@ -10332,7 +10424,11 @@
             "type": "string"
           },
           "url": {
-            "type": "string"
+            "description": "Null only for a catalog source, which then reads the catalog this release ships. A source keeps its format.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -10938,6 +11034,13 @@
           "connector": {
             "$ref": "#/components/schemas/ProviderKind"
           },
+          "dialects": {
+            "description": "Generation dialects the vendor documents. A profile in another generation dialect is refused for the vendor.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "discovery": {
             "type": "boolean"
           },
@@ -10967,6 +11070,13 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "unsupported_parameters": {
+            "description": "Request fields refused for the vendor because its documented API cannot represent them.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -10977,7 +11087,9 @@
           "operations",
           "authentication",
           "parameters",
-          "documentation_url"
+          "documentation_url",
+          "dialects",
+          "unsupported_parameters"
         ],
         "type": "object"
       },
@@ -12960,6 +13072,439 @@
           "balance",
           "observed_at"
         ]
+      },
+      "PricingSourceFormat": {
+        "description": "How a source document is read: a price list, or a signed reference catalog verified against the keys this release trusts.",
+        "enum": [
+          "prices",
+          "catalog"
+        ],
+        "type": "string"
+      },
+      "PricingSourceSnapshotCatalog": {
+        "additionalProperties": false,
+        "description": "Signed reference catalog a snapshot was mapped from.",
+        "properties": {
+          "key_id": {
+            "description": "Trusted key that verified the catalog signature.",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "SHA-256 digest of the signed catalog document.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha256",
+          "published_at",
+          "key_id"
+        ],
+        "type": "object"
+      },
+      "UnrepresentablePrice": {
+        "additionalProperties": false,
+        "description": "A price component the catalog lists that pricing revisions cannot yet hold, in the vendor's own terms.",
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "vendor_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendor_id",
+          "model",
+          "operation",
+          "component",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "SkippedPrice": {
+        "additionalProperties": false,
+        "description": "A catalog price this installation cannot store, such as an unknown vendor or operation a newer catalog names.",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "vendor_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendor_id",
+          "model",
+          "operation",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ReferenceCatalog": {
+        "additionalProperties": false,
+        "description": "The signed reference catalog this release ships, verified at start-up.",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "key_id": {
+            "description": "Trusted key that verified the catalog.",
+            "type": "string"
+          },
+          "model_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "published_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "SHA-256 digest of the signed catalog document; facts taken from it are tagged catalog@<sha256>.",
+            "type": "string"
+          },
+          "vendor_count": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "api_version",
+          "published_at",
+          "sha256",
+          "key_id",
+          "vendor_count",
+          "model_count"
+        ],
+        "type": "object"
+      },
+      "ModelLifecycle": {
+        "additionalProperties": false,
+        "description": "A model's deprecation and retirement as its vendor documents them in the reference catalog.",
+        "properties": {
+          "deprecated_at": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "replacement": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retires_at": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "description": "Vendor page that documents the dates.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deprecated_at",
+          "retires_at",
+          "replacement",
+          "source"
+        ],
+        "type": "object"
+      },
+      "CatalogCapabilityHints": {
+        "additionalProperties": false,
+        "description": "Capabilities the vendor documents; an absent hint is unknown. Hints never certify a capability.",
+        "properties": {
+          "prompt_caching": {
+            "type": "boolean"
+          },
+          "reasoning": {
+            "type": "boolean"
+          },
+          "structured_outputs": {
+            "type": "boolean"
+          },
+          "tools": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ProviderCatalogSuggestion": {
+        "additionalProperties": false,
+        "description": "The reference catalog's facts for one of a provider's models.",
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/CatalogCapabilityHints"
+          },
+          "catalog_model": {
+            "description": "Catalog model the upstream model matched.",
+            "type": "string"
+          },
+          "changes": {
+            "description": "Stored facts accepting would change.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "conflict": {
+            "description": "Why the suggestion cannot be accepted: privacy_evidence when the stored facts attest a privacy declaration.",
+            "enum": [
+              "privacy_evidence",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "facts": {
+            "$ref": "#/components/schemas/ModelMetadata"
+          },
+          "lifecycle": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelLifecycle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "matched_by": {
+            "enum": [
+              "id",
+              "alias",
+              "canonical_model"
+            ],
+            "type": "string"
+          },
+          "model_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "upstream_model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "upstream_model",
+          "catalog_model",
+          "matched_by",
+          "facts",
+          "changes",
+          "capabilities",
+          "lifecycle",
+          "conflict"
+        ],
+        "type": "object"
+      },
+      "ProviderCatalogSuggestionListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog": {
+            "$ref": "#/components/schemas/ReferenceCatalog"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCatalogSuggestion"
+            },
+            "type": "array"
+          },
+          "vendor_id": {
+            "description": "Vendor the provider's models were matched under.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "catalog",
+          "vendor_id",
+          "items"
+        ],
+        "type": "object"
+      },
+      "AcceptCatalogSuggestionsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_sha256": {
+            "description": "Digest of the catalog the suggestions were reviewed against; a different catalog answers 409.",
+            "type": "string"
+          },
+          "upstream_models": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 2000,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "catalog_sha256",
+          "upstream_models"
+        ],
+        "type": "object"
+      },
+      "PluginIndexRelease": {
+        "additionalProperties": false,
+        "description": "A reviewed build of a plugin: an owner installs exactly this module digest and approves exactly these origins.",
+        "properties": {
+          "abi_version": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "approved": {
+            "description": "Whether this digest is installed and its origins approved.",
+            "type": "boolean"
+          },
+          "commit": {
+            "description": "Source revision the digest builds from, reproducibly.",
+            "type": "string"
+          },
+          "digest": {
+            "description": "Hex SHA-256 of the WebAssembly module.",
+            "type": "string"
+          },
+          "installed": {
+            "description": "Whether this digest is installed.",
+            "type": "boolean"
+          },
+          "origins": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reviewed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "digest",
+          "abi_version",
+          "size_bytes",
+          "origins",
+          "profiles",
+          "commit",
+          "reviewed_at",
+          "installed",
+          "approved"
+        ],
+        "type": "object"
+      },
+      "PluginIndexEntry": {
+        "additionalProperties": false,
+        "description": "A reviewed plugin and its source.",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "documentation_url": {
+            "type": "string"
+          },
+          "maintainer": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "description": "Source directory within the repository.",
+            "type": "string"
+          },
+          "releases": {
+            "description": "Reviewed releases, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/PluginIndexRelease"
+            },
+            "type": "array"
+          },
+          "repository": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "maintainer",
+          "documentation_url",
+          "repository",
+          "path",
+          "releases"
+        ],
+        "type": "object"
+      },
+      "PluginIndexResponse": {
+        "additionalProperties": false,
+        "description": "The signed index of reviewed plugins this release ships.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PluginIndexEntry"
+            },
+            "type": "array"
+          },
+          "key_id": {
+            "description": "Trusted key that verified the index.",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "SHA-256 digest of the signed index document.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "published_at",
+          "sha256",
+          "key_id",
+          "items"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -18441,7 +18986,7 @@
                 }
               }
             },
-            "description": "Source document failed validation"
+            "description": "Source document failed validation; for a catalog source also catalog_signature_invalid, catalog_outdated or catalog_unsupported_version"
           },
           "502": {
             "content": {
@@ -18461,7 +19006,7 @@
                 }
               }
             },
-            "description": "Egress policy or database unavailable"
+            "description": "Egress policy, reference catalog or database unavailable"
           }
         },
         "security": [
@@ -29563,6 +30108,291 @@
         ],
         "tags": [
           "code-mode"
+        ]
+      }
+    },
+    "/api/v1/reference-catalog": {
+      "get": {
+        "description": "Describes the signed reference catalog this release ships. Its prices reach pricing only through a catalog pricing source an operator refreshes and publishes.",
+        "operationId": "get_reference_catalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceCatalog"
+                }
+              }
+            },
+            "description": "Reference catalog"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks installation-wide management read access"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "This process holds no verified reference catalog"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/catalog-suggestions": {
+      "get": {
+        "description": "Lists the reference catalog's facts for the provider's models, matched under the provider's vendor by upstream model, alias or canonical model, with what accepting each would change.",
+        "operationId": "list_provider_catalog_suggestions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCatalogSuggestionListResponse"
+                }
+              }
+            },
+            "description": "Catalog suggestions"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "This process holds no verified reference catalog"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/catalog-suggestions/accept": {
+      "post": {
+        "description": "Stores the catalog's facts for the named models as operator facts tagged catalog@<sha256>. It changes the provider configuration, so certified capabilities return to declared and must be certified again.",
+        "operationId": "accept_provider_catalog_suggestions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current provider ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique acceptance key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptCatalogSuggestionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderDetailResponse"
+                }
+              }
+            },
+            "description": "Provider with the accepted facts"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The reference catalog changed since the suggestions were reviewed"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider ETag mismatch"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A model has no catalog facts, or its facts attest a privacy declaration"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "This process holds no verified reference catalog"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/plugin-index": {
+      "get": {
+        "description": "Lists the reviewed plugins in the signed index this release ships, with whether each reviewed digest is installed and approved. Browsing installs nothing: installing a module, approving its origins and permitting it stay explicit owner actions.",
+        "operationId": "get_plugin_index",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginIndexResponse"
+                }
+              }
+            },
+            "description": "Plugin index"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "This process holds no verified plugin index"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "plugins"
         ]
       }
     }

@@ -1,0 +1,47 @@
+{
+  "vendor": "minimax",
+  "documentation_url": "https://platform.minimax.io/docs/api-reference/text-chat-openai",
+  "reviewed_at": "2026-10-05",
+  "notes": "presence_penalty, frequency_penalty and logit_bias are documented as ignored; n must be 1. The stream terminal is undocumented. The error body is documented for speech-to-text and was observed for chat.",
+  "endpoints": {
+    "generation": "https://api.minimax.io/v1/chat/completions"
+  },
+  "unsupported_parameters": [
+    "frequency_penalty",
+    "logit_bias",
+    "presence_penalty"
+  ],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 172,
+        "output_tokens": 312,
+        "total_tokens": 484,
+        "cached_input_tokens": 159
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "dialect",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "observed",
+    "status": 401,
+    "envelope": {
+      "type": "authorized_error",
+      "code": "",
+      "message": "login fail: Please carry the API secret key in the 'Authorization' field of the request header (1004)"
+    },
+    "class": "credential"
+  }
+}

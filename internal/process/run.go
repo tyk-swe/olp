@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/config"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/console"
@@ -25,6 +26,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
+	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -54,6 +56,19 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
+	// The signed documents a release ships verify before anything starts: a
+	// tampered reference catalog must never feed discovery, prices or token
+	// estimates.
+	referenceCatalog, err := catalog.Embedded()
+	if err != nil {
+		return err
+	}
+	log.Info("reference catalog verified", "sha256", referenceCatalog.SHA256, "key_id", referenceCatalog.KeyID, "published_at", referenceCatalog.Catalog.PublishedAt)
+	pluginIndex, err := pluginindex.Embedded()
+	if err != nil {
+		return err
+	}
+	log.Info("plugin index verified", "sha256", pluginIndex.SHA256, "key_id", pluginIndex.KeyID, "published_at", pluginIndex.Index.PublishedAt)
 	warnEgressExceptions(log, c)
 	// Tracing is installed before any listener binds: an invalid endpoint or
 	// header file must stop startup rather than trace half a process.
@@ -308,7 +323,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 			defer pluginRuntime.Close(context.Background())
-			Management{Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined}.Register(public)
+			Management{Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, PluginIndex: pluginIndex}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {

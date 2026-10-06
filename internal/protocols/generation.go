@@ -51,11 +51,16 @@ func (a generationAdapter) LiftRequest(r oif.Request) (oif.View, error) {
 	}
 	ignored := map[string]bool{"model": true, "stream": true, "stream_options": true, "tools": true}
 	switch a.family {
-	case openai.FamilyChat:
+	case openai.FamilyChat, openai.FamilyCohereChat:
 		ignored["messages"] = true
 		for i, v := range field(root, "messages").Elements() {
 			add(v, fmt.Sprintf("/messages/%d", i), textField(v, "role"), "message")
 		}
+	case openai.FamilyMistralFIM:
+		ignored["prompt"] = true
+		ignored["suffix"] = true
+		add(field(root, "prompt"), "/prompt", "user", "mistral-fim.prompt")
+		add(field(root, "suffix"), "/suffix", "user", "mistral-fim.suffix")
 	case openai.FamilyResponses:
 		ignored["input"] = true
 		ignored["instructions"] = true
@@ -253,7 +258,7 @@ func (a generationAdapter) LiftResult(r oif.Result) (oif.View, error) {
 		result.Candidates = append(result.Candidates, generation.Candidate{ID: id, Pointer: path, Index: index, Source: v, Nodes: a.nodes(content, contentPath), FinishReason: finish})
 	}
 	switch a.family {
-	case openai.FamilyChat:
+	case openai.FamilyChat, openai.FamilyMistralFIM:
 		for i, c := range field(root, "choices").Elements() {
 			path := fmt.Sprintf("/choices/%d", i)
 			index := i
@@ -272,6 +277,11 @@ func (a generationAdapter) LiftResult(r oif.Result) (oif.View, error) {
 		add(root, "", 0, field(root, "output"), "/output", textField(root, "status"))
 	case openai.FamilyAnthropic:
 		add(root, "", 0, field(root, "content"), "/content", textField(root, "stop_reason"))
+	case openai.FamilyCohereChat:
+		message := field(root, "message")
+		add(root, "", 0, field(message, "content"), "/message/content", textField(root, "finish_reason"))
+		last := &result.Candidates[len(result.Candidates)-1]
+		last.Nodes = append(last.Nodes, a.nodes(field(message, "tool_calls"), "/message/tool_calls")...)
 	case openai.FamilyGemini:
 		result.Usage = field(root, "usageMetadata")
 		for i, c := range field(root, "candidates").Elements() {

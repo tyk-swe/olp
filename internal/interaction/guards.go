@@ -133,7 +133,7 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 		return guardFailure("/events", "event_dialect")
 	}
 	if event.Control() != "" {
-		if (p.Wire() == openai.FamilyChat || p.Wire() == openai.FamilyResponses) && event.Control() == "[DONE]" {
+		if (p.Wire() == openai.FamilyChat || p.Wire() == openai.FamilyResponses || p.Wire() == openai.FamilyMistralFIM) && event.Control() == "[DONE]" {
 			return nil
 		}
 		return guardFailure("/events", "control_grammar")
@@ -171,9 +171,14 @@ func (p *Plan) ValidateEvent(event oif.Event) error {
 				return guardFailure("/events/delta", "message_delta")
 			}
 		}
-	case openai.FamilyChat:
+	case openai.FamilyChat, openai.FamilyMistralFIM:
 		if choices, present := root.Lookup("choices"); present && choices.Kind() != oif.Array {
 			return guardFailure("/events/choices", "candidate_grammar")
+		}
+	case openai.FamilyCohereChat:
+		kind := valueText(member(root, "type"))
+		if kind == "" || event.Name() != "" && event.Name() != kind {
+			return guardFailure("/events/type", "event_identity")
 		}
 	case openai.FamilyResponses:
 		if valueText(member(root, "type")) == "" {

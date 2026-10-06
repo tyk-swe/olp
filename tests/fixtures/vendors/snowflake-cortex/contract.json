@@ -1,0 +1,45 @@
+{
+  "vendor": "snowflake-cortex",
+  "documentation_url": "https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-rest-api",
+  "reviewed_at": "2026-10-05",
+  "notes": "The account host is the operator's. max_tokens is deprecated and refused, so it is renamed to max_completion_tokens. X-Snowflake-Authorization-Token-Type is optional. Usage arrives in streams with stream_options.include_usage. No error body is documented.",
+  "endpoints": {
+    "generation": "https://your-account.snowflakecomputing.com/api/v2/cortex/v1/chat/completions"
+  },
+  "unsupported_parameters": [
+    "service_tier",
+    "store"
+  ],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  }
+}

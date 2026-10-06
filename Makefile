@@ -10,8 +10,9 @@ GO_TEST_TIMEOUT ?= 5m
 CONSOLE_TEST_ARGS ?=
 GO_BUILD_OUTPUT ?= .local/bin/olp
 GO_BUILD_TAGS ?=
+SIGNED_DOCUMENTS = internal/catalog/catalog.json internal/pluginindex/index.json
 
-.PHONY: help setup dev check test test-go test-bench test-console test-scripts test-race integration bench bench-compare bench-gate api build build-go fmt
+.PHONY: help setup dev check test test-go test-bench test-console test-scripts test-race integration bench bench-compare bench-gate api build build-go fmt catalog catalog-sign
 
 help: ## Show development commands
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -72,6 +73,12 @@ build: api ## Build the native Go binary and static console
 build-go: ## Build the native Go binary from generated contracts
 	mkdir -p -- "$$(dirname -- "$(GO_BUILD_OUTPUT)")"
 	CGO_ENABLED=1 go build -mod=readonly -trimpath $(if $(strip $(GO_BUILD_TAGS)),-tags="$(GO_BUILD_TAGS)") -ldflags='$(LDFLAGS)' -o "$(GO_BUILD_OUTPUT)" ./cmd/olp
+
+catalog: ## Rewrite the reference catalog and plugin index in canonical form
+	go run ./internal/signing/cmd/olpsign fmt $(SIGNED_DOCUMENTS)
+
+catalog-sign: catalog ## Sign the reference catalog and plugin index with the development key
+	go run ./internal/signing/cmd/olpsign sign -key-id dev-2026a -seed-file internal/signing/devkey/dev-2026a.seed $(SIGNED_DOCUMENTS)
 
 fmt: ## Format Go and console source
 	gofmt -w cmd internal sdk plugins openapi/*.go tests/fixtures/*.go tests/fixtures/fidelity tests/fixtures/codex-qualified tests/fidelity tests/codecli tests/integration tests/sdkfixture tests/clientfixture $(wildcard tests/bench tests/clients)

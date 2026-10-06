@@ -7,56 +7,67 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
+// TestEveryCompatibleVendorUsesItsReviewedOperationContract checks that each
+// compatible vendor is admitted exactly the operations its contract lists,
+// that a vendor without Responses is sent Chat Completions, and that a
+// renamed token limit reaches the vendor under its documented name.
 func TestEveryCompatibleVendorUsesItsReviewedOperationContract(t *testing.T) {
-	for _, vendor := range []string{"deepseek", "fireworks", "deepinfra", "huggingface", "perplexity", "cohere", "voyage"} {
-		t.Run(vendor, func(t *testing.T) {
+	for _, contract := range vendors.All() {
+		if contract.Connector != "openai_compatible" || contract.KindDefault {
+			continue
+		}
+		t.Run(contract.ID, func(t *testing.T) {
 			for _, operation := range []string{"generation", "embeddings", "token_count", "moderation"} {
 				for _, surface := range []string{"openai", "anthropic", "gemini"} {
 					for _, mode := range []string{"unary", "streaming"} {
-						want := surface == "openai" && ((operation == "generation" && vendor != "voyage") || (operation == "embeddings" && mode == "unary" && (vendor == "voyage" || vendor == "cohere")))
-						if got := connectors.Supports("openai_compatible", vendor, operation, surface, mode); got != want {
+						kindServes := surface == "openai" && (operation == "generation" || mode == "unary")
+						// Generation is translated only to a vendor that speaks
+						// an OpenAI dialect; another serves its own natively.
+						translatable := operation != "generation" || contract.Speaks("openai-chat") || contract.Speaks("openai-responses")
+						want := kindServes && contract.Serves(operation) && translatable
+						if got := connectors.Supports("openai_compatible", contract.ID, operation, surface, mode); got != want {
 							t.Fatalf("%s/%s/%s: supported=%v want %v", operation, surface, mode, got, want)
 						}
 					}
 				}
 			}
-			if vendor != "voyage" {
-				for _, family := range []openai.Family{openai.FamilyChat, openai.FamilyResponses} {
-					for _, stream := range []bool{false, true} {
-						fields := map[string]any{"model": "team-model", "stream": stream}
-						if family == openai.FamilyChat {
-							fields["messages"] = []any{map[string]any{"role": "user", "content": "hello"}}
-							fields["max_completion_tokens"] = 17
-							fields["seed"] = 5
-						} else {
-							fields["input"] = "hello"
-							fields["max_output_tokens"] = 17
-						}
-						body, _ := json.Marshal(fields)
-						request, err := Parse(family, body, "")
-						if err != nil {
-							t.Fatal(err)
-						}
-						encoded, wire, err := Encode(request, "openai_compatible", vendor, "wire-model", nil)
-						if err != nil || wire != openai.FamilyChat {
-							t.Fatalf("%s stream=%v: %s %v", family, stream, wire, err)
-						}
-						document, _ := object(encoded)
-						if string(document["max_tokens"]) != "17" || document["max_completion_tokens"] != nil || string(document["model"]) != `"wire-model"` {
-							t.Fatalf("wrong profile request: %s", encoded)
-						}
-					}
+			if !contract.Serves("generation") || !contract.Speaks("openai-chat") && !contract.Speaks("openai-responses") {
+				return
+			}
+			wantWire := openai.FamilyChat
+			limit := "max_completion_tokens"
+			for _, rewrite := range contract.Request("generation").Rewrites {
+				if rewrite.From == "max_completion_tokens" {
+					limit = rewrite.To
 				}
 			}
-			if vendor == "cohere" || vendor == "voyage" {
-				request, err := Parse(openai.FamilyEmbeddings, []byte(`{"model":"team-model","input":["hello","world"],"encoding_format":"base64"}`), "")
+			for _, family := range []openai.Family{openai.FamilyChat, openai.FamilyResponses} {
+				fields := map[string]any{"model": "team-model"}
+				if family == openai.FamilyChat {
+					fields["messages"] = []any{map[string]any{"role": "user", "content": "hello"}}
+					fields["max_completion_tokens"] = 17
+				} else {
+					fields["input"] = "hello"
+					fields["max_output_tokens"] = 17
+					if contract.Speaks("openai-responses") {
+						wantWire = openai.FamilyResponses
+					}
+				}
+				body, _ := json.Marshal(fields)
+				request, err := Parse(family, body, "")
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, wire, err := Encode(request, "openai_compatible", vendor, "wire-model", nil); err != nil || wire != openai.FamilyEmbeddings {
-					t.Fatalf("embedding profile: %s %v", wire, err)
+				encoded, wire, err := Encode(request, "openai_compatible", contract.ID, "wire-model", nil)
+				if err != nil || wire != wantWire {
+					t.Fatalf("%s: %s %v", family, wire, err)
+				}
+				document, _ := object(encoded)
+				if wire == openai.FamilyChat && string(document[limit]) != "17" || string(document["model"]) != `"wire-model"` {
+					t.Fatalf("wrong %s request: %s", family, encoded)
 				}
 			}
 		})

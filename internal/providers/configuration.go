@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // Limits is the connection quota configuration persisted for distributed limits enforcement.
@@ -67,10 +68,7 @@ type Configuration struct {
 // compare equal and every stored document is complete.
 func (c *Configuration) Normalize() {
 	if c.Endpoint == nil || *c.Endpoint == "" {
-		if endpoint := connectors.DefaultEndpoint(c.Kind, value(c.CloudRegion), value(c.CloudProject)); endpoint != "" {
-			if c.ProfileID == "vertex-anthropic" {
-				endpoint = strings.TrimSuffix(endpoint, "/google") + "/anthropic"
-			}
+		if endpoint := connectors.DefaultProfileEndpoint(c.Kind, c.ProfileID, value(c.CloudRegion), value(c.CloudProject)); endpoint != "" {
 			c.Endpoint = new(endpoint)
 		}
 	}
@@ -95,7 +93,7 @@ func (c *Configuration) Normalize() {
 			c.Options.VendorID = nil
 		}
 	case c.VendorMissing():
-		c.Options.VendorID = new(defaultVendor(c.Kind))
+		c.Options.VendorID = new(vendors.DefaultFor(c.Kind))
 	}
 }
 

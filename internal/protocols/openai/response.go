@@ -74,14 +74,36 @@ func (e *UpstreamError) Redact(redact func(string) string) *UpstreamError {
 }
 
 // ParseErrorBody extracts an OpenAI error envelope, tolerating other shapes.
+// Google APIs, including Vertex's OpenAI-compatible endpoint, may wrap the
+// envelope in a one-element array, and IBM's list errors, of which the first
+// states the failure.
 func ParseErrorBody(body []byte) *UpstreamError {
-	var envelope struct {
-		Error json.RawMessage `json:"error"`
+	type envelope struct {
+		Error  json.RawMessage `json:"error"`
+		Errors json.RawMessage `json:"errors"`
+		Name   string          `json:"name"`
 	}
-	if json.Unmarshal(body, &envelope) != nil || len(envelope.Error) == 0 {
+	var single envelope
+	if json.Unmarshal(body, &single) != nil {
+		var wrapped []envelope
+		if json.Unmarshal(body, &wrapped) != nil || len(wrapped) != 1 {
+			return nil
+		}
+		single = wrapped[0]
+	}
+	var listed []json.RawMessage
+	if len(single.Error) == 0 && json.Unmarshal(single.Errors, &listed) == nil && len(listed) > 0 {
+		stated := errorObject(listed[0])
+		// Stability names the failure beside its list of messages.
+		if stated != nil && stated.Type == "" && single.Name != "" {
+			stated.Type = single.Name
+		}
+		return stated
+	}
+	if len(single.Error) == 0 {
 		return nil
 	}
-	return errorObject(envelope.Error)
+	return errorObject(single.Error)
 }
 
 func errorObject(raw json.RawMessage) *UpstreamError {
@@ -93,11 +115,26 @@ func errorObject(raw json.RawMessage) *UpstreamError {
 		Type    string          `json:"type"`
 		Code    json.RawMessage `json:"code"`
 		Message string          `json:"message"`
+		// Status is Google's canonical error name, such as RESOURCE_EXHAUSTED,
+		// and Name Stability's, such as content_moderation; either stands in
+		// for the type.
+		Status string `json:"status"`
+		Name   string `json:"name"`
 	}
 	if json.Unmarshal(raw, &detail) != nil {
 		return nil
 	}
-	return &UpstreamError{Type: detail.Type, Code: strings.Trim(string(detail.Code), `"`), Message: detail.Message}
+	code := strings.Trim(string(detail.Code), `"`)
+	if code == "null" {
+		code = ""
+	}
+	if detail.Type == "" {
+		detail.Type = detail.Status
+	}
+	if detail.Type == "" {
+		detail.Type = detail.Name
+	}
+	return &UpstreamError{Type: detail.Type, Code: code, Message: detail.Message}
 }
 
 // DecodeChat validates a unary chat completion and rewrites its model to the route.

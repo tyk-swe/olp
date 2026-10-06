@@ -1,0 +1,15 @@
+event: message-start
+data: {"delta":{"message":{"role":"assistant"}},"id":"29f14a5a-11de-4cae-9800-25e4747408ea","type":"message-start"}
+
+event: content-start
+data: {"delta":{"message":{"content":{"text":"","type":"text"}}},"index":0,"type":"content-start"}
+
+event: content-delta
+data: {"delta":{"message":{"content":{"text":"LL"}}},"index":0,"type":"content-delta"}
+
+event: content-end
+data: {"index":0,"type":"content-end"}
+
+event: message-end
+data: {"delta":{"finish_reason":"COMPLETE","usage":{"billed_units":{"input_tokens":5,"output_tokens":26},"tokens":{"input_tokens":71,"output_tokens":26}}},"type":"message-end"}
+

@@ -112,6 +112,18 @@ test('a significant slowdown within the threshold is tolerated and an improvemen
   assert.equal(result.improvements[0].percent, -33.33);
 });
 
+test('a significant change that rounds to zero is unsigned and no regression', () => {
+  const sample = fixture('mixed').replace(
+    '+25.00% (p=0.000 n=10)',
+    '0.00% (p=0.037 n=10)'
+  );
+  const { result } = checkBenchstat(sample);
+  assert.equal(
+    result.regressions.some((finding) => finding.name === 'Admission-8'),
+    false
+  );
+});
+
 test('the threshold is exclusive and configurable', () => {
   const sample = fixture('mixed');
   const atThreshold = sample.replace(

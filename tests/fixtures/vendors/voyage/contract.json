@@ -1,0 +1,38 @@
+{
+  "vendor": "voyage",
+  "documentation_url": "https://docs.voyageai.com/reference/embeddings-api",
+  "reviewed_at": "2026-10-05",
+  "notes": "Error bodies carry a detail message. MongoDB is moving Voyage users to ai.mongodb.com/v1 with the same paths.",
+  "endpoints": {
+    "embeddings": "https://api.voyageai.com/v1/embeddings",
+    "rerank": "https://api.voyageai.com/v1/rerank"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "embeddings": {
+      "file": "embeddings.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 8,
+        "output_tokens": 0,
+        "total_tokens": 8
+      }
+    },
+    "rerank": {
+      "file": "rerank.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 8,
+        "output_tokens": 0,
+        "total_tokens": 8
+      }
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 400,
+    "envelope": null,
+    "class": "upstream_client"
+  }
+}

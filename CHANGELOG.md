@@ -26,3 +26,30 @@ semantic versioning and take their source from root `package.json`;
   adapter from their accounts. Client configuration generates Claude Code 2.1.286
   and OpenCode 1.18.34 setup, which is qualified against controlled peers.
 - Plugin grant profiles can declare a `secret` input, which the console masks.
+- Reviewed vendor contracts: one declared table of every vendor's operations,
+  dialects, refused parameters, credential placement and error classes, each
+  backed by fixtures transcribed from the vendor's documentation. Fifty
+  OpenAI-compatible presets, up from 13, including xAI, Cerebras, Moonshot, DashScope,
+  Z.ai, MiniMax, Databricks, Cloudflare Workers AI, Ollama, LM Studio and
+  llama.cpp; a preset whose vendor speaks a dialect exactly carries its profile
+  and discovery setting.
+- Azure AI Foundry, Vertex OpenAI-compatible and Cohere v2 profiles; the
+  `sagemaker` and `watsonx` connector kinds, the latter with IBM Cloud IAM
+  authentication; Bedrock rerank and Stability images; and native
+  `mistral-fim` and `cohere-chat-v2` generation at
+  `/native/{dialect}/models/{route}` on strict routes.
+- Vendor media codecs on transformed routes: Azure OpenAI, Gemini, Stability
+  AI, Recraft, Black Forest Labs and xAI images; Azure OpenAI, Gemini,
+  ElevenLabs, Deepgram and Amazon Polly speech; Azure OpenAI, Gemini, Groq,
+  ElevenLabs, Deepgram and AssemblyAI transcription; Runway video as durable
+  jobs; and Jina, Together and Infinity rerank. Each is certified by a
+  costless authenticated request or, where a vendor offers none, its smallest
+  real call.
+- A signed reference catalog of model facts, list prices, lifecycle dates and
+  token-estimation factors, verified at startup and published with each
+  release. Catalog pricing sources refresh from it with anti-rollback;
+  discovery suggests its facts, and routes warn about deprecated and retiring
+  models. See [the reference catalog](docs/catalog.md).
+- Plugin authoring templates for OAuth 2.0 client credentials, signed requests
+  and token exchange, and a signed index of reviewed plugins the console
+  browses.

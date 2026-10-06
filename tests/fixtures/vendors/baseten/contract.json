@@ -1,0 +1,43 @@
+{
+  "vendor": "baseten",
+  "documentation_url": "https://docs.baseten.co/reference/inference-api/chat-completions",
+  "reviewed_at": "2026-10-05",
+  "notes": "Model APIs only; dedicated deployments use model-scoped hosts. The documented example omits created, which the schema has. Every failed response is {\"error\": \"<message>\"}. Only max_tokens is documented; n must be 1.",
+  "endpoints": {
+    "generation": "https://inference.baseten.co/v1/chat/completions"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 8,
+        "output_tokens": 11,
+        "total_tokens": 19,
+        "cached_input_tokens": 0
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "dialect",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 403,
+    "envelope": {
+      "type": "",
+      "code": "",
+      "message": "Invalid API key"
+    },
+    "class": "credential"
+  }
+}

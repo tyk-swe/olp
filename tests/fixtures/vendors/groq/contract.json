@@ -1,0 +1,48 @@
+{
+  "vendor": "groq",
+  "documentation_url": "https://console.groq.com/docs/openai",
+  "reviewed_at": "2026-10-05",
+  "notes": "Supplying logprobs, logit_bias or top_logprobs returns 400; n must be 1. Streams end with data: [DONE]. Responses is documented as beta. Audio transcription, translation and speech are documented under the same base. Transcription and translation use OpenAI's audio wire: https://console.groq.com/docs/speech-to-text",
+  "endpoints": {
+    "generation": "https://api.groq.com/openai/v1/chat/completions",
+    "transcription": "https://api.groq.com/openai/v1/audio/transcriptions",
+    "translation": "https://api.groq.com/openai/v1/audio/translations"
+  },
+  "unsupported_parameters": [
+    "logit_bias",
+    "logprobs",
+    "top_logprobs"
+  ],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 18,
+        "output_tokens": 556,
+        "total_tokens": 574
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "String - description of the specific error"
+    },
+    "class": "upstream_client"
+  }
+}

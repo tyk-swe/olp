@@ -1,0 +1,42 @@
+{
+  "vendor": "zai",
+  "documentation_url": "https://docs.z.ai/api-reference/llm/chat-completion",
+  "reviewed_at": "2026-10-05",
+  "notes": "The path prefix is /api/paas/v4. Only max_tokens is documented. Usage appears only in the last stream chunk, as documented. Model listing is undocumented.",
+  "endpoints": {
+    "generation": "https://api.z.ai/api/paas/v4/chat/completions"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "documented",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 401,
+    "envelope": {
+      "type": "",
+      "code": "1001",
+      "message": "Authentication parameter not received in Header, unable to authenticate"
+    },
+    "class": "credential"
+  }
+}

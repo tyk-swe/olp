@@ -190,9 +190,16 @@ func (c Config) envelopeValues(model string) map[string]string {
 }
 
 // WrapRequest returns the body OLP sends for a dialect request body to model:
-// the body in the envelope a plugin profile declares, or the body as it is.
+// the body in the envelope a plugin profile declares, the body adapted to a
+// hosting's API, such as SageMaker's or watsonx's, or the body as it is.
 // Apply signs what it returns.
 func (c Config) WrapRequest(body []byte, model string) []byte {
+	switch c.Kind {
+	case KindSageMaker:
+		return sagemakerBody(body)
+	case KindWatsonx:
+		return c.watsonxBody(body)
+	}
 	e := c.envelope()
 	if e == nil || e.request == "" {
 		return body
@@ -204,6 +211,10 @@ func (c Config) WrapRequest(body []byte, model string) []byte {
 // unary response carries: the member a plugin profile's envelope names, or the
 // body as it is, such as an upstream error.
 func (c Config) UnwrapResponse(body []byte) []byte {
+	if c.Kind == KindWatsonx {
+		result, _ := watsonxResult(body, "chat.completion")
+		return result
+	}
 	e := c.envelope()
 	if e == nil || e.response == "" {
 		return body

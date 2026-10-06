@@ -173,7 +173,7 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 	if _, canonical := fields["route"]; canonical {
 		return nil, access.Invalid("request", "Actual strict inspection requires a native request; set its model to the selected route and choose its dialect.")
 	}
-	families := []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyInputTokens, openai.FamilyAnthropicCount, openai.FamilyGeminiCount, openai.FamilyEmbeddings, openai.FamilyModeration, openai.FamilyRerank}
+	families := []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyGeminiStream, openai.FamilyInputTokens, openai.FamilyAnthropicCount, openai.FamilyGeminiCount, openai.FamilyEmbeddings, openai.FamilyModeration, openai.FamilyRerank, openai.FamilyMistralFIM, openai.FamilyCohereChat}
 	var family openai.Family
 	for _, candidate := range families {
 		if candidate.Operation() != operation || candidate.Surface() != surface {

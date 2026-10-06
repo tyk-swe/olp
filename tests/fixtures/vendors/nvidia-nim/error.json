@@ -1,0 +1,8 @@
+{
+  "type": "urn:nvcf-worker-service:problem-details:unprocessable-entity",
+  "title": "Unprocessable Entity",
+  "status": 422,
+  "detail": "string",
+  "instance": "/v2/nvcf/pexec/functions/4a58c6cb-a9b4-4014-99de-3e704d4ae687",
+  "requestId": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+}

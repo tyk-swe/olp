@@ -14,7 +14,7 @@ import (
 var contracts = buildContracts()
 
 func buildContracts() *oif.Registry {
-	families := []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyBedrock, openai.FamilyInputTokens, openai.FamilyAnthropicCount, openai.FamilyGeminiCount, "bedrock_count", openai.FamilyEmbeddings, openai.FamilyGeminiEmbeddings, openai.FamilyGeminiEmbeddingsBatch, openai.FamilyVertexEmbeddings, openai.FamilyBedrockEmbeddings, openai.FamilyRerank, openai.FamilyModeration}
+	families := []openai.Family{openai.FamilyChat, openai.FamilyResponses, openai.FamilyAnthropic, openai.FamilyGemini, openai.FamilyBedrock, openai.FamilyInputTokens, openai.FamilyAnthropicCount, openai.FamilyGeminiCount, "bedrock_count", openai.FamilyEmbeddings, openai.FamilyGeminiEmbeddings, openai.FamilyGeminiEmbeddingsBatch, openai.FamilyVertexEmbeddings, openai.FamilyBedrockEmbeddings, openai.FamilyRerank, openai.FamilyBedrockRerank, openai.FamilyModeration, openai.FamilyMistralFIM, openai.FamilyCohereChat}
 	operations := []oif.Operation{}
 	bindings := []oif.Binding{}
 	seen := map[oif.Identity]bool{}
@@ -25,7 +25,9 @@ func buildContracts() *oif.Registry {
 			seen[d.Operation] = true
 		}
 		binding := oif.Binding{Dialect: d.Dialect, Operation: d.Operation}
-		if family.Surface() != "gemini" && family != openai.FamilyBedrock && family != "bedrock_count" {
+		// Bedrock bodies name no model: Converse addresses it in the URL, and
+		// Rerank by the ARN its configuration carries.
+		if family.Surface() != "gemini" && family != openai.FamilyBedrock && family != "bedrock_count" && family != openai.FamilyBedrockRerank {
 			binding.IdentityRules = append(binding.IdentityRules, oif.IdentityRule{Pointer: "/model", Origin: oif.IdentityBinding, Kind: oif.String})
 		}
 		if family == openai.FamilyGeminiCount {

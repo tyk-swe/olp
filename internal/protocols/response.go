@@ -64,6 +64,11 @@ func decodeTransformed(wire, target openai.Family, body []byte, route, encoding 
 		} else {
 			c, err = openai.DecodeResponse(body, route)
 		}
+	case openai.FamilyMistralFIM:
+		// A fill-in-the-middle result is a chat completion.
+		c, err = openai.DecodeChat(body, route)
+	case openai.FamilyCohereChat:
+		c, err = decodeCohereChat(body)
 	case openai.FamilyAnthropic:
 		c, err = decodeAnthropic(body, route)
 	case openai.FamilyGemini:
@@ -107,6 +112,8 @@ func decodeTransformed(wire, target openai.Family, body []byte, route, encoding 
 		c, err = decodeBedrockEmbedding(body, route, encoding)
 	case openai.FamilyRerank:
 		c, err = decodeRerank(body, route, request)
+	case openai.FamilyBedrockRerank:
+		c, err = decodeBedrockRerank(body, route, request)
 	case openai.FamilyModeration:
 		f, e := object(body)
 		if e != nil {

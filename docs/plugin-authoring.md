@@ -54,6 +54,23 @@ GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o acme.wasm .
 A module built without `-buildmode=c-shared` is a WASI command, which OLP
 refuses. Install the result from the console's Plugins page.
 
+## Templates
+
+Three templates in [`sdk/plugin/templates`](../sdk/plugin/templates) cover the
+authentication schemes a profile's hosting cannot express by itself. Each is a
+complete plugin with tests, imports only the SDK, and builds to a module OLP
+installs, which CI checks:
+
+| Template | Authenticates with | Uses |
+| --- | --- | --- |
+| [`oauth-client-credentials`](../sdk/plugin/templates/oauth-client-credentials) | Access tokens the OAuth 2.0 client credentials grant issues, refreshed by running the grant again | A grant with a pasted secret, `Fetch` |
+| [`signed-request`](../sdk/plugin/templates/signed-request) | An HMAC signature of each request, so the secret never travels | A static credential, the signing hook |
+| [`token-exchange`](../sdk/plugin/templates/token-exchange) | Bearer tokens exchanged for an API key (RFC 8693, or an IAM service's variant) | A grant with a pasted secret, `Fetch` |
+
+Copy a template outside the repository, replace its upstream constants and
+names, and follow its README. Build with
+`-trimpath -buildvcs=false` so the module's digest is reproducible.
+
 ## The manifest
 
 OLP calls `Manifest` once, at install, and stores the result with the module's

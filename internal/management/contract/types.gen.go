@@ -1185,6 +1185,24 @@ func (e PluginRewriteOp) Valid() bool {
 	}
 }
 
+// Defines values for PricingSourceFormat.
+const (
+	Catalog PricingSourceFormat = "catalog"
+	Prices  PricingSourceFormat = "prices"
+)
+
+// Valid indicates whether the value is a known member of the PricingSourceFormat enum.
+func (e PricingSourceFormat) Valid() bool {
+	switch e {
+	case Catalog:
+		return true
+	case Prices:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProjectMemberResponseProjectRole.
 const (
 	ProjectMemberResponseProjectRoleManager ProjectMemberResponseProjectRole = "manager"
@@ -1230,6 +1248,7 @@ const (
 	ProviderAuthModeDefaultChain      ProviderAuthMode = "default_chain"
 	ProviderAuthModeGrant             ProviderAuthMode = "grant"
 	ProviderAuthModeHeaders           ProviderAuthMode = "headers"
+	ProviderAuthModeIbmIam            ProviderAuthMode = "ibm_iam"
 	ProviderAuthModeNone              ProviderAuthMode = "none"
 	ProviderAuthModeServiceAccount    ProviderAuthMode = "service_account"
 	ProviderAuthModeStatic            ProviderAuthMode = "static"
@@ -1253,6 +1272,8 @@ func (e ProviderAuthMode) Valid() bool {
 		return true
 	case ProviderAuthModeHeaders:
 		return true
+	case ProviderAuthModeIbmIam:
+		return true
 	case ProviderAuthModeNone:
 		return true
 	case ProviderAuthModeServiceAccount:
@@ -1260,6 +1281,45 @@ func (e ProviderAuthMode) Valid() bool {
 	case ProviderAuthModeStatic:
 		return true
 	case ProviderAuthModeStaticCredential:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProviderCatalogSuggestionConflict.
+const (
+	ProviderCatalogSuggestionConflictLessThannil     ProviderCatalogSuggestionConflict = "<nil>"
+	ProviderCatalogSuggestionConflictPrivacyEvidence ProviderCatalogSuggestionConflict = "privacy_evidence"
+)
+
+// Valid indicates whether the value is a known member of the ProviderCatalogSuggestionConflict enum.
+func (e ProviderCatalogSuggestionConflict) Valid() bool {
+	switch e {
+	case ProviderCatalogSuggestionConflictLessThannil:
+		return true
+	case ProviderCatalogSuggestionConflictPrivacyEvidence:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProviderCatalogSuggestionMatchedBy.
+const (
+	Alias          ProviderCatalogSuggestionMatchedBy = "alias"
+	CanonicalModel ProviderCatalogSuggestionMatchedBy = "canonical_model"
+	Id             ProviderCatalogSuggestionMatchedBy = "id"
+)
+
+// Valid indicates whether the value is a known member of the ProviderCatalogSuggestionMatchedBy enum.
+func (e ProviderCatalogSuggestionMatchedBy) Valid() bool {
+	switch e {
+	case Alias:
+		return true
+	case CanonicalModel:
+		return true
+	case Id:
 		return true
 	default:
 		return false
@@ -1320,7 +1380,9 @@ const (
 	ProviderKindOpenai           ProviderKind = "openai"
 	ProviderKindOpenaiCompatible ProviderKind = "openai_compatible"
 	ProviderKindPlugin           ProviderKind = "plugin"
+	ProviderKindSagemaker        ProviderKind = "sagemaker"
 	ProviderKindVertexAi         ProviderKind = "vertex_ai"
+	ProviderKindWatsonx          ProviderKind = "watsonx"
 )
 
 // Valid indicates whether the value is a known member of the ProviderKind enum.
@@ -1340,7 +1402,11 @@ func (e ProviderKind) Valid() bool {
 		return true
 	case ProviderKindPlugin:
 		return true
+	case ProviderKindSagemaker:
+		return true
 	case ProviderKindVertexAi:
+		return true
+	case ProviderKindWatsonx:
 		return true
 	default:
 		return false
@@ -1773,6 +1839,13 @@ func (e ListProviderResourcesParamsKind) Valid() bool {
 	}
 }
 
+// AcceptCatalogSuggestionsRequest defines model for AcceptCatalogSuggestionsRequest.
+type AcceptCatalogSuggestionsRequest struct {
+	// CatalogSha256 Digest of the catalog the suggestions were reviewed against; a different catalog answers 409.
+	CatalogSha256  string   `json:"catalog_sha256"`
+	UpstreamModels []string `json:"upstream_models"`
+}
+
 // AcceptInvitationRequest defines model for AcceptInvitationRequest.
 type AcceptInvitationRequest struct {
 	DisplayName string  `json:"display_name"`
@@ -2093,6 +2166,14 @@ type CapabilityResponse struct {
 	Operation   string                       `json:"operation"`
 	Source      string                       `json:"source"`
 	Surface     string                       `json:"surface"`
+}
+
+// CatalogCapabilityHints Capabilities the vendor documents; an absent hint is unknown. Hints never certify a capability.
+type CatalogCapabilityHints struct {
+	PromptCaching     *bool `json:"prompt_caching,omitempty"`
+	Reasoning         *bool `json:"reasoning,omitempty"`
+	StructuredOutputs *bool `json:"structured_outputs,omitempty"`
+	Tools             *bool `json:"tools,omitempty"`
 }
 
 // ChangePasswordRequest defines model for ChangePasswordRequest.
@@ -2851,11 +2932,14 @@ type CreateNotificationRuleRequest struct {
 // CreatePricingSourceRequest defines model for CreatePricingSourceRequest.
 type CreatePricingSourceRequest struct {
 	// Enabled Defaults to true.
-	Enabled *bool  `json:"enabled,omitempty"`
-	Name    string `json:"name"`
+	Enabled *bool `json:"enabled,omitempty"`
 
-	// Url Document URL validated by the installation egress policy.
-	Url string `json:"url"`
+	// Format Defaults to prices.
+	Format *PricingSourceFormat `json:"format,omitempty"`
+	Name   string               `json:"name"`
+
+	// Url Document URL validated by the installation egress policy. Required for prices; omit for a catalog source to read the catalog this release ships. A fetched catalog is verified with its detached signature at the same URL plus .sig.
+	Url nullable.Nullable[string] `json:"url,omitempty"`
 }
 
 // CreateProjectRequest defines model for CreateProjectRequest.
@@ -3334,6 +3418,16 @@ type MediaJobItem struct {
 type MediaJobListResponse struct {
 	Items      []MediaJobItem            `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// ModelLifecycle A model's deprecation and retirement as its vendor documents them in the reference catalog.
+type ModelLifecycle struct {
+	DeprecatedAt nullable.Nullable[openapi_types.Date] `json:"deprecated_at"`
+	Replacement  nullable.Nullable[string]             `json:"replacement"`
+	RetiresAt    nullable.Nullable[openapi_types.Date] `json:"retires_at"`
+
+	// Source Vendor page that documents the dates.
+	Source string `json:"source"`
 }
 
 // ModelMetadata defines model for ModelMetadata.
@@ -3831,6 +3925,55 @@ type PluginHosting struct {
 	Rewrites *[]PluginRewrite `json:"rewrites,omitempty"`
 }
 
+// PluginIndexEntry A reviewed plugin and its source.
+type PluginIndexEntry struct {
+	Description      string `json:"description"`
+	DocumentationUrl string `json:"documentation_url"`
+	Maintainer       string `json:"maintainer"`
+	Name             string `json:"name"`
+
+	// Path Source directory within the repository.
+	Path string `json:"path"`
+
+	// Releases Reviewed releases, newest first.
+	Releases   []PluginIndexRelease `json:"releases"`
+	Repository string               `json:"repository"`
+}
+
+// PluginIndexRelease A reviewed build of a plugin: an owner installs exactly this module digest and approves exactly these origins.
+type PluginIndexRelease struct {
+	AbiVersion int32 `json:"abi_version"`
+
+	// Approved Whether this digest is installed and its origins approved.
+	Approved bool `json:"approved"`
+
+	// Commit Source revision the digest builds from, reproducibly.
+	Commit string `json:"commit"`
+
+	// Digest Hex SHA-256 of the WebAssembly module.
+	Digest string `json:"digest"`
+
+	// Installed Whether this digest is installed.
+	Installed  bool      `json:"installed"`
+	Origins    []string  `json:"origins"`
+	Profiles   []string  `json:"profiles"`
+	ReviewedAt time.Time `json:"reviewed_at"`
+	SizeBytes  int64     `json:"size_bytes"`
+	Version    string    `json:"version"`
+}
+
+// PluginIndexResponse The signed index of reviewed plugins this release ships.
+type PluginIndexResponse struct {
+	Items []PluginIndexEntry `json:"items"`
+
+	// KeyId Trusted key that verified the index.
+	KeyId       string    `json:"key_id"`
+	PublishedAt time.Time `json:"published_at"`
+
+	// Sha256 SHA-256 digest of the signed index document.
+	Sha256 string `json:"sha256"`
+}
+
 // PluginListResponse defines model for PluginListResponse.
 type PluginListResponse struct {
 	Items []Plugin `json:"items"`
@@ -4044,10 +4187,15 @@ type PricingSource struct {
 	CreatedBy openapi_types.UUID `json:"created_by"`
 	Enabled   bool               `json:"enabled"`
 	Etag      openapi_types.UUID `json:"etag"`
-	Id        openapi_types.UUID `json:"id"`
-	Name      string             `json:"name"`
-	UpdatedAt time.Time          `json:"updated_at"`
-	Url       string             `json:"url"`
+
+	// Format How a source document is read: a price list, or a signed reference catalog verified against the keys this release trusts.
+	Format    PricingSourceFormat `json:"format"`
+	Id        openapi_types.UUID  `json:"id"`
+	Name      string              `json:"name"`
+	UpdatedAt time.Time           `json:"updated_at"`
+
+	// Url Document URL. A catalog source without one reads the catalog this release ships.
+	Url nullable.Nullable[string] `json:"url"`
 }
 
 // PricingSourceDiff defines model for PricingSourceDiff.
@@ -4065,7 +4213,13 @@ type PricingSourceDocument struct {
 	Currency    string                       `json:"currency"`
 	EffectiveAt nullable.Nullable[time.Time] `json:"effective_at,omitempty"`
 	Prices      []PriceRequest               `json:"prices"`
+
+	// Unrepresentable Components a catalog lists that no price holds; publishing never prices them.
+	Unrepresentable *[]UnrepresentablePrice `json:"unrepresentable,omitempty"`
 }
+
+// PricingSourceFormat How a source document is read: a price list, or a signed reference catalog verified against the keys this release trusts.
+type PricingSourceFormat string
 
 // PricingSourceListResponse defines model for PricingSourceListResponse.
 type PricingSourceListResponse struct {
@@ -4076,21 +4230,33 @@ type PricingSourceListResponse struct {
 // PricingSourceRefreshResponse defines model for PricingSourceRefreshResponse.
 type PricingSourceRefreshResponse struct {
 	Diff     PricingSourceDiff     `json:"diff"`
+	Skipped  []SkippedPrice        `json:"skipped"`
 	Snapshot PricingSourceSnapshot `json:"snapshot"`
 	Source   PricingSource         `json:"source"`
 }
 
 // PricingSourceSnapshot defines model for PricingSourceSnapshot.
 type PricingSourceSnapshot struct {
-	Currency   string                `json:"currency"`
-	Document   PricingSourceDocument `json:"document"`
-	FetchedAt  time.Time             `json:"fetched_at"`
-	Id         openapi_types.UUID    `json:"id"`
-	PriceCount int32                 `json:"price_count"`
+	Catalog    nullable.Nullable[PricingSourceSnapshotCatalog] `json:"catalog"`
+	Currency   string                                          `json:"currency"`
+	Document   PricingSourceDocument                           `json:"document"`
+	FetchedAt  time.Time                                       `json:"fetched_at"`
+	Id         openapi_types.UUID                              `json:"id"`
+	PriceCount int32                                           `json:"price_count"`
 
 	// Sha256 SHA-256 digest of the canonical document.
 	Sha256   string             `json:"sha256"`
 	SourceId openapi_types.UUID `json:"source_id"`
+}
+
+// PricingSourceSnapshotCatalog Signed reference catalog a snapshot was mapped from.
+type PricingSourceSnapshotCatalog struct {
+	// KeyId Trusted key that verified the catalog signature.
+	KeyId       string    `json:"key_id"`
+	PublishedAt time.Time `json:"published_at"`
+
+	// Sha256 SHA-256 digest of the signed catalog document.
+	Sha256 string `json:"sha256"`
 }
 
 // PricingSourceSnapshotListResponse defines model for PricingSourceSnapshotListResponse.
@@ -4190,11 +4356,11 @@ type ProviderAuthCapabilityResponse struct {
 	Credential CredentialRequirement `json:"credential"`
 	Label      string                `json:"label"`
 
-	// Mode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
+	// Mode How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	Mode ProviderAuthMode `json:"mode"`
 }
 
-// ProviderAuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
+// ProviderAuthMode How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 type ProviderAuthMode string
 
 // ProviderCapabilityOptionsResponse defines model for ProviderCapabilityOptionsResponse.
@@ -4207,11 +4373,47 @@ type ProviderCapabilityOptionsResponse struct {
 	ProviderKind ProviderKind `json:"provider_kind"`
 }
 
+// ProviderCatalogSuggestion The reference catalog's facts for one of a provider's models.
+type ProviderCatalogSuggestion struct {
+	// Capabilities Capabilities the vendor documents; an absent hint is unknown. Hints never certify a capability.
+	Capabilities CatalogCapabilityHints `json:"capabilities"`
+
+	// CatalogModel Catalog model the upstream model matched.
+	CatalogModel string `json:"catalog_model"`
+
+	// Changes Stored facts accepting would change.
+	Changes []string `json:"changes"`
+
+	// Conflict Why the suggestion cannot be accepted: privacy_evidence when the stored facts attest a privacy declaration.
+	Conflict      nullable.Nullable[ProviderCatalogSuggestionConflict] `json:"conflict"`
+	Facts         ModelMetadata                                        `json:"facts"`
+	Lifecycle     nullable.Nullable[ModelLifecycle]                    `json:"lifecycle"`
+	MatchedBy     ProviderCatalogSuggestionMatchedBy                   `json:"matched_by"`
+	ModelId       openapi_types.UUID                                   `json:"model_id"`
+	UpstreamModel string                                               `json:"upstream_model"`
+}
+
+// ProviderCatalogSuggestionConflict Why the suggestion cannot be accepted: privacy_evidence when the stored facts attest a privacy declaration.
+type ProviderCatalogSuggestionConflict string
+
+// ProviderCatalogSuggestionMatchedBy defines model for ProviderCatalogSuggestion.MatchedBy.
+type ProviderCatalogSuggestionMatchedBy string
+
+// ProviderCatalogSuggestionListResponse defines model for ProviderCatalogSuggestionListResponse.
+type ProviderCatalogSuggestionListResponse struct {
+	// Catalog The signed reference catalog this release ships, verified at start-up.
+	Catalog ReferenceCatalog            `json:"catalog"`
+	Items   []ProviderCatalogSuggestion `json:"items"`
+
+	// VendorId Vendor the provider's models were matched under.
+	VendorId string `json:"vendor_id"`
+}
+
 // ProviderConfiguration defines model for ProviderConfiguration.
 type ProviderConfiguration struct {
 	ApiVersion nullable.Nullable[string] `json:"api_version,omitempty"`
 
-	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
+	// AuthMode How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	AuthMode     ProviderAuthMode          `json:"auth_mode"`
 	CloudProject nullable.Nullable[string] `json:"cloud_project,omitempty"`
 	CloudRegion  nullable.Nullable[string] `json:"cloud_region,omitempty"`
@@ -4336,7 +4538,7 @@ type ProviderKindCapabilityListResponse struct {
 type ProviderKindCapabilityResponse struct {
 	AuthModes []ProviderAuthCapabilityResponse `json:"auth_modes"`
 
-	// DefaultAuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
+	// DefaultAuthMode How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
 	DefaultAuthMode ProviderAuthMode                  `json:"default_auth_mode"`
 	Description     string                            `json:"description"`
 	Fields          []ProviderFieldCapabilityResponse `json:"fields"`
@@ -4363,10 +4565,13 @@ type ProviderModelInventoryListResponse struct {
 
 // ProviderModelInventoryResponse defines model for ProviderModelInventoryResponse.
 type ProviderModelInventoryResponse struct {
-	Available  bool                  `json:"available"`
-	Metadata   ModelMetadata         `json:"metadata"`
-	Model      ProviderModelResponse `json:"model"`
-	ProviderId openapi_types.UUID    `json:"provider_id"`
+	Available bool `json:"available"`
+
+	// Lifecycle The model's deprecation and retirement as the reference catalog documents them, or null when it documents none.
+	Lifecycle  nullable.Nullable[ModelLifecycle] `json:"lifecycle"`
+	Metadata   ModelMetadata                     `json:"metadata"`
+	Model      ProviderModelResponse             `json:"model"`
+	ProviderId openapi_types.UUID                `json:"provider_id"`
 
 	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 	ProviderKind ProviderKind `json:"provider_kind"`
@@ -4433,11 +4638,14 @@ type ProviderOperationDefaults struct {
 
 // ProviderPresetResponse defines model for ProviderPresetResponse.
 type ProviderPresetResponse struct {
-	// AuthMode How a provider authenticates. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
-	AuthMode           ProviderAuthMode `json:"auth_mode"`
-	Description        string           `json:"description"`
-	DocumentationLabel string           `json:"documentation_label"`
-	DocumentationUrl   string           `json:"documentation_url"`
+	// AuthMode How a provider authenticates. `ibm_iam` exchanges an IBM Cloud API key for IAM access tokens. `static_credential` is a plugin provider's static credential, which its profile's hosting adaptation places; `grant` is a plugin provider's grant, which grant enrollment obtains through the plugin.
+	AuthMode    ProviderAuthMode `json:"auth_mode"`
+	Description string           `json:"description"`
+
+	// Discovery Whether the upstream lists its models; without discovery the connection test needs a declared probe model.
+	Discovery          bool   `json:"discovery"`
+	DocumentationLabel string `json:"documentation_label"`
+	DocumentationUrl   string `json:"documentation_url"`
 
 	// Endpoint Reviewed HTTPS base URL resolved into ordinary provider configuration.
 	Endpoint string `json:"endpoint"`
@@ -4448,6 +4656,15 @@ type ProviderPresetResponse struct {
 
 	// Maintainer Organization maintaining the official documentation used for review.
 	Maintainer string `json:"maintainer"`
+
+	// Placeholder Whether the endpoint is a placeholder the operator replaces, as for self-hosted runtimes and account-scoped hosts.
+	Placeholder bool `json:"placeholder"`
+
+	// ProfileId Profile a strict route needs, for a vendor whose reviewed contract is the profile's dialect exactly. Onboarding clients copy it into the configuration; the server never infers it.
+	ProfileId nullable.Nullable[string] `json:"profile_id"`
+
+	// ProfileRevision Revision of profile_id.
+	ProfileRevision nullable.Nullable[string] `json:"profile_revision"`
 }
 
 // ProviderProfile Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification. A plugin profile's revision is the digest of the plugin module that supplies it; the catalogue lists the profiles of approved plugins.
@@ -4717,6 +4934,20 @@ type RecentAuthenticationRequest struct {
 	// Purpose Exact security operation authorized by this one-time grant: password_enrollment, oidc_link, oidc_unlink or plugin_permit.
 	Purpose    string                                `json:"purpose"`
 	ResourceId nullable.Nullable[openapi_types.UUID] `json:"resource_id,omitempty"`
+}
+
+// ReferenceCatalog The signed reference catalog this release ships, verified at start-up.
+type ReferenceCatalog struct {
+	ApiVersion string `json:"api_version"`
+
+	// KeyId Trusted key that verified the catalog.
+	KeyId       string    `json:"key_id"`
+	ModelCount  int32     `json:"model_count"`
+	PublishedAt time.Time `json:"published_at"`
+
+	// Sha256 SHA-256 digest of the signed catalog document; facts taken from it are tagged catalog@<sha256>.
+	Sha256      string `json:"sha256"`
+	VendorCount int32  `json:"vendor_count"`
 }
 
 // ReplaceRouteDraftRequest defines model for ReplaceRouteDraftRequest.
@@ -5084,16 +5315,19 @@ type RouteTargetRequest struct {
 type RouteTargetResponse struct {
 	// Available False when the provider was disabled or the model left the provider's
 	// activated revision. The target is still part of the stored route.
-	Available       bool               `json:"available"`
-	Id              openapi_types.UUID `json:"id"`
-	Position        int32              `json:"position"`
-	Priority        int32              `json:"priority"`
-	ProviderId      openapi_types.UUID `json:"provider_id"`
-	ProviderModel   string             `json:"provider_model"`
-	ProviderModelId openapi_types.UUID `json:"provider_model_id"`
-	ProviderName    string             `json:"provider_name"`
-	TimeoutMs       int32              `json:"timeout_ms"`
-	Weight          int32              `json:"weight"`
+	Available bool               `json:"available"`
+	Id        openapi_types.UUID `json:"id"`
+
+	// Lifecycle The model's deprecation and retirement as the reference catalog documents them, or null when it documents none.
+	Lifecycle       nullable.Nullable[ModelLifecycle] `json:"lifecycle"`
+	Position        int32                             `json:"position"`
+	Priority        int32                             `json:"priority"`
+	ProviderId      openapi_types.UUID                `json:"provider_id"`
+	ProviderModel   string                            `json:"provider_model"`
+	ProviderModelId openapi_types.UUID                `json:"provider_model_id"`
+	ProviderName    string                            `json:"provider_name"`
+	TimeoutMs       int32                             `json:"timeout_ms"`
+	Weight          int32                             `json:"weight"`
 }
 
 // RoutingConstraints defines model for RoutingConstraints.
@@ -5372,6 +5606,14 @@ type SimulationRequest struct {
 // SimulationSemanticHeaders Profile-owned semantic headers for the hypothetical inference request. Authentication, credentials, routing and arbitrary transport headers are rejected. Values are always redacted in inspection output.
 type SimulationSemanticHeaders map[string]string
 
+// SkippedPrice A catalog price this installation cannot store, such as an unknown vendor or operation a newer catalog names.
+type SkippedPrice struct {
+	Model     string `json:"model"`
+	Operation string `json:"operation"`
+	Reason    string `json:"reason"`
+	VendorId  string `json:"vendor_id"`
+}
+
 // SlotHealth defines model for SlotHealth.
 type SlotHealth struct {
 	ActiveCredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"active_credential_version_id,omitempty"`
@@ -5466,6 +5708,15 @@ type UnconfinedPluginPermitRequest struct {
 	Digest string `json:"digest"`
 }
 
+// UnrepresentablePrice A price component the catalog lists that pricing revisions cannot yet hold, in the vendor's own terms.
+type UnrepresentablePrice struct {
+	Component string `json:"component"`
+	Detail    string `json:"detail"`
+	Model     string `json:"model"`
+	Operation string `json:"operation"`
+	VendorId  string `json:"vendor_id"`
+}
+
 // UpdateApiKeyRequest A merge patch: every field is optional, an omitted field keeps the stored
 // value, and an explicit `null` clears one. Writing absent fields through
 // would silently widen a key's privileges — a rename would drop the route
@@ -5534,7 +5785,9 @@ type UpdateNotificationRuleRequest struct {
 type UpdatePricingSourceRequest struct {
 	Enabled *bool   `json:"enabled,omitempty"`
 	Name    *string `json:"name,omitempty"`
-	Url     *string `json:"url,omitempty"`
+
+	// Url Null only for a catalog source, which then reads the catalog this release ships. A source keeps its format.
+	Url nullable.Nullable[string] `json:"url,omitempty"`
 }
 
 // UpdateProfileRequest defines model for UpdateProfileRequest.
@@ -5731,7 +5984,10 @@ type Vendor struct {
 	Authentication []ProviderAuthMode `json:"authentication"`
 
 	// Connector Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
-	Connector        ProviderKind              `json:"connector"`
+	Connector ProviderKind `json:"connector"`
+
+	// Dialects Generation dialects the vendor documents. A profile in another generation dialect is refused for the vendor.
+	Dialects         []string                  `json:"dialects"`
 	Discovery        bool                      `json:"discovery"`
 	DocumentationUrl string                    `json:"documentation_url"`
 	Endpoint         nullable.Nullable[string] `json:"endpoint,omitempty"`
@@ -5739,6 +5995,9 @@ type Vendor struct {
 	Name             string                    `json:"name"`
 	Operations       []string                  `json:"operations"`
 	Parameters       []string                  `json:"parameters"`
+
+	// UnsupportedParameters Request fields refused for the vendor because its documented API cannot represent them.
+	UnsupportedParameters []string `json:"unsupported_parameters"`
 }
 
 // ListApiKeysParams defines parameters for ListApiKeys.
@@ -6311,6 +6570,15 @@ type ActivateProviderParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// AcceptProviderCatalogSuggestionsParams defines parameters for AcceptProviderCatalogSuggestions.
+type AcceptProviderCatalogSuggestionsParams struct {
+	// IfMatch Current provider ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique acceptance key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // PutCredentialSlotParams defines parameters for PutCredentialSlot.
 type PutCredentialSlotParams struct {
 	// IfMatch Current credential-slot ETag
@@ -6812,6 +7080,9 @@ type CreateProviderJSONRequestBody = CreateProviderRequest
 
 // UpdateProviderJSONRequestBody defines body for UpdateProvider for application/json ContentType.
 type UpdateProviderJSONRequestBody = UpdateProviderRequest
+
+// AcceptProviderCatalogSuggestionsJSONRequestBody defines body for AcceptProviderCatalogSuggestions for application/json ContentType.
+type AcceptProviderCatalogSuggestionsJSONRequestBody = AcceptCatalogSuggestionsRequest
 
 // PutCredentialSlotJSONRequestBody defines body for PutCredentialSlot for application/json ContentType.
 type PutCredentialSlotJSONRequestBody = SlotWrite

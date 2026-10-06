@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "TOO_MANY_REQUESTS",
+    "message": "You have insufficient credit to run this request",
+    "param": null,
+    "error_type": "INSUFFICIENT_CREDIT"
+  }
+}

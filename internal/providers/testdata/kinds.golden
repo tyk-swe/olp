@@ -1,0 +1,1029 @@
+{
+  "items": [
+    {
+      "kind": "openai",
+      "label": "OpenAI",
+      "description": "OpenAI platform API with Chat Completions and Responses.",
+      "default_auth_mode": "api_key",
+      "auth_modes": [
+        {
+          "mode": "api_key",
+          "label": "API key",
+          "credential": "required"
+        },
+        {
+          "mode": "headers",
+          "label": "Encrypted headers",
+          "credential": "required"
+        },
+        {
+          "mode": "none",
+          "label": "No credential",
+          "credential": "forbidden"
+        }
+      ],
+      "fields": [
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "openai_compatible",
+      "label": "OpenAI-compatible",
+      "description": "Any server implementing the OpenAI Chat Completions or Responses API.",
+      "default_auth_mode": "api_key",
+      "auth_modes": [
+        {
+          "mode": "api_key",
+          "label": "Bearer API key",
+          "credential": "required"
+        },
+        {
+          "mode": "headers",
+          "label": "Custom credential headers",
+          "credential": "required"
+        },
+        {
+          "mode": "none",
+          "label": "No credential",
+          "credential": "forbidden"
+        }
+      ],
+      "fields": [
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": true
+        }
+      ],
+      "presets": [
+        {
+          "id": "groq",
+          "label": "Groq",
+          "description": "Groq OpenAI-compatible endpoint.",
+          "endpoint": "https://api.groq.com/openai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Groq",
+          "documentation_label": "Groq OpenAI compatibility",
+          "documentation_url": "https://console.groq.com/docs/openai",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "mistral",
+          "label": "Mistral",
+          "description": "Mistral La Plateforme.",
+          "endpoint": "https://api.mistral.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Mistral AI",
+          "documentation_label": "Mistral chat API",
+          "documentation_url": "https://docs.mistral.ai/api/endpoint/chat",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "openrouter",
+          "label": "OpenRouter",
+          "description": "OpenRouter unified API.",
+          "endpoint": "https://openrouter.ai/api/v1",
+          "auth_mode": "api_key",
+          "maintainer": "OpenRouter",
+          "documentation_label": "OpenRouter API reference",
+          "documentation_url": "https://openrouter.ai/docs/api/reference/overview",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "together",
+          "label": "Together AI",
+          "description": "Together AI inference.",
+          "endpoint": "https://api.together.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Together AI",
+          "documentation_label": "Together OpenAI compatibility",
+          "documentation_url": "https://docs.together.ai/docs/openai-api-compatibility",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "vllm",
+          "label": "vLLM",
+          "description": "Self-hosted vLLM OpenAI server.",
+          "endpoint": "https://vllm.example.internal/v1",
+          "auth_mode": "none",
+          "maintainer": "vLLM",
+          "documentation_label": "vLLM OpenAI-compatible server",
+          "documentation_url": "https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/",
+          "discovery": true,
+          "placeholder": true,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "deepseek",
+          "label": "DeepSeek",
+          "description": "DeepSeek compatible API.",
+          "endpoint": "https://api.deepseek.com",
+          "auth_mode": "api_key",
+          "maintainer": "DeepSeek",
+          "documentation_label": "DeepSeek chat completion API",
+          "documentation_url": "https://api-docs.deepseek.com/api/create-chat-completion",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "fireworks",
+          "label": "Fireworks",
+          "description": "Fireworks compatible API.",
+          "endpoint": "https://api.fireworks.ai/inference/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Fireworks",
+          "documentation_label": "Fireworks OpenAI compatibility",
+          "documentation_url": "https://docs.fireworks.ai/tools-sdks/openai-compatibility",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "deepinfra",
+          "label": "DeepInfra",
+          "description": "DeepInfra compatible API.",
+          "endpoint": "https://api.deepinfra.com/v1/openai",
+          "auth_mode": "api_key",
+          "maintainer": "DeepInfra",
+          "documentation_label": "DeepInfra chat API",
+          "documentation_url": "https://docs.deepinfra.com/chat/overview",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "huggingface",
+          "label": "Hugging Face",
+          "description": "Hugging Face Inference Providers.",
+          "endpoint": "https://router.huggingface.co/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Hugging Face",
+          "documentation_label": "Hugging Face chat completion",
+          "documentation_url": "https://huggingface.co/docs/inference-providers/tasks/chat-completion",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "cohere",
+          "label": "Cohere",
+          "description": "Cohere compatible API.",
+          "endpoint": "https://api.cohere.ai/compatibility/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Cohere",
+          "documentation_label": "Cohere Compatibility API",
+          "documentation_url": "https://docs.cohere.com/docs/compatibility-api",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "cohere-native-v2",
+          "label": "Cohere native v2",
+          "description": "Cohere native v2 compatible API.",
+          "endpoint": "https://api.cohere.ai/v2",
+          "auth_mode": "api_key",
+          "maintainer": "Cohere",
+          "documentation_label": "Cohere native v2 API",
+          "documentation_url": "https://docs.cohere.com/reference/embed",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": "cohere-v2",
+          "profile_revision": "1"
+        },
+        {
+          "id": "jina",
+          "label": "Jina AI",
+          "description": "Jina AI embeddings and reranking.",
+          "endpoint": "https://api.jina.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Jina AI",
+          "documentation_label": "Jina AI API",
+          "documentation_url": "https://api.jina.ai/openapi.json",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "elevenlabs",
+          "label": "ElevenLabs",
+          "description": "ElevenLabs speech synthesis and transcription.",
+          "endpoint": "https://api.elevenlabs.io/v1",
+          "auth_mode": "api_key",
+          "maintainer": "ElevenLabs",
+          "documentation_label": "ElevenLabs API reference",
+          "documentation_url": "https://elevenlabs.io/docs/api-reference/introduction",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "deepgram",
+          "label": "Deepgram",
+          "description": "Deepgram speech recognition and synthesis.",
+          "endpoint": "https://api.deepgram.com/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Deepgram",
+          "documentation_label": "Deepgram API reference",
+          "documentation_url": "https://developers.deepgram.com/reference/deepgram-api-overview",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "assemblyai",
+          "label": "AssemblyAI",
+          "description": "AssemblyAI speech recognition.",
+          "endpoint": "https://api.assemblyai.com",
+          "auth_mode": "api_key",
+          "maintainer": "AssemblyAI",
+          "documentation_label": "AssemblyAI transcript API",
+          "documentation_url": "https://www.assemblyai.com/docs/pre-recorded-audio/api-reference/transcripts/submit",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "runway",
+          "label": "Runway",
+          "description": "Runway video generation.",
+          "endpoint": "https://api.dev.runwayml.com/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Runway",
+          "documentation_label": "Runway API reference",
+          "documentation_url": "https://docs.dev.runwayml.com/api",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "stability",
+          "label": "Stability AI",
+          "description": "Stability AI image generation and inpainting.",
+          "endpoint": "https://api.stability.ai",
+          "auth_mode": "api_key",
+          "maintainer": "Stability AI",
+          "documentation_label": "Stability AI API reference",
+          "documentation_url": "https://platform.stability.ai/docs/api-reference",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "recraft",
+          "label": "Recraft",
+          "description": "Recraft raster image generation.",
+          "endpoint": "https://external.api.recraft.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Recraft",
+          "documentation_label": "Recraft API endpoints",
+          "documentation_url": "https://www.recraft.ai/docs/api-reference/endpoints",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "bfl",
+          "label": "Black Forest Labs",
+          "description": "Black Forest Labs FLUX image generation.",
+          "endpoint": "https://api.bfl.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Black Forest Labs",
+          "documentation_label": "BFL integration guidelines",
+          "documentation_url": "https://docs.bfl.ai/api_integration/integration_guidelines",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "voyage",
+          "label": "Voyage AI",
+          "description": "Voyage AI compatible API.",
+          "endpoint": "https://api.voyageai.com/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Voyage AI",
+          "documentation_label": "Voyage AI embeddings API",
+          "documentation_url": "https://docs.voyageai.com/reference/embeddings-api",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "xai",
+          "label": "xAI",
+          "description": "xAI Grok API.",
+          "endpoint": "https://api.x.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "xAI",
+          "documentation_label": "xAI chat completions",
+          "documentation_url": "https://docs.x.ai/developers/rest-api-reference/inference/chat-completions",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "cerebras",
+          "label": "Cerebras",
+          "description": "Cerebras Inference.",
+          "endpoint": "https://api.cerebras.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Cerebras",
+          "documentation_label": "Cerebras OpenAI compatibility",
+          "documentation_url": "https://inference-docs.cerebras.ai/resources/openai",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "sambanova",
+          "label": "SambaNova",
+          "description": "SambaNova Cloud.",
+          "endpoint": "https://api.sambanova.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "SambaNova",
+          "documentation_label": "SambaNova OpenAI compatibility",
+          "documentation_url": "https://docs.sambanova.ai/docs/en/features/openai-compatibility",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "nebius",
+          "label": "Nebius Token Factory",
+          "description": "Nebius Token Factory, formerly AI Studio.",
+          "endpoint": "https://api.tokenfactory.nebius.com/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Nebius",
+          "documentation_label": "Nebius Token Factory chat completions",
+          "documentation_url": "https://docs.tokenfactory.nebius.com/api-reference/inference/create-chat-completion",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "novita",
+          "label": "Novita AI",
+          "description": "Novita AI model APIs.",
+          "endpoint": "https://api.novita.ai/openai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Novita AI",
+          "documentation_label": "Novita AI chat completions",
+          "documentation_url": "https://docs.novita.ai/api-reference/model-apis-llm-create-chat-completion",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "nvidia-nim",
+          "label": "NVIDIA NIM",
+          "description": "NVIDIA-hosted NIM API catalog.",
+          "endpoint": "https://integrate.api.nvidia.com/v1",
+          "auth_mode": "api_key",
+          "maintainer": "NVIDIA",
+          "documentation_label": "NVIDIA NIM chat completions",
+          "documentation_url": "https://docs.api.nvidia.com/nim/reference/create_chat_completion_v1_chat_completions_post",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "featherless",
+          "label": "Featherless",
+          "description": "Featherless serverless inference.",
+          "endpoint": "https://api.featherless.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Featherless",
+          "documentation_label": "Featherless completions",
+          "documentation_url": "https://featherless.ai/docs/completions",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "baseten",
+          "label": "Baseten",
+          "description": "Baseten Model APIs.",
+          "endpoint": "https://inference.baseten.co/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Baseten",
+          "documentation_label": "Baseten chat completions",
+          "documentation_url": "https://docs.baseten.co/reference/inference-api/chat-completions",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "moonshot",
+          "label": "Moonshot AI",
+          "description": "Moonshot AI Kimi platform.",
+          "endpoint": "https://api.moonshot.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Moonshot AI",
+          "documentation_label": "Kimi chat API",
+          "documentation_url": "https://platform.kimi.ai/docs/api/chat",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "moonshot-cn",
+          "label": "Moonshot AI (China)",
+          "description": "Moonshot AI Kimi platform in mainland China.",
+          "endpoint": "https://api.moonshot.cn/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Moonshot AI",
+          "documentation_label": "Kimi chat API (China)",
+          "documentation_url": "https://platform.kimi.com/docs/api/chat",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "dashscope",
+          "label": "Alibaba Cloud Model Studio",
+          "description": "Alibaba Cloud Model Studio, international.",
+          "endpoint": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Alibaba Cloud",
+          "documentation_label": "Model Studio OpenAI Chat Completions",
+          "documentation_url": "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "dashscope-cn",
+          "label": "Alibaba Cloud Model Studio (China)",
+          "description": "Alibaba Cloud Bailian in mainland China.",
+          "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Alibaba Cloud",
+          "documentation_label": "Bailian OpenAI Chat Completions",
+          "documentation_url": "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "zai",
+          "label": "Z.ai",
+          "description": "Z.ai GLM platform.",
+          "endpoint": "https://api.z.ai/api/paas/v4",
+          "auth_mode": "api_key",
+          "maintainer": "Z.ai",
+          "documentation_label": "Z.ai chat completion",
+          "documentation_url": "https://docs.z.ai/api-reference/llm/chat-completion",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "zhipu",
+          "label": "Zhipu BigModel",
+          "description": "Zhipu BigModel GLM platform in mainland China.",
+          "endpoint": "https://open.bigmodel.cn/api/paas/v4",
+          "auth_mode": "api_key",
+          "maintainer": "Zhipu AI",
+          "documentation_label": "BigModel OpenAI compatibility",
+          "documentation_url": "https://docs.bigmodel.cn/cn/guide/develop/openai/introduction",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "minimax",
+          "label": "MiniMax",
+          "description": "MiniMax platform, international.",
+          "endpoint": "https://api.minimax.io/v1",
+          "auth_mode": "api_key",
+          "maintainer": "MiniMax",
+          "documentation_label": "MiniMax OpenAI chat",
+          "documentation_url": "https://platform.minimax.io/docs/api-reference/text-chat-openai",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "minimax-cn",
+          "label": "MiniMax (China)",
+          "description": "MiniMax platform in mainland China.",
+          "endpoint": "https://api.minimax.cn/v1",
+          "auth_mode": "api_key",
+          "maintainer": "MiniMax",
+          "documentation_label": "MiniMax OpenAI chat (China)",
+          "documentation_url": "https://platform.minimax.cn/docs/api-reference/text-chat-openai",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "volcengine-ark",
+          "label": "Volcengine Ark",
+          "description": "Volcengine Ark in mainland China. Models may be named by endpoint ID.",
+          "endpoint": "https://ark.cn-beijing.volces.com/api/v3",
+          "auth_mode": "api_key",
+          "maintainer": "Volcengine",
+          "documentation_label": "Ark chat API",
+          "documentation_url": "https://www.volcengine.com/docs/82379/1494384",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "byteplus-modelark",
+          "label": "BytePlus ModelArk",
+          "description": "BytePlus ModelArk, Southeast Asia. Models may be named by endpoint ID.",
+          "endpoint": "https://ark.ap-southeast.bytepluses.com/api/v3",
+          "auth_mode": "api_key",
+          "maintainer": "BytePlus",
+          "documentation_label": "ModelArk chat API",
+          "documentation_url": "https://docs.byteplus.com/en/docs/ModelArk/1494384",
+          "discovery": false,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "scaleway",
+          "label": "Scaleway Generative APIs",
+          "description": "Scaleway Generative APIs.",
+          "endpoint": "https://api.scaleway.ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Scaleway",
+          "documentation_label": "Scaleway Chat API",
+          "documentation_url": "https://www.scaleway.com/en/docs/generative-apis/api-cli/using-chat-api/",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "ovhcloud",
+          "label": "OVHcloud AI Endpoints",
+          "description": "OVHcloud AI Endpoints.",
+          "endpoint": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+          "auth_mode": "api_key",
+          "maintainer": "OVHcloud",
+          "documentation_label": "AI Endpoints capabilities",
+          "documentation_url": "https://docs.ovhcloud.com/en/guides/public-cloud/ai-machine-learning/ai-endpoints-capabilities",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "nscale",
+          "label": "Nscale",
+          "description": "Nscale serverless inference.",
+          "endpoint": "https://inference.api.nscale.com/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Nscale",
+          "documentation_label": "Nscale chat completions",
+          "documentation_url": "https://docs.nscale.com/api-reference/inference/create-chat-completion",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": "compatible-chat",
+          "profile_revision": "1"
+        },
+        {
+          "id": "databricks",
+          "label": "Databricks",
+          "description": "Databricks Foundation Model APIs through the AI Gateway.",
+          "endpoint": "https://your-workspace.cloud.databricks.com/ai-gateway/mlflow/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Databricks",
+          "documentation_label": "Foundation Model APIs reference",
+          "documentation_url": "https://docs.databricks.com/aws/en/machine-learning/foundation-model-apis/api-reference",
+          "discovery": false,
+          "placeholder": true,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "snowflake-cortex",
+          "label": "Snowflake Cortex",
+          "description": "Snowflake Cortex REST API.",
+          "endpoint": "https://your-account.snowflakecomputing.com/api/v2/cortex/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Snowflake Cortex",
+          "documentation_label": "Cortex REST API",
+          "documentation_url": "https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-rest-api",
+          "discovery": false,
+          "placeholder": true,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "cloudflare-workers-ai",
+          "label": "Cloudflare Workers AI",
+          "description": "Cloudflare Workers AI OpenAI-compatible endpoints.",
+          "endpoint": "https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Cloudflare Workers AI",
+          "documentation_label": "Workers AI OpenAI compatibility",
+          "documentation_url": "https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/",
+          "discovery": false,
+          "placeholder": true,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "vercel-ai-gateway",
+          "label": "Vercel AI Gateway",
+          "description": "Vercel AI Gateway.",
+          "endpoint": "https://ai-gateway.vercel.sh/v1",
+          "auth_mode": "api_key",
+          "maintainer": "Vercel",
+          "documentation_label": "AI Gateway Chat Completions",
+          "documentation_url": "https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions",
+          "discovery": true,
+          "placeholder": false,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "ollama",
+          "label": "Ollama",
+          "description": "Self-hosted Ollama; the server listens on port 11434 by default.",
+          "endpoint": "https://ollama.example.internal/v1",
+          "auth_mode": "none",
+          "maintainer": "Ollama",
+          "documentation_label": "Ollama OpenAI compatibility",
+          "documentation_url": "https://docs.ollama.com/api/openai-compatibility",
+          "discovery": true,
+          "placeholder": true,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "lmstudio",
+          "label": "LM Studio",
+          "description": "Self-hosted LM Studio server; port 1234 in its examples.",
+          "endpoint": "https://lmstudio.example.internal/v1",
+          "auth_mode": "none",
+          "maintainer": "LM Studio",
+          "documentation_label": "LM Studio OpenAI compatibility",
+          "documentation_url": "https://lmstudio.ai/docs/developer/openai-compat",
+          "discovery": true,
+          "placeholder": true,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "llamacpp",
+          "label": "llama.cpp server",
+          "description": "Self-hosted llama-server; port 8080 by default.",
+          "endpoint": "https://llamacpp.example.internal/v1",
+          "auth_mode": "none",
+          "maintainer": "llama.cpp server",
+          "documentation_label": "llama.cpp server API",
+          "documentation_url": "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
+          "discovery": true,
+          "placeholder": true,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "infinity",
+          "label": "Infinity",
+          "description": "Self-hosted Infinity embedding and reranking server; port 7997 by default.",
+          "endpoint": "https://infinity.example.internal",
+          "auth_mode": "none",
+          "maintainer": "Infinity",
+          "documentation_label": "Infinity API",
+          "documentation_url": "https://github.com/michaelfeil/infinity/blob/main/docs/assets/openapi.json",
+          "discovery": true,
+          "placeholder": true,
+          "profile_id": null,
+          "profile_revision": null
+        },
+        {
+          "id": "docker-model-runner",
+          "label": "Docker Model Runner",
+          "description": "Docker Model Runner; port 12434 on the host by default.",
+          "endpoint": "https://model-runner.example.internal/engines/v1",
+          "auth_mode": "none",
+          "maintainer": "Docker Model Runner",
+          "documentation_label": "Docker Model Runner API",
+          "documentation_url": "https://docs.docker.com/ai/model-runner/api-reference/",
+          "discovery": false,
+          "placeholder": true,
+          "profile_id": null,
+          "profile_revision": null
+        }
+      ]
+    },
+    {
+      "kind": "anthropic",
+      "label": "Anthropic",
+      "description": "Native API, including custom endpoints.",
+      "default_auth_mode": "api_key",
+      "auth_modes": [
+        {
+          "mode": "api_key",
+          "label": "API key",
+          "credential": "required"
+        },
+        {
+          "mode": "headers",
+          "label": "Encrypted headers",
+          "credential": "required"
+        },
+        {
+          "mode": "none",
+          "label": "No credential",
+          "credential": "forbidden"
+        }
+      ],
+      "fields": [
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "gemini",
+      "label": "Google Gemini",
+      "description": "Native API, including custom endpoints.",
+      "default_auth_mode": "api_key",
+      "auth_modes": [
+        {
+          "mode": "api_key",
+          "label": "API key",
+          "credential": "required"
+        },
+        {
+          "mode": "headers",
+          "label": "Encrypted headers",
+          "credential": "required"
+        },
+        {
+          "mode": "none",
+          "label": "No credential",
+          "credential": "forbidden"
+        }
+      ],
+      "fields": [
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "azure_openai",
+      "label": "Azure OpenAI",
+      "description": "Azure deployment API.",
+      "default_auth_mode": "api_key",
+      "auth_modes": [
+        {
+          "mode": "api_key",
+          "label": "API key",
+          "credential": "required"
+        },
+        {
+          "mode": "azure_default",
+          "label": "Microsoft Entra default credential",
+          "credential": "forbidden"
+        },
+        {
+          "mode": "azure_client_secret",
+          "label": "Microsoft Entra client secret",
+          "credential": "required"
+        }
+      ],
+      "fields": [
+        {
+          "field": "endpoint",
+          "label": "Resource origin",
+          "required": true
+        },
+        {
+          "field": "deployment",
+          "label": "Deployment",
+          "required": true
+        },
+        {
+          "field": "api_version",
+          "label": "API version",
+          "required": true
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "vertex_ai",
+      "label": "Google Vertex AI",
+      "description": "Vertex publisher generation API.",
+      "default_auth_mode": "adc",
+      "auth_modes": [
+        {
+          "mode": "adc",
+          "label": "Application default credentials",
+          "credential": "forbidden"
+        },
+        {
+          "mode": "service_account",
+          "label": "Service account JSON",
+          "credential": "required"
+        }
+      ],
+      "fields": [
+        {
+          "field": "cloud_project",
+          "label": "Project",
+          "required": true
+        },
+        {
+          "field": "cloud_region",
+          "label": "Location",
+          "required": true
+        },
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "bedrock",
+      "label": "Amazon Bedrock",
+      "description": "Converse, ConverseStream and CountTokens.",
+      "default_auth_mode": "default_chain",
+      "auth_modes": [
+        {
+          "mode": "default_chain",
+          "label": "AWS credential chain",
+          "credential": "forbidden"
+        },
+        {
+          "mode": "static",
+          "label": "AWS credential JSON",
+          "credential": "required"
+        }
+      ],
+      "fields": [
+        {
+          "field": "cloud_region",
+          "label": "Region",
+          "required": true
+        },
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "sagemaker",
+      "label": "Amazon SageMaker AI",
+      "description": "Real-time endpoints serving OpenAI Chat Completions.",
+      "default_auth_mode": "default_chain",
+      "auth_modes": [
+        {
+          "mode": "default_chain",
+          "label": "AWS credential chain",
+          "credential": "forbidden"
+        },
+        {
+          "mode": "static",
+          "label": "AWS credential JSON",
+          "credential": "required"
+        }
+      ],
+      "fields": [
+        {
+          "field": "cloud_region",
+          "label": "Region",
+          "required": true
+        },
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        },
+        {
+          "field": "model",
+          "label": "Probe model",
+          "required": true
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "watsonx",
+      "label": "IBM watsonx.ai",
+      "description": "Chat API with IBM Cloud IAM authentication.",
+      "default_auth_mode": "ibm_iam",
+      "auth_modes": [
+        {
+          "mode": "ibm_iam",
+          "label": "IBM Cloud API key",
+          "credential": "required"
+        }
+      ],
+      "fields": [
+        {
+          "field": "cloud_region",
+          "label": "Region",
+          "required": true
+        },
+        {
+          "field": "cloud_project",
+          "label": "Project ID",
+          "required": true
+        },
+        {
+          "field": "endpoint",
+          "label": "Endpoint",
+          "required": false
+        },
+        {
+          "field": "api_version",
+          "label": "API version date",
+          "required": false
+        }
+      ],
+      "presets": []
+    },
+    {
+      "kind": "plugin",
+      "label": "Provider plugin",
+      "description": "A profile an installed provider plugin supplies around a built-in dialect.",
+      "default_auth_mode": "static_credential",
+      "auth_modes": [
+        {
+          "mode": "static_credential",
+          "label": "Static credential",
+          "credential": "required"
+        },
+        {
+          "mode": "grant",
+          "label": "Grant",
+          "credential": "grant"
+        }
+      ],
+      "fields": [],
+      "presets": []
+    }
+  ]
+}

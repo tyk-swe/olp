@@ -97,7 +97,9 @@ func TestProviderKindsServeTheirCertifiedNativeSurfaces(t *testing.T) {
 				v := option.(map[string]any)
 				// This local fixture implements non-media operations. Native media
 				// discovery is exercised by TestMediaManagementSetupPublishesUsableRoutes.
-				if !slices.Contains(operations, v["operation"].(string)) {
+				// A native generation dialect needs its own profile, which this
+				// Automatic provider lacks; native_generation_test.go covers them.
+				if !slices.Contains(operations, v["operation"].(string)) || v["surface"] == "native" {
 					continue
 				}
 				capabilities = append(capabilities, map[string]any{"operation": v["operation"], "surface": v["surface"], "mode": v["mode"]})

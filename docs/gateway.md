@@ -437,9 +437,11 @@ Cookbook, and an OpenAI count includes them. A request in another dialect is
 framed by what that dialect calls a message: each entry of the Anthropic,
 Bedrock or Gemini conversation, and each system prompt, and the instructions of
 a Responses request. The other families charge text only, four characters per
-token with every field rounded up, and that charge is scaled by a per-family
-factor that is 1 until the [reference catalog](roadmap/m02-provider-catalog.md)
-carries measured ones.
+token with every field rounded up, and that charge is scaled by the family's
+factor in the signed [reference catalog](catalog.md). A factor is published
+only once it is measured against the vendor's own token counts, with
+`tests/fixtures/tokens/calibrate.py`; a family without one keeps the plain
+rule.
 
 Each estimate carries its provenance. `tokenizer` is an exact count of the text
 and of the message framing OpenAI documents, for a prompt that is nothing else:

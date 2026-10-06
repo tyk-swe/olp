@@ -1,0 +1,46 @@
+{
+  "vendor": "minimax-cn",
+  "documentation_url": "https://platform.minimax.cn/docs/api-reference/text-chat-openai",
+  "reviewed_at": "2026-10-05",
+  "notes": "The documentation moved to platform.minimax.cn and documents api.minimax.cn; keys are bound to the region.",
+  "endpoints": {
+    "generation": "https://api.minimax.cn/v1/chat/completions"
+  },
+  "unsupported_parameters": [
+    "frequency_penalty",
+    "logit_bias",
+    "presence_penalty"
+  ],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "dialect",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 401,
+    "envelope": {
+      "type": "authorized_error",
+      "code": "",
+      "message": "login fail: Please carry the API secret key in the 'Authorization' field of the request header (1004)"
+    },
+    "class": "credential"
+  }
+}

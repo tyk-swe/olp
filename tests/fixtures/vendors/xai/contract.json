@@ -1,0 +1,45 @@
+{
+  "vendor": "xai",
+  "documentation_url": "https://docs.x.ai/developers/rest-api-reference/inference/chat-completions",
+  "reviewed_at": "2026-10-05",
+  "notes": "logit_bias is documented as unsupported; penalties and stop are refused by reasoning models only, which is model-specific. total_tokens includes reasoning tokens. The error body is undocumented. Image generation uses the xai-images media wire: https://docs.x.ai/developers/rest-api-reference/inference/images",
+  "endpoints": {
+    "generation": "https://api.x.ai/v1/chat/completions",
+    "image_generation": "https://api.x.ai/v1/images/generations"
+  },
+  "unsupported_parameters": [
+    "logit_bias"
+  ],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 32,
+        "output_tokens": 9,
+        "total_tokens": 135
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  }
+}

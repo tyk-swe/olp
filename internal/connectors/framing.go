@@ -13,11 +13,12 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/protocols/awsframe"
+	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
 // EventStream reports the hosting framing independently from the payload dialect.
 func (c Config) EventStream() bool {
-	return c.Hosting() == "bedrock-converse" || c.Hosting() == "bedrock-anthropic-invoke"
+	return c.traits().eventStream
 }
 
 // StreamPayload removes only the qualified hosting envelope, retaining the native
@@ -27,6 +28,9 @@ func (c Config) EventStream() bool {
 func (c Config) StreamPayload(reader io.Reader, maxEventBytes int) io.Reader {
 	if c.Plugin != nil {
 		return c.unwrapStream(reader, maxEventBytes)
+	}
+	if c.Kind == KindWatsonx {
+		return &watsonxStream{events: sse.NewDecoder(reader, maxEventBytes)}
 	}
 	if c.Hosting() != "bedrock-anthropic-invoke" {
 		return reader

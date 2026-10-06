@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | None | [M6](m06-cost-management.md), [M9](m09-api-surface.md) |
+| In progress | None | [M6](m06-cost-management.md), [M9](m09-api-surface.md) |
 
 LiteLLM's largest advantage is breadth: about 170 provider pages and a model
 cost map covering thousands of models. OLP reaches seven native connector kinds,
@@ -66,6 +66,21 @@ passes against the vendor's documentation, which the preset records as
 Presets also gain an optional `profile_id`, so a preset whose vendor contract
 is exact can serve strict routes without the operator choosing a profile.
 
+#### Declined candidates
+
+Reviewed on 2026-10-05 against each vendor's own documentation. A declined
+vendor stays reachable through **Custom endpoint** or a plugin.
+
+| Candidate | Reason | Source |
+| --- | --- | --- |
+| Lambda | The Lambda Inference API was sunset on 2025-09-25. | [Lambda announcement](https://deeptalk.lambda.ai/t/sunsetting-chat-sunsetting-inference/4744) |
+| Hyperbolic | The serverless inference API is retired; only GPU rental remains. | [Hyperbolic FAQ](https://www.hyperbolic.ai/docs/faq/inference-models) |
+| GitHub Models | Retired on 2026-07-30, including its inference API. | [GitHub changelog](https://github.blog/changelog/2026-07-30-github-models-is-now-retired/) |
+| Hugging Face TGI | The repository is archived and in maintenance mode; `GET /v1/models` is not a list. | [TGI repository](https://github.com/huggingface/text-generation-inference) |
+| Xinference | Its documented chat result reports token usage as `-1`, which OLP refuses as unmeterable. | [Xinference guide](https://inference.readthedocs.io/en/latest/getting_started/using_xinference.html) |
+| Perplexity (withdrawn preset) | Sonar Chat Completions ended on 2026-09-27; its replacement router is in private preview. | [Perplexity migration](https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview) |
+| Codestral endpoint | `codestral.mistral.ai` is absent from current Mistral documentation; fill-in-the-middle is served at `api.mistral.ai` through the `mistral-fim` profile. | [Mistral FIM API](https://docs.mistral.ai/api/endpoint/fim) |
+
 ### M2.2 First-party profiles and codecs
 
 Cloud platforms and APIs that no existing composition expresses get first-party
@@ -84,6 +99,22 @@ support:
 Each addition extends the [capability rules](../../internal/connectors/capabilities.go)
 and [certification eligibility](../../internal/providers/kinds.go) explicitly;
 no operation becomes certifiable by default.
+
+#### Settled during implementation
+
+Reviewed on 2026-10-05 against each vendor's own documentation.
+
+| Target | Outcome | Source |
+| --- | --- | --- |
+| Amazon SageMaker endpoints | A `sagemaker` kind on SageMaker's [OpenAI-compatible path](https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html), which routes by endpoint and inference component and streams server-sent events, with bearer tokens signed from AWS credentials. It serves the vLLM and SGLang containers and custom containers implementing that path. The LMI container streams JSON lines, not server-sent events, and is not supported. | [SageMaker AI guide](https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html) |
+| IBM watsonx.ai | A `watsonx` kind adapting Chat Completions to the watsonx chat API, with an `ibm_iam` mode. It serves transformed routes only; watsonx.ai software on Cloud Pak for Data is not supported. | [watsonx.ai chat API](https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-api-chat.html?context=wx) |
+| Cohere Chat v2 | A native generation dialect at `/native/cohere-chat-v2/models/{route}`, served by the `cohere-v2` profile, that forwards documents, citations and tools unchanged and meters billed units. OpenAI clients keep the `cohere` compatibility preset. | [Chat v2](https://docs.cohere.com/reference/chat) |
+| Mistral fill-in-the-middle | A native generation dialect at `/native/mistral-fim/models/{route}`, served by the `mistral-fim` profile, unary and streaming. | [FIM API](https://docs.mistral.ai/api/endpoint/fim) |
+| Bedrock rerank | Rerank models serve `/v1/rerank` through the Agent Runtime's Rerank API, metered in the queries AWS bills, a query per hundred documents. | [Rerank API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Rerank.html), [rerank pricing](https://docs.aws.amazon.com/bedrock/latest/userguide/rerank-pricing.html) |
+| Bedrock Cohere embeddings | Declined. Cohere Embed on Bedrock reports no usage in its response, and the `X-Amzn-Bedrock-Input-Token-Count` header is absent from the InvokeModel reference, so OLP could not meter it. | [InvokeModel](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html), [Cohere Embed v4](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-embed-v4.html) |
+| Bedrock Stability images | Stable Diffusion 3.5 Large, Stable Image Core and Stable Image Ultra serve `image_generation` through InvokeModel, one image per request. | [SD3.5 Large on Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-diffusion-3-5-large.html) |
+| Bedrock Nova Canvas | Declined. `amazon.nova-canvas-v1:0` reached end of life on 2026-09-30. | [Bedrock legacy models](https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle-legacy.html) |
+| Azure AI Foundry models | Served by the `azure-v1-chat` and `azure-v1-responses` profiles at the resource's `services.ai.azure.com` origin. Microsoft deprecated the `/models` Model Inference API in favour of `/openai/v1`, so no `azure-ai-inference` profile ships. | [Model Inference API specification](https://github.com/Azure/azure-rest-api-specs/blob/main/specification/ai/data-plane/ModelInference/main.tsp), [migration guide](https://learn.microsoft.com/en-us/azure/foundry/how-to/model-inference-to-openai-migration) |
 
 ### M2.3 Media, embedding and rerank providers
 
@@ -104,6 +135,26 @@ Asynchronous vendors (AssemblyAI transcription, every video vendor) use the
 durable job model that [video creation](../gateway.md#media-and-durable-video-jobs)
 already provides: the job pins its route, provider, slot, credential and price
 revisions, and the media reconciler settles it.
+
+#### Settled during implementation
+
+Reviewed on 2026-10-05 against each vendor's own documentation.
+
+| Target | Outcome | Source |
+| --- | --- | --- |
+| Azure OpenAI media | Image generation, speech and transcription through deployments, certified by the smallest real call, as Vertex and Bedrock images are; Azure offers no costless proof. Azure Sora video is declined: its only remaining version retires on 2026-10-15. | [Azure OpenAI preview reference](https://learn.microsoft.com/en-us/azure/foundry/openai/reference-preview), [retirement schedule](https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/model-retirement-schedule) |
+| Google speech | Gemini speech models on the Gemini API and Vertex. Google Cloud Text-to-Speech is declined: it sits on its own host, which a Vertex provider's address does not reach, and its voices need a language OpenAI's speech request does not carry. | [Gemini speech generation](https://ai.google.dev/gemini-api/docs/speech-generation), [Cloud TTS](https://docs.cloud.google.com/text-to-speech/docs/reference/rest/v1/text/synthesize) |
+| Amazon Polly | Speech through a Bedrock provider, at `polly.{region}` and signed for Polly. | [SynthesizeSpeech](https://docs.aws.amazon.com/polly/latest/dg/API_SynthesizeSpeech.html) |
+| Fireworks audio | Declined. Fireworks deprecated audio inference on 2026-06-10 and removed its documentation. | [Fireworks changelog](https://docs.fireworks.ai/updates/changelog) |
+| Runway | A `runway` preset whose video tasks are durable video jobs, polled, settled and deleted like OpenAI's. Video job calls now encode in the wire of the vendor their pinned provider revision names. | [Runway API](https://docs.dev.runwayml.com/api) |
+| Video vendors declined | Azure OpenAI Sora retires on 2026-10-15; Veo on the Gemini API ends on 2026-10-22; Amazon Nova Reel reached end of life on 2026-09-30. Veo on Vertex AI: Google's references disagree on its operation's result, the video arrives inside the operation unless written to Cloud Storage, and it has no deletion; Runway serves Veo 3.1. | [Azure retirements](https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/model-retirement-schedule), [Gemini deprecations](https://ai.google.dev/gemini-api/docs/deprecations), [Bedrock legacy models](https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle-legacy.html), [Veo on Vertex](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/video/generate-videos-from-text) |
+| fal | Declined: no costless authenticated request for ordinary keys, so certification would bill an image. | [fal billing API](https://fal.ai/docs/platform-apis/v1/account/billing) |
+| Jina AI | A `jina` preset for embeddings and rerank; `encoding_format` reaches Jina as `embedding_type`. | [Jina API](https://api.jina.ai/openapi.json) |
+| Together AI rerank | The `together` preset serves rerank on dedicated endpoints, metered by its token usage. | [Together rerank](https://docs.together.ai/reference/rerank-1) |
+| Infinity | An `infinity` self-hosted preset for embeddings and Cohere-protocol rerank. | [Infinity API](https://github.com/michaelfeil/infinity/blob/main/docs/assets/openapi.json) |
+| Mistral embeddings | Served by the `mistral` preset since M2.1. Mistral has no rerank API, so its rerank is declined. | [Mistral API](https://docs.mistral.ai/api/) |
+| NVIDIA NIM rerank | Declined. NVIDIA's hosted rerankers sit at a model-specific address each and score with raw logits, which OLP's rerank result, a relevance score from 0 to 1, cannot carry without rescaling. NIM embeddings are served by the `nvidia-nim` preset. | [NVIDIA reranking API](https://docs.api.nvidia.com/nim/reference/nvidia-llama-3_2-nv-rerankqa-1b-v2-infer) |
+| Bedrock Cohere embeddings | Declined; see M2.2. | |
 
 ### M2.4 Reference catalog
 
@@ -169,20 +220,135 @@ The catalog is advisory and never authoritative on its own:
 3. The minimum media set for Azure OpenAI that unblocks most deployments
    (recommended: image generation, speech and transcription first).
 
+## Delivered
+
+### M2.1 Reviewed presets
+
+- The [`internal/vendors`](../../internal/vendors) table declares every
+  vendor's operations, dialects, refused and rewritten parameters, credential
+  placement, error classes and media wires once; capability rules,
+  certification eligibility, request shaping, discovery and the console read it
+  instead of their former hard-coded lists. Golden tests pinned the connector
+  matrix and onboarding catalogue before the refactor.
+- Fifty [OpenAI-compatible presets](../configuration.md#openai-compatible-provider-presets),
+  up from 13, each with a contract fixture in `tests/fixtures/vendors/`
+  transcribed from the vendor's documentation and a contract test of its URL,
+  refused parameters, usage, stream terminal and error envelope. A preset whose
+  vendor speaks a dialect exactly carries its profile, so it serves strict
+  routes as created; the console offers the profile, discovery and placeholder
+  endpoints from the preset. Candidates without a usable API are
+  [declined](#declined-candidates).
+
+### M2.2 First-party profiles and codecs
+
+- The `vertex-openai` profile; the `sagemaker` kind with bearer tokens signed
+  from AWS credentials ([SageMaker AI](../providers/sagemaker.md)); the
+  `watsonx` kind with IBM Cloud IAM exchange ([watsonx.ai](../providers/watsonx.md));
+  Bedrock rerank through the Agent Runtime and Stability images through
+  InvokeModel ([Bedrock](../providers/bedrock.md)).
+- [Native generation dialects](../provider-profiles.md#native-generation-dialects):
+  `mistral-fim` and `cohere-chat-v2` at `/native/{dialect}/models/{route}`,
+  validated, metered and forwarded unchanged on strict routes, served by the
+  `mistral-fim` and composite `cohere-v2` profiles.
+- Connector hosting traits in one table, and a live-provider case for every
+  new target in `internal/connectors/live_test.go` and the live-providers
+  workflow. [Settled outcomes](#settled-during-implementation) record what
+  changed from the plan.
+
+### M2.3 Media, embedding and rerank providers
+
+- A media codec registry in which a vendor's wire encodes and decodes each
+  operation, with a bounded step loop for vendors that answer
+  asynchronously: polls, uploads, cleanup, and products fetched without the
+  credential from any address the egress policy admits. Video jobs encode in
+  the wire their pinned provider revision names.
+- The vendors of [vendor media](../providers/media.md), each certified by a
+  costless authenticated request, or by its smallest real call where the
+  vendor offers none (Azure OpenAI, Vertex and Bedrock), with fixtures from
+  the vendor's documentation and an integration test through the gateway.
+- Jina, Together and Infinity rerank on a widened rerank decoder that reads
+  token usage and echoed document objects. [Settled outcomes](#settled-during-implementation-1)
+  record the declines.
+
+### M2.4 Reference catalog
+
+- [`internal/signing`](../../internal/signing): detached multi-key Ed25519
+  signatures over exact bytes, the `olpsign` tool, a committed development
+  key, and release builds that trust release keys alone.
+- The [reference catalog](../catalog.md): schema, canonical form, signature
+  verification before any listener opens and in `olp doctor`, and model facts,
+  prices with every unpriced component named, and lifecycle dates for the
+  vendors under [coverage](../catalog.md#coverage), each with provenance.
+- Catalog [pricing sources](../operations.md#accounting-delivery-and-shutdown)
+  with signature checks and anti-rollback; discovery suggestions accepted as
+  `catalog@<sha256>` facts that invalidate certification; deprecation and
+  retirement warnings in the models and route consoles and APIs; and
+  per-family token-estimation factors read from the catalog.
+- The release workflow signs the catalog and plugin index with the CI-held
+  key, builds with the `release` tag and publishes both documents; a weekly
+  workflow opens `catalog-drift` issues.
+
+### M2.5 Plugin ecosystem
+
+- [Authoring templates](../plugin-authoring.md#templates) for OAuth 2.0
+  client credentials, signed requests and token exchange, built to WebAssembly
+  and inspected by the plugin runtime in tests.
+- The [reviewed plugin index](../plugins.md#reviewed-plugin-index), signed like
+  the catalog and browsable in the console; installing, approving and
+  permitting stay owner actions.
+
+## Open items
+
+**Evidence still to produce**
+
+- The live-provider tests of the M2.2 targets compile under the `liveproviders`
+  tag but have not run: they need vendor credentials this work did not have.
+- No token-estimation factor ships. `tests/fixtures/tokens/calibrate.py`
+  measures one against the free Anthropic and Gemini counting endpoints; each
+  family keeps the factor 1 until a measurement lands in the catalog.
+
+**Later work**
+
+- Veo on Vertex AI, if Google settles how a finished operation returns its
+  video; fal, if it offers a costless authenticated request; NVIDIA rerank,
+  if OLP's rerank result gains a raw score.
+- Translation on vendor speech-to-text APIs, streaming from vendor media
+  codecs, and image variations beyond OpenAI.
+
 ## Exit criteria
 
-- [ ] Every candidate in M2.1 ships as a preset with a passing contract test, or
+- [x] Every candidate in M2.1 ships as a preset with a passing contract test, or
       is recorded in this file with the reason it was declined.
+      *Evidence:* `TestEveryPresetHasReviewedEvidence` checks every preset against its
+      fixture; [declined candidates](#declined-candidates) records the rest.
 - [ ] Every target in M2.2 is certifiable through its profile or codec and has a
       live-provider test.
-- [ ] Every provider in the M2.3 table can be certified for its listed
+      *Done:* each target is certifiable through the profile, kind or dialect
+      its [settled outcome](#settled-during-implementation) names, and has a
+      live-provider case. *Remaining:* the live cases compile but have not run
+      against the vendors (see [open items](#open-items)).
+- [x] Every provider in the M2.3 table can be certified for its listed
       operations on transformed routes, with conformance fixtures and pricing
       coverage.
-- [ ] Releases embed a signed catalog; a tampered catalog fails verification at
+      *Evidence:* each served vendor has fixtures in `tests/fixtures/vendors/`,
+      codec tests, an integration test through the gateway and catalog prices;
+      the providers and operations not served are declined with their reasons
+      in [settled outcomes](#settled-during-implementation-1).
+- [x] Releases embed a signed catalog; a tampered catalog fails verification at
       startup and at source refresh.
-- [ ] The catalog covers every model of every catalog vendor with published list
+      *Evidence:* `TestTamperedCatalogsAreRefused` and the startup path in
+      `internal/process`, which verifies the embedded catalog through the same
+      `catalog.Load`, and the tampered-document and tampered-signature
+      refresh tests in `internal/usage`. The release workflow re-signs with the
+      release key, which a maintainer has yet to create.
+- [x] The catalog covers every model of every catalog vendor with published list
       prices, each component either priced or marked `unrepresentable`.
-- [ ] Discovery suggests catalog facts, and accepting them stores
+      *Evidence:* 714 models of 32 vendors, transcribed on 2026-10-05; the
+      vendors left to operator prices and why are listed under
+      [coverage](../catalog.md#coverage).
+- [x] Discovery suggests catalog facts, and accepting them stores
       provenance-tagged operator facts.
-- [ ] The [parity matrix](parity.md) provider and media rows are `Parity` or
+      *Evidence:* the catalog-suggestions API and console, storing
+      `catalog@<sha256>` facts and invalidating certification.
+- [x] The [parity matrix](parity.md) provider and media rows are `Parity` or
       better.

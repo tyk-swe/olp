@@ -18,6 +18,15 @@ function flag(value: boolean | null): string | null {
 }
 
 /**
+ * How a fact source reads: facts accepted from the reference catalog name the
+ * catalog by its digest, any other source is shown as recorded.
+ */
+export function sourceLabel(source: string): string {
+  const digest = source.match(/^catalog@([0-9a-f]{64})$/)?.[1];
+  return digest ? `Reference catalog (${digest.slice(0, 12)}…)` : source;
+}
+
+/**
  * The upstream facts worth showing beside a model, minus the context and
  * output ceilings the table already carries as columns. Unknown fields are
  * dropped rather than rendered as blanks, so a model with nothing recorded
@@ -41,7 +50,7 @@ export function metadataFacts(metadata: ModelMetadata): MetadataFact[] {
     ['Deployment', metadata.deployment],
     ['Data collection', flag(metadata.data_collection)],
     ['Zero data retention', flag(metadata.zero_data_retention)],
-    ['Source', metadata.source],
+    ['Source', metadata.source === null ? null : sourceLabel(metadata.source)],
     ['Observed', metadata.observed_at ? formatDate(metadata.observed_at) : null]
   ];
   return entries

@@ -55,8 +55,9 @@ const scales = new Map([
 const marks = '⁰¹²³⁴⁵⁶⁷⁸⁹';
 const footnote = new RegExp(`^[${marks}]+\\s`);
 const cell = /(\d[^\s±]*)\s*±\s*(\S+)/g;
+// benchstat leaves a significant change that rounds to zero unsigned: 0.00%.
 const change =
-  /^[\s⁰¹²³⁴⁵⁶⁷⁸⁹]*(?:([+-])(\d+(?:\.\d+)?|Inf)%|(~)|(\?))\s+\(p=([\d.]+)\s+n=(\d+)(?:\+(\d+))?\)/;
+  /^[\s⁰¹²³⁴⁵⁶⁷⁸⁹]*(?:([+-]?)(\d+(?:\.\d+)?|Inf)%|(~)|(\?))\s+\(p=([\d.]+)\s+n=(\d+)(?:\+(\d+))?\)/;
 
 const shortPackage = (pkg) => pkg.replace(/^github\.com\/[^/]+\/[^/]+\//, '');
 const signed = (percent) => `${percent > 0 ? '+' : ''}${percent.toFixed(2)}%`;

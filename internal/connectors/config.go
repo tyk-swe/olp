@@ -14,6 +14,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 type Config struct {
@@ -29,22 +30,33 @@ type Config struct {
 	OperationDefaults                                                                     map[string]DefaultSet
 	Bindings                                                                              map[string]Binding
 	Kind, AuthMode, Endpoint, CloudRegion, CloudProject, Deployment, APIVersion, VendorID string
-	CredentialHeaders                                                                     []string
-	Models                                                                                map[string]json.RawMessage
+	// SigningService overrides the SigV4 signing name of one call to an AWS
+	// service beside the connector's own, such as Amazon Polly's.
+	SigningService    string `json:"-"`
+	CredentialHeaders []string
+	Models            map[string]json.RawMessage
 	// ObservedPrincipal is the upstream principal that grant enrollment
 	// observed for every credential slot of a provider authenticated by a
 	// grant, or empty.
 	ObservedPrincipal string
 }
 
+// DefaultProfileEndpoint is the endpoint a provider of kind using profileID
+// gets when it names none: its kind's, or the address the profile's hosting
+// is served at.
+func DefaultProfileEndpoint(kind, profileID, region, project string) string {
+	endpoint := DefaultEndpoint(kind, region, project)
+	if path := hostings[profileHosting(profileID)].vertexPath; kind == "vertex_ai" && path != "" {
+		return strings.TrimSuffix(endpoint, hostings["vertex-google"].vertexPath) + path
+	}
+	return endpoint
+}
+
+// DefaultEndpoint is the endpoint a provider of kind gets when it names none:
+// the address its cloud fields resolve to, or its default vendor's reviewed
+// endpoint.
 func DefaultEndpoint(kind, region, project string) string {
 	switch kind {
-	case "openai":
-		return "https://api.openai.com/v1"
-	case "anthropic":
-		return "https://api.anthropic.com/v1"
-	case "gemini":
-		return "https://generativelanguage.googleapis.com/v1beta"
 	case "vertex_ai":
 		host := region + "-aiplatform.googleapis.com"
 		if region == "global" {
@@ -57,18 +69,30 @@ func DefaultEndpoint(kind, region, project string) string {
 	case "bedrock":
 		endpoint, _ := BedrockEndpoint(region, false)
 		return endpoint
+	case KindSageMaker:
+		endpoint, _ := SageMakerEndpoint(region)
+		return endpoint
+	case KindWatsonx:
+		if !cloudIdentifier.MatchString(region) {
+			return ""
+		}
+		return "https://" + region + ".ml.cloud.ibm.com"
 	}
-	return ""
+	contract, _ := vendors.Lookup(vendors.DefaultFor(kind))
+	return contract.Endpoint
 }
-
-const coherePresetEndpoint = "https://api.cohere.ai/compatibility/v1"
-const cohereRerankEndpoint = "https://api.cohere.ai/v2/rerank"
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 var cloudIdentifier = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
 var bedrockModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 
 func ModelValid(kind, model string) bool {
+	if kind == KindSageMaker {
+		return sagemakerModelValid(model)
+	}
+	if kind == KindWatsonx {
+		return watsonxModelValid(model)
+	}
 	if kind == "bedrock" {
 		return len(model) <= 2048 && bedrockModel.MatchString(model) && !strings.Contains(model, "..")
 	}
@@ -91,7 +115,7 @@ func (c Config) Validate(policy *egress.Policy) error {
 	if err := c.validateProfileEndpoint(u); err != nil {
 		return err
 	}
-	if c.Hosting() == "azure-v1" || c.Hosting() == "azure-responses-legacy" {
+	if hosting := c.Hosting(); hosting == "azure-v1" || hosting == "azure-responses-legacy" {
 		return nil
 	}
 	switch c.Kind {
@@ -116,6 +140,23 @@ func (c Config) Validate(policy *egress.Policy) error {
 		}
 		if c.Deployment != "" || c.APIVersion != "" {
 			return errors.New("Vertex deployment and API version belong in the native endpoint")
+		}
+	case KindSageMaker:
+		if !cloudIdentifier.MatchString(c.CloudRegion) {
+			return errors.New("SageMaker requires an AWS region")
+		}
+		if u.Path != "" || c.CloudProject != "" || c.Deployment != "" || c.APIVersion != "" {
+			return errors.New("SageMaker uses a runtime endpoint origin and region; models name the endpoint")
+		}
+	case KindWatsonx:
+		if !cloudIdentifier.MatchString(c.CloudRegion) || !cloudIdentifier.MatchString(c.CloudProject) {
+			return errors.New("watsonx requires a region and a project ID")
+		}
+		if u.Path != "" || c.Deployment != "" {
+			return errors.New("watsonx uses a regional endpoint origin, region and project")
+		}
+		if date, err := time.Parse(time.DateOnly, c.APIVersion); c.APIVersion != "" && (err != nil || date.Year() < 2024) {
+			return errors.New("watsonx api_version must be a YYYY-MM-DD date")
 		}
 	case "bedrock":
 		if !cloudIdentifier.MatchString(c.CloudRegion) {
@@ -190,8 +231,14 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 	}
 	model = c.Model(model)
 	base := c.profileBase()
-	if !ModelValid(c.Kind, model) {
+	if !c.ValidModel(model) {
 		return "", errors.New("invalid upstream model identifier")
+	}
+	switch c.Kind {
+	case KindSageMaker:
+		return sagemakerURL(base, wire, model)
+	case KindWatsonx:
+		return c.watsonxURL(base, wire, stream)
 	}
 	path := "/chat/completions"
 	switch wire {
@@ -241,30 +288,37 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 		path = "/model/" + url.PathEscape(model) + "/" + operation
 	case openai.FamilyBedrockEmbeddings:
 		path = "/model/" + url.PathEscape(model) + "/invoke"
+	case openai.FamilyBedrockRerank:
+		return c.bedrockAgentRuntime(base)
+	case openai.FamilyMistralFIM:
+		path = "/fim/completions"
+	case openai.FamilyCohereChat:
+		path = "/chat"
 	case openai.FamilyRerank:
-		if c.VendorID == "cohere" && base == coherePresetEndpoint {
-			return cohereRerankEndpoint, nil
+		if endpoint, ok := c.operationEndpoint("rerank", base); ok {
+			return endpoint, nil
 		}
 		path = "/rerank"
 	}
-	if c.Hosting() == "vertex-anthropic" && wire == openai.FamilyAnthropic {
+	hosting, traits := c.Hosting(), c.traits()
+	if hosting == "vertex-anthropic" && wire == openai.FamilyAnthropic {
 		action := "rawPredict"
 		if stream {
 			action = "streamRawPredict"
 		}
 		return base + "/models/" + url.PathEscape(model) + ":" + action, nil
 	}
-	if c.Hosting() == "bedrock-anthropic-invoke" && wire == openai.FamilyAnthropic {
+	if hosting == "bedrock-anthropic-invoke" && wire == openai.FamilyAnthropic {
 		action := "invoke"
 		if stream {
 			action = "invoke-with-response-stream"
 		}
 		return base + "/model/" + url.PathEscape(model) + "/" + action, nil
 	}
-	if c.Hosting() == "azure-responses-legacy" && (wire == openai.FamilyResponses || wire == openai.FamilyInputTokens) {
+	if hosting == "azure-responses-legacy" && (wire == openai.FamilyResponses || wire == openai.FamilyInputTokens) {
 		return base + "/openai" + path + "?api-version=" + url.QueryEscape(c.APIVersion), nil
 	}
-	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+	if traits.deployment {
 		if model != c.Deployment && !c.hasDeployment(model) {
 			var metadata struct {
 				Deployment string `json:"deployment"`
@@ -280,9 +334,23 @@ func (c Config) URL(wire openai.Family, model string, stream bool) (string, erro
 			}
 		}
 		base += "/openai/deployments/" + url.PathEscape(model)
+	}
+	if traits.apiVersion {
 		path += "?api-version=" + url.QueryEscape(c.APIVersion)
 	}
 	return base + path, nil
+}
+
+// operationEndpoint is the address the vendor's contract documents for an
+// operation it serves outside its reviewed endpoint, while the provider still
+// uses that endpoint.
+func (c Config) operationEndpoint(operation, base string) (string, bool) {
+	contract, ok := vendors.Lookup(c.VendorID)
+	if !ok || base != strings.TrimRight(contract.Endpoint, "/") {
+		return "", false
+	}
+	endpoint, ok := contract.OperationEndpoints[operation]
+	return endpoint, ok
 }
 
 // MediaURL resolves an OpenAI-family media resource path — images, audio, and
@@ -294,8 +362,8 @@ func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
 	if strings.HasPrefix(path, "/") || strings.Contains(path, "..") || strings.ContainsAny(path, "\\?#") {
 		return "", errors.New("invalid upstream resource path")
 	}
-	base := c.profileBase()
-	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+	base, traits := c.profileBase(), c.traits()
+	if traits.deployment {
 		deployment := c.Model(model)
 		if deployment != c.Deployment && !c.hasDeployment(deployment) {
 			var metadata struct {
@@ -318,7 +386,7 @@ func (c Config) MediaURL(path, model string, query url.Values) (string, error) {
 	}
 	u := base + "/" + path
 	merged := url.Values{}
-	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+	if traits.apiVersion {
 		merged.Set("api-version", c.APIVersion)
 	}
 	for name, values := range query {
@@ -344,8 +412,8 @@ func (c Config) ResourceURL(model, path string, query url.Values) (string, error
 	if strings.Contains(path, "..") || strings.ContainsAny(path, "\\?#") {
 		return "", errors.New("invalid upstream resource path")
 	}
-	base := c.profileBase()
-	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+	base, traits := c.profileBase(), c.traits()
+	if traits.deployment {
 		if strings.HasPrefix(path, "deployments/") {
 			deployment := c.Model(model)
 			if deployment == "" {
@@ -358,7 +426,7 @@ func (c Config) ResourceURL(model, path string, query url.Values) (string, error
 		}
 	}
 	merged := url.Values{}
-	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+	if traits.apiVersion {
 		merged.Set("api-version", c.APIVersion)
 	}
 	for name, values := range query {
@@ -379,7 +447,7 @@ func (c Config) RealtimeURL(model string) (string, error) {
 		return "", errors.New("profile does not support realtime")
 	}
 	query := url.Values{}
-	if c.Kind == "azure_openai" && c.Hosting() != "azure-v1" {
+	if c.traits().deployment {
 		query.Set("deployment", c.Model(model))
 	} else {
 		query.Set("model", c.Model(model))

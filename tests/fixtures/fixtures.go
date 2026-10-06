@@ -4,5 +4,5 @@ package fixtures
 
 import "embed"
 
-//go:embed protocols/*.json routing/*.json security/*.json streams/*.sse streams/*.json tokens/*.json
+//go:embed protocols/*.json routing/*.json security/*.json streams/*.sse streams/*.json tokens/*.json vendors/*/*.json vendors/*/*.sse
 var Files embed.FS

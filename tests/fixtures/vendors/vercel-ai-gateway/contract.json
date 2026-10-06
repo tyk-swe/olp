@@ -1,0 +1,43 @@
+{
+  "vendor": "vercel-ai-gateway",
+  "documentation_url": "https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions",
+  "reviewed_at": "2026-10-05",
+  "notes": "Model ids use provider/model slugs. Only max_tokens is documented. Streams end with data: [DONE].",
+  "endpoints": {
+    "generation": "https://ai-gateway.vercel.sh/v1/chat/completions",
+    "embeddings": "https://ai-gateway.vercel.sh/v1/embeddings"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 15,
+        "output_tokens": 28,
+        "total_tokens": 43
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "documented",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "missing_parameter",
+      "message": "Invalid request: missing required parameter 'model'"
+    },
+    "class": "upstream_client"
+  }
+}

@@ -51,7 +51,12 @@ func Prepare(request *openai.Request, config connectors.Config, model string, pa
 			}
 		}
 	}
-	prepared, wire, err := protocols.PrepareTarget(request, wire, config.Kind, config.VendorID, config.Model(model), defaults)
+	target := config.Model(model)
+	if wire == openai.FamilyBedrockRerank {
+		// Bedrock Rerank names its model by ARN in the request body.
+		target = config.BedrockModelARN(target)
+	}
+	prepared, wire, err := protocols.PrepareTarget(request, wire, config.Kind, config.VendorID, target, defaults)
 	if err != nil {
 		return Invocation{}, err
 	}

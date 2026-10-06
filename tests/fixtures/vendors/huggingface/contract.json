@@ -1,0 +1,42 @@
+{
+  "vendor": "huggingface",
+  "documentation_url": "https://huggingface.co/docs/inference-providers/tasks/chat-completion",
+  "reviewed_at": "2026-10-05",
+  "notes": "Model ids may carry :fastest, :cheapest or :<provider> routing suffixes. Only max_tokens is documented. The error body is undocumented.",
+  "endpoints": {
+    "generation": "https://router.huggingface.co/v1/chat/completions"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "schema",
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    }
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "schema",
+    "text": "Hello",
+    "usage": {
+      "input_tokens": 9,
+      "output_tokens": 1,
+      "total_tokens": 10
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  }
+}

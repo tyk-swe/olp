@@ -3,7 +3,8 @@ import {
   declaresModels,
   dialectSurface,
   pluginOptionFields,
-  pluginProfileGroups
+  pluginProfileGroups,
+  vendorSpeaks
 } from './profiles';
 import type { ProviderProfile } from './api/profiles';
 
@@ -123,5 +124,17 @@ describe('plugin profile options', () => {
     ]);
     expect(pluginOptionFields(profile({}))).toEqual([]);
     expect(pluginOptionFields(undefined)).toEqual([]);
+  });
+});
+
+describe('vendorSpeaks', () => {
+  it('offers a generation profile only in a dialect the vendor documents', () => {
+    const chat = { dialect: 'openai-chat' };
+    const responses = { dialect: 'openai-responses' };
+    const embeddings = { dialect: 'cohere-embed-v2' };
+    expect(vendorSpeaks(chat, ['openai-chat'])).toBe(true);
+    expect(vendorSpeaks(responses, ['openai-chat'])).toBe(false);
+    expect(vendorSpeaks(embeddings, [])).toBe(true);
+    expect(vendorSpeaks(responses, undefined)).toBe(true);
   });
 });

@@ -1,0 +1,18 @@
+{
+  "vendor": "recraft",
+  "documentation_url": "https://www.recraft.ai/docs/api-reference/endpoints",
+  "reviewed_at": "2026-10-05",
+  "notes": "Generations take an aspect ratio as size and return OpenAI's image result with credits and image IDs. The raster path refuses vector models. GET /v1/users/me proves a key without cost. Error bodies are JSON of an undocumented shape.",
+  "endpoints": {
+    "image_generation": "https://external.api.recraft.ai/v1/images/generations/raster"
+  },
+  "unsupported_parameters": [],
+  "responses": {},
+  "error": {
+    "file": "error.json",
+    "basis": "observed",
+    "status": 401,
+    "envelope": null,
+    "class": "credential"
+  }
+}

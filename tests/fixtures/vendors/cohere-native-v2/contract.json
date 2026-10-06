@@ -1,0 +1,44 @@
+{
+  "vendor": "cohere-native-v2",
+  "documentation_url": "https://docs.cohere.com/reference/embed",
+  "reviewed_at": "2026-10-05",
+  "notes": "Native v2 chat, embed and rerank, served through the cohere-v2 profile. Chat is a native generation dialect at /native/cohere-chat-v2.",
+  "endpoints": {
+    "embeddings": "https://api.cohere.ai/v2/embed",
+    "rerank": "https://api.cohere.ai/v2/rerank",
+    "generation": "https://api.cohere.ai/v2/chat"
+  },
+  "unsupported_parameters": [],
+  "responses": {
+    "generation": {
+      "file": "chat.response.json",
+      "basis": "documented",
+      "usage": {
+        "input_tokens": 127,
+        "output_tokens": 69,
+        "total_tokens": 196
+      }
+    }
+  },
+  "error": {
+    "file": "error.json",
+    "basis": "dialect",
+    "status": 400,
+    "envelope": {
+      "type": "invalid_request_error",
+      "code": "",
+      "message": "The request is invalid."
+    },
+    "class": "upstream_client"
+  },
+  "stream": {
+    "file": "chat.stream.sse",
+    "basis": "documented",
+    "text": "LL",
+    "usage": {
+      "input_tokens": 5,
+      "output_tokens": 26,
+      "total_tokens": 31
+    }
+  }
+}
