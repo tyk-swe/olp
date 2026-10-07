@@ -26,8 +26,10 @@ func (s *Server) selectionOptions(ctx context.Context, x *execution) runtime.Sel
 	if x.route != nil && len(x.route.Selectors) > 0 {
 		options.Features = x.features()
 		options.Evaluate = s.evaluator(ctx, x, options.Features)
-		if x.authorize != nil {
-			options.Permitted = func(route runtime.Route) bool { return x.authorize(&route) == nil }
+		if x.authorize != nil || x.fixed {
+			options.Permitted = func(route runtime.Route) bool {
+				return !x.fixed && (x.authorize == nil || x.authorize(&route) == nil)
+			}
 		}
 	}
 	return options

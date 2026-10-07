@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -85,6 +86,34 @@ func splitRoutes(s *runtime.Snapshot, b runtime.Provider, behavior runtime.Behav
 	backup.ID, backup.RoutingID, backup.RevisionID, backup.Slug = backupID, backupID, uuid.NewString(), backupSlug
 	backup.Targets = []runtime.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}}
 	s.Routes[routeSlug], s.Routes[backupSlug] = primary, backup
+}
+
+func TestRetainedResponsesIgnoreRouteDelegatingSelectors(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
+		for id, provider := range s.Providers {
+			provider.Kind, provider.Endpoint = "openai", ""
+			s.Providers[id] = provider
+		}
+		splitRoutes(s, b, runtime.Behavior{Selectors: []runtime.Selector{{ID: "delegate", Route: backupSlug}}})
+	})
+	for _, retained := range []bool{false, true} {
+		parsed, err := protocols.Parse(openai.FamilyResponses, []byte(`{"model":"team-chat","input":"hi","store":true}`), routeSlug)
+		if err != nil {
+			t.Fatal(err)
+		}
+		x := &execution{request: request{release: h.rt.Release()}, parsed: parsed, family: openai.FamilyResponses, mode: "unary", providerState: retained}
+		if e := h.gateway.prepare(t.Context(), x, h.gateway.keyAuthorizer(h.rt.keys[fullKey])); e != nil {
+			t.Fatal(e)
+		}
+		wantRoute, wantProvider := backupSlug, h.provider("b")
+		if retained {
+			wantRoute, wantProvider = routeSlug, h.provider("a")
+		}
+		if x.route.Slug != wantRoute || len(x.attempts) != 1 || x.attempts[0].ProviderID != wantProvider {
+			t.Fatalf("retained=%t route=%s attempts=%+v", retained, x.route.Slug, x.attempts)
+		}
+	}
 }
 
 func TestFallbackRouteServesOnceThePrimaryIsExhausted(t *testing.T) {

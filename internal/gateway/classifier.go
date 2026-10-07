@@ -108,8 +108,8 @@ func (s *Server) classify(ctx context.Context, x *execution, c *runtime.Classifi
 
 // callClassifier sends the text of the caller's last user turn to the
 // classifier route as a request of its own: accounted to the caller's key
-// with the classifier origin, bounded by the predicate's deadline, and free of
-// any key reservation, since the caller's request already holds one. A
+// with the classifier origin and its own key reservation, bounded by the
+// predicate's deadline. The caller is still being planned and has no lease. A
 // classification route answers with its highest-scoring label, a generation
 // route with its trimmed reply.
 func (s *Server) callClassifier(ctx context.Context, parent *execution, c *runtime.ClassifierPredicate) classification {
@@ -139,8 +139,9 @@ func (s *Server) callClassifier(ctx context.Context, parent *execution, c *runti
 		origin:        usage.OriginClassifier,
 		parent:        parent.request.accountingID(),
 		priority:      parent.priority,
+		route:         &route,
 	}
-	defer s.settleCaps(ctx, x)
+	defer s.settleAdmission(ctx, x)
 	var answer classification
 	var out *outcome
 	if slices.Contains(route.Operations, "classification") {
@@ -174,6 +175,9 @@ func (s *Server) predict(ctx context.Context, x *execution, slug, text string) (
 	if e := s.prepareUnary(ctx, x); e != nil {
 		return failed, &outcome{err: e}
 	}
+	if e := s.admitClassifier(ctx, x); e != nil {
+		return failed, &outcome{err: e}
+	}
 	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a runtime.Attempt, p *runtime.Provider, slot runtime.Slot, n int) (AttemptFact, operationplan.Result, *attemptFailure) {
 		return s.unaryAttempt(ctx, x, a, p, slot, n)
 	}})
@@ -202,6 +206,9 @@ func (s *Server) generateLabel(ctx context.Context, x *execution, slug, text str
 	if e := s.prepare(ctx, x, s.keyAuthorizer(x.authority)); e != nil {
 		return failed, &outcome{err: e}
 	}
+	if e := s.admitClassifier(ctx, x); e != nil {
+		return failed, &outcome{err: e}
+	}
 	out := s.execute(ctx, x)
 	if out.err != nil || out.completion == nil {
 		return failed, out
@@ -213,4 +220,18 @@ func (s *Server) generateLabel(ctx context.Context, x *execution, slug, text str
 		return failed, out
 	}
 	return classification{label: label}, out
+}
+
+// admitClassifier budgets the classifier independently of its caller, which
+// cannot finish planning until the label is known. It shares the caller's
+// admission permit, awaiting it before any upstream work.
+func (s *Server) admitClassifier(ctx context.Context, x *execution) *Error {
+	if e := s.awaitAdmission(ctx, x); e != nil {
+		return e
+	}
+	x.estimate = requestEstimate(x)
+	ttl := time.Duration(x.named().OverallTimeout) * time.Millisecond
+	var e *Error
+	x.lease, e = s.Admission.reserveKeyCosted(ctx, x.authority, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority))
+	return e
 }

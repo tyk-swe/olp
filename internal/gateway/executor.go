@@ -218,9 +218,9 @@ type outcome struct {
 
 // dispatchableAttempts returns the most attempts this request can hand to a
 // provider, capped by its requested budget. Each target may be tried through
-// each of its usable credential slots.
+// each of its usable credential slots, including bounded same-slot retries.
 func (s *Server) dispatchableAttempts(x *execution) int {
-	n := s.walkDispatchable(x, nil)
+	n := s.walkDispatchable(x, x.attempts, nil)
 	if x.mayLeaveRoute() {
 		// Fallback and delegating routes may spend the rest of the budget.
 		return max(n, x.allowance-x.spent)
@@ -228,24 +228,28 @@ func (s *Server) dispatchableAttempts(x *execution) int {
 	return n
 }
 
-// walkDispatchable visits the attempts this request can hand to a provider in
-// the order the attempt loop tries them, once for each usable credential slot of
-// each, until the request's attempt budget is met. It returns how many it
-// visited. Admission walks the same attempts the loop will, so what it reserves
-// covers what can be dispatched and no more.
-func (s *Server) walkDispatchable(x *execution, visit func(runtime.Attempt)) int {
+// walkDispatchable visits each usable credential slot in the supplied target
+// order, including its maximum same-slot retries, up to the remaining attempt
+// budget. Cost admission may use price order to cover alternate retry paths.
+func (s *Server) walkDispatchable(x *execution, attempts []runtime.Attempt, visit func(runtime.Attempt)) int {
 	remaining := x.budget - x.spent
+	if remaining <= 0 {
+		return 0
+	}
+	repeats := retryDispatches(x.route)
 	available := 0
-	for _, attempt := range x.attempts {
+	for _, attempt := range attempts {
 		provider, ok := x.snapshot().Providers[attempt.ProviderID]
 		if !ok {
 			continue
 		}
 		for i := range provider.Slots {
 			if s.slotAvailable(x, attempt, &provider.Slots[i]) {
-				available++
-				if visit != nil {
-					visit(attempt)
+				for range min(repeats, remaining-available) {
+					available++
+					if visit != nil {
+						visit(attempt)
+					}
 				}
 			}
 			if available == remaining {
@@ -254,6 +258,15 @@ func (s *Server) walkDispatchable(x *execution, visit func(runtime.Attempt)) int
 		}
 	}
 	return available
+}
+
+// retryDispatches bounds one slot's dispatches across the route's retry rules.
+func retryDispatches(route *runtime.Route) int {
+	retries := 0
+	for _, rule := range route.Retry {
+		retries = max(retries, rule.MaxRetries)
+	}
+	return 1 + retries
 }
 
 type attemptFailure struct {

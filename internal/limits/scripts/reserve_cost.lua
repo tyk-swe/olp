@@ -414,21 +414,23 @@ end
 local held_hi, held_lo = 0, 0
 if priced then
   held_hi, held_lo = pending_total(KEYS[3], KEYS[4], now_ms)
-  -- A lease that is already recorded was granted by an earlier delivery of this
-  -- same reservation: it is not charged again. One that has lapsed, but that the
-  -- bounded sweep has not reached, is retired and reserved afresh instead of
-  -- being granted a second time. The total is known to describe the leases, so
-  -- taking its amount off is exact and needs no second sweep.
+  -- Repeated deliveries never charge a lease twice. A larger estimate must
+  -- fit beside the other leases before replacing this lease's amount. A lapsed
+  -- lease outside the bounded sweep is retired and reserved afresh.
   local recorded = redis.call("ZSCORE", KEYS[4], ARGV[5])
-  if recorded ~= false and tonumber(recorded) > now_ms then
-    return {RESPONSE_VERSION, 1, "ok", 0, day_window, month_window}
-  end
   if recorded ~= false then
-    local lapsed_hi, lapsed_lo = parse_amount(redis.call("HGET", KEYS[3], ARGV[5]))
-    if lapsed_hi ~= nil then
-      held_hi, held_lo = sub_amount(held_hi, held_lo, lapsed_hi, lapsed_lo)
+    local prior_hi, prior_lo = parse_amount(redis.call("HGET", KEYS[3], ARGV[5]))
+    if prior_hi == nil then
+      return failure("invalid_pending_amount")
     end
-    release_lease(KEYS[3], KEYS[4], ARGV[5])
+    if tonumber(recorded) > now_ms then
+      if compare_amount(amount_hi, amount_lo, prior_hi, prior_lo) <= 0 then
+        return {RESPONSE_VERSION, 1, "ok", 0, day_window, month_window}
+      end
+    else
+      release_lease(KEYS[3], KEYS[4], ARGV[5])
+    end
+    held_hi, held_lo = sub_amount(held_hi, held_lo, prior_hi, prior_lo)
   end
   local pending_hi, pending_lo = held_hi, held_lo
   held_hi, held_lo = add_amount(pending_hi, pending_lo, amount_hi, amount_lo)

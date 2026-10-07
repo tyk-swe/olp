@@ -216,6 +216,10 @@ type Request struct {
 	// replaces the reservation instead of counting beside it. Required with a
 	// CostEstimate.
 	RequestID string
+	// RetainCostReservation keeps an existing reservation on an ambiguous
+	// cost-reservation failure. Its original lease remains responsible for
+	// settlement while a request increases the amount held before another attempt.
+	RetainCostReservation bool
 	// CostGrace is how long past LeaseTTL the reservation survives if nothing
 	// settles it. Zero means DefaultCostGrace.
 	CostGrace time.Duration
@@ -717,7 +721,7 @@ func (l *Limiter) reserveCost(ctx context.Context, r Request, scriptKeys keys) (
 	// the estimate is given back; releasing a lease that is not there does nothing.
 	// A command that never reached Valkey reserved nothing, and during an outage is
 	// not asked again.
-	if r.CostEstimate != "" && ambiguousFailure(err) {
+	if r.CostEstimate != "" && !r.RetainCostReservation && ambiguousFailure(err) {
 		(&Lease{
 			limiter: l, costReserved: true, pendingKey: scriptKeys.pending, expiryKey: scriptKeys.expiry,
 			costID: canonicalUUID(r.RequestID),

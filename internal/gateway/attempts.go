@@ -126,7 +126,7 @@ route:
 				x.dispatched = x.dispatched || dispatched
 				gate.hold.settle(ctx, dispatched, totalTokens(fact.Usage))
 				if dispatched {
-					x.spendCaps(caps.owners)
+					x.spendCaps(caps.owners, attempt)
 				}
 				fact.Retry, fact.Budgets = retry, caps.owners
 				x.facts = append(x.facts, fact)

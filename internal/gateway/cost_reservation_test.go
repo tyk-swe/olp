@@ -169,6 +169,43 @@ func TestCredentialSlotRetriesAreEachReserved(t *testing.T) {
 	}
 }
 
+func TestSameSlotRetriesReserveTokensAndCostWithinTheAttemptBudget(t *testing.T) {
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 3,
+		runtime.Attempt{Price: costPrice()})
+	x.request.id, x.request.minted = uuid.NewString(), true
+	x.route.Retry = runtime.Retry{
+		classRateLimit:      {MaxRetries: 2},
+		classUpstreamServer: {MaxRetries: 1},
+	}
+	s := &Server{}
+	for _, tc := range []struct {
+		budget int
+		cost   string
+	}{{3, "0.000486"}, {2, "0.000324"}, {1, "0.000162"}, {0, ""}} {
+		x.budget = tc.budget
+		if got := s.dispatchableAttempts(x); got != tc.budget {
+			t.Fatalf("budget %d reserves %d dispatches", tc.budget, got)
+		}
+		if got := keyReservationEstimate(18, s.dispatchableAttempts(x)); got != 18*int64(max(tc.budget, 1)) {
+			t.Fatalf("budget %d reserves %d tokens", tc.budget, got)
+		}
+		if hold := s.costReservation(x, budgeted()); hold.amount != tc.cost {
+			t.Fatalf("budget %d reserves %q, want %q", tc.budget, hold.amount, tc.cost)
+		}
+	}
+}
+
+func TestRetryCostReservationCoversSkippingCheapRetries(t *testing.T) {
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 3,
+		runtime.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("0.1"), OutputPerMillion: costText("1")}}},
+		runtime.Attempt{Price: costPrice()})
+	x.request.id, x.request.minted = uuid.NewString(), true
+	x.route.Retry = runtime.Retry{classRateLimit: {MaxRetries: 2}}
+	if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != "0.000486" {
+		t.Fatalf("reserves %q, want enough for three expensive dispatches", hold.amount)
+	}
+}
+
 func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 	const chat = `"model":"team-chat","messages":[{"role":"user","content":"hello"}]`
 	const gemini = `"contents":[{"role":"user","parts":[{"text":"hello"}]}]`

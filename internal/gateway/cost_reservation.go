@@ -41,9 +41,18 @@ func (s *Server) costReservation(x *execution, authority access.Authority) costR
 		return costReservation{}
 	}
 	var bound usage.Cost
-	s.walkDispatchable(x, func(attempt runtime.Attempt) {
-		// An attempt is visited once for each of its credential slots in turn,
-		// and each visit is a dispatch that may be billed on its own.
+	attempts := x.attempts
+	if retryDispatches(x.route) > 1 {
+		// Retries are optional: an early cheap target can fail over without
+		// using them, leaving the budget for a more expensive target's retries.
+		// Price the dearest possible dispatches first to cover either path.
+		attempts = slices.Clone(attempts)
+		slices.SortStableFunc(attempts, func(a, b runtime.Attempt) int {
+			return x.attemptCostBound(b).Cmp(x.attemptCostBound(a))
+		})
+	}
+	s.walkDispatchable(x, attempts, func(attempt runtime.Attempt) {
+		// Each visit is a dispatch that may be billed on its own.
 		bound = bound.Add(x.attemptCostBound(attempt))
 	})
 	if bound.IsZero() {

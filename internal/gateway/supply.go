@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // ReadSupply reads the remaining headroom of the queried slots and the state of
@@ -79,13 +80,14 @@ func (a *Admission) ReadSupply(ctx context.Context, query runtime.SupplyQuery) *
 }
 
 // capHold is a request's reservation against one supply-side spend cap. The
-// first attempt that would spend against a capped connection, slot or route
-// reserves its estimate; later attempts of the same request on the same owner
-// draw on that reservation, which settles with the request.
+// reservation grows before each dispatch to cover the estimates of all work
+// handed to that owner. It settles once with the request.
 type capHold struct {
 	owner      string
 	lease      *limits.Lease
 	dispatched bool
+	reserved   usage.Cost
+	spent      usage.Cost
 }
 
 // cappedOwner is one spend cap an attempt is subject to.
@@ -128,8 +130,13 @@ func (s *Server) holdCaps(ctx context.Context, x *execution, attempt runtime.Att
 			continue
 		}
 		check.owners = append(check.owners, owner.id)
-		if slices.ContainsFunc(x.caps, func(h capHold) bool { return h.owner == owner.id }) {
-			continue
+		index := slices.IndexFunc(x.caps, func(h capHold) bool { return h.owner == owner.id })
+		bound := x.attemptCostBound(attempt)
+		if index >= 0 {
+			bound = x.caps[index].spent.Add(bound)
+			if bound.Cmp(x.caps[index].reserved) <= 0 {
+				continue
+			}
 		}
 		if !s.Admission.ready() {
 			return capCheck{quota: owner.quota}
@@ -137,8 +144,9 @@ func (s *Server) holdCaps(ctx context.Context, x *execution, attempt runtime.Att
 		request := limits.Request{
 			LookupID: owner.lookup, CostOwnerID: owner.id, DailyCostLimit: owner.limits.DailyCostLimit,
 			MonthlyCostLimit: owner.limits.MonthlyCostLimit, LeaseTTL: max(time.Until(deadline), time.Second),
+			RetainCostReservation: index >= 0 && x.caps[index].lease.HasCostReservation(),
 		}
-		if bound := x.attemptCostBound(attempt); !bound.IsZero() {
+		if !bound.IsZero() {
 			request.CostEstimate, request.RequestID = bound.String(), x.request.accountingID()
 		}
 		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
@@ -151,17 +159,23 @@ func (s *Server) holdCaps(ctx context.Context, x *execution, attempt runtime.Att
 			s.Admission.logger().Warn("skipping a target whose spend cap is unreadable", "owner_id", owner.id, "error", err.Error())
 			return capCheck{quota: owner.quota}
 		}
-		x.caps = append(x.caps, capHold{owner: owner.id, lease: lease})
+		if index < 0 {
+			x.caps = append(x.caps, capHold{owner: owner.id, lease: lease, reserved: bound})
+		} else {
+			x.caps[index].lease, x.caps[index].reserved = lease, bound
+		}
 	}
 	return check
 }
 
 // spendCaps marks the caps an attempt was dispatched against, whose
 // reservations settle at cost rather than being given back.
-func (x *execution) spendCaps(owners []string) {
+func (x *execution) spendCaps(owners []string, attempt runtime.Attempt) {
+	bound := x.attemptCostBound(attempt)
 	for i := range x.caps {
 		if slices.Contains(owners, x.caps[i].owner) {
 			x.caps[i].dispatched = true
+			x.caps[i].spent = x.caps[i].spent.Add(bound)
 		}
 	}
 }
