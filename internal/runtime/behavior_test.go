@@ -20,6 +20,9 @@ func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
 	if err := valid.Validate("assistant", tagged); err != nil {
 		t.Fatalf("valid behavior refused: %v", err)
 	}
+	if err := (CostLimits{DailyCostLimit: ptr("0.000000000001"), MonthlyCostLimit: ptr("0.000000000001")}).Validate("budget"); err != nil {
+		t.Fatalf("small positive caps refused: %v", err)
+	}
 	for name, mutate := range map[string]func(*Behavior){
 		"self fallback":      func(b *Behavior) { b.Fallbacks[0].Route = "assistant" },
 		"duplicate fallback": func(b *Behavior) { b.Fallbacks = append(b.Fallbacks, b.Fallbacks[0]) },
@@ -48,6 +51,8 @@ func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
 		"unlabelled affinity":   func(b *Behavior) { b.Affinity = &Affinity{Source: AffinityLabel} },
 		"empty budget":          func(b *Behavior) { b.Budget = &CostLimits{} },
 		"inexact budget":        func(b *Behavior) { b.Budget = &CostLimits{MonthlyCostLimit: ptr("1e3")} },
+		"zero daily budget":     func(b *Behavior) { b.Budget = &CostLimits{DailyCostLimit: ptr("0")} },
+		"zero monthly budget":   func(b *Behavior) { b.Budget = &CostLimits{MonthlyCostLimit: ptr("00.000000000000")} },
 		"selector without verb": func(b *Behavior) { b.Selectors[1].Route = "" },
 	} {
 		t.Run(name, func(t *testing.T) {

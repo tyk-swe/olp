@@ -32,7 +32,7 @@ func (h *harness) replica() (*Server, *capture, *httptest.Server) {
 	return gw, sink, server
 }
 
-func TestCircuitOpenedOnOneGatewayIsHonoredByAnother(t *testing.T) {
+func TestIntegrationCircuitOpenedOnOneGatewayIsHonoredByAnother(t *testing.T) {
 	h := newHarness(t, Config{})
 	limiter := mediaLimiter(t)
 	log := slog.New(slog.DiscardHandler)
@@ -85,7 +85,7 @@ func TestCircuitOpenedOnOneGatewayIsHonoredByAnother(t *testing.T) {
 	}
 }
 
-func TestActiveProbesShareTheirVerdictWithTheFleet(t *testing.T) {
+func TestIntegrationActiveProbesShareTheirVerdictWithTheFleet(t *testing.T) {
 	h := newHarness(t, Config{})
 	client, namespace := mediaValkey(t)
 	limiter, err := limits.New(client, namespace)

@@ -555,6 +555,8 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), realtimeSession)
 	defer cancel()
+	defer s.settleCaps(r.Context(), x)
+	x.estimate = resourceEstimate
 	var p *pin
 	if x.strict() {
 		// Realtime has an operation-owned duplex contract. Retained Responses
@@ -757,6 +759,9 @@ func realtimeURL(p *pin) (string, *Error) {
 func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint string) (*websocket.Conn, *Error) {
 	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1)
 	fact.Mode = "realtime"
+	if p.hold != nil {
+		fact.Budgets = p.hold.budgets
+	}
 	finish := func(class string, e *Error) *Error {
 		fact.Class = class
 		fact.Duration = s.now().Sub(fact.StartedAt)
@@ -780,6 +785,9 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 		return nil, finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable."))
 	}
 	conn, resp, err := websocket.Dial(ctx, probe.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: headers})
+	if p.hold != nil {
+		x.spendCaps(p.hold.budgets, p.attempt)
+	}
 	if err != nil {
 		status := 0
 		if resp != nil {

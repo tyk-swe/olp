@@ -166,7 +166,7 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
 			continue
 		}
-		gate := s.gateSlot(ctx, &provider, slot, max(resourceEstimate, x.estimate), deadline, x.priority)
+		gate := s.gateAttempt(ctx, x, attempt, &provider, slot, max(resourceEstimate, x.estimate), deadline)
 		switch gate.verdict {
 		case gateAdmitted:
 			return &pin{target: target, provider: provider, attempt: attempt, slot: *slot, model: attempt.UpstreamModel, hold: gate.hold}, nil
@@ -182,6 +182,9 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, endpoint string, body []byte, contentType string) (*http.Response, *attemptFailure) {
 	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1)
 	fact.Mode = x.mode
+	if p.hold != nil {
+		fact.Budgets = p.hold.budgets
+	}
 	finish := func(class string, f *attemptFailure) *attemptFailure {
 		if f == nil {
 			f = &attemptFailure{}
@@ -234,6 +237,9 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		return nil, finish(classCredential, nil)
 	}
 	resp, err := client.Do(req)
+	if p.hold != nil {
+		x.spendCaps(p.hold.budgets, p.attempt)
+	}
 	if err != nil {
 		class := upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
 		return nil, finish(string(class), &attemptFailure{dispatched: true})
@@ -321,6 +327,7 @@ func (s *Server) resourceSettle(ctx context.Context, x *execution, p *pin) {
 	if p != nil {
 		s.settlePinHold(ctx, x, p.hold, nil)
 	}
+	s.settleCaps(ctx, x)
 	settleKey(ctx, x.lease, x.dispatched, nil, s.log)
 }
 

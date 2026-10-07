@@ -172,7 +172,7 @@ func (l *Limiter) evalAll(ctx context.Context, calls []scriptCall) []any {
 	copy(replies, values)
 	var missing []int
 	for index, value := range values {
-		if failure, ok := value.(error); ok && strings.Contains(failure.Error(), "NOSCRIPT") {
+		if failure, ok := value.(error); ok && (strings.Contains(failure.Error(), "NOSCRIPT") || strings.Contains(failure.Error(), "NoScriptError")) {
 			missing = append(missing, index)
 		}
 	}

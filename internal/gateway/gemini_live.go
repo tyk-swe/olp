@@ -186,6 +186,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		if p != nil {
 			s.settlePinHold(r.Context(), x, p.hold, settled)
 		}
+		s.settleCaps(r.Context(), x)
 		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
 	}()
 	p, e = s.selectPinSurface(ctx, x, &route, "realtime", "gemini", "realtime", func(provider *runtime.Provider, model string) bool {

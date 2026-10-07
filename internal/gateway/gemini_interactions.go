@@ -74,6 +74,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		if p != nil {
 			s.settlePinHold(r.Context(), x, p.hold, totalTokens(x.usage()))
 		}
+		s.settleCaps(r.Context(), x)
 		settleKey(r.Context(), x.lease, x.dispatched, x.settledTokens(), s.log)
 	}()
 	fail := func(e *Error) {
@@ -176,8 +177,9 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		x.pinnedSlot = &p.slot
+		p.attempt.Price = s.Runtime.RoutingInputs().Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, "generation", s.now())
 		deadline, _ := ctx.Deadline()
-		gate := s.gateSlot(ctx, &p.provider, &p.slot, x.estimate, deadline, x.priority)
+		gate := s.gateAttempt(ctx, x, p.attempt, &p.provider, &p.slot, x.estimate, deadline)
 		if gate.verdict != gateAdmitted {
 			fail(gateError(gate))
 			return

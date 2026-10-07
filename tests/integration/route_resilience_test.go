@@ -83,6 +83,13 @@ func TestRouteResilienceRoundTripsThroughDraftsRevisionsAndConfiguration(t *test
 		}
 	}
 
+	for _, zero := range []string{"0", "0.0", "00.000000000000"} {
+		for _, limit := range []string{"daily_cost_limit", "monthly_cost_limit"} {
+			body["budget"] = map[string]any{limit: zero}
+			h.want(owner, "POST", "/api/v1/route-drafts", body, idem(uuid.NewString()), 422)
+		}
+	}
+	body["budget"] = behavior["budget"]
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", body, idem(uuid.NewString()), 201)
 	requireDeclared("draft", h.want(owner, "GET", "/api/v1/route-drafts/"+draft["id"].(string), nil, nil, 200))
 
@@ -230,6 +237,40 @@ func TestRouteTemplatesPublishCertifiedModelsAsOrdinaryRoutes(t *testing.T) {
 		if item := item.(map[string]any); item["kind"] == "route_template" && item["action"] != "noop" {
 			t.Fatalf("an unchanged template planned %v", item)
 		}
+	}
+
+	// A later operator revision makes the generated draft stale. Further
+	// template joins stay drafts rather than overwriting the published limits.
+	edited := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+		"slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 20000, "max_attempts": 4,
+		"fidelity": map[string]any{"mode": "transformed"}, "budget": map[string]any{"daily_cost_limit": "5"},
+		"targets": []any{
+			map[string]any{"provider_id": earlier["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000},
+			map[string]any{"provider_id": later["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000},
+		},
+	}, idem(uuid.NewString()), 201)
+	activated := h.want(owner, "POST", "/api/v1/route-drafts/"+edited["id"].(string)+"/activate", nil, withMatch(edited, idem(uuid.NewString())), 200)
+	third := activeAzureProvider(t, h, owner, "Third connection", fixture.URL, generation)
+	h.refresh()
+	route = h.Runtime.Release().Snapshot.Routes[slug]
+	if route.RevisionID != activated["revision_id"] || route.OverallTimeout != 20000 || route.MaxAttempts != 4 ||
+		route.Budget == nil || route.Budget.DailyCostLimit == nil || *route.Budget.DailyCostLimit != "5" || len(route.Targets) != 2 {
+		t.Fatalf("template join overwrote the operator revision: %+v", route)
+	}
+	detail = h.want(owner, "GET", path, nil, nil, 200)
+	var staged bool
+	for _, member := range detail["routes"].([]any) {
+		member := member.(map[string]any)
+		if member["provider_id"] == third["id"] {
+			staged = member["outcome"] == "draft"
+			joined := h.want(owner, "GET", "/api/v1/route-drafts/"+member["draft_id"].(string), nil, nil, 200)
+			if len(joined["targets"].([]any)) != 3 {
+				t.Fatalf("staged template join lost a target: %v", joined)
+			}
+		}
+	}
+	if !staged {
+		t.Fatalf("stale template join was not staged: %v", detail["routes"])
 	}
 	h.want(owner, "DELETE", path, nil, withMatch(detail, nil), 204)
 }

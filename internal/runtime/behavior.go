@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -403,11 +404,11 @@ func (p Predicate) validate(slug string, invalid func(string) error) error {
 	return nil
 }
 
-// Validate checks spend caps as exact decimals.
+// Validate checks spend caps as positive exact decimals.
 func (c CostLimits) Validate(field string) error {
 	for _, limit := range []*string{c.DailyCostLimit, c.MonthlyCostLimit} {
-		if limit != nil && !decimal(*limit) {
-			return access.Invalid(field, "Cost limits are decimals with at most 12 fractional digits")
+		if limit != nil && (!decimal(*limit) || strings.Trim(*limit, "0.") == "") {
+			return access.Invalid(field, "Cost limits are positive decimals with at most 12 fractional digits")
 		}
 	}
 	if c.DailyCostLimit == nil && c.MonthlyCostLimit == nil {

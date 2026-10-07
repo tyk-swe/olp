@@ -9,7 +9,7 @@ import (
 )
 
 // Features are the request properties a route selector can test, read from
-// the represented semantics of any generation dialect.
+// the canonical and native fields of any generation dialect.
 type Features struct {
 	Tools            bool
 	StructuredOutput bool
@@ -27,10 +27,12 @@ var modalities = []string{"text", "image", "audio", "video", "file"}
 func RequestFeatures(r *openai.Request) Features {
 	var f Features
 	fields := r.Document()
+	f.Tools = len(arr(fields["tools"])) > 0 || len(arr(fields["functions"])) > 0
+	f.StructuredOutput = structured(fields["response_format"])
+	seen := make([]bool, len(modalities))
 	if c, err := decodeCanonical(r.Family, fields); err == nil {
-		f.Tools = len(c.Tools) > 0
-		f.StructuredOutput = structured(c.Parameters["response_format"])
-		seen := make([]bool, len(modalities))
+		f.Tools = f.Tools || len(c.Tools) > 0
+		f.StructuredOutput = f.StructuredOutput || structured(c.Parameters["response_format"])
 		for _, message := range c.Messages {
 			for _, part := range message.Parts {
 				if i := slices.Index(modalities, partModality(part)); i >= 0 {
@@ -38,10 +40,32 @@ func RequestFeatures(r *openai.Request) Features {
 				}
 			}
 		}
-		for i, name := range modalities {
-			if seen[i] {
-				f.Modalities = append(f.Modalities, name)
-			}
+	}
+	// Native audio and file parts are valid even when the canonical codec
+	// retains them only as extensions.
+	recordPart := func(value json.RawMessage) {
+		part, _ := object(value)
+		var modality string
+		switch str(part["type"]) {
+		case "input_audio", "audio":
+			modality = "audio"
+		case "file", "input_file", "document":
+			modality = "file"
+		}
+		if i := slices.Index(modalities, modality); i >= 0 {
+			seen[i] = true
+		}
+	}
+	for _, message := range append(arr(fields["messages"]), arr(fields["input"])...) {
+		recordPart(message)
+		item, _ := object(message)
+		for _, part := range arr(item["content"]) {
+			recordPart(part)
+		}
+	}
+	for i, name := range modalities {
+		if seen[i] {
+			f.Modalities = append(f.Modalities, name)
 		}
 	}
 	f.ReasoningEffort = strings.ToLower(reasoningEffort(r.Family.Surface(), fields))

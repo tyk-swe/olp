@@ -13,7 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
-func TestCapacitySharesHoldConnectionHeadroomForPriorityWorkAcrossGateways(t *testing.T) {
+func TestIntegrationCapacitySharesHoldConnectionHeadroomForPriorityWorkAcrossGateways(t *testing.T) {
 	h := newHarness(t, Config{})
 	limiter := mediaLimiter(t)
 	log := slog.New(slog.DiscardHandler)

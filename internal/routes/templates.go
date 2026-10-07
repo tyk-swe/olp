@@ -444,6 +444,14 @@ func (s *Server) promoteGenerated(ctx context.Context, tx pgx.Tx, draftID, actor
 	if err != nil {
 		return "", err
 	}
+	var latest string
+	err = savepoint.QueryRow(ctx, "SELECT latest_revision_id::text FROM olp.routes WHERE slug=$1 FOR UPDATE", d.Slug).Scan(&latest)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	if err == nil && (d.BasedOnRevision == nil || *d.BasedOnRevision != latest) {
+		return "draft_stale", nil
+	}
 	_, err = s.promote(ctx, savepoint, d, actor)
 	if refusal, ok := refusalCode(err); ok {
 		return refusal, nil

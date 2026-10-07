@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -112,6 +113,16 @@ func (x *execution) attemptCostBound(attempt runtime.Attempt) usage.Cost {
 			seconds = *x.media.Seconds
 		}
 		bound, _ := attempt.Price.Price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds})
+		return bound
+	}
+	if x.parsed == nil && x.unary == nil {
+		// Pinned native requests use the resource input estimate and the
+		// ordinary default reply allowance when no canonical request exists.
+		input, reply := max(resourceEstimate, x.estimate), int64(0)
+		if x.operationName() == "generation" || x.operationName() == "realtime" {
+			reply = estimate.DefaultOutputTokens
+		}
+		bound, _ := attempt.Price.CostBound(input, reply, reply > 0)
 		return bound
 	}
 	provider, ok := x.snapshot().Providers[attempt.ProviderID]
