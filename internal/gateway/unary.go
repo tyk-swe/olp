@@ -121,7 +121,7 @@ func (x *execution) unaryPlan(p *runtime.Provider, model string) (*operationplan
 	if len(clientValues) == 1 {
 		client = clientValues[0]
 	}
-	plan, err := template.Bind(x.unary.source, operationplan.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, Route: x.route.Slug, ClientContract: client})
+	plan, err := template.Bind(x.unary.source, operationplan.Context{Headers: x.semanticHeaders, Query: x.semanticQuery, Route: x.unary.route, ClientContract: client})
 	if err != nil {
 		return nil, err
 	}

@@ -66,11 +66,10 @@ func (l *Limiter) Supply(ctx context.Context, quotas []QuotaProbe, caps []CapPro
 	}
 	for _, cap := range caps {
 		prefix := l.costPrefix(cap.OwnerID)
-		// An amount of zero judges the cap on what is accrued and pending and
-		// records nothing, which is a read.
+		// Availability includes pending spend without changing balances or leases.
 		calls = append(calls, scriptCall{reserveCostScript,
 			[]string{prefix + ":day", prefix + ":month", prefix + ":pending", prefix + ":expiry"},
-			[]string{optionalCost(cap.DailyCostLimit), optionalCost(cap.MonthlyCostLimit), "0", "0", "", "0"}})
+			[]string{optionalCost(cap.DailyCostLimit), optionalCost(cap.MonthlyCostLimit), "0", "check", "", "0"}})
 	}
 	replies := l.evalAll(ctx, calls)
 	headroom := make([]Headroom, len(quotas))

@@ -275,6 +275,74 @@ func TestRouteTemplatesPublishCertifiedModelsAsOrdinaryRoutes(t *testing.T) {
 	h.want(owner, "DELETE", path, nil, withMatch(detail, nil), 204)
 }
 
+func TestRouteTemplateJoinsLeaveOperatorEditsPending(t *testing.T) {
+	for _, edit := range []string{"validated draft", "routing policy"} {
+		t.Run(edit, func(t *testing.T) {
+			h := newAccessHarness(t)
+			fixture := newOpenAIFixture(t, "")
+			generation := []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}
+			owner := h.owner()
+			earlier := activeAzureProvider(t, h, owner, "Earlier connection", fixture.URL, generation)
+			created := h.want(owner, "POST", "/api/v1/route-templates", map[string]any{
+				"name": "published-models", "provider_selector": "vendor:" + vendors.DefaultFor("azure_openai"), "model_filter": "*",
+				"slug_pattern": "auto-{model}", "overall_timeout_ms": 10000, "max_attempts": 2,
+				"fidelity": map[string]any{"mode": "transformed"}, "auto_publish": true,
+			}, idem(uuid.NewString()), 201)
+			templatePath := "/api/v1/route-templates/" + created["id"].(string)
+			applied := h.want(owner, "POST", templatePath+"/apply", nil, idem(uuid.NewString()), 200)
+			first := applied["results"].([]any)[0].(map[string]any)
+			slug := first["route_slug"].(string)
+			draftPath := "/api/v1/route-drafts/" + first["draft_id"].(string)
+			draft := h.want(owner, "GET", draftPath, nil, nil, 200)
+			h.refresh()
+			published := h.Runtime.Release().Snapshot.Routes[slug]
+			if edit == "validated draft" {
+				draft = h.want(owner, "PUT", draftPath, map[string]any{
+					"slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 20000, "max_attempts": 4,
+					"fidelity": map[string]any{"mode": "transformed"},
+					"targets":  []any{map[string]any{"provider_id": earlier["id"], "provider_model": vendorModel, "weight": 1, "timeout_ms": 10000}},
+				}, etagHeader(draft), 200)
+				h.want(owner, "POST", draftPath+"/validate", nil, etagHeader(draft), 200)
+			} else {
+				policyPath := "/api/v1/routing-policies/route-draft/" + first["draft_id"].(string)
+				policy := h.want(owner, "GET", policyPath, nil, nil, 200)
+				h.want(owner, "PUT", policyPath, map[string]any{"defaults": map[string]any{"strategy": "price"}}, withMatch(policy, idem(uuid.NewString())), 200)
+			}
+			// Repeated joins must keep both the edits and every new target staged.
+			for index := range 2 {
+				activeAzureProvider(t, h, owner, fmt.Sprintf("Later connection %d", index), fixture.URL, generation)
+				h.refresh()
+				live := h.Runtime.Release().Snapshot.Routes[slug]
+				if live.RevisionID != published.RevisionID || live.OverallTimeout != 10000 || live.MaxAttempts != 2 || len(live.Targets) != 1 {
+					t.Fatalf("pending operator edits became live: %+v", live)
+				}
+				if live.Policy != nil && live.Policy.Defaults.Strategy != nil {
+					t.Fatalf("pending routing policy became live: %+v", live.Policy)
+				}
+				draft = h.want(owner, "GET", draftPath, nil, nil, 200)
+				if len(draft["targets"].([]any)) != index+2 || draft["based_on_revision_id"] != published.RevisionID {
+					t.Fatalf("joined draft %v", draft)
+				}
+			}
+			h.want(owner, "POST", draftPath+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
+			h.refresh()
+			live := h.Runtime.Release().Snapshot.Routes[slug]
+			if len(live.Targets) != 3 || edit == "validated draft" && (live.OverallTimeout != 20000 || live.MaxAttempts != 4) {
+				t.Fatalf("explicit activation lost pending edits: %+v", live)
+			}
+			if edit == "routing policy" && (live.Policy == nil || live.Policy.Defaults.Strategy == nil || *live.Policy.Defaults.Strategy != "price") {
+				t.Fatalf("explicit activation lost routing policy: %+v", live.Policy)
+			}
+			// Explicit activation restores automatic joins to the approved draft.
+			activeAzureProvider(t, h, owner, "Approved connection", fixture.URL, generation)
+			h.refresh()
+			if live := h.Runtime.Release().Snapshot.Routes[slug]; len(live.Targets) != 4 {
+				t.Fatalf("approved draft stopped accepting automatic joins: %+v", live)
+			}
+		})
+	}
+}
+
 // flakyUpstream serves the OpenAI fixture until broken, after which every chat
 // completion streams one chunk and drops the connection, committing the
 // caller's stream before failing.

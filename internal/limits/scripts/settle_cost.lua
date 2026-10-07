@@ -164,23 +164,23 @@ end
 -- accrual: the hash holds "sum" and one field per lease and the set one member per
 -- lease, so keys that disagree mean one of them lost state, and no sum read from
 -- either would describe what is held.
-local function pending_total(pending_key, expiry_key, now_ms)
+local function pending_total(pending_key, expiry_key, now_ms, read_only)
   local stored = redis.pcall("HGET", pending_key, "sum")
   local leases = redis.pcall("ZCARD", expiry_key)
   if type(stored) == "table" or type(leases) == "table" then
-    drop_pending(pending_key, expiry_key)
+    if not read_only then drop_pending(pending_key, expiry_key) end
     return 0, 0
   end
   if stored == false then
     -- Nothing is held, or a hash has lost its total.
-    if leases > 0 or redis.call("EXISTS", pending_key) == 1 then
+    if not read_only and (leases > 0 or redis.call("EXISTS", pending_key) == 1) then
       drop_pending(pending_key, expiry_key)
     end
     return 0, 0
   end
   local sum_hi, sum_lo = parse_amount(stored)
   if sum_hi == nil or leases < 1 or redis.call("HLEN", pending_key) ~= leases + 1 then
-    drop_pending(pending_key, expiry_key)
+    if not read_only then drop_pending(pending_key, expiry_key) end
     return 0, 0
   end
   local expired = redis.call("ZRANGEBYSCORE", expiry_key, "-inf", now_ms, "LIMIT", 0, SWEEP_LIMIT)
@@ -193,6 +193,9 @@ local function pending_total(pending_key, expiry_key, now_ms)
     if hi ~= nil then
       sum_hi, sum_lo = sub_amount(sum_hi, sum_lo, hi, lo)
     end
+  end
+  if read_only then
+    return sum_hi, sum_lo
   end
   redis.call("HDEL", pending_key, unpack(expired))
   redis.call("ZREM", expiry_key, unpack(expired))

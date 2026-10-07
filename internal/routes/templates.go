@@ -346,12 +346,12 @@ func (s *Server) place(ctx context.Context, tx pgx.Tx, t *template, m certifiedM
 	case errors.Is(err, pgx.ErrNoRows):
 		result, err = s.generate(ctx, tx, t, m, result, actor)
 	case err == nil:
-		result, err = s.join(ctx, tx, draftID, m, result)
+		result, err = s.join(ctx, tx, draftID, m, result, t.AutoPublish)
 	}
 	if err != nil || result.Outcome == TemplateSkipped {
 		return result, err
 	}
-	if t.AutoPublish {
+	if t.AutoPublish && result.Reason == nil {
 		reason, err := s.promoteGenerated(ctx, tx, *result.DraftID, actor)
 		if err != nil {
 			return result, err
@@ -398,7 +398,7 @@ func (s *Server) generate(ctx context.Context, tx pgx.Tx, t *template, m certifi
 	return result, nil
 }
 
-func (s *Server) join(ctx context.Context, tx pgx.Tx, draftID string, m certifiedModel, result TemplateResult) (TemplateResult, error) {
+func (s *Server) join(ctx context.Context, tx pgx.Tx, draftID string, m certifiedModel, result TemplateResult, autoPublish bool) (TemplateResult, error) {
 	d, err := loadDraft(ctx, tx, draftID, true)
 	if err != nil {
 		return result, err
@@ -408,6 +408,28 @@ func (s *Server) join(ctx context.Context, tx pgx.Tx, draftID string, m certifie
 	}
 	if len(d.Targets) >= maxTargets {
 		return result.skip("targets_full"), nil
+	}
+	if autoPublish {
+		// Compare before adding the target: a matching revision ID also belongs
+		// to drafts with pending edits, even after an operator validates them.
+		// Without a published baseline, an existing draft needs activation too.
+		var unchanged bool
+		defaultPolicy, _ := json.Marshal(runtime.Policy{})
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(
+			SELECT 1 FROM olp.route_drafts d
+			JOIN olp.route_revisions v ON v.id=d.based_on_revision_id
+			LEFT JOIN olp.routing_policies p ON p.scope='route-draft' AND p.scope_id=d.id
+			WHERE d.id=$1 AND
+			ROW(d.slug,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.content_policy,d.fidelity,d.behavior,COALESCE(p.policy,$2::jsonb))
+			IS NOT DISTINCT FROM
+			ROW(v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.content_policy,v.fidelity,v.behavior,COALESCE(v.routing_policy,$2::jsonb))
+		)`, d.ID, defaultPolicy).Scan(&unchanged); err != nil {
+			return result, err
+		}
+		if !unchanged {
+			reason := "draft_modified"
+			result.Reason = &reason
+		}
 	}
 	// The new target is validated as a one-target draft of the same shape,
 	// which applies every target rule without revisiting the others.
