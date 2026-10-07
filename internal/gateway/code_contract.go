@@ -12,7 +12,7 @@ import (
 // coding generation, including each generation on an upgraded connection.
 type CodeLedger interface {
 	Admit(context.Context, resources.CodeAdmission) (resources.CodePermit, error)
-	BindConnection(context.Context, codemode.Route, string, codemode.Identity, string) (resources.CodePermit, error)
+	BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (resources.CodePermit, error)
 	MarkDispatched(context.Context, string) error
 	Settle(context.Context, string, codemode.Usage) error
 	Abort(context.Context, string) error

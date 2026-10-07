@@ -32,7 +32,7 @@ func TestCodeObservationPartialCountsKeepIndependentResets(t *testing.T) {
 		t.Run(exhausted, func(t *testing.T) {
 			f := newCodeFixture(t)
 			ctx := t.Context()
-			root, err := f.store.BindConnection(ctx, f.route, f.key, codemode.Identity{Conversation: "counts"}, "")
+			root, err := f.store.BindConnection(ctx, f.route, f.key, codemode.Identity{Conversation: "counts"}, "", []string{f.provider})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -101,7 +101,7 @@ func TestCodeObservationPartialCountsKeepIndependentResets(t *testing.T) {
 func TestCodeObservationWindowsMergeAndGateUntilIndependentResets(t *testing.T) {
 	f := newCodeFixture(t)
 	ctx := t.Context()
-	root, err := f.store.BindConnection(ctx, f.route, f.key, codemode.Identity{Conversation: "observation-root"}, "")
+	root, err := f.store.BindConnection(ctx, f.route, f.key, codemode.Identity{Conversation: "observation-root"}, "", []string{f.provider})
 	if err != nil {
 		t.Fatal(err)
 	}

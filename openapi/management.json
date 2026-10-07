@@ -12449,7 +12449,7 @@
             ]
           },
           "adapter": {
-            "description": "The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool holds accounts of one adapter.",
+            "description": "The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.",
             "enum": [
               "codex",
               "opencode_go",
@@ -12772,7 +12772,7 @@
       },
       "CodeBinding": {
         "additionalProperties": false,
-        "description": "Persistent per-key conversation tree identity. Retiring any member retires the whole tree; retirement never permits re-binding to another account.",
+        "description": "Persistent per-key conversation tree identity. Retiring any member retires the whole tree; retirement never permits re-binding to another account. Account and principal are the tree's first account, which later models prefer; pins name the account each model is served from.",
         "properties": {
           "account_id": {
             "format": "uuid",
@@ -12800,6 +12800,13 @@
               "string",
               "null"
             ]
+          },
+          "pins": {
+            "description": "The tree's pins, oldest first. A tree's first admission of a model pins an account to it, and the pin never moves.",
+            "items": {
+              "$ref": "#/components/schemas/CodePin"
+            },
+            "type": "array"
           },
           "principal": {
             "type": "string"
@@ -12835,7 +12842,8 @@
           "account_id",
           "principal",
           "created_at",
-          "retired_at"
+          "retired_at",
+          "pins"
         ],
         "type": "object"
       },
@@ -13003,13 +13011,19 @@
       "CodeClientConfiguration": {
         "additionalProperties": false,
         "properties": {
-          "adapter": {
-            "enum": [
-              "codex",
-              "opencode_go",
-              "zai_coding"
-            ],
-            "type": "string"
+          "adapters": {
+            "description": "The subscription families whose accounts serve the client's native models, in display order. A mixed route's configuration draws each model from its own family.",
+            "items": {
+              "enum": [
+                "codex",
+                "opencode_go",
+                "zai_coding"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
           },
           "base_url": {
             "format": "uri",
@@ -13061,7 +13075,15 @@
             "maxItems": 100,
             "minItems": 1,
             "type": "array",
-            "uniqueItems": true
+            "uniqueItems": true,
+            "description": "The route's models an adapter supporting the client serves, in route order."
+          },
+          "plan_model": {
+            "description": "The native model for planning: Claude Code's plan mode through opusplan and OpenCode's plan agent. It equals model unless another was chosen. Null for Codex.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "qualification_gaps": {
             "items": {
@@ -13080,7 +13102,7 @@
             ]
           },
           "supported_clients": {
-            "description": "The clients this route's adapter has configurations for; the first is the default.",
+            "description": "The clients the route's adapters have configurations for; the first, a client of the first model's adapter, is the default.",
             "items": {
               "enum": [
                 "codex",
@@ -13097,16 +13119,46 @@
           "route_slug",
           "base_url",
           "native_models",
-          "adapter",
+          "adapters",
           "client",
           "supported_clients",
           "client_version",
           "model",
+          "plan_model",
           "small_model",
           "format",
           "file",
           "configuration",
           "qualification_gaps"
+        ],
+        "type": "object"
+      },
+      "CodePin": {
+        "additionalProperties": false,
+        "description": "The account a conversation tree serves one model from.",
+        "properties": {
+          "account_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "model": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "principal": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "account_id",
+          "principal",
+          "created_at"
         ],
         "type": "object"
       },
@@ -13355,14 +13407,18 @@
         "additionalProperties": false,
         "description": "Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.",
         "properties": {
-          "adapter": {
-            "description": "The adapter the latest published revision serves, derived from the provider connections it froze. It selects the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan serves `v1/messages` and `v1/chat/completions`. Absent before publication or when the revision's accounts name no adapter.",
-            "enum": [
-              "codex",
-              "opencode_go",
-              "zai_coding"
-            ],
-            "type": "string"
+          "adapters": {
+            "description": "The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan serves `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.",
+            "items": {
+              "enum": [
+                "codex",
+                "opencode_go",
+                "zai_coding"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
           },
           "enabled": {
             "type": "boolean"
@@ -13424,7 +13480,8 @@
           "etag",
           "revision_id",
           "revision",
-          "published_at"
+          "published_at",
+          "adapters"
         ],
         "type": "object"
       },
@@ -31790,10 +31847,10 @@
             "schema": {
               "type": "string"
             },
-            "description": "The native model for the main conversation; defaults to the route's first model."
+            "description": "The native model for the main conversation; defaults to the first route model the client can use."
           },
           {
-            "description": "The client to configure; defaults to the first of the adapter's supported clients.",
+            "description": "The client to configure; defaults to the first of the route's supported clients.",
             "in": "query",
             "name": "client",
             "required": false,
@@ -31803,6 +31860,15 @@
                 "claude-code",
                 "opencode"
               ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The native model for planning; defaults to model. Codex takes none.",
+            "in": "query",
+            "name": "plan_model",
+            "required": false,
+            "schema": {
               "type": "string"
             }
           },

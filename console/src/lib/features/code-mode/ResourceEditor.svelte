@@ -20,6 +20,7 @@
     type CodeRoute
   } from '$lib/api/code-mode';
   import {
+    adapterLabel,
     nativeModels,
     tokenLimit,
     mutationError,
@@ -347,7 +348,7 @@
                 type="checkbox"
                 bind:group={accountIds}
                 value={account.id}
-              />{account.name} · {account.eligible
+              />{account.name} · {adapterLabel(account.adapter)} · {account.eligible
                 ? 'eligible'
                 : 'ineligible'}</label
             >{/each}

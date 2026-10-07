@@ -204,9 +204,11 @@
     </p>
   {:else if kind === 'bindings'}
     <p>
-      Parents, children, resumes, reconnects and compaction remain pinned to the
-      same root account. Revoked permissions still refuse access. Retirement is
-      permanent for the entire tree.
+      A tree pins an account to each model at its first use and holds at most
+      one account of each subscription. Parents, children, resumes, reconnects
+      and compaction stay on that model's account, which never changes. Revoked
+      permissions still refuse access. Retirement is permanent for the entire
+      tree.
     </p>
     {#each bindings.data?.items ?? [] as item (item.id)}
       <article class="card">
@@ -220,8 +222,14 @@
           <dd>{item.id} / {item.root_id}</dd>
           <dt>Parent binding</dt>
           <dd>{item.parent_id ?? 'Root conversation'}</dd>
-          <dt>Pinned account / principal</dt>
+          <dt>First account / principal</dt>
           <dd>{item.account_id} / {item.principal}</dd>
+          <dt>Model pins</dt>
+          <dd>
+            {item.pins
+              .map((pin) => `${pin.model} → ${pin.account_id}`)
+              .join(', ') || 'No model served yet'}
+          </dd>
           <dt>Route / key</dt>
           <dd>{item.route_id} / {item.api_key_id}</dd>
           <dt>Created / retired</dt>

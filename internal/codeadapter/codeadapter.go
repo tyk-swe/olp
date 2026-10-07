@@ -1,11 +1,12 @@
 // Package codeadapter is the table of code-mode adapters: the plugin profiles
-// each subscription family enrolls through, the wire protocols its routes
-// serve, the header that carries its upstream credential, and the coding
-// clients OLP generates configuration for.
+// each subscription family enrolls through, the client paths and wire
+// protocols it serves, the header that carries its upstream credential, and
+// the coding clients OLP generates configuration for. A route's pool may mix
+// families; each request goes to an account whose family serves its path.
 package codeadapter
 
 import (
-	"errors"
+	"cmp"
 	"slices"
 	"strings"
 
@@ -46,24 +47,34 @@ type Vendor struct {
 	// codeplans.Principal, rather than a refreshed OAuth grant.
 	KeyGrant  bool
 	Protocols []codemode.Protocol
+	// Paths maps each client path under a route to the upstream path that
+	// extends the profile's hosting address.
+	Paths map[string]string
 	// Extra names the upstream authorization headers besides the credential.
 	Extra []string
 	// Clients lists the clients with a generated configuration, default first.
 	Clients []string
 }
 
+// vendors is in display order, which orders every list of adapters.
 var vendors = []Vendor{
 	{
 		Adapter: codemode.AdapterCodex, Name: "Codex", Profiles: []string{codexauth.ProfileID}, Manifest: codexauth.Manifest,
-		Protocols: []codemode.Protocol{codemode.ProtocolResponses}, Extra: []string{"Chatgpt-Account-Id"}, Clients: []string{ClientCodex},
+		Protocols: []codemode.Protocol{codemode.ProtocolResponses},
+		Paths:     map[string]string{"responses": "responses", "responses/compact": "responses/compact"},
+		Extra:     []string{"Chatgpt-Account-Id"}, Clients: []string{ClientCodex},
 	},
 	{
 		Adapter: codemode.AdapterOpenCodeGo, Name: "OpenCode Go", Profiles: []string{codeplans.OpenCodeGoProfile}, Manifest: codeplans.OpenCodeGoManifest, KeyGrant: true,
-		Protocols: []codemode.Protocol{codemode.ProtocolChat, codemode.ProtocolMessages, codemode.ProtocolResponses}, Clients: []string{ClientOpenCode, ClientClaudeCode},
+		Protocols: []codemode.Protocol{codemode.ProtocolChat, codemode.ProtocolMessages, codemode.ProtocolResponses},
+		Paths:     map[string]string{"v1/chat/completions": "chat/completions", "v1/messages": "messages", "v1/responses": "responses"},
+		Clients:   []string{ClientOpenCode, ClientClaudeCode},
 	},
 	{
 		Adapter: codemode.AdapterZAICoding, Name: "GLM Coding Plan", Profiles: []string{codeplans.ZAIProfile, codeplans.BigModelProfile}, Manifest: codeplans.ZAIManifest, KeyGrant: true,
-		Protocols: []codemode.Protocol{codemode.ProtocolMessages, codemode.ProtocolChat}, Clients: []string{ClientClaudeCode, ClientOpenCode},
+		Protocols: []codemode.Protocol{codemode.ProtocolMessages, codemode.ProtocolChat},
+		Paths:     map[string]string{"v1/messages": "anthropic/v1/messages", "v1/chat/completions": "coding/paas/v4/chat/completions"},
+		Clients:   []string{ClientClaudeCode, ClientOpenCode},
 	},
 }
 
@@ -91,30 +102,17 @@ func ForConnection(kind, authMode, profileID string) (Vendor, bool) {
 	return Vendor{}, false
 }
 
-// Connection is what a provider configuration says about its adapter.
-type Connection struct {
-	Kind, AuthMode, ProfileID string
+// Compare orders adapters as the table does, unknown ones last.
+func Compare(a, b codemode.Adapter) int {
+	return cmp.Compare(rank(a), rank(b))
 }
 
-// ErrMixed reports connections of more than one adapter.
-var ErrMixed = errors.New("Use accounts of one subscription family: Codex, OpenCode Go or GLM Coding Plan.")
-
-// Derive returns the one adapter of connections. Connections no adapter
-// accepts are ignored, so a set of only those derives no adapter, and serves
-// nothing; more than one adapter is ErrMixed.
-func Derive(connections []Connection) (codemode.Adapter, error) {
-	var adapter codemode.Adapter
-	for _, c := range connections {
-		v, ok := ForConnection(c.Kind, c.AuthMode, c.ProfileID)
-		if !ok {
-			continue
-		}
-		if adapter != "" && adapter != v.Adapter {
-			return "", ErrMixed
-		}
-		adapter = v.Adapter
+func rank(adapter codemode.Adapter) int {
+	i := slices.IndexFunc(vendors, func(v Vendor) bool { return v.Adapter == adapter })
+	if i < 0 {
+		return len(vendors)
 	}
-	return adapter, nil
+	return i
 }
 
 // Serves reports whether the adapter's routes serve a protocol.
@@ -158,9 +156,14 @@ func SQL(config string) string {
 	return b.String()
 }
 
-// SQLRevision is a SQL expression for the adapter Derive returns for a route
-// revision's connections, a jsonb object of provider configurations, or NULL
-// when they name none or several.
-func SQLRevision(connections string) string {
-	return "(SELECT CASE WHEN count(DISTINCT adapter)=1 THEN min(adapter) END FROM (SELECT " + SQL("c.value") + " adapter FROM jsonb_each(" + connections + ") c) adapters)"
+// SQLAdapters is a SQL expression for the adapters of a route revision's
+// connections, a jsonb object of provider configurations: a jsonb array in
+// table order, empty when the revision is absent or names none.
+func SQLAdapters(connections string) string {
+	order := make([]string, len(vendors))
+	for i, v := range vendors {
+		order[i] = "'" + string(v.Adapter) + "'"
+	}
+	return "(SELECT coalesce(jsonb_agg(adapter ORDER BY array_position(ARRAY[" + strings.Join(order, ",") + "],adapter)),'[]'::jsonb) FROM (SELECT DISTINCT " + SQL("c.value") +
+		" adapter FROM jsonb_each(" + connections + ") c) adapters WHERE adapter IS NOT NULL)"
 }

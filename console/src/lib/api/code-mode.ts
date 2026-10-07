@@ -18,10 +18,11 @@ export type CodeClientConfiguration = Schemas['CodeClientConfiguration'];
 export type CodeClient = CodeClientConfiguration['client'];
 
 /** The client and models a client configuration is generated for; omitted
- * fields take the route adapter's defaults. */
+ * fields take the route's defaults. */
 export type CodeClientSelection = {
   client?: CodeClient;
   model?: string;
+  plan_model?: string;
   small_model?: string;
 };
 

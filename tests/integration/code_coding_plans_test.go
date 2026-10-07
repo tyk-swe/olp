@@ -185,6 +185,30 @@ func newCodingPlanFixture(t *testing.T, plugin, profile string, keys ...string) 
 	return f
 }
 
+// mix adds an OpenCode Go account serving minimax-m3 and kimi-k3 to the GLM
+// fixture's pool, narrows the GLM account to glm-5.3, and republishes the route
+// with all three models, so each model has exactly one subscription.
+func (f *codingPlanFixture) mix(t *testing.T, key string) (glm, other map[string]any) {
+	t.Helper()
+	h, owner := f.h, f.owner
+	glm = f.accounts[0]
+	glm = h.want(owner, "PUT", "/api/v1/code/accounts/"+glm["id"].(string), map[string]any{"project_id": f.project, "provider_id": glm["provider_id"], "credential_id": glm["credential_id"], "name": glm["name"], "enabled": true, "models": []string{"glm-5.3"}}, etagHeader(glm), 200)
+	f.digest = installPlugin(t, h, owner, testutil.BuildPlugin(t, "./plugins/opencode-go"))
+	provider := f.provider(t, "OpenCode Go", codeplans.OpenCodeGoProfile)
+	credential := f.enroll(t, provider, key)
+	other = h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": "Other plan", "enabled": true, "models": []string{"minimax-m3", "kimi-k3"}}, idem("other-account"), 201)
+	if other["adapter"] != "opencode_go" {
+		t.Fatalf("account adapter: %v", other)
+	}
+	f.providers, f.accounts = append(f.providers, provider), []map[string]any{glm, other}
+	f.pool = h.want(owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), f.poolInput(glm, other), etagHeader(f.pool), 200)
+	id := f.route["id"].(string)
+	draft := h.want(owner, "PUT", "/api/v1/code/routes/"+id, map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": []string{"glm-5.3", "minimax-m3", "kimi-k3"}, "enabled": true}, etagHeader(f.route), 200)
+	f.route = h.want(owner, "POST", "/api/v1/code/routes/"+id+"/publish", nil, withMatch(draft, idem("mixed-publish")), 200)
+	h.refresh()
+	return glm, other
+}
+
 func (f *codingPlanFixture) provider(t *testing.T, name, profile string) string {
 	t.Helper()
 	provider := f.h.want(f.owner, "POST", "/api/v1/providers", map[string]any{"name": name, "project_id": f.project, "model": vendorModel, "configuration": map[string]any{
@@ -500,40 +524,106 @@ func TestCodeCodingPlanQuotaCoolsTheAccountWithoutFailover(t *testing.T) {
 	}
 }
 
-func TestCodeCodingPlanRoutesServeOneAdapter(t *testing.T) {
-	f := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, "0123456789abcdef0123456789abcdef.first")
+func TestCodeCodingPlanRoutesServeEachModelFromItsSubscription(t *testing.T) {
+	glmKey, goKey := "0123456789abcdef0123456789abcdef.first", "opencode0123456789abcdef0123456789"
+	f := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, glmKey)
 	h, owner := f.h, f.owner
+	if adapters := fmt.Sprint(f.route["adapters"]); adapters != "[zai_coding]" {
+		t.Fatalf("route adapters: %s", adapters)
+	}
+	// An OpenCode Go account joins the GLM pool, and the republished route
+	// serves each model from the subscription that lists it.
+	glm, other := f.mix(t, goKey)
+	id := f.route["id"].(string)
 	routes := h.want(owner, "GET", "/api/v1/code/routes?project_id="+f.project, nil, nil, 200)["items"].([]any)
-	if f.route["adapter"] != "zai_coding" || routes[0].(map[string]any)["adapter"] != "zai_coding" {
-		t.Fatalf("route adapter: %v %v", f.route, routes)
+	revisions := h.want(owner, "GET", "/api/v1/code/routes/"+id+"/revisions", nil, nil, 200)["items"].([]any)
+	for _, adapters := range []any{f.route["adapters"], routes[0].(map[string]any)["adapters"], revisions[0].(map[string]any)["route"].(map[string]any)["adapters"]} {
+		if fmt.Sprint(adapters) != "[opencode_go zai_coding]" {
+			t.Fatalf("mixed route adapters: %v", adapters)
+		}
 	}
-	revisions := h.want(owner, "GET", "/api/v1/code/routes/"+f.route["id"].(string)+"/revisions", nil, nil, 200)["items"].([]any)
-	if revisions[0].(map[string]any)["route"].(map[string]any)["adapter"] != "zai_coding" {
-		t.Fatalf("revision adapter: %v", revisions)
-	}
-	// An OpenCode Go account can't join the GLM pool.
-	f.digest = installPlugin(t, h, owner, testutil.BuildPlugin(t, "./plugins/opencode-go"))
-	provider := f.provider(t, "OpenCode Go", codeplans.OpenCodeGoProfile)
-	credential := f.enroll(t, provider, "opencode0123456789abcdef0123456789")
-	other := h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": "Other plan", "enabled": true, "models": []string{"glm-5.3"}}, idem("other-account"), 201)
-	if other["adapter"] != "opencode_go" {
-		t.Fatalf("account adapter: %v", other)
-	}
-	h.want(owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), f.poolInput(f.accounts[0], other), etagHeader(f.pool), 422)
 
-	path := "/api/v1/code/routes/" + f.route["id"].(string) + "/client-config?gateway_url=https%3A%2F%2Fgateway.example"
-	config := h.want(owner, "GET", path, nil, nil, 200)
-	if config["client"] != "claude-code" || config["adapter"] != "zai_coding" || config["format"] != "shell" || !strings.Contains(config["configuration"].(string), "ANTHROPIC_BASE_URL='https://gateway.example/code/qualification'") {
-		t.Fatalf("default client configuration: %v", config)
+	session := func(name, value string) http.Header {
+		return http.Header{"Authorization": {"Bearer " + f.key}, name: {value}}
 	}
-	config = h.want(owner, "GET", path+"&client=opencode&model=minimax-m3&small_model=glm-5.3", nil, nil, 200)
-	if config["file"] != "opencode.json" || !strings.Contains(config["configuration"].(string), `"small_model": "zai-coding-plan/glm-5.3"`) {
-		t.Fatalf("OpenCode configuration: %v", config)
+	claude, child, opencode := session("X-Claude-Code-Session-Id", "mix"), session("X-Claude-Code-Session-Id", "mix"), session("X-Opencode-Session-Id", "ses_mix")
+	child.Set("X-Claude-Code-Agent-Id", "agent-1")
+	bodies := map[string]string{
+		"v1/messages":         `{"model":%q,"max_tokens":64,"messages":[]}`,
+		"v1/chat/completions": `{"model":%q,"messages":[]}`,
+		"v1/responses":        `{"model":%q,"stream":true,"store":false,"input":"CONTROLLED_PRIVATE_PROMPT"}`,
 	}
-	for _, refused := range []string{"&client=codex", "&small_model=unpublished", "&model=claude-sonnet-4-6"} {
+	for i, c := range []struct {
+		path                                            string
+		header                                          http.Header
+		model, host, upstreamPath, credential, expected string
+	}{
+		{"v1/messages", claude, "glm-5.3", "api.z.ai", "/api/anthropic/v1/messages", "Authorization", "Bearer " + glmKey},
+		{"v1/messages", claude, "minimax-m3", "opencode.ai", "/zen/go/v1/messages", "X-Api-Key", goKey},
+		{"v1/messages", child, "minimax-m3", "opencode.ai", "/zen/go/v1/messages", "X-Api-Key", goKey},
+		{"v1/chat/completions", opencode, "kimi-k3", "opencode.ai", "/zen/go/v1/chat/completions", "Authorization", "Bearer " + goKey},
+		{"v1/responses", opencode, "kimi-k3", "opencode.ai", "/zen/go/v1/responses", "Authorization", "Bearer " + goKey},
+	} {
+		if response, got := f.post(t, c.path, c.header, fmt.Sprintf(bodies[c.path], c.model)); response.StatusCode != 200 {
+			t.Fatalf("%s %s: %d %s", c.path, c.model, response.StatusCode, got)
+		}
+		sent := f.peer.received()[i]
+		if sent.Host != c.host || sent.Path != c.upstreamPath || sent.Header.Get(c.credential) != c.expected || len(sent.Header.Values("Authorization"))+len(sent.Header.Values("X-Api-Key")) != 1 {
+			t.Fatalf("%s %s reached the upstream as %s%s %v", c.path, c.model, sent.Host, sent.Path, sent.Header)
+		}
+	}
+	// A path no account serving the model can take, and a path no adapter of
+	// the route serves, refuse before dispatch.
+	if response, got := f.post(t, "v1/responses", session("X-Opencode-Session-Id", "ses_glm"), fmt.Sprintf(bodies["v1/responses"], "glm-5.3")); response.StatusCode != 503 || !bytes.Contains(got, []byte("code_account_unavailable")) {
+		t.Fatalf("GLM on Responses: %d %s", response.StatusCode, got)
+	}
+	if response, _ := f.post(t, "responses", claude, fmt.Sprintf(bodies["v1/responses"], "kimi-k3")); response.StatusCode != 400 {
+		t.Fatalf("Codex path: %d", response.StatusCode)
+	}
+
+	// The tree pins one account per model and keeps its first account.
+	var root map[string]any
+	for _, item := range h.want(owner, "GET", "/api/v1/code/bindings?project_id="+f.project, nil, nil, 200)["items"].([]any) {
+		if binding := item.(map[string]any); binding["conversation"] == "mix" {
+			root = binding
+		}
+	}
+	pins := []string{}
+	for _, item := range root["pins"].([]any) {
+		pin := item.(map[string]any)
+		pins = append(pins, pin["model"].(string)+"="+pin["account_id"].(string))
+	}
+	if root["account_id"] != glm["id"] || strings.Join(pins, " ") != "glm-5.3="+glm["id"].(string)+" minimax-m3="+other["id"].(string) {
+		t.Fatalf("tree pins: %v", root)
+	}
+	// A cooling pin refuses its model without failing over, while the tree's
+	// other models stay served.
+	if err := (&resources.CodeStore{Pool: h.Pool}).ObserveHealth(t.Context(), other["id"].(string), "quota_limited"); err != nil {
+		t.Fatal(err)
+	}
+	if response, got := f.post(t, "v1/messages", child, fmt.Sprintf(bodies["v1/messages"], "minimax-m3")); response.StatusCode != 503 || !bytes.Contains(got, []byte("code_account_unavailable")) {
+		t.Fatalf("cooling pin: %d %s", response.StatusCode, got)
+	}
+	if response, _ := f.post(t, "v1/messages", claude, fmt.Sprintf(bodies["v1/messages"], "glm-5.3")); response.StatusCode != 200 || len(f.peer.received()) != 6 {
+		t.Fatalf("the tree's GLM pin: %d", response.StatusCode)
+	}
+
+	path := "/api/v1/code/routes/" + id + "/client-config?gateway_url=https%3A%2F%2Fgateway.example"
+	config := h.want(owner, "GET", path+"&plan_model=minimax-m3", nil, nil, 200)
+	if config["client"] != "claude-code" || fmt.Sprint(config["supported_clients"]) != "[claude-code opencode]" || fmt.Sprint(config["adapters"]) != "[opencode_go zai_coding]" ||
+		config["model"] != "glm-5.3" || config["plan_model"] != "minimax-m3" || !strings.Contains(config["configuration"].(string), "export ANTHROPIC_MODEL='opusplan'") {
+		t.Fatalf("Claude Code configuration: %v", config)
+	}
+	config = h.want(owner, "GET", path+"&client=opencode&plan_model=kimi-k3", nil, nil, 200)
+	for _, want := range []string{`"model": "zai-coding-plan/glm-5.3"`, `"model": "opencode-go/kimi-k3"`, `"opencode-go",` + "\n" + `    "zai-coding-plan"`} {
+		if !strings.Contains(config["configuration"].(string), want) {
+			t.Fatalf("OpenCode configuration lacks %s:\n%s", want, config["configuration"])
+		}
+	}
+	for _, refused := range []string{"&client=codex", "&plan_model=unpublished", "&model=claude-sonnet-4-6"} {
 		h.want(owner, "GET", path+refused, nil, nil, 422)
 	}
-	if v, _ := codeadapter.Lookup(codemode.AdapterZAICoding); config["client_version"] != codeadapter.OpenCodeVersion || len(v.Clients) != 2 {
+	if config["client_version"] != codeadapter.OpenCodeVersion {
 		t.Fatal("client pins changed")
 	}
 }

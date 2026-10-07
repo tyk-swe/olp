@@ -13,7 +13,13 @@ func (m *Management) registerCodeMode(mux *http.ServeMux) {
 }
 
 func (m *Management) codeBindings(r *http.Request, p access.Principal) (access.Reply, error) {
-	return m.Access.CodeList(r, p, `SELECT to_jsonb(x)||jsonb_build_object('retired_at',COALESCE(x.retired_at,root.retired_at)) FROM olp.code_bindings x JOIN olp.code_bindings root ON root.id=x.root_id`)
+	return m.Access.CodeList(r, p, `SELECT to_jsonb(x)||jsonb_build_object('retired_at',COALESCE(x.retired_at,root.retired_at),'pins',`+codePinsJSON("x.root_id")+`)
+		FROM olp.code_bindings x JOIN olp.code_bindings root ON root.id=x.root_id`)
+}
+
+// codePinsJSON is the JSON array of a conversation tree's pins, oldest first.
+func codePinsJSON(root string) string {
+	return `(SELECT coalesce(jsonb_agg(to_jsonb(p)-'root_id' ORDER BY p.created_at,p.model),'[]'::jsonb) FROM olp.code_pins p WHERE p.root_id=` + root + `)`
 }
 
 func (m *Management) retireCodeBinding(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -51,7 +57,7 @@ func (m *Management) retireCodeBinding(r *http.Request, _ access.Principal) (acc
 		return access.Reply{}, err
 	}
 	var body json.RawMessage
-	if err = tx.QueryRow(r.Context(), `SELECT to_jsonb(b) FROM olp.code_bindings b WHERE id=$1`, b.RootID).Scan(&body); err != nil {
+	if err = tx.QueryRow(r.Context(), `SELECT to_jsonb(b)||jsonb_build_object('pins',`+codePinsJSON("b.id")+`) FROM olp.code_bindings b WHERE id=$1`, b.RootID).Scan(&body); err != nil {
 		return access.Reply{}, err
 	}
 	out := access.OK(body)

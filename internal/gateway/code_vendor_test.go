@@ -7,11 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -174,6 +176,7 @@ func TestCodeAdaptersRefuseOtherPathsBeforeDispatch(t *testing.T) {
 		{"websocket on opencode go", codeplans.OpenCodeGoProfile, http.MethodGet, "responses", http.Header{"Authorization": {"Bearer " + fullKey}, "Upgrade": {"websocket"}, "Connection": {"Upgrade"}}, 400, "code_operation_unsupported", true},
 		{"count tokens probe", codeplans.ZAIProfile, http.MethodPost, "v1/messages/count_tokens", claude, 404, "code_operation_unsupported", false},
 		{"connectivity probe", codeplans.OpenCodeGoProfile, http.MethodHead, "api/hello", claude, 404, "", false},
+		{"count tokens probe on codex", codexauth.ProfileID, http.MethodPost, "v1/messages/count_tokens", claude, 400, "code_operation_unsupported", true},
 		{"no identity", codeplans.ZAIProfile, http.MethodPost, "v1/messages", http.Header{"X-Api-Key": {fullKey}}, 400, "code_identity_invalid", true},
 		{"unknown adapter", "reference-grant-chat", http.MethodPost, "v1/messages", claude, 503, "code_adapter_unavailable", true},
 	} {
@@ -189,6 +192,62 @@ func TestCodeAdaptersRefuseOtherPathsBeforeDispatch(t *testing.T) {
 				t.Fatalf("admitted %d, refusals %v", len(ledger.inputs), ledger.refusals)
 			}
 		})
+	}
+}
+
+func TestCodeMixedRoutesDispatchEachPathToAnAccountOfItsAdapter(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t)
+	connection := func(profile string) runtime.Configuration {
+		return runtime.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: profile, Endpoint: h.upstream.URL + "/a"}
+	}
+	h.rt.release.Snapshot.CodeConnections = map[string]runtime.Configuration{
+		"revision:p-codex": connection(codexauth.ProfileID),
+		"revision:p-glm":   connection(codeplans.ZAIProfile),
+		"revision:p-go":    connection(codeplans.OpenCodeGoProfile),
+	}
+	if err := h.rt.release.Snapshot.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	type upstream struct {
+		path   string
+		header http.Header
+	}
+	requests := make(chan upstream, 1)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		requests <- upstream{r.URL.Path, r.Header.Clone()}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	})
+	for _, test := range []struct {
+		path      string
+		header    http.Header
+		providers []string
+		upstream  string
+		codex     bool
+	}{
+		{"responses", http.Header{"Authorization": {"Bearer " + fullKey}, "Session_id": {"root"}}, []string{"p-codex"}, "/a/responses", true},
+		{"v1/messages", http.Header{"X-Api-Key": {fullKey}, "X-Claude-Code-Session-Id": {"s1"}}, []string{"p-glm", "p-go"}, "/a/anthropic/v1/messages", false},
+		{"v1/chat/completions", http.Header{"Authorization": {"Bearer " + fullKey}, "X-Opencode-Session-Id": {"ses_a"}}, []string{"p-glm", "p-go"}, "/a/coding/paas/v4/chat/completions", false},
+		{"v1/responses", http.Header{"Authorization": {"Bearer " + fullKey}, "X-Opencode-Session-Id": {"ses_b"}}, []string{"p-go"}, "/a/responses", false},
+	} {
+		response, body := codeVendorDo(t, server, http.MethodPost, test.path, []byte(`{"model":"native-model"}`), test.header)
+		if response.StatusCode != 200 {
+			t.Fatalf("%s: %d %s", test.path, response.StatusCode, body)
+		}
+		got := <-requests
+		ledger.wait(t)
+		ledger.mu.Lock()
+		providers := ledger.inputs[len(ledger.inputs)-1].Providers
+		ledger.mu.Unlock()
+		if got.path != test.upstream || !slices.Equal(providers, test.providers) || (got.header.Get("Chatgpt-Account-Id") != "") != test.codex {
+			t.Fatalf("%s: upstream %s providers %v headers %v", test.path, got.path, providers, got.header)
+		}
+	}
+	response, _ := codeVendorDo(t, server, http.MethodPost, "v1/messages/count_tokens", []byte(`{}`), http.Header{"X-Api-Key": {fullKey}})
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+	if response.StatusCode != 404 || len(ledger.refusals) != 0 {
+		t.Fatalf("probe on a route serving Messages: %d refusals %v", response.StatusCode, ledger.refusals)
 	}
 }
 

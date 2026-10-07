@@ -1,7 +1,7 @@
 package codeadapter
 
 import (
-	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -49,25 +49,24 @@ func TestConnectionKindAndAuthModeAreThePluginGrantConstants(t *testing.T) {
 	}
 }
 
-func TestDeriveIgnoresUnknownConnectionsAndRefusesMixedAdapters(t *testing.T) {
-	codex := Connection{connectors.KindPlugin, connectors.AuthGrant, codexauth.ProfileID}
-	zai := Connection{connectors.KindPlugin, connectors.AuthGrant, codeplans.ZAIProfile}
-	bigmodel := Connection{connectors.KindPlugin, connectors.AuthGrant, codeplans.BigModelProfile}
-	other := Connection{connectors.KindPlugin, connectors.AuthGrant, "reference-grant-chat"}
-	for _, test := range []struct {
-		connections []Connection
-		want        codemode.Adapter
-		err         error
-	}{
-		{nil, "", nil},
-		{[]Connection{other}, "", nil},
-		{[]Connection{codex, other}, codemode.AdapterCodex, nil},
-		{[]Connection{zai, bigmodel}, codemode.AdapterZAICoding, nil},
-		{[]Connection{zai, codex}, "", ErrMixed},
-	} {
-		got, err := Derive(test.connections)
-		if got != test.want || !errors.Is(err, test.err) {
-			t.Fatalf("%v: %q %v", test.connections, got, err)
+func TestAdaptersOrderAsTheTableAndShareOnlyNativePaths(t *testing.T) {
+	adapters := []codemode.Adapter{"unknown", codemode.AdapterZAICoding, codemode.AdapterCodex, codemode.AdapterOpenCodeGo}
+	slices.SortFunc(adapters, Compare)
+	if !slices.Equal(adapters, []codemode.Adapter{codemode.AdapterCodex, codemode.AdapterOpenCodeGo, codemode.AdapterZAICoding, "unknown"}) {
+		t.Fatalf("order %q", adapters)
+	}
+	if !strings.Contains(SQLAdapters("v.connections"), "ARRAY['codex','opencode_go','zai_coding']") {
+		t.Fatal("SQLAdapters does not order adapters as the table")
+	}
+	for _, v := range vendors {
+		if len(v.Paths) == 0 {
+			t.Fatalf("%s serves no path", v.Adapter)
+		}
+		for path, upstream := range v.Paths {
+			// Codex's paths are the route's root, which no other family serves.
+			if codex := !strings.HasPrefix(path, "v1/"); codex != (v.Adapter == codemode.AdapterCodex) || upstream == "" {
+				t.Fatalf("%s serves %s at %q", v.Adapter, path, upstream)
+			}
 		}
 	}
 }

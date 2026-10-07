@@ -70,7 +70,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 		reject(codemode.Refuse(400, "code_model_invalid"))
 		return
 	}
-	permit, err := s.CodeLedger.BindConnection(r.Context(), route, keyID, identity, r.Header.Get("X-OLP-Code-Model"))
+	permit, err := s.CodeLedger.BindConnection(r.Context(), route, keyID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot.CodeProviders(route, "responses"))
 	if err != nil {
 		reject(err)
 		return
@@ -80,9 +80,8 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 		reject(codemode.Refuse(503, "code_connection_unpublished"))
 		return
 	}
-	dispatch := codemode.Dispatch{Adapter: codemode.AdapterCodex, Protocol: codemode.ProtocolResponses}
-	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), config, permit.Account, dispatch)
-	if err != nil || auth.Principal == "" || auth.Principal != permit.Binding.Principal {
+	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), config, permit.Account, codemode.Dispatch{Adapter: codemode.AdapterCodex, Protocol: codemode.ProtocolResponses})
+	if err != nil || auth.Principal == "" || auth.Principal != permit.Pin.Principal {
 		reject(codemode.Refuse(503, "code_account_unavailable"))
 		return
 	}
@@ -198,7 +197,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				refuse(codemode.Refuse(409, "code_identity_changed"))
 				return
 			}
-			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation, dispatch)
+			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation, "responses", codemode.ProtocolResponses)
 			if err != nil {
 				refuse(err)
 				return

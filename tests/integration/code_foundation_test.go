@@ -69,7 +69,7 @@ func (f *codeFixture) addKey(t *testing.T, id string) {
 	f.exec(t, `INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag,project_id) VALUES($1::uuid,$1::text,'\x00','Fixture key',$2,'{"scopes":["inference"],"allowed_routes":["coding"]}',$3,$4)`, id, f.user, access.NewID(), f.project)
 }
 func (f *codeFixture) input(conversation, parent string, bound *codemode.TokenBound) resources.CodeAdmission {
-	return resources.CodeAdmission{Route: f.route, APIKeyID: f.key, Operation: codemode.Operation{Name: "responses.create", Model: "native-model", Identity: codemode.Identity{Conversation: conversation, Parent: parent}}, Bound: bound}
+	return resources.CodeAdmission{Route: f.route, APIKeyID: f.key, Providers: []string{f.provider}, Operation: codemode.Operation{Name: "responses.create", Model: "native-model", Identity: codemode.Identity{Conversation: conversation, Parent: parent}}, Bound: bound}
 }
 func codeRefusal(t *testing.T, err error, code string) {
 	t.Helper()

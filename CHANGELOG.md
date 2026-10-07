@@ -23,8 +23,16 @@ semantic versioning and take their source from root `package.json`;
   and `zai-coding` plugins enroll a pasted API key, fingerprinted as the
   principal and fenced from ordinary routes. Routes serve Anthropic Messages,
   Chat Completions and, for OpenCode Go, the Responses API, and derive their
-  adapter from their accounts. Client configuration generates Claude Code 2.1.286
+  adapters from their accounts. Client configuration generates Claude Code 2.1.286
   and OpenCode 1.18.34 setup, which is qualified against controlled peers.
+- Code-mode routes that mix subscriptions. One pool can hold Codex, OpenCode Go
+  and GLM Coding Plan accounts; each request reaches an account that lists its
+  model and whose subscription serves the client's path, and a conversation tree
+  pins one account per model and holds at most one account of each
+  subscription. Client configuration offers each client the models
+  it can reach and a planning model, which Claude Code uses through `opusplan`
+  and OpenCode through its plan agent, so one session can plan on one
+  subscription's model and implement on another's.
 - Plugin grant profiles can declare a `secret` input, which the console masks.
 - Reviewed vendor contracts: one declared table of every vendor's operations,
   dialects, refused parameters, credential placement and error classes, each
