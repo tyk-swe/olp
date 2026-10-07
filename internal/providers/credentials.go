@@ -251,6 +251,11 @@ type slotInput struct {
 	MaxConcurrency      *int64   `json:"max_concurrency"`
 	RequestsPerMinute   *int64   `json:"requests_per_minute"`
 	TokensPerMinute     *int64   `json:"tokens_per_minute"`
+	runtime.Supply
+}
+
+func (in *slotInput) limits() Limits {
+	return Limits{MaxConcurrency: in.MaxConcurrency, RequestsPerMinute: in.RequestsPerMinute, TokensPerMinute: in.TokensPerMinute, Supply: in.Supply}
 }
 
 type slotWrite struct {
@@ -264,6 +269,7 @@ func slotJSON(row slotRow) map[string]any {
 		"credential_version_id": row.CredentialID,
 		"allowed_api_keys":      orEmpty(row.Restrictions.AllowedAPIKeys), "allowed_models": orEmpty(row.Restrictions.AllowedModels), "allowed_routes": orEmpty(row.Restrictions.AllowedRoutes),
 		"max_concurrency": row.Limits.MaxConcurrency, "requests_per_minute": row.Limits.RequestsPerMinute, "tokens_per_minute": row.Limits.TokensPerMinute,
+		"daily_cost_limit": row.Limits.DailyCostLimit, "monthly_cost_limit": row.Limits.MonthlyCostLimit, "priority_shares": row.Limits.PriorityShares, "saturation_percent": row.Limits.SaturationPercent,
 	}
 }
 
@@ -431,8 +437,8 @@ func validSlot(in *slotInput, slotID string) error {
 			return err
 		}
 	}
-	if !ValidQuota(Limits{MaxConcurrency: in.MaxConcurrency, RequestsPerMinute: in.RequestsPerMinute, TokensPerMinute: in.TokensPerMinute}) {
-		return access.Invalid("slot", "Use positive limits: requests and concurrency at most 2147483647, tokens at most 9007199254740991.")
+	if err := ValidLimits("slot", in.limits()); err != nil {
+		return err
 	}
 	if in.CredentialVersionID != nil {
 		id, err := access.ParseUUID(*in.CredentialVersionID)
@@ -551,7 +557,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 		credentialID = existing.CredentialID
 	}
 	restrictions, _ := json.Marshal(slotRestrictions{AllowedAPIKeys: orEmpty(input.Slot.AllowedAPIKeys), AllowedModels: orEmpty(input.Slot.AllowedModels), AllowedRoutes: orEmpty(input.Slot.AllowedRoutes)})
-	limits, _ := json.Marshal(Limits{MaxConcurrency: input.Slot.MaxConcurrency, RequestsPerMinute: input.Slot.RequestsPerMinute, TokensPerMinute: input.Slot.TokensPerMinute})
+	limits, _ := json.Marshal(input.Slot.limits())
 	if existing == nil {
 		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,false,(SELECT coalesce(max(position),0)+1 FROM olp.provider_slots WHERE provider_id=$2),$3,$4,$5,$6,$7,$8,$9)", slotID, id, input.Slot.Name, enabled, priority, weight, credentialID, restrictions, limits); err != nil {
 			return access.Reply{}, err

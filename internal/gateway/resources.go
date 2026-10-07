@@ -120,7 +120,9 @@ func (s *Server) selectPin(ctx context.Context, x *execution, route *runtime.Rou
 
 func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runtime.Route, operation, surface, mode string, qualified func(*runtime.Provider, string) bool) (*pin, *Error) {
 	snapshot := x.request.release.Snapshot
-	options := s.selectionOptions(x)
+	// Pinned work must select a target on this route rather than delegate.
+	x.fixed = true
+	options := s.selectionOptions(ctx, x)
 	options.Accept = func(p runtime.Provider, t runtime.Target) error {
 		if !qualified(&p, t.ProviderModel) {
 			return errors.New("provider capability unavailable")
@@ -166,7 +168,7 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
 			continue
 		}
-		gate := s.gateSlot(ctx, &provider, slot, max(resourceEstimate, x.estimate), deadline)
+		gate := s.gateAttempt(ctx, x, attempt, &provider, slot, max(resourceEstimate, x.estimate), deadline)
 		switch gate.verdict {
 		case gateAdmitted:
 			return &pin{target: target, provider: provider, attempt: attempt, slot: *slot, model: attempt.UpstreamModel, hold: gate.hold}, nil
@@ -182,6 +184,9 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, endpoint string, body []byte, contentType string) (*http.Response, *attemptFailure) {
 	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1)
 	fact.Mode = x.mode
+	if p.hold != nil {
+		fact.Budgets = p.hold.budgets
+	}
 	finish := func(class string, f *attemptFailure) *attemptFailure {
 		if f == nil {
 			f = &attemptFailure{}
@@ -234,6 +239,9 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		return nil, finish(classCredential, nil)
 	}
 	resp, err := client.Do(req)
+	if p.hold != nil {
+		x.spendCaps(p.hold.budgets, p.attempt)
+	}
 	if err != nil {
 		class := upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
 		return nil, finish(string(class), &attemptFailure{dispatched: true})
@@ -321,6 +329,7 @@ func (s *Server) resourceSettle(ctx context.Context, x *execution, p *pin) {
 	if p != nil {
 		s.settlePinHold(ctx, x, p.hold, nil)
 	}
+	s.settleCaps(ctx, x)
 	settleKey(ctx, x.lease, x.dispatched, nil, s.log)
 }
 
@@ -1217,7 +1226,7 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
+	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
 	if gate.verdict != gateAdmitted {
 		s.stateFail(x, w, gateError(gate), x.family)
 		return
@@ -1361,7 +1370,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
+	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
 	if gate.verdict != gateAdmitted {
 		s.stateFail(x, w, gateError(gate), x.family)
 		return
@@ -1509,7 +1518,7 @@ func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedU
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
+	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
 	if gate.verdict != gateAdmitted {
 		s.stateFail(x, w, gateError(gate), x.family)
 		return

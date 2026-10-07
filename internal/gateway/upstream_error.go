@@ -6,7 +6,7 @@ import "net/http"
 // client, as if the upstream had answered with it.
 func inBandStatus(class string) int {
 	switch class {
-	case classContextWindow, classUpstreamClient:
+	case classContextWindow, classUpstreamClient, classContentFilter:
 		return http.StatusBadRequest
 	case classCredential:
 		return http.StatusUnauthorized

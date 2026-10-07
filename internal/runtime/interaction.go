@@ -76,6 +76,16 @@ func (s *Snapshot) InteractionTemplate(slug, target string) (*interaction.Templa
 
 func (r *Route) CompiledContentPolicy() *contentpolicy.Compiled { return r.compiledContentPolicy }
 
+// Shadowed reports whether any of the route's targets mirrors traffic.
+func (r *Route) Shadowed() bool {
+	for _, target := range r.Targets {
+		if target.Shadow != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // EffectiveOutputLimit reads the dialect-owned bound after omission defaults.
 // It does not assert equivalence between reasoning and generation token scopes.
 func EffectiveOutputLimit(request *openai.Request) *int64 {

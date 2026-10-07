@@ -14,6 +14,10 @@ export type EditableTarget = {
   priority: number;
   weight: number;
   timeoutMs: number;
+  /** Tags route selectors narrow the route's targets by. */
+  tags?: string[];
+  /** The share of requests mirrored to the target, or null when it serves. */
+  shadowSampleRate?: number | null;
   /**
    * Facts the API reported for a target the draft already stores. A stored
    * target stays in the draft after its provider is disabled or its model
@@ -65,6 +69,36 @@ export type EditablePolicyRule = {
 };
 
 export type ContentPolicy = components['schemas']['ContentPolicy'];
+export type RouteBehavior = components['schemas']['RouteBehavior'];
+export type RouteSelector = components['schemas']['RouteSelector'];
+export type FallbackCondition = components['schemas']['FallbackCondition'];
+export type RetryClass =
+  'connect' | 'timeout' | 'rate_limit' | 'upstream_server';
+
+export const fallbackConditions: [FallbackCondition, string][] = [
+  ['exhausted', 'Every attempt failed'],
+  ['context_window', 'Context window exceeded'],
+  ['content_filter', 'Content filter refusal'],
+  ['rate_limit', 'Rate limited'],
+  ['budget', 'Spend cap exhausted']
+];
+
+export const retryClasses: [RetryClass, string][] = [
+  ['connect', 'Connection failures'],
+  ['timeout', 'Timeouts'],
+  ['rate_limit', 'Rate limits'],
+  ['upstream_server', 'Upstream server errors']
+];
+
+export function emptyBehavior(): RouteBehavior {
+  return {
+    fallbacks: [],
+    selectors: [],
+    retry: {},
+    affinity: null,
+    budget: null
+  };
+}
 
 export type RouteEditorValues = {
   slug: string;
@@ -76,7 +110,85 @@ export type RouteEditorValues = {
   projectId?: string;
   /** Every draft the console saves states its fidelity; strict is the default. */
   fidelity: components['schemas']['RouteFidelity'];
+  /** Fallbacks, selectors, retry policy, session affinity and spend cap. */
+  behavior?: RouteBehavior;
+  /** Why the selectors the operator typed cannot be read, if they cannot. */
+  selectorsError?: string | null;
 };
+
+/** Reads selectors typed as JSON, or explains why they cannot be read. */
+export function parseSelectors(text: string): RouteSelector[] | string {
+  if (!text.trim()) return [];
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (Array.isArray(parsed) && parsed.every(isSelector)) return parsed;
+  } catch {
+    // Reported below.
+  }
+  return 'Selectors must be a JSON array of selector objects.';
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === 'string')
+  );
+}
+
+function isSelector(value: unknown): value is RouteSelector {
+  if (
+    !isObject(value) ||
+    typeof value.id !== 'string' ||
+    !isObject(value.when) ||
+    (value.route !== undefined && typeof value.route !== 'string') ||
+    (value.tags !== undefined && !isStringArray(value.tags)) ||
+    Object.keys(value).some(
+      (key) => !['id', 'when', 'route', 'tags'].includes(key)
+    )
+  )
+    return false;
+  return Object.entries(value.when).every(([key, field]) => {
+    switch (key) {
+      case 'operations':
+      case 'modalities':
+      case 'reasoning_effort':
+        return isStringArray(field);
+      case 'min_input_tokens':
+      case 'max_input_tokens':
+      case 'min_output_tokens':
+      case 'max_output_tokens':
+        return field === null || Number.isSafeInteger(field);
+      case 'streaming':
+      case 'tools':
+      case 'structured_output':
+        return field === null || typeof field === 'boolean';
+      case 'classifier':
+        return (
+          field === null ||
+          (isObject(field) &&
+            typeof field.route === 'string' &&
+            isStringArray(field.labels) &&
+            Number.isSafeInteger(field.timeout_ms) &&
+            (field.min_score == null || typeof field.min_score === 'number') &&
+            Object.keys(field).every((name) =>
+              ['route', 'labels', 'timeout_ms', 'min_score'].includes(name)
+            ))
+        );
+      case 'plugin':
+        return (
+          field === null ||
+          (isObject(field) &&
+            typeof field.digest === 'string' &&
+            Object.keys(field).every((name) => name === 'digest'))
+        );
+      default:
+        return false;
+    }
+  });
+}
 
 /** Omitted modes are strict, matching the server's default. */
 export function fidelityLabel(
@@ -336,7 +448,115 @@ export function validateRouteEditor(values: RouteEditorValues): string | null {
   ) {
     return 'Every target needs a priority from 0 to 32767, a weight from 1 to 1000000, and a timeout from 1 ms up to the overall deadline.';
   }
-  return validateContentPolicy(values.contentPolicyRules);
+  return (
+    validateTargetRoles(values.targets) ??
+    validateRouteBehavior(values) ??
+    validateContentPolicy(values.contentPolicyRules)
+  );
+}
+
+const targetTag = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+const routeSlug = /^[a-z0-9][a-z0-9._-]{0,99}$/;
+const attributionLabel = /^[A-Za-z][A-Za-z0-9_.-]{0,31}$/;
+const costLimit = /^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$/;
+
+/** Tags and shadow sampling, matching the server's target rules. */
+export function validateTargetRoles(targets: EditableTarget[]): string | null {
+  for (const target of targets) {
+    const tags = target.tags ?? [];
+    if (
+      tags.length > 8 ||
+      new Set(tags).size !== tags.length ||
+      tags.some((tag) => !targetTag.test(tag))
+    )
+      return 'Use up to 8 distinct tags of lowercase letters, digits, underscores or hyphens.';
+    const rate = target.shadowSampleRate;
+    if (rate != null && !(rate > 0 && rate <= 1))
+      return 'A shadow target mirrors a share of requests greater than 0 and at most 1.';
+  }
+  if (
+    targets.length &&
+    targets.every((target) => target.shadowSampleRate != null)
+  )
+    return 'Declare at least one target that serves callers rather than shadowing them.';
+  return null;
+}
+
+/** The route behavior rules the server enforces, checked before saving. */
+export function validateRouteBehavior(
+  values: RouteEditorValues
+): string | null {
+  if (values.selectorsError) return values.selectorsError;
+  const behavior = values.behavior;
+  if (!behavior) return null;
+  if (behavior.fallbacks.length > 4)
+    return 'Declare at most 4 fallback routes.';
+  for (const fallback of behavior.fallbacks) {
+    if (!routeSlug.test(fallback.route) || fallback.route === values.slug)
+      return 'Every fallback names another route by its slug.';
+    if (!fallback.on.length)
+      return `Fallback “${fallback.route}” needs at least one condition.`;
+  }
+  const serving = new Set(
+    values.targets
+      .filter((target) => target.shadowSampleRate == null)
+      .flatMap((target) => target.tags ?? [])
+  );
+  for (const selector of behavior.selectors) {
+    if (!selector.route && !selector.tags?.length)
+      return `Selector “${selector.id}” needs target tags or a route to delegate to.`;
+    const missing = selector.tags?.find((tag) => !serving.has(tag));
+    if (missing)
+      return `Selector “${selector.id}” names tag “${missing}”, which no serving target carries.`;
+  }
+  for (const [kind, rule] of Object.entries(behavior.retry)) {
+    if (
+      !rule ||
+      rule.max_retries < 0 ||
+      rule.max_retries > 10 ||
+      rule.base_backoff_ms < 0 ||
+      rule.max_backoff_ms < rule.base_backoff_ms ||
+      rule.max_backoff_ms > 60000
+    )
+      return `The ${kind} retry rule needs 0–10 retries and a backoff no longer than 60000 ms.`;
+  }
+  if (
+    behavior.affinity?.source === 'label' &&
+    !attributionLabel.test(behavior.affinity.label ?? '')
+  )
+    return 'Session affinity by label names an attribution label.';
+  const budget = behavior.budget;
+  if (budget) {
+    const limits = [budget.daily_cost_limit, budget.monthly_cost_limit];
+    if (limits.every((limit) => !limit))
+      return 'A route spend cap declares a daily or monthly limit.';
+    if (limits.some((limit) => limit && !costLimit.test(limit)))
+      return 'Spend caps are decimal amounts with up to 12 decimal places.';
+  }
+  return null;
+}
+
+/** The behavior fields a draft write carries. */
+function behaviorFields(behavior: RouteBehavior | undefined) {
+  const value = behavior ?? emptyBehavior();
+  return {
+    fallbacks: value.fallbacks,
+    selectors: value.selectors,
+    retry: value.retry,
+    affinity: value.affinity,
+    budget: value.budget
+  };
+}
+
+/** The tag and shadow fields one target write carries. */
+function roleFields(target: EditableTarget) {
+  return {
+    tags: target.tags ?? [],
+    shadow:
+      target.shadowSampleRate == null
+        ? null
+        : { sample_rate: target.shadowSampleRate }
+  };
 }
 
 export function buildCreateRouteDraftInput(
@@ -351,6 +571,7 @@ export function buildCreateRouteDraftInput(
     max_attempts: values.maxAttempts,
     content_policy: buildContentPolicy(values.contentPolicyRules),
     fidelity: values.fidelity,
+    ...behaviorFields(values.behavior),
     targets: values.targets.map((target) => {
       const model = providerModel(target, modelOptions)!;
       return {
@@ -358,7 +579,8 @@ export function buildCreateRouteDraftInput(
         provider_model: model.upstreamModel,
         priority: target.priority,
         weight: target.weight,
-        timeout_ms: target.timeoutMs
+        timeout_ms: target.timeoutMs,
+        ...roleFields(target)
       };
     })
   };
@@ -374,11 +596,13 @@ export function buildReplaceRouteDraftInput(
     max_attempts: values.maxAttempts,
     content_policy: buildContentPolicy(values.contentPolicyRules),
     fidelity: values.fidelity,
+    ...behaviorFields(values.behavior),
     targets: values.targets.map((target) => ({
       provider_model_id: target.providerModelId,
       priority: target.priority,
       weight: target.weight,
-      timeout_ms: target.timeoutMs
+      timeout_ms: target.timeoutMs,
+      ...roleFields(target)
     }))
   };
 }

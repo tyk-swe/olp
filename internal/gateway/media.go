@@ -150,7 +150,7 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution,
 	x.semanticHeaders = semanticHeaders(r.Header)
 	query, queryErr := url.ParseQuery(r.URL.RawQuery)
 	x.semanticQuery, x.semanticQueryInvalid = query, queryErr != nil
-	if !s.admit(r.Context()) {
+	if !s.admitLater(r.Context()) {
 		s.mediaFail(x, w, overloaded)
 		return x, access.Authority{}, true
 	}
@@ -160,7 +160,13 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution,
 		s.mediaFail(x, w, e)
 		return x, access.Authority{}, true
 	}
-	if x.preferences, e = routingPreferences(r); e != nil {
+	if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
+		s.release(r.Context())
+		s.mediaFail(x, w, e)
+		return x, access.Authority{}, true
+	}
+	// Media waits before staging uploads, so the queue timeout alone bounds it.
+	if e = s.awaitAdmission(r.Context(), x); e != nil {
 		s.release(r.Context())
 		s.mediaFail(x, w, e)
 		return x, access.Authority{}, true
@@ -194,7 +200,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execu
 		x.estimate = 1500
 	}
 	defer s.cleanupUploads(request)
-	if e := s.prepareMedia(x, authority); e != nil {
+	if e := s.prepareMedia(ctx, x, authority); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}
@@ -202,15 +208,18 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execu
 		s.mediaFail(x, w, e)
 		return
 	}
-	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
-	ctx, cancel := context.WithTimeout(ctx, overall)
+	overall := time.Duration(x.primary.OverallTimeout) * time.Millisecond
+	ctx, cancel := x.routeContext(ctx)
 	defer cancel()
 	var e *Error
 	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, overall); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}
-	defer func() { settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log) }()
+	defer func() {
+		s.settleCaps(ctx, x)
+		settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
+	}()
 
 	out := s.executeMedia(ctx, w, x)
 	if out.err != nil {
@@ -243,18 +252,29 @@ func (s *Server) cleanupUploads(request *media.Request) {
 
 // prepareMedia resolves the route, the caller's route permission, and the
 // eligible attempt set for one media operation.
-func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
+func (s *Server) prepareMedia(ctx context.Context, x *execution, authority access.Authority) *Error {
 	request := x.media
 	x.mode = request.Mode()
-	snapshot := x.request.release.Snapshot
-	route, ok := snapshot.Routes[request.Route]
+	route, ok := x.snapshot().Routes[request.Route]
 	if !ok {
 		return modelNotFound(request.Route)
 	}
 	x.route = &route
-	if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
-		return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
+	authorize := s.keyAuthorizer(authority)
+	if e := authorize(&route); e != nil {
+		return e
 	}
+	// A video job is reserved against one provider target before creation,
+	// so it never leaves the route it names.
+	x.bind(mediaPlanner, authorize, request.Op == media.OpVideoCreate)
+	return s.planNamed(ctx, x)
+}
+
+// planMedia plans x.route for one media operation.
+func (s *Server) planMedia(ctx context.Context, x *execution) *Error {
+	request := x.media
+	snapshot := x.snapshot()
+	route := *x.route
 	if route.Fidelity.Strict() {
 		if e := strictMediaContext(x); e != nil {
 			return e
@@ -268,7 +288,7 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 	// encoded call for the metadata check so require_parameters cannot overlook
 	// a default or an explicit native null.
 	candidates := make(map[string][]string, len(route.Targets))
-	options := s.selectionOptions(x)
+	options := s.selectionOptions(ctx, x)
 	options.Parameters = runtime.Listed(mediaParameterNames(request))
 	options.Accept = func(p runtime.Provider, t runtime.Target) error {
 		if !connectorsSupports(p, request.Op, x.mode) {
@@ -327,10 +347,10 @@ func (s *Server) prepareMedia(x *execution, authority access.Authority) *Error {
 		}
 		return requestError(err)
 	}
-	x.decisions = plan.Decisions
-	x.policy = plan.Policy
-	x.attempts = plan.Attempts
-	x.budget = plan.Budget
+	if plan.Delegate != "" {
+		return s.delegate(ctx, x, plan)
+	}
+	x.adoptPlan(plan)
 	if len(plan.Attempts) == 0 {
 		if semantic != nil {
 			return requestError(semantic)
@@ -490,8 +510,8 @@ type mediaOutcome struct {
 func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *execution) *mediaOutcome {
 	attempted := runAttempts(ctx, s, x, attemptAdapter[*media.Result]{
 		estimate: func(runtime.Attempt, *runtime.Provider) int64 { return x.estimate },
-		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *media.Result, *attemptFailure) {
-			return s.mediaAttempt(ctx, w, x, attempt, provider, slot, ordinal)
+		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, *media.Result, *attemptFailure) {
+			return s.mediaAttempt(ctx, w, x, attempt, provider, slot, fact)
 		},
 	})
 	out := &mediaOutcome{
@@ -561,8 +581,7 @@ func mediaParameterNames(r *media.Request) []string {
 }
 
 // mediaAttempt performs one upstream media call with one credential.
-func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *media.Result, *attemptFailure) {
-	fact := s.newFact(x, a, slot, ordinal)
+func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, *media.Result, *attemptFailure) {
 	attemptCtx, atr := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finishTrace := func() {
 		if atr == nil {

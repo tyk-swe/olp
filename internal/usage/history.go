@@ -43,7 +43,9 @@ type Cursor struct {
 type RequestSummary struct {
 	ID                      string                   `json:"id"`
 	RuntimeGenerationID     string                   `json:"runtime_generation_id"`
-	APIKeyID                string                   `json:"api_key_id"`
+	APIKeyID                *string                  `json:"api_key_id"`
+	Origin                  string                   `json:"origin"`
+	ParentRequestID         *string                  `json:"parent_request_id"`
 	Route                   string                   `json:"route"`
 	Operation               string                   `json:"operation"`
 	Surface                 string                   `json:"surface"`
@@ -115,7 +117,8 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
         r.status_code::int, r.error_class, r.total_latency_ms::bigint, r.first_byte_ms::bigint,
         r.attempt_count::int, u.input_tokens, u.output_tokens, u.cached_input_tokens,
         u.cache_write_input_tokens, u.cache_write_5m_input_tokens, u.cache_write_1h_input_tokens,
-        u.estimated_cost, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions
+        u.estimated_cost, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions,
+        r.origin, r.parent_request_id::text
     FROM olp.requests r LEFT JOIN LATERAL (
       SELECT SUM(f.input_tokens)::bigint AS input_tokens,
              SUM(f.output_tokens)::bigint AS output_tokens,
@@ -136,7 +139,8 @@ func (s *RequestSummary) scanTargets() []any {
 		&s.StartedAt, &s.CompletedAt, &s.StatusCode, &s.ErrorClass, &s.TotalLatencyMS,
 		&s.FirstByteMS, &s.AttemptCount, &s.InputTokens, &s.OutputTokens, &s.CachedInputTokens,
 		&s.CacheWriteInputTokens, &s.CacheWrite5MInputTokens, &s.CacheWrite1HInputTokens,
-		&s.EstimatedCost, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions}
+		&s.EstimatedCost, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions,
+		&s.Origin, &s.ParentRequestID}
 }
 
 // normalize pins the timestamps to UTC so the JSON always renders as Z.

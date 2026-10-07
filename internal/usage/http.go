@@ -43,6 +43,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/usage/breakdown", s.usageBreakdown)
 	s.Access.Route(mux, "GET /api/v1/usage/time-series", s.usageTimeSeries)
 	s.Access.Route(mux, "GET /api/v1/usage/completeness", s.usageCompleteness)
+	s.Access.Route(mux, "GET /api/v1/usage/selector-savings", s.selectorSavings)
+	s.Access.Route(mux, "GET /api/v1/usage/shadow-experiments", s.shadowExperiments)
 	s.Access.Route(mux, "GET /api/v1/requests", s.listRequests)
 	s.Access.Route(mux, "GET /api/v1/requests/{request_id}", s.getRequest)
 	s.Access.Route(mux, "GET /api/v1/pricing/revisions", s.listPricingRevisions)
@@ -185,9 +187,12 @@ func (s *Server) getRequest(r *http.Request, p access.Principal) (access.Reply, 
 	if err != nil {
 		return access.Reply{}, err
 	}
+	// A keyless request is the installation's own and belongs to no project.
 	var keyProject *string
-	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", detail.APIKeyID).Scan(&keyProject); err != nil {
-		return access.Reply{}, err
+	if detail.APIKeyID != nil {
+		if err = s.Access.Pool.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1", *detail.APIKeyID).Scan(&keyProject); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	if p.Project(keyProject, access.View) != nil {
 		return access.Reply{}, access.Fail(404, "not_found", "The request does not exist.")

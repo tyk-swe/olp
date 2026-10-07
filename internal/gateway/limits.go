@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -215,17 +216,19 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Autho
 		}
 		group = lease
 	}
+	policy := &authority.Policy
+	if policy.RequestsPerMinute == nil && policy.TokensPerMinute == nil && policy.MaxConcurrency == nil &&
+		policy.DailyCostLimit == nil && policy.MonthlyCostLimit == nil {
+		// Nothing to enforce, so nothing to store: a key without hard limits
+		// reaches Valkey only for the group it belongs to.
+		return group, nil
+	}
 	request := keyRequest(authority, estimate, ttl)
 	// The allowance is stated for a response that will report it. A surface
 	// whose SDKs read no rate-limit headers, Gemini, Bedrock and the native
 	// operations, would be answered an allowance nothing writes, and the reply
 	// costs the request about a dozen allocations to build.
 	request.ReportRate = rateHeadersOf(surface) != nil
-	if !request.HasHardLimits() {
-		// Nothing to enforce, so nothing to store: a key without hard limits
-		// reaches Valkey only for the group it belongs to.
-		return group, nil
-	}
 	if !a.ready() {
 		return nil, limitsUnavailable()
 	}
@@ -334,7 +337,7 @@ func (t *targetReservation) settle(ctx context.Context, dispatched bool, actual 
 
 // connectionRequest describes the quota shared by every attempt that flows
 // through one provider connection.
-func connectionRequest(provider *runtime.Provider, estimate int64, ttl time.Duration) limits.Request {
+func connectionRequest(provider *runtime.Provider, estimate int64, ttl time.Duration, priority string) limits.Request {
 	request := limits.Request{
 		CostOwnerID:     provider.ID,
 		RequestedTokens: estimate,
@@ -344,6 +347,7 @@ func connectionRequest(provider *runtime.Provider, estimate int64, ttl time.Dura
 		request.RequestsPerMinute = provider.Limits.RequestsPerMinute
 		request.TokensPerMinute = provider.Limits.TokensPerMinute
 		request.MaxConcurrency = provider.Limits.MaxConcurrency
+		request.Share = share(provider.Limits.Supply, priority)
 	}
 	// Naming the quota allocates, so a provider that has none is not made to.
 	if request.HasHardLimits() {
@@ -353,7 +357,7 @@ func connectionRequest(provider *runtime.Provider, estimate int64, ttl time.Dura
 }
 
 // slotRequest describes the quota of one credential slot.
-func slotRequest(slot *runtime.Slot, estimate int64, ttl time.Duration) limits.Request {
+func slotRequest(slot *runtime.Slot, estimate int64, ttl time.Duration, priority string) limits.Request {
 	request := limits.Request{
 		CostOwnerID:       slot.ID,
 		RequestsPerMinute: slot.RequestsPerMinute,
@@ -361,6 +365,7 @@ func slotRequest(slot *runtime.Slot, estimate int64, ttl time.Duration) limits.R
 		MaxConcurrency:    slot.MaxConcurrency,
 		RequestedTokens:   estimate,
 		LeaseTTL:          ttl,
+		Share:             share(slot.Supply, priority),
 	}
 	if request.HasHardLimits() {
 		request.LookupID = limits.SlotLookup(slot.ID)
@@ -373,9 +378,9 @@ func slotRequest(slot *runtime.Slot, estimate int64, ttl time.Duration) limits.R
 // settle, or a rejection to record as a failed attempt, or skip when a quota
 // is configured but cannot be consulted: an unmeterable target is passed over
 // so a sibling can serve, never used unmetered.
-func (a *Admission) reserveTarget(ctx context.Context, provider *runtime.Provider, slot *runtime.Slot, estimate int64, ttl time.Duration) (reservation *targetReservation, rejection *attemptFailure, skip bool) {
-	connection := connectionRequest(provider, estimate, ttl)
-	credential := slotRequest(slot, estimate, ttl)
+func (a *Admission) reserveTarget(ctx context.Context, provider *runtime.Provider, slot *runtime.Slot, estimate int64, ttl time.Duration, priority string) (reservation *targetReservation, rejection *attemptFailure, skip bool) {
+	connection := connectionRequest(provider, estimate, ttl, priority)
+	credential := slotRequest(slot, estimate, ttl, priority)
 	if !connection.HasHardLimits() && !credential.HasHardLimits() {
 		return nil, nil, false
 	}
@@ -539,4 +544,15 @@ func totalTokens(usage *openai.Usage) *int64 {
 	total := addBounded(min(usage.InputTokens, maxEstimate), min(usage.OutputTokens, maxEstimate))
 	total = max(total, min(usage.TotalTokens, maxEstimate))
 	return &total
+}
+
+// share is the part of a divided quota the request's admission class may
+// hold, or the zero Share for an undivided one. A request without a class is
+// a normal one.
+func share(supply runtime.Supply, priority string) limits.Share {
+	if !supply.Shared() {
+		return limits.Share{}
+	}
+	priority = cmp.Or(priority, runtime.PriorityNormal)
+	return limits.Share{Class: priority, Percent: supply.PriorityShares.Of(priority), SaturationPercent: *supply.SaturationPercent}
 }

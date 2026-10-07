@@ -2,8 +2,14 @@ package gateway
 
 import (
 	"context"
+	"errors"
+	"slices"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -39,16 +45,54 @@ func (s *Server) costReservation(x *execution, authority access.Authority) costR
 	if !costBudgeted(authority) {
 		return costReservation{}
 	}
-	var bound usage.Cost
-	s.walkDispatchable(x, func(attempt runtime.Attempt) {
-		// An attempt is visited once for each of its credential slots in turn,
-		// and each visit is a dispatch that may be billed on its own.
-		bound = bound.Add(x.attemptCostBound(attempt))
-	})
+	bound := s.routeCostBound(x)
 	if bound.IsZero() {
 		return costReservation{}
 	}
 	return costReservation{amount: bound.String(), requestID: x.request.accountingID()}
+}
+
+func (s *Server) routeCostBound(x *execution) usage.Cost {
+	var bound usage.Cost
+	attempts := x.attempts
+	if retryDispatches(x.route) > 1 {
+		// Retries are optional: an early cheap target can fail over without
+		// using them, leaving the budget for a more expensive target's retries.
+		// Price the dearest possible dispatches first to cover either path.
+		attempts = slices.Clone(attempts)
+		slices.SortStableFunc(attempts, func(a, b runtime.Attempt) int {
+			return x.attemptCostBound(b).Cmp(x.attemptCostBound(a))
+		})
+	}
+	s.walkDispatchable(x, attempts, func(attempt runtime.Attempt) {
+		// Each visit is a dispatch that may be billed on its own.
+		bound = bound.Add(x.attemptCostBound(attempt))
+	})
+	return bound
+}
+
+// reserveFallbackCost covers the remaining route's work alongside the bound
+// already dispatched, even when an earlier attempt could not report its usage.
+func (s *Server) reserveFallbackCost(ctx context.Context, x *execution) *Error {
+	if x.lease == nil || !costBudgeted(x.authority) {
+		return nil
+	}
+	bound := x.spentCost.Add(s.routeCostBound(x))
+	if bound.IsZero() {
+		return nil
+	}
+	deadline, _ := ctx.Deadline()
+	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
+	defer cancel()
+	err := x.lease.GrowCost(decision, bound.String(), x.request.accountingID(), max(time.Until(deadline), time.Second))
+	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
+		s.Admission.recordRejection(exceeded.Dimension)
+		return rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
+	}
+	if err != nil {
+		return limitsUnavailable()
+	}
+	return nil
 }
 
 // attemptCostBound is the most one attempt could cost, and nothing when it has no
@@ -59,6 +103,27 @@ func (s *Server) costReservation(x *execution, authority access.Authority) costR
 func (x *execution) attemptCostBound(attempt runtime.Attempt) usage.Cost {
 	if attempt.Price == nil {
 		return usage.Cost{}
+	}
+	if x.media != nil {
+		if x.media.Op != media.OpVideoCreate {
+			return usage.Cost{}
+		}
+		seconds := "4"
+		if x.media.Seconds != nil {
+			seconds = *x.media.Seconds
+		}
+		bound, _ := attempt.Price.Price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds})
+		return bound
+	}
+	if x.parsed == nil && x.unary == nil {
+		// Pinned native requests use the resource input estimate and the
+		// ordinary default reply allowance when no canonical request exists.
+		input, reply := max(resourceEstimate, x.estimate), int64(0)
+		if x.operationName() == "generation" || x.operationName() == "realtime" {
+			reply = estimate.DefaultOutputTokens
+		}
+		bound, _ := attempt.Price.CostBound(input, reply, reply > 0)
+		return bound
 	}
 	provider, ok := x.snapshot().Providers[attempt.ProviderID]
 	if !ok {
@@ -84,12 +149,16 @@ func (x *execution) attemptCostBound(attempt runtime.Attempt) usage.Cost {
 // as it has none in the accounting tables until its evidence arrives. It is a
 // pure function of the attempts, so it can be read at any point after they have
 // been recorded.
-func (x *execution) settledCost() usage.Cost {
+func (x *execution) settledCost() usage.Cost { return x.costOf("") }
+
+// costOf is settledCost restricted to the attempts whose spend counts against
+// a capped owner, or over every attempt when owner is empty.
+func (x *execution) costOf(owner string) usage.Cost {
 	var total usage.Cost
 	operation := x.operationName()
 	for index := range x.facts {
 		fact := &x.facts[index]
-		if !fact.UsageObserved || fact.Price == nil {
+		if !fact.UsageObserved || fact.Price == nil || owner != "" && !slices.Contains(fact.Budgets, owner) {
 			continue
 		}
 		if cost, ok := fact.Price.Cost(attemptUsage(fact, operation)); ok {
@@ -139,6 +208,7 @@ func (x *execution) responseCost() (usage.Cost, bool) {
 // never was gives everything back. Either way this runs before the usage event
 // is consumed or after, and the reservation script makes the order immaterial.
 func (s *Server) settleAdmission(ctx context.Context, x *execution) {
+	s.settleCaps(ctx, x)
 	if x.lease == nil {
 		// A request that reserved nothing has nothing to settle, and is not made to
 		// total the tokens it would have settled.

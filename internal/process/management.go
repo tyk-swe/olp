@@ -68,12 +68,21 @@ func (m Management) Register(mux *http.ServeMux) {
 	routeServer.Inputs = m.Runtime.RoutingInputs
 	routeServer.UnconfinedPlugins = m.Unconfined != nil
 	routeServer.Catalog = m.Catalog
+	if m.Limiter != nil {
+		routeServer.Supply = gateway.NewAdmission(m.Limiter, nil, m.Log)
+		routeServer.Fleet = m.Limiter
+	}
+	catalogue.Activated = routeServer.Activated
 	routeServer.Register(mux)
 	(&gateway.Playground{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&media.Management{Access: m.Access, Pool: m.Access.Pool, Jobs: m.Media, Log: m.Log}).Register(mux)
 	(&resources.Management{Access: m.Access, Pool: m.Access.Pool}).Register(mux)
 	(&management.Overview{Access: m.Access}).Register(mux)
-	(&observability.Management{Access: m.Access, Cache: m.Health, Pool: m.Access.Pool}).Register(mux)
+	health := &observability.Management{Access: m.Access, Cache: m.Health, Pool: m.Access.Pool}
+	if m.Limiter != nil {
+		health.Fleet = m.Limiter
+	}
+	health.Register(mux)
 	(&plugins.Management{Access: m.Access, Runtime: m.PluginRuntime, Host: m.PluginHost, Unconfined: m.Unconfined, Index: m.PluginIndex}).Register(mux)
 	// Usage, pricing, request history and recovery reporting are part
 	// of the management surface; their patterns are more specific than

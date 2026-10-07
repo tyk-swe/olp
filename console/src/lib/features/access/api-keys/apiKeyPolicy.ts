@@ -22,7 +22,18 @@ export type ApiKeyFormState = {
   allowProviderState: boolean;
   responseMetadata: boolean;
   allowedAttributionKeys: string[];
+  /** Admission classes; empty means normal, and a ceiling of the default. */
+  priority: string;
+  maxPriority: string;
 };
+
+export const admissionPriorities = [
+  'critical',
+  'high',
+  'normal',
+  'low'
+] as const;
+type AdmissionPriority = (typeof admissionPriorities)[number];
 
 export function createApiKeyFormState(
   editing: ApiKey | null = null
@@ -43,7 +54,11 @@ export function createApiKeyFormState(
       : '',
     allowProviderState: editing?.allow_provider_state ?? false,
     responseMetadata: editing?.response_metadata ?? false,
-    allowedAttributionKeys: editing ? [...editing.allowed_attribution_keys] : []
+    allowedAttributionKeys: editing
+      ? [...editing.allowed_attribution_keys]
+      : [],
+    priority: editing?.priority ?? '',
+    maxPriority: editing?.max_priority ?? ''
   };
 }
 
@@ -90,7 +105,9 @@ export function buildApiKeyPolicyInput(
       : null,
     allow_provider_state: state.allowProviderState,
     response_metadata: state.responseMetadata,
-    allowed_attribution_keys: state.allowedAttributionKeys
+    allowed_attribution_keys: state.allowedAttributionKeys,
+    priority: (state.priority || null) as AdmissionPriority | null,
+    max_priority: (state.maxPriority || null) as AdmissionPriority | null
   };
   if (expiryUnchanged(state, editing)) delete input.expires_at;
   return input;

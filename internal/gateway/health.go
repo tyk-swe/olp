@@ -23,6 +23,8 @@ type healthTracker struct {
 	mu        sync.Mutex
 	providers map[string]*providerHealth
 	now       func() time.Time
+	// changes carries circuit transitions to the fleet; nil keeps them local.
+	changes chan circuitChange
 }
 
 type providerHealth struct {
@@ -140,7 +142,10 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 	case "success":
 		b.successes++
 		p.failures = 0
-		p.openUntil = time.Time{}
+		if !p.openUntil.IsZero() {
+			p.openUntil = time.Time{}
+			h.publish(providerID, p.openUntil)
+		}
 		return
 	case "rate_limit":
 		b.rateLimits++
@@ -169,6 +174,7 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 	if wasProbe {
 		p.openUntil = now.Add(circuitOpenFor)
 		p.failures = 0
+		h.publish(providerID, p.openUntil)
 		return
 	}
 	if p.failures == 0 || now.Sub(p.firstFailure) > circuitWindow {
@@ -179,6 +185,19 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 	if p.failures >= circuitFailures {
 		p.openUntil = now.Add(circuitOpenFor)
 		p.failures = 0
+		h.publish(providerID, p.openUntil)
+	}
+}
+
+// publish hands a circuit transition to the fleet without waiting: a full
+// queue drops it, and the circuit still holds on this gateway.
+func (h *healthTracker) publish(providerID string, until time.Time) {
+	if h.changes == nil {
+		return
+	}
+	select {
+	case h.changes <- circuitChange{provider: providerID, until: until}:
+	default:
 	}
 }
 

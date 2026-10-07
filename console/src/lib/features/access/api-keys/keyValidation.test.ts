@@ -79,4 +79,21 @@ describe('API key validation', () => {
       validateApiKey({ name: 'production SDK', expiresAt: '', now })
     ).toEqual({});
   });
+
+  it('refuses a default priority above the highest requestable one', () => {
+    expect(
+      validateApiKey({ name: 'batch', priority: 'high', maxPriority: 'normal' })
+        .priority
+    ).toMatch(/cannot exceed/);
+    expect(
+      validateApiKey({ name: 'batch', maxPriority: 'low' }).priority
+    ).toMatch(/cannot exceed/);
+    expect(
+      validateApiKey({
+        name: 'batch',
+        priority: 'low',
+        maxPriority: 'critical'
+      })
+    ).toEqual({});
+  });
 });

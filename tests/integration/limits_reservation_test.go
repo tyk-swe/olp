@@ -274,6 +274,33 @@ func TestLimitsCostReservationsCountAgainstBothWindows(t *testing.T) {
 	limReserve(t, f.limiter, onlyDaily)
 }
 
+func TestLimitsCostReservationIncreasesOnlyWhenTheNewTotalFits(t *testing.T) {
+	f := limCostSeed(t, "grow-cost", "0")
+	request := f.request("0.2")
+	lease := limReserve(t, f.limiter, request)
+	limReserve(t, f.limiter, f.request("0.3"))
+
+	request.CostEstimate, request.RetainCostReservation = "0.6", true
+	limReserve(t, f.limiter, request)
+	f.wantReserved(t, "0.9")
+	// Replays and smaller estimates retain the larger bound without adding it.
+	limReserve(t, f.limiter, request)
+	request.CostEstimate = "0.4"
+	limReserve(t, f.limiter, request)
+	f.wantReserved(t, "0.9")
+
+	request.CostEstimate = "0.8"
+	_, err := f.limiter.Reserve(t.Context(), request)
+	limExceeded(t, err, limits.DimensionDailyCost)
+	f.wantReserved(t, "0.9")
+	// The original handle settles the grown reservation under the same identity.
+	lease.SetActualCost("0.1")
+	if err := lease.SettleCost(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	f.wantReserved(t, "0.4")
+}
+
 func TestLimitsCostReservationsAreGivenBackAndSettled(t *testing.T) {
 	f := limCostSeed(t, "settle-cost", "0")
 	pending, expiry := f.keys()

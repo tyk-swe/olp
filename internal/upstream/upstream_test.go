@@ -99,6 +99,37 @@ func TestContextRejectionMatchesTypedCodesExactly(t *testing.T) {
 	}
 }
 
+func TestContentFilterRefusalsMatchTypedCodesExactly(t *testing.T) {
+	var classifier Classifier
+	for code, want := range map[string]bool{
+		"content_filter":               true,
+		"Content-Policy-Violation":     true,
+		"content_moderation":           true,
+		"ResponsibleAIPolicyViolation": true,
+		"content_filtered":             true,
+		"content":                      false,
+		"filter":                       false,
+		"":                             false,
+	} {
+		got := classifier.Classify(Evidence{Status: 400, Error: &openai.UpstreamError{Code: code}}).Class == ContentFilter
+		if got != want {
+			t.Errorf("code %q: content filter %v, want %v", code, got, want)
+		}
+	}
+	if classifier.Classify(Evidence{Reached: true, Error: &openai.UpstreamError{Type: "content_filter"}}).Class != ContentFilter {
+		t.Error("an in-band typed refusal must classify")
+	}
+	if classifier.Classify(Evidence{Status: 400, Error: &openai.UpstreamError{Message: "content_filter"}}).Class != ClientError {
+		t.Error("message prose must never classify")
+	}
+	if classifier.Classify(Evidence{Status: 429, Error: &openai.UpstreamError{Code: "content_filter"}}).Class != RateLimit {
+		t.Error("the status decides before the error body")
+	}
+	if (Classifier{AtMostOnce: true}).Classify(Evidence{Status: 400, Error: &openai.UpstreamError{Code: "content_filter"}}).Class != ContentFilter {
+		t.Error("a stated refusal performed no work, so at-most-once calls keep its class")
+	}
+}
+
 func TestClassifyInBandErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

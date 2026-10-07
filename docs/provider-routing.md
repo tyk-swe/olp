@@ -204,6 +204,47 @@ the distributed limiter is unavailable. New requests use current published
 connection and slot quotas, including when a gateway retains an older runtime
 release.
 
+A quota may also divide itself among the admission priorities a request
+carries (see [priority admission](gateway.md#priority-admission)). Declare
+`priority_shares` with a percent for each of `critical`, `high`, `normal` and
+`low`, summing to 100, together with a `saturation_percent` from 1 to 100:
+
+```json
+{"max_concurrency": 40, "priority_shares": {"critical": 50, "high": 25, "normal": 20, "low": 5}, "saturation_percent": 60}
+```
+
+Until the quota's use reaches the saturation percent, any class may use idle
+capacity. Beyond it, each class holds at most its share of each window, so
+critical work keeps headroom that background traffic cannot take. The Valkey
+scripts enforce the shares atomically with the request, token and concurrency
+windows, so they hold across every gateway sharing the limiter. A refused
+attempt is a quota rejection that fails over like any other.
+
+Connections and slots also take supply-side spend caps, `daily_cost_limit` and
+`monthly_cost_limit`, in the installation currency. They use the same
+exact-decimal accounting, PostgreSQL authority and Valkey snapshots as key
+budgets ([spend reconciliation](operations.md#spend-budget-reconciliation)) and
+count spend from the moment they are declared. An exhausted cap removes the
+connection or slot from selection with the plan reason
+`connection_budget_exhausted` or `slot_budget_exhausted`; before reconciliation
+has installed a new cap's windows, about a minute after publication, or while
+Valkey cannot read them, the target is skipped as `connection_budget_unavailable`
+or `slot_budget_unavailable`, as unreadable provider quotas are. Each attempt
+reserves its cost bound against every cap it is subject to and settles the
+actual cost once it is accounted.
+
+Set `configuration.options.health_probe` to `{"interval_seconds": 300}` (60 to
+86,400) to have the `health_probes` worker task send each of the connection's
+routed models a bounded synthetic request, no more than once per interval across
+the fleet: the certification probe's minimal chat, embeddings or rerank body,
+with a 30-second deadline, through the route and its quotas. A probe whose
+upstream fails with a server, transport, timeout or protocol error marks the
+connection unhealthy for the fleet until a later probe or request succeeds.
+Probes cost money, so they are off unless a connection enables them; their usage
+is accounted to the installation under the `system` actor with origin `probe`,
+and appears in usage reports. `GET /api/v1/provider-health` reports each
+connection's latest probe and shared circuit.
+
 Activation snapshots options, model contracts, and selected secret versions. An
 attempt pins its exact slot, credential version, and pricing revision.
 Authentication failures cool down that version; HTTP 429 honors Retry-After for
@@ -248,6 +289,187 @@ Revisions can be compared and restored as new drafts. The simulation endpoints
 (`POST /route-drafts/{id}/simulate` and `POST /routing/simulate`) explain the
 deterministic attempt order for a given seed or key without contacting any
 provider.
+
+A route revision may also declare fallbacks, selectors, a retry policy, session
+affinity and a spend cap, and its targets may carry `tags` and a `shadow`
+sample rate. The draft and revision endpoints, revision diffs, restore, and
+[configuration promotion](configuration.md#configuration-promotion-artifacts)
+carry them all:
+
+```json
+{
+  "slug": "assistant",
+  "targets": [
+    {"provider_model_id": "…", "tags": ["small"]},
+    {"provider_model_id": "…", "tags": ["large"]},
+    {"provider_model_id": "…", "shadow": {"sample_rate": 0.05}}
+  ],
+  "fallbacks": [
+    {"route": "assistant-long-context", "on": ["context_window"]},
+    {"route": "assistant-backup", "on": ["exhausted", "content_filter"]}
+  ],
+  "selectors": [
+    {"id": "short", "when": {"max_input_tokens": 2000, "tools": false}, "tags": ["small"]},
+    {"id": "reasoning", "when": {"reasoning_effort": ["high"]}, "route": "assistant-reasoning"}
+  ],
+  "retry": {"upstream_server": {"max_retries": 2, "base_backoff_ms": 200, "max_backoff_ms": 2000, "respect_retry_after": true}},
+  "affinity": {"source": "cache_key"},
+  "budget": {"daily_cost_limit": "250"}
+}
+```
+
+### Fallbacks
+
+`fallbacks` lists up to four other routes, in order, each with the conditions
+that start it:
+
+| Condition | The route's attempts ended… |
+| --- | --- |
+| `exhausted` | without success, every attempt having failed with a retryable class |
+| `context_window` | on a context-window refusal, or planning found no target whose window holds the request |
+| `content_filter` | on an upstream content-filter refusal |
+| `rate_limit` | on an upstream rate limit or a local quota |
+| `budget` | on a supply-side spend cap, at planning or before dispatch |
+
+A content-filter refusal is a typed upstream error, such as `content_filter` or
+`content_policy_violation`. It is terminal within the route, never counts
+against provider health, and reaches the caller as a `400` with code
+`content_filter` unless a fallback serves the request.
+
+A fallback route runs with its own targets, policy, content policy and fidelity,
+and the caller still sees the route it named in the response's `model`. The key
+must be allowed to use the fallback route; otherwise the plan records
+`fallback_route_forbidden` and moves to the next fallback. A route that is no
+longer active is skipped as `fallback_route_unavailable`, and one the request
+already visited as `fallback_route_repeated`. The named route's overall deadline
+and attempt budget bound the whole request, fallbacks included, and every
+attempt records the route leg it ran on. A request never falls back once a
+stream has committed, after an ambiguous resource creation, or when it is bound
+to its route by a pinned resource, a continuation or provider state.
+
+Publication refuses a route graph, counting fallbacks and selector delegation,
+that has a cycle (`route_graph_cycle`), crosses a project boundary
+(`route_graph_project_mismatch`), is more than three routes deep
+(`route_graph_too_deep`), or lets a strict route serve through a transformed one
+(`route_graph_fidelity_mismatch`). Validation and activation refuse a reference
+to a route that is not active (`route_reference_unknown`).
+
+### Request selectors
+
+`selectors` are up to 16 rules, evaluated in order; the first whose predicate
+matches wins. Its action either narrows the route to the targets carrying any
+of its `tags`, or delegates the request to another `route` the key may use.
+Plan decisions record the selector, and targets it excluded carry the reason
+`selector_excluded`. A predicate is the conjunction of what it declares, over
+features the gateway computes during admission:
+
+| Predicate | Matches |
+| --- | --- |
+| `operations` | the planned operation |
+| `min_input_tokens`, `max_input_tokens` | the estimated input tokens |
+| `min_output_tokens`, `max_output_tokens` | the requested output tokens |
+| `streaming`, `tools`, `structured_output` | a streaming request, one that offers tools, one that asks for a JSON schema or object |
+| `modalities` | any of `text`, `image`, `audio`, `video` and `file` among the input parts |
+| `reasoning_effort` | the request's reasoning effort, such as `high` |
+| `classifier` | the label another route returns for the request |
+| `plugin` | the verdict of an approved confined plugin |
+
+Attribution labels never take part, so labels stay free of routing effect.
+
+A `classifier` predicate, such as
+`{"route": "triage", "labels": ["complex"], "min_score": 0.7, "timeout_ms": 500}`,
+sends the text of the request's last user turn, up to 32 KiB, to another OLP
+route. A route serving `classification`, such as a TEI classifier, answers with
+its top label and score; a generation route answers with its reply text as the
+label. The call is an accounted request of the caller's key, with origin
+`classifier` and the caller's request as its parent, under its own deadline. A
+classifier that fails, times out or that the key may not use falls through to
+the next selector, recorded as `classifier_failed` or `classifier_forbidden`.
+
+A `plugin` predicate names a confined plugin by its digest,
+`{"digest": "<sha-256>"}`, and asks it to judge the same features through the
+`route_predicate` method ([route predicates](plugin-authoring.md#route-predicates)).
+The plugin must be approved when the route is validated
+(`route_plugin_unavailable` otherwise); a call that fails or exceeds 250
+milliseconds falls through as `plugin_failed`. A plugin predicate can only
+narrow the candidate set.
+
+`GET /api/v1/usage/selector-savings` compares each selector's attempts with
+what their own usage would have cost on the most expensive eligible target the
+selector avoided, priced when each attempt was accounted. Attempts without both
+prices are counted but not compared, so the report never invents usage.
+
+### Retry policy
+
+`retry` declares, per retryable class (`connect`, `timeout`, `rate_limit` and
+`upstream_server`), how many times an attempt repeats on the same slot before
+the route fails over: `max_retries` up to 10, a `base_backoff_ms` and
+`max_backoff_ms` up to 60 seconds with full jitter, and whether to honor the
+upstream's `Retry-After` instead. Retries consume the attempt budget and the
+overall deadline, are recorded as attempts with their retry number, never apply
+after commitment or to an ambiguous creation, and stop once the provider's
+circuit opens. The slot cools down only after its retries are exhausted.
+
+### Session affinity
+
+`affinity` keeps requests of one session on the same target and slot while it
+stays eligible, which raises provider prompt-cache hit rates without any gateway
+state. The session key is the value of an attribution label,
+`{"source": "label", "label": "session"}`, or the dialect's own cache key,
+`{"source": "cache_key"}`, which is OpenAI's `prompt_cache_key`. OLP hashes it
+into the rendezvous seed in place of the key's identity; a request without one
+keeps the key's seed.
+
+### Shadow targets
+
+A target declared `{"shadow": {"sample_rate": 0.05}}` never serves callers. It
+is planned with the request under every hard constraint the request is subject
+to, including region, data collection, zero data retention and the route's
+content policy, and a sample of eligible requests, chosen deterministically from
+the request's identifier, is mirrored to it after the caller's response
+completes. Shadow attempts run in their own admission pool
+(`OLP_HTTP_MAX_IN_FLIGHT_SHADOW_REQUESTS`) under the route's deadline and are
+dropped rather than queued when it is full, so they never change what the
+caller sees. Only stateless generation, embeddings and rerank are mirrored, never
+requests with provider state, continuations, pinned resources, files, batches,
+realtime or media. Shadow requests are recorded with origin `shadow` and the
+caller's request as their parent, and accounted to the route, never to the
+caller's key or its budgets. `GET /api/v1/usage/shadow-experiments` compares
+each shadow target with the primary path of the requests it mirrored by status,
+latency, time to first byte, token usage and cost, from metadata only. A route
+needs at least one serving target.
+
+### Route spend caps
+
+`budget` declares a route's own `daily_cost_limit` and `monthly_cost_limit`,
+shared by every target. An exhausted cap removes the whole route from selection
+with the reason `route_budget_exhausted` and can start a `budget` fallback; an
+attempt refused by any cap at dispatch answers `503 supply_budget_exhausted`
+when no fallback serves the request.
+
+### Route templates
+
+A route template turns certified models into ordinary routes. It names a
+provider selector (`vendor:<id>` or `provider:<uuid>`), a case-insensitive model
+filter where `*` matches any run of characters and `?` one, a slug pattern built
+from `{model}`, the model's canonical identity, and optionally `{vendor}`, an
+overall deadline, an attempt budget, a fidelity, a routing policy, and whether
+to publish automatically:
+
+```json
+{"name": "claude", "provider_selector": "vendor:anthropic", "model_filter": "claude-*", "slug_pattern": "{vendor}-{model}", "overall_timeout_ms": 120000, "max_attempts": 2, "auto_publish": true}
+```
+
+Manage templates under `/api/v1/route-templates`. When a provider activation
+certifies a model that matches, the template creates a route draft, or a
+published revision when `auto_publish` is set, in the activation's transaction;
+`POST /api/v1/route-templates/{template_id}/apply` places every matching model
+now. A second connection serving the same identity joins the same generated
+route as another target. A template places each model once, records why it
+skipped one (`slug_taken`, `operations_not_certified`, `targets_full` or an
+activation refusal), and never creates a route for an uncertified model, so
+nothing reaches a caller without certification. Every generated route is a
+normal route, with its own revisions, simulation and access control.
 
 ### Route fidelity
 
@@ -328,6 +550,11 @@ All native inference surfaces accept one optional `X-OLP-Routing` header:
 X-OLP-Routing: {"only":["vendor:deepseek"],"strategy":"price","max_price":{"input_per_million":"0.50","output_per_million":"2.00"}}
 ```
 
+The header also chooses the request's admission `priority`, such as
+`{"priority":"high"}`, up to the ceiling its key's policy allows; a higher value
+is refused as `priority_increase_forbidden`. Priority decides admission and
+capacity shares, never target selection, and is not a routing-policy control.
+
 Malformed JSON, unknown controls, and invalid selectors are rejected before
 dispatch. The header is never forwarded upstream. Existing header-size limits
 apply. Strict parameter filtering additionally requires affirmative model
@@ -342,6 +569,7 @@ and `input_reference`; internal cleanup markers are excluded.
 | `price` | Exact decimal rates; generation compares input plus output per million, embeddings use input, other units use their unit rate |
 | `latency` | Median time to first meaningful output for streams, total attempt latency for unary operations |
 | `throughput` | Median generated output tokens per second after first meaningful output; reasoning tokens are excluded |
+| `capacity` | Remaining headroom of each credential slot, the smallest of its connection's and its own remaining request, token and concurrency fractions, read in one pipelined Valkey round trip; slots without quotas rank after slots with known headroom |
 
 Prices resolve connection scope before vendor scope before connector-kind scope,
 then the latest effective revision. Future rates become eligible at their
@@ -355,6 +583,10 @@ required; snapshots refresh every ten seconds and expire after 60 seconds.
 Unknown measurements rank after known measurements and use weighted order when
 all are unknown. `preferred_max_latency_ms` and `preferred_min_throughput` favor
 matching observations; they are preferences, not response guarantees.
+
+Targets the fleet marks unhealthy, by a shared circuit or an active probe, move
+to the end of the attempt order rather than disappearing, so a fleet-wide false
+positive degrades latency instead of availability.
 
 Eligibility filtering precedes ordering and `max_attempts`. Each actual
 credential attempt consumes the route's budget, which can exceed target count.
@@ -381,11 +613,22 @@ and takes the larger of the caller's request and the provider's, which a
 simulation does not. An `estimated_input_tokens` the caller supplies stands for
 every target instead, with no provenance, and a `max_output_tokens` replaces the
 reply bound the request names.
+Route draft simulation also explains the adaptive behaviors for the request:
+the trace of each selector it evaluated (with `classifier_labels` standing in
+for classifier answers, keyed by selector), the route legs a selector delegation
+or a plan-time fallback leads to, every declared fallback with whether it would
+run (`planned`), stays on `standby` for an execution failure, or would be
+skipped and why, and the session affinity the request carries (from its
+`attribution` labels or cache key). Decisions add the capacity `headroom` the
+`capacity` strategy reads, shadow targets, and targets the fleet marks
+`unhealthy`.
 The playground accepts the same preferences in its `routing` field and shows the
 resulting decision. Runtime health and available capacity can change between a
 preview and a dispatch.
 
 Request history records connection, slot/version, provider revision, policy
-digest, selected price revision, fallback failure classes, and meaningful output
-timing. Prompts, outputs, secret header values, and raw preference payloads are
+digest, selected price revision, fallback failure classes, the route leg, the
+selector, the retry number and the spend caps of each attempt, the request's
+origin (`caller`, `shadow`, `classifier` or `probe`) and parent request, and
+meaningful output timing. Prompts, outputs, secret header values, and raw preference payloads are
 absent from persisted routing telemetry.

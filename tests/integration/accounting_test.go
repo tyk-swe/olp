@@ -744,3 +744,45 @@ func TestAccountingFactsRefuseAMalformedEstimate(t *testing.T) {
 		})
 	}
 }
+
+// A selector's attempt records what its own usage would have cost on the most
+// expensive target the selector avoided, at the price in effect when it ran;
+// an attempt without a price of its own records no baseline.
+func TestAccountingPricesTheBaselineASelectorAvoided(t *testing.T) {
+	t.Parallel()
+	fixture := acctSeed(t, acctPool(t))
+	observed := time.Now().UTC().Add(-time.Minute)
+	acctPricing(t, fixture, 1, observed.Add(-time.Hour),
+		acctPrice{Kind: "openai", VendorID: acctPtr("openai"), Model: "gpt-4o",
+			Operation: "generation", Input: acctPtr("3"), Output: acctPtr("15")},
+		acctPrice{Kind: "openai", ProviderID: acctPtr(fixture.Provider), Model: "gpt-4o-mini",
+			Operation: "generation", Input: acctPtr("1"), Output: acctPtr("2")})
+	selected := func(model string) usage.Attempt {
+		attempt := acctAttempt(t, fixture.Provider, 1, model, 200, acctObserved(1000, 500, nil, nil))
+		attempt.Routing = &usage.Routing{ProviderRevisionID: fixture.Revision, Selector: acctPtr("short"),
+			Baseline: &usage.Baseline{ProviderID: fixture.Provider, UpstreamModel: "gpt-4o", VendorID: acctPtr("openai")}}
+		return attempt
+	}
+	baselineOf := func(requestID string) (selector, cost *string) {
+		if err := fixture.Pool.QueryRow(t.Context(), `SELECT selector, baseline_cost::text
+            FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`, requestID).Scan(&selector, &cost); err != nil {
+			t.Fatal(err)
+		}
+		return selector, cost
+	}
+
+	priced := acctEvent(t, fixture, acctEventOptions{ObservedAt: observed, Attempts: []usage.Attempt{selected("gpt-4o-mini")}})
+	acctPersist(t, fixture, priced)
+	acctSameMoney(t, fixture, acctLoadFact(t, fixture, priced.RequestID, 1).Cost, "0.002")
+	if selector, cost := baselineOf(priced.RequestID); selector == nil || *selector != "short" {
+		t.Fatalf("selector %v", selector)
+	} else {
+		acctSameMoney(t, fixture, cost, "0.0105")
+	}
+
+	unpriced := acctEvent(t, fixture, acctEventOptions{ObservedAt: observed, Attempts: []usage.Attempt{selected("unlisted")}})
+	acctPersist(t, fixture, unpriced)
+	if selector, cost := baselineOf(unpriced.RequestID); selector == nil || cost != nil {
+		t.Fatalf("an unpriced attempt recorded baseline %v", cost)
+	}
+}

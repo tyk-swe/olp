@@ -33,6 +33,12 @@ type Server struct {
 	// UnconfinedPlugins is set where the deployment enables unconfined
 	// plugins; previews plan as its gateways do.
 	UnconfinedPlugins bool
+	// Supply and Fleet give simulation the capacity, spend-cap and shared
+	// circuit state the gateways plan with; nil without shared state.
+	Supply runtime.SupplyReader
+	Fleet  interface {
+		Circuits(ctx context.Context, now time.Time) (map[string]time.Time, error)
+	}
 }
 
 // New prepares the route surface.
@@ -63,6 +69,7 @@ type draft struct {
 	Targets          []runtime.PublishedTarget
 	ContentPolicy    []byte
 	Fidelity         []byte
+	Behavior         []byte
 	BasedOnRevision  *string
 	ETag             string
 	CreatedBy        string
@@ -73,13 +80,13 @@ type draft struct {
 	ProjectName      *string
 }
 
-const draftColumns = "d.id::text,d.slug,d.state,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.content_policy,d.based_on_revision_id::text,d.etag::text,d.created_by::text,d.created_at,d.updated_at,u.email,d.project_id::text,pr.name,d.fidelity"
+const draftColumns = "d.id::text,d.slug,d.state,d.operations,d.overall_timeout_ms,d.max_attempts,d.targets,d.content_policy,d.based_on_revision_id::text,d.etag::text,d.created_by::text,d.created_at,d.updated_at,u.email,d.project_id::text,pr.name,d.fidelity,d.behavior"
 const draftFrom = " FROM olp.route_drafts d JOIN olp.users u ON u.id=d.created_by LEFT JOIN olp.projects pr ON pr.id=d.project_id"
 
 func scanDraft(row pgx.Row) (*draft, error) {
 	var d draft
 	var operations, targets []byte
-	if err := row.Scan(&d.ID, &d.Slug, &d.State, &operations, &d.OverallTimeoutMS, &d.MaxAttempts, &targets, &d.ContentPolicy, &d.BasedOnRevision, &d.ETag, &d.CreatedBy, &d.CreatedAt, &d.UpdatedAt, &d.CreatedByEmail, &d.ProjectID, &d.ProjectName, &d.Fidelity); err != nil {
+	if err := row.Scan(&d.ID, &d.Slug, &d.State, &operations, &d.OverallTimeoutMS, &d.MaxAttempts, &targets, &d.ContentPolicy, &d.BasedOnRevision, &d.ETag, &d.CreatedBy, &d.CreatedAt, &d.UpdatedAt, &d.CreatedByEmail, &d.ProjectID, &d.ProjectName, &d.Fidelity, &d.Behavior); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &d.Operations); err != nil {
@@ -191,7 +198,27 @@ func targetJSON(t runtime.PublishedTarget, live *resolved) map[string]any {
 	if live != nil {
 		lifecycle = live.Lifecycle
 	}
-	return map[string]any{"id": t.ID, "provider_model_id": t.ProviderModelID, "provider_id": providerID, "provider_name": name, "provider_model": model, "available": live.available(), "priority": t.Priority, "weight": t.Weight, "timeout_ms": t.TimeoutMS, "position": t.Position, "lifecycle": lifecycle}
+	return map[string]any{"id": t.ID, "provider_model_id": t.ProviderModelID, "provider_id": providerID, "provider_name": name, "provider_model": model, "available": live.available(), "priority": t.Priority, "weight": t.Weight, "timeout_ms": t.TimeoutMS, "position": t.Position, "lifecycle": lifecycle, "tags": orEmpty(t.Tags), "shadow": t.Shadow}
+}
+
+// behaviorJSON flattens a stored route behavior into a draft or revision
+// representation, with empty collections rather than absent fields.
+func behaviorJSON(out map[string]any, raw []byte) map[string]any {
+	behavior, _ := runtime.DecodeBehavior(raw)
+	retry := behavior.Retry
+	if retry == nil {
+		retry = runtime.Retry{}
+	}
+	out["fallbacks"], out["selectors"], out["retry"] = orEmpty(behavior.Fallbacks), orEmpty(behavior.Selectors), retry
+	out["affinity"], out["budget"] = behavior.Affinity, behavior.Budget
+	return out
+}
+
+func orEmpty[T any](values []T) []T {
+	if values == nil {
+		return []T{}
+	}
+	return values
 }
 
 func targetsJSON(targets []runtime.PublishedTarget, live map[string]*resolved) []map[string]any {
@@ -207,7 +234,7 @@ func (d *draft) summary() map[string]any {
 }
 
 func (d *draft) detail(live map[string]*resolved) map[string]any {
-	return map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "overall_timeout_ms": d.OverallTimeoutMS, "max_attempts": d.MaxAttempts, "etag": d.ETag, "operations": d.Operations, "targets": targetsJSON(d.Targets, live), "content_policy": json.RawMessage(d.ContentPolicy), "created_at": d.CreatedAt, "updated_at": d.UpdatedAt, "based_on_revision_id": d.BasedOnRevision, "created_by_email": d.CreatedByEmail, "project_id": d.ProjectID, "project_name": d.ProjectName, "fidelity": json.RawMessage(d.Fidelity)}
+	return behaviorJSON(map[string]any{"id": d.ID, "slug": d.Slug, "state": d.State, "overall_timeout_ms": d.OverallTimeoutMS, "max_attempts": d.MaxAttempts, "etag": d.ETag, "operations": d.Operations, "targets": targetsJSON(d.Targets, live), "content_policy": json.RawMessage(d.ContentPolicy), "created_at": d.CreatedAt, "updated_at": d.UpdatedAt, "based_on_revision_id": d.BasedOnRevision, "created_by_email": d.CreatedByEmail, "project_id": d.ProjectID, "project_name": d.ProjectName, "fidelity": json.RawMessage(d.Fidelity)}, d.Behavior)
 }
 
 func (s *Server) draftDetail(ctx context.Context, q access.Queryer, d *draft) (access.Reply, error) {
@@ -219,23 +246,36 @@ func (s *Server) draftDetail(ctx context.Context, q access.Queryer, d *draft) (a
 }
 
 type TargetInput struct {
-	ProviderID      *string `json:"provider_id"`
-	ProviderModel   *string `json:"provider_model"`
-	ProviderModelID *string `json:"provider_model_id"`
-	Priority        int     `json:"priority"`
-	Weight          int64   `json:"weight"`
-	TimeoutMS       int     `json:"timeout_ms"`
+	ProviderID      *string         `json:"provider_id"`
+	ProviderModel   *string         `json:"provider_model"`
+	ProviderModelID *string         `json:"provider_model_id"`
+	Priority        int             `json:"priority"`
+	Weight          int64           `json:"weight"`
+	TimeoutMS       int             `json:"timeout_ms"`
+	Tags            []string        `json:"tags,omitempty"`
+	Shadow          *runtime.Shadow `json:"shadow,omitempty"`
 }
 
 type DraftInput struct {
-	Slug             string          `json:"slug"`
-	Operations       []string        `json:"operations"`
-	OverallTimeoutMS int             `json:"overall_timeout_ms"`
-	MaxAttempts      int             `json:"max_attempts"`
-	Targets          []TargetInput   `json:"targets"`
-	ContentPolicy    json.RawMessage `json:"content_policy"`
-	Fidelity         json.RawMessage `json:"fidelity,omitempty"`
-	ProjectID        *string         `json:"project_id"`
+	Slug             string              `json:"slug"`
+	Operations       []string            `json:"operations"`
+	OverallTimeoutMS int                 `json:"overall_timeout_ms"`
+	MaxAttempts      int                 `json:"max_attempts"`
+	Targets          []TargetInput       `json:"targets"`
+	ContentPolicy    json.RawMessage     `json:"content_policy"`
+	Fidelity         json.RawMessage     `json:"fidelity,omitempty"`
+	ProjectID        *string             `json:"project_id"`
+	Fallbacks        []runtime.Fallback  `json:"fallbacks,omitempty"`
+	Selectors        []runtime.Selector  `json:"selectors,omitempty"`
+	Retry            runtime.Retry       `json:"retry,omitempty"`
+	Affinity         *runtime.Affinity   `json:"affinity,omitempty"`
+	Budget           *runtime.CostLimits `json:"budget,omitempty"`
+	// Behavior is the validated, stored form of the adaptive routing fields.
+	Behavior []byte `json:"-"`
+}
+
+func (in *DraftInput) behavior() runtime.Behavior {
+	return runtime.Behavior{Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget}
 }
 
 func sameProject(a, b *string) bool {
@@ -298,6 +338,14 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 		if t.TimeoutMS < 1 || t.TimeoutMS > in.OverallTimeoutMS {
 			return nil, access.Invalid("targets.timeout_ms", "Use a target timeout from 1 millisecond up to the overall timeout.")
 		}
+		if !runtime.ValidTargetTags(t.Tags) {
+			return nil, access.Invalid("targets.tags", "Use up to 8 distinct tags of lowercase letters, digits, underscores or hyphens.")
+		}
+		if t.Shadow != nil {
+			if err := t.Shadow.Validate(); err != nil {
+				return nil, err
+			}
+		}
 		var modelID, providerID, providerName, providerModel string
 		var providerProject *string
 		var err error
@@ -332,12 +380,31 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 		if prev, ok := previous[modelID]; ok {
 			id = prev.ID
 		}
-		targets = append(targets, runtime.PublishedTarget{ID: id, ProviderModelID: modelID, ProviderID: providerID, ProviderName: providerName, ProviderModel: providerModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int64(t.TimeoutMS), Position: i})
+		targets = append(targets, runtime.PublishedTarget{ID: id, ProviderModelID: modelID, ProviderID: providerID, ProviderName: providerName, ProviderModel: providerModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int64(t.TimeoutMS), Position: i, Tags: sortedTags(t.Tags), Shadow: t.Shadow})
 	}
+	serving := slices.IndexFunc(targets, func(t runtime.PublishedTarget) bool { return t.Shadow == nil })
+	if serving < 0 {
+		return nil, access.Invalid("targets", "Declare at least one target that serves callers rather than shadowing them.")
+	}
+	behavior := in.behavior()
+	tagged := func(tag string) bool {
+		return slices.ContainsFunc(targets, func(t runtime.PublishedTarget) bool { return t.Shadow == nil && slices.Contains(t.Tags, tag) })
+	}
+	if err := behavior.Validate(in.Slug, tagged); err != nil {
+		return nil, err
+	}
+	in.Behavior, _ = json.Marshal(behavior)
 	if err := reserveOrdinarySlug(ctx, q, in.Slug); err != nil {
 		return nil, err
 	}
 	return targets, nil
+}
+
+func sortedTags(tags []string) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+	return slices.Sorted(slices.Values(tags))
 }
 
 func reserveOrdinarySlug(ctx context.Context, q access.Queryer, slug string) error {
@@ -438,7 +505,7 @@ func (s *Server) createDraft(r *http.Request, _ access.Principal) (access.Reply,
 	id, etag := access.NewID(), access.NewID()
 	operations, _ := json.Marshal(input.Operations)
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11)", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, p.UserID(), input.ProjectID, input.Fidelity); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity,behavior) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, p.UserID(), input.ProjectID, input.Fidelity, input.Behavior); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.create", "route_draft", id, "success"); err != nil {
@@ -490,7 +557,7 @@ func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (access.Reply
 	etag := access.NewID()
 	operations, _ := json.Marshal(input.Operations)
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET slug=$2,state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,updated_at=now() WHERE id=$1", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, input.Fidelity); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET slug=$2,state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,behavior=$10,updated_at=now() WHERE id=$1", id, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, etag, input.Fidelity, input.Behavior); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route_draft.update", "route_draft", id, "success"); err != nil {

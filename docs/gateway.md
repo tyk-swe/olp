@@ -99,7 +99,8 @@ object, for example
 `{"strategy":"price","allow_fallbacks":false,"max_attempts":1}`. It can narrow
 constraints and attempts within published policy, never expand access or
 deadlines. Unknown controls, invalid selectors, and budget increases are
-refused. Raw header values are never forwarded or persisted.
+refused. Its `priority` chooses the request's [admission class](#priority-admission)
+up to the key's ceiling. Raw header values are never forwarded or persisted.
 
 The optional `X-OLP-Attribution` header attaches caller-chosen labels to a
 request's usage records, for example `{"team":"core","env":"prod"}`. Exactly one
@@ -121,13 +122,20 @@ the model to the upstream identifier. Native calls preserve unknown request
 fields; translation refuses semantic extensions it cannot represent. Failover to
 the next eligible attempt happens only before any response bytes have been sent
 to the client and only for connect, timeout, rate-limit, credential, and
-upstream server failures. Generation, token-counting, embedding, rerank, and
+upstream server failures. A route's [retry policy](provider-routing.md#retry-policy)
+may first repeat such an attempt on the same slot, within the same budget and
+deadline. Generation, token-counting, embedding, rerank, and
 moderation attempts also fail over on a typed context-window rejection, an
 upstream error code or type of `context_length_exceeded`,
 `context_window_exceeded`, `max_context_length_exceeded`, or `prompt_too_long`,
 because a target with a larger context window may serve the request; message
-text never triggers it. Other upstream client errors, protocol errors, and
-cancellations are terminal. A request that ends on an upstream rejection
+text never triggers it. A typed content-filter refusal (`content_filter`,
+`content_policy_violation` and the like) is terminal within the route and never
+counts against provider health. Other upstream client errors, protocol errors,
+and cancellations are terminal. When a route's attempts end without success,
+its declared [fallback routes](provider-routing.md#fallbacks) may serve the
+request under the same deadline and attempt budget, never after a stream has
+committed. A request that ends on an upstream rejection
 returns `upstream_rejected` with the redacted upstream message, keeping an
 upstream 400, 404, 405, 409, 413, 415, or 422 status and otherwise answering
 502. A committed stream never restarts on another provider: a later failure
@@ -140,14 +148,20 @@ tracking is bounded to `max(1, OLP_PROVIDER_MAX_EVENT_BYTES / 16)` entries.
 Bedrock advertised event lengths are checked before SDK allocation, and the SDK
 still verifies event CRCs.
 
-Provider health is tracked per gateway: five counted failures within 30 seconds
-open a provider's circuit for 30 seconds. Connection, timeout, protocol and
+Provider health is tracked per gateway and shared across the fleet: five
+counted failures within 30 seconds open a provider's circuit for 30 seconds. Connection, timeout, protocol and
 upstream server failures count; so do ambiguous ones of a strict interaction
 or of traffic a plugin carries. One half-open probe may proceed;
 credential-only failure releases it without penalizing siblings. A credential
 rejection cools that credential version for 60 seconds; a rate limit cools the
 logical slot across rotation for the upstream `Retry-After` (10 seconds when
-absent, at most 60 seconds). Client cancellation and disconnects close the
+absent, at most 60 seconds). Each gateway publishes its circuit transitions to
+Valkey and reads the fleet's every two seconds, so a circuit one replica opens
+is honored by all of them within five seconds; [active probes](provider-routing.md#credential-pools-and-limits)
+add their verdicts to the same state. A target the fleet marks unhealthy moves
+to the end of the attempt order instead of disappearing, while a gateway's own
+open circuit still skips it, and local circuits remain in force when Valkey is
+unavailable. Client cancellation and disconnects close the
 upstream request and release admission once. Unary response writes and
 individual stream frames have a 30-second write deadline. Failed unary writes or
 flushes are recorded as cancellation; successful delivery is recorded only after
@@ -155,7 +169,7 @@ the response has been flushed.
 
 | Status | `error.code` | Meaning |
 | --- | --- | --- |
-| 400 | `invalid_json`, `missing_required_parameter`, `invalid_value`, `unsupported_parameter`, `unsupported_stateful_reference`, `request_exceeds_token_limit`, `content_policy_blocked` | Request envelope problems, including unsupported Responses state references, an estimate larger than the key's tokens-per-minute limit, or text blocked by a route content-policy rule. |
+| 400 | `invalid_json`, `missing_required_parameter`, `invalid_value`, `unsupported_parameter`, `unsupported_stateful_reference`, `request_exceeds_token_limit`, `content_policy_blocked`, `priority_increase_forbidden`, `content_filter` | Request envelope problems, including unsupported Responses state references, an estimate larger than the key's tokens-per-minute limit, text blocked by a route content-policy rule, a priority above the key's ceiling, or an upstream content filter's refusal. |
 | 401 | `invalid_api_key` | Missing, unknown, expired, or revoked key. |
 | 403 | `permission_denied`, `route_forbidden` | Missing scope or route outside the key's project/allowlist. |
 | 404 | `route_not_found`, `not_found` | Unknown route slug or endpoint. |
@@ -164,8 +178,31 @@ the response has been flushed.
 | 422 | `content_policy_surface_unavailable`, `content_policy_streaming_requires_unary` | The request surface cannot be inspected by the route's content policy, or output rules require a buffered unary response instead of streaming. |
 | 429 | `rate_limit_exceeded`, `budget_exhausted`, `upstream_rate_limit` | The key's requests, tokens, or concurrency limit was exceeded; the key's daily or monthly cost budget is exhausted or cannot hold the request's [estimated cost](#cost-reservation); or every attempt was rate limited upstream. `Retry-After` carries whole seconds, and a limit of a key that has a request or token limit adds that key's [rate-limit headers](#rate-limit-headers). |
 | 502 | `upstream_unavailable`, `upstream_rejected`, `upstream_authentication_failed`, `upstream_permission_denied`, `provider_protocol_error`, `upstream_response_too_large` | Upstream or transport failures after the budget is spent, or a stream from an upstream that serves only streams whose aggregated non-streaming result exceeds the response size limit. |
-| 503 | `authority_unavailable`, `request_admission_overloaded`, `distributed_limits_unavailable`, `upstream_unavailable` | Stale authority, admission limit, limits that cannot be enforced, or no eligible target. |
+| 503 | `authority_unavailable`, `request_admission_overloaded`, `distributed_limits_unavailable`, `upstream_unavailable`, `supply_budget_exhausted` | Stale authority, admission limit or queue timeout, limits that cannot be enforced, no eligible target, or a connection, slot or route spend cap. |
 | 504 | `gateway_timeout` | Route deadline reached before commitment. |
+
+### Priority admission
+
+Each gateway admits at most `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS`
+inference requests at once. By default a full pool answers `503
+request_admission_overloaded` with `Retry-After: 1`. Set
+`OLP_HTTP_ADMISSION_QUEUE_DEPTH` to queue up to that many requests instead,
+in four classes: `critical`, `high`, `normal` and `low`. A freed slot goes to the
+next class in a weighted fair order of 8:4:2:1, so lower classes are never
+starved. A queued request waits at most `OLP_HTTP_ADMISSION_QUEUE_TIMEOUT`
+(two seconds by default) and never beyond its route deadline, then receives the
+same `503`.
+
+A key's policy sets its default `priority` (`normal` when unset) and a
+`max_priority` ceiling, which defaults to the key's priority. A request may
+choose any class up to that ceiling through `X-OLP-Routing`, for example
+`{"priority":"high"}`; a higher value is refused with `400
+priority_increase_forbidden`, like other budget increases. The same class
+selects a request's share of any [capacity shares](provider-routing.md#credential-pools-and-limits)
+its connection and slot quotas declare. Shadow traffic, classifier calls and
+probes run at `low`. `/metrics` reports `olp_admission_queue_depth{class}`,
+`olp_admission_queue_wait_seconds{class}` and
+`olp_admission_queue_rejections_total{class}`.
 
 ## Response headers
 

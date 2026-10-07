@@ -29,9 +29,12 @@ type Preferences struct {
 	RequireParameters        *bool           `json:"require_parameters"`
 	RequireZeroDataRetention *bool           `json:"require_zero_data_retention"`
 	MaxAttempts              *int            `json:"max_attempts,omitempty"`
+	// Priority is the admission class a request asks for, up to its key's
+	// ceiling. Only the routing header carries it; it never steers selection.
+	Priority *string `json:"priority,omitempty"`
 }
 
-var Strategies = []string{"weighted", "price", "latency", "throughput"}
+var Strategies = []string{"weighted", "price", "latency", "throughput", "capacity"}
 
 type Policy struct {
 	AllowedStrategies []string    `json:"allowed_strategies"`
@@ -58,28 +61,16 @@ func (p *Preferences) Validate(field string) error {
 	if p.MaxAttempts != nil && (*p.MaxAttempts < 1 || *p.MaxAttempts > 32767) {
 		return invalid("max_attempts must be positive and bounded")
 	}
+	if p.Priority != nil && access.PriorityRank(*p.Priority) < 0 {
+		return invalid("priority must be critical, high, normal or low")
+	}
 	for _, selectors := range [][]string{p.Only, p.Ignore, p.Order} {
 		if len(selectors) > 128 {
 			return invalid("Use at most 128 selectors")
 		}
 		for _, selector := range selectors {
-			kind, value, ok := strings.Cut(selector, ":")
-			if !ok || value == "" || len(value) > 200 {
-				return invalid("Selectors must be vendor:<catalog-id> or provider:<uuid>")
-			}
-			switch kind {
-			case "provider":
-				if _, e := uuid.Parse(value); e != nil {
-					return invalid("Invalid provider selector")
-				}
-			case "vendor":
-				for _, ch := range value {
-					if !(ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '-' || ch == '_') {
-						return invalid("Invalid vendor selector")
-					}
-				}
-			default:
-				return invalid("Unknown selector kind")
+			if problem := selectorProblem(selector); problem != "" {
+				return invalid(problem)
 			}
 		}
 	}
@@ -152,6 +143,9 @@ func (p *Policy) Validate() error {
 	if c.Strategy != nil || c.AllowFallbacks != nil || c.Order != nil || c.PreferredMaxLatencyMS != nil || c.PreferredMinThroughput != nil || c.MaxAttempts != nil || p.Defaults.MaxAttempts != nil {
 		return access.Invalid("constraints", "Policy constraints accept hard constraints only")
 	}
+	if c.Priority != nil || p.Defaults.Priority != nil {
+		return access.Invalid("defaults", "Priority belongs to API key policies and the routing header")
+	}
 	return nil
 }
 func ParsePreferences(data []byte) (*Preferences, error) {
@@ -175,7 +169,7 @@ type EffectivePolicy struct {
 	Digest      string
 }
 
-func ResolvePolicy(installation, route, key *Policy, request *Preferences) (EffectivePolicy, error) {
+func ResolvePolicy(installation, route, key *Policy, requested *Preferences) (EffectivePolicy, error) {
 	e := EffectivePolicy{Strategy: "weighted", Allowed: slices.Clone(Strategies)}
 	apply := func(p Preferences) {
 		e.Constraints = append(e.Constraints, p)
@@ -208,10 +202,16 @@ func ResolvePolicy(installation, route, key *Policy, request *Preferences) (Effe
 		e.Constraints = append(e.Constraints, p.Constraints)
 		apply(p.Defaults)
 	}
-	if request != nil {
-		if err := request.Validate("preferences"); err != nil {
+	var request *Preferences
+	if requested != nil {
+		if err := requested.Validate("preferences"); err != nil {
 			return e, err
 		}
+		// Priority decides admission, not selection, so it stays out of the
+		// effective policy and its digest.
+		request = &Preferences{}
+		*request = *requested
+		request.Priority = nil
 		apply(*request)
 	}
 	if !slices.Contains(e.Allowed, e.Strategy) {
@@ -222,8 +222,43 @@ func ResolvePolicy(installation, route, key *Policy, request *Preferences) (Effe
 	e.Digest = hex.EncodeToString(hash[:])
 	return e, nil
 }
+
+// selectorProblem explains why selector is not vendor:<catalog-id> or
+// provider:<uuid>, or returns "" when it is.
+func selectorProblem(selector string) string {
+	kind, value, ok := strings.Cut(selector, ":")
+	if !ok || value == "" || len(value) > 200 {
+		return "Selectors must be vendor:<catalog-id> or provider:<uuid>"
+	}
+	switch kind {
+	case "provider":
+		if _, e := uuid.Parse(value); e != nil {
+			return "Invalid provider selector"
+		}
+	case "vendor":
+		for _, ch := range value {
+			if !(ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '-' || ch == '_') {
+				return "Invalid vendor selector"
+			}
+		}
+	default:
+		return "Unknown selector kind"
+	}
+	return ""
+}
+
+// ValidSelector reports whether selector is vendor:<catalog-id> or
+// provider:<uuid>.
+func ValidSelector(selector string) bool { return selectorProblem(selector) == "" }
+
+// SelectorMatches reports whether selector names the provider with id and
+// vendor.
+func SelectorMatches(selector, id, vendor string) bool {
+	return selector == "provider:"+id || selector == "vendor:"+vendor
+}
+
 func selectorMatches(selector string, p Provider) bool {
-	return selector == "provider:"+p.ID || selector == "vendor:"+p.VendorID
+	return SelectorMatches(selector, p.ID, p.VendorID)
 }
 func anySelector(selectors []string, p Provider) bool {
 	for _, s := range selectors {

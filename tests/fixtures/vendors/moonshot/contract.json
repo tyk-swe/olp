@@ -38,6 +38,6 @@
       "code": "",
       "message": "The request was rejected because it was considered high risk"
     },
-    "class": "upstream_client"
+    "class": "content_filter"
   }
 }

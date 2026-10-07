@@ -105,6 +105,13 @@ type SignRequest = abi.SignRequest
 // SignResult carries the headers a Signer adds to a request.
 type SignResult = abi.SignResult
 
+// RouteFeatures are the request features a route selector's plugin predicate
+// judges, and RouteVerdict is its answer.
+type (
+	RouteFeatures = abi.RoutePredicate
+	RouteVerdict  = abi.RouteVerdict
+)
+
 // Plugin is implemented by every provider plugin.
 type Plugin interface {
 	// Manifest declares the plugin's profiles and the origins it may reach.
@@ -121,6 +128,15 @@ type Signer interface {
 	// ProviderOf(ctx) returns the provider the request is for, with its
 	// option values. A failure fails the request before it is sent.
 	Sign(ctx context.Context, request SignRequest) (SignResult, error)
+}
+
+// RoutePredicate is implemented by a plugin that route selectors consult. OLP
+// calls it only on a confined plugin, while it plans a request, with the
+// request's features and never its content. A match can only narrow the
+// route's targets or delegate to another route; an error falls through to
+// the route's next selector.
+type RoutePredicate interface {
+	MatchRoute(ctx context.Context, features RouteFeatures) (RouteVerdict, error)
 }
 
 // GrantEnroller is implemented by a plugin whose profiles authenticate with a
@@ -202,13 +218,14 @@ var registered Plugin
 // parameters. A method whose optional interface the plugin lacks reports
 // abi.CodeUnknownMethod.
 var methods = map[string]func(ctx context.Context, params json.RawMessage) (any, error){
-	abi.MethodManifest:      manifest,
-	abi.MethodSign:          optional(abi.MethodSign, "A sign request carries the request to sign.", Signer.Sign),
-	abi.MethodGrantStart:    optional(abi.MethodGrantStart, invalidParams, GrantEnroller.StartGrant),
-	abi.MethodGrantExchange: optional(abi.MethodGrantExchange, invalidParams, GrantEnroller.ExchangeGrant),
-	abi.MethodGrantPoll:     optional(abi.MethodGrantPoll, invalidParams, GrantPoller.PollGrant),
-	abi.MethodGrantRefresh:  optional(abi.MethodGrantRefresh, "A grant_refresh call carries the grant to refresh.", GrantRefresher.RefreshGrant),
-	abi.MethodCarry:         carry,
+	abi.MethodManifest:       manifest,
+	abi.MethodSign:           optional(abi.MethodSign, "A sign request carries the request to sign.", Signer.Sign),
+	abi.MethodGrantStart:     optional(abi.MethodGrantStart, invalidParams, GrantEnroller.StartGrant),
+	abi.MethodGrantExchange:  optional(abi.MethodGrantExchange, invalidParams, GrantEnroller.ExchangeGrant),
+	abi.MethodGrantPoll:      optional(abi.MethodGrantPoll, invalidParams, GrantPoller.PollGrant),
+	abi.MethodGrantRefresh:   optional(abi.MethodGrantRefresh, "A grant_refresh call carries the grant to refresh.", GrantRefresher.RefreshGrant),
+	abi.MethodCarry:          carry,
+	abi.MethodRoutePredicate: optional(abi.MethodRoutePredicate, "A route_predicate call carries the request's features.", RoutePredicate.MatchRoute),
 }
 
 type providerKey struct{}

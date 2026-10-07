@@ -120,6 +120,7 @@ load runs. Everything else is a smoke run.
 | S4 | First target returns 503, second succeeds | 1,000 RPS |
 | S5 | Anthropic Messages streaming, translated to an OpenAI upstream | 1,000 RPS |
 | S6 | Slow-reader streams held open | 10,000 streams |
+| S1-shadow | S1 with every request mirrored to a shadow target | 1,000 RPS |
 
 S6 is OLP only: no target compares it, and its socket buffers at full scale need
 more TCP memory than most single hosts have. Its streams must also all open
@@ -138,6 +139,7 @@ behavior, how the gateway is sized for it and what to know when reading it.
 | S3: 3,000 RPS at a 100% success rate | the scenario suite, at full scale, in valid runs |
 | S3: fewer total vCPU than LiteLLM's high-throughput profile at equal or better p95 | `scripts/bench-compare.sh` ([below](#the-s3-profile-target)) |
 | S1 to S3 with healthy Valkey: zero lost request-metadata events | the scenario suite: every admitted request has its metadata, and Valkey was healthy throughout |
+| S1-shadow: the S1 latency and metadata targets hold with every request mirrored, and at least 99% of caller requests reach the shadow target | the scenario suite, under the same conditions as S1 ([shadow targets](provider-routing.md#shadow-targets)) |
 
 A target the first baseline misses becomes M1 scope (profiling and hot-path
 work), not a revised target.
@@ -510,6 +512,13 @@ scenarios, which measure the whole gateway.
   limiter reads it before every attempt, whatever the key and the target limit,
   which costs an unconfigured key one Valkey round trip an attempt. The test
   does not cover that read ([tests](../tests/README.md#microbenchmarks)).
+- Adaptive routing keeps to that budget: a route without fallbacks, selectors,
+  retries, affinity, spend caps or shadow targets, and a connection without
+  priority shares, caps or probes, plans and executes exactly as before. The
+  `capacity` strategy and spend caps read every candidate slot's headroom and
+  cap state in one pipelined Valkey round trip per plan, which
+  `TestCapacityStrategyAddsOneValkeyRoundTrip` holds. Shadow attempts run after
+  the caller's response, in their own pool: S1-shadow holds the S1 targets.
 - A configured feature declares its own budget in its milestone: the added
   latency, CPU per request or memory it may cost, in the scenario it affects.
   The pull request that ships it records the scenario's result before and after.

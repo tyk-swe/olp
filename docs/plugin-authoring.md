@@ -304,6 +304,7 @@ the `Class`:
 | `rate_limited` | The upstream is limiting the credential, such as an exhausted quota: the slot cools down, for the upstream's `Retry-After` when it sends one, and the request fails over. |
 | `retryable` | Another attempt may succeed: the request fails over, unless the upstream may have performed work a strict route must not repeat. |
 | `terminal` | The request itself was refused: it does not fail over, and the caller receives the upstream's rejection. |
+| `content_filter` | The upstream's content filter refused the request: it does not fail over within the route, may start a route's `content_filter` [fallback](provider-routing.md#fallbacks), and never counts against provider health. |
 
 OLP's built-in rules classify every failure no rule matches: among others, 401
 and 403 are credential failures, 429 a rate limit, 5xx retryable and other 4xx
@@ -533,6 +534,26 @@ status. Request and response bodies are at most 512 KiB. A request OLP refuses
 or can't complete fails with an `*plugin.Error`: `origin_not_approved`,
 `http_failed` or `invalid_request`.
 
+## Route predicates
+
+A plugin can decide a route [selector](provider-routing.md#request-selectors)
+by implementing `RoutePredicate`. OLP calls it while it plans a request on a
+route whose selector names the plugin by digest, with the features it computed
+during admission and never the request's content: the operation, estimated
+input and requested output tokens, streaming, tool presence, input modalities,
+structured output and reasoning effort. Attribution labels never take part.
+
+```go
+func (myPlugin) MatchRoute(ctx context.Context, f plugin.RouteFeatures) (plugin.RouteVerdict, error) {
+	return plugin.RouteVerdict{Match: f.Tools && f.InputTokens > 8000}, nil
+}
+```
+
+A match can only narrow the route's targets or delegate to a route the key may
+use. OLP runs predicates only in approved confined plugins, grants them no
+capability but logging, and bounds each call to 250 milliseconds; an error or
+a timeout falls through to the route's next selector.
+
 ## What a plugin can reach
 
 OLP runs a plugin confined, within 64 MiB of memory, an 8 MiB stack and 10
@@ -760,6 +781,7 @@ OLP calls, through `olp_call`:
 | `grant_poll` | `{"profile": "…", "session": "…"}` | As for `grant_exchange` |
 | `grant_refresh` | `{"profile": "…", "refresh_token": "…", "facts": {"name": "value"}}` | `{"access_token": "…", "refresh_token": "…", "expires_in": 3600}`, optionally with `principal` and `facts` |
 | `carry` | `{"method": "POST", "url": "…", "header": {"Name": ["value"]}, "body": "<base64>"}` | none, after [streamed parts](#stdio-transport) |
+| `route_predicate` | `{"route": "…", "selector": "…", "operation": "generation", "input_tokens": 1200, "output_tokens": 256, "streaming": true, "tools": true, "modalities": ["text", "image"], "structured_output": false, "reasoning_effort": "high"}` | `{"match": true}` |
 
 OLP calls `sign` only for profiles that declare `"signing": true`, on behalf of
 the provider whose request it signs; the grant steps only for profiles that
@@ -771,6 +793,8 @@ until it returns a grant or fails with another code than
 plugin, for profiles that declare `"carries_traffic": true`, on behalf of the
 provider whose request it carries. A `carry` call that fails with the error
 code `not_sent` reports a request that never reached the upstream.
+OLP calls `route_predicate` only on a confined plugin, while it plans a request
+on a route whose [selector](#route-predicates) names the plugin.
 
 ### Capabilities
 

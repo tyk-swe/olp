@@ -46,11 +46,12 @@ func (i *RoutingInputs) Price(kind, provider, vendor, model, operation string, n
 		return nil
 	}
 	var found *RoutingPrice
-	for _, v := range i.Prices {
+	for index := range i.Prices {
+		v := &i.Prices[index]
 		if v.ProviderKind != kind || v.Model != model || v.Operation != operation || v.EffectiveAt.After(now) || v.ProviderID != nil && *v.ProviderID != provider || v.VendorID != nil && *v.VendorID != vendor {
 			continue
 		}
-		p := v
+		p := *v
 		p.ScopePriority = 0
 		if p.VendorID != nil {
 			p.ScopePriority++

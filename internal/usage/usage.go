@@ -83,6 +83,8 @@ const (
 	TaskNotificationDelivery Task = "notification_delivery"
 	// TaskGrantRefresh refreshes grants ahead of their access tokens' expiry.
 	TaskGrantRefresh Task = "grant_refresh"
+	// TaskHealthProbes sends the active health probes connections opt into.
+	TaskHealthProbes Task = "health_probes"
 )
 
 // Outcome is what one worker pass achieved.

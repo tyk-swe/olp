@@ -19,8 +19,8 @@ type WorkerTask struct {
 }
 
 // WorkerTasks is every fixed responsibility a worker replica may checkpoint.
-// RequestMetadataConsumer and CostReconciliation exist only when shared state
-// is configured; the rest run on any worker replica.
+// RequestMetadataConsumer, CostReconciliation and HealthProbes exist only when
+// shared state is configured; the rest run on any worker replica.
 var WorkerTasks = []WorkerTask{
 	{Name: string(usage.TaskRequestMetadataConsumer), StaleAfter: 20},
 	{Name: string(usage.TaskEpochDetection), StaleAfter: 20},
@@ -29,6 +29,7 @@ var WorkerTasks = []WorkerTask{
 	{Name: string(usage.TaskCostReconciliation), StaleAfter: 180},
 	{Name: string(usage.TaskNotificationDelivery), StaleAfter: 180},
 	{Name: string(usage.TaskGrantRefresh), StaleAfter: 20},
+	{Name: string(usage.TaskHealthProbes), StaleAfter: 180},
 }
 
 // ValkeyWorkerTasks are the responsibilities expected only when a limiter is
@@ -36,6 +37,7 @@ var WorkerTasks = []WorkerTask{
 var ValkeyWorkerTasks = []string{
 	string(usage.TaskRequestMetadataConsumer),
 	string(usage.TaskCostReconciliation),
+	string(usage.TaskHealthProbes),
 }
 
 const (
@@ -160,7 +162,7 @@ func ReadWorkerTaskHealth(ctx context.Context, q access.Queryer) (*WorkerTaskHea
 		case string(usage.TaskRequestMetadataConsumer), string(usage.TaskEpochDetection),
 			string(usage.TaskMediaReconciliation), string(usage.TaskMaintenance),
 			string(usage.TaskCostReconciliation), string(usage.TaskNotificationDelivery),
-			string(usage.TaskGrantRefresh):
+			string(usage.TaskGrantRefresh), string(usage.TaskHealthProbes):
 		default:
 			return nil, fmt.Errorf("stored worker task %q is invalid", task.Name)
 		}

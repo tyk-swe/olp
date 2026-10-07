@@ -12,6 +12,30 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AdmissionPriority.
+const (
+	Critical AdmissionPriority = "critical"
+	High     AdmissionPriority = "high"
+	Low      AdmissionPriority = "low"
+	Normal   AdmissionPriority = "normal"
+)
+
+// Valid indicates whether the value is a known member of the AdmissionPriority enum.
+func (e AdmissionPriority) Valid() bool {
+	switch e {
+	case Critical:
+		return true
+	case High:
+		return true
+	case Low:
+		return true
+	case Normal:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AttemptInteractionMetadataClientState.
 const (
 	AttemptInteractionMetadataClientStateActionable        AttemptInteractionMetadataClientState = "actionable"
@@ -215,22 +239,22 @@ func (e CodeAccountGrantState) Valid() bool {
 
 // Defines values for CodeAccountHealth.
 const (
-	Healthy      CodeAccountHealth = "healthy"
-	QuotaLimited CodeAccountHealth = "quota_limited"
-	Unavailable  CodeAccountHealth = "unavailable"
-	Unknown      CodeAccountHealth = "unknown"
+	CodeAccountHealthHealthy      CodeAccountHealth = "healthy"
+	CodeAccountHealthQuotaLimited CodeAccountHealth = "quota_limited"
+	CodeAccountHealthUnavailable  CodeAccountHealth = "unavailable"
+	CodeAccountHealthUnknown      CodeAccountHealth = "unknown"
 )
 
 // Valid indicates whether the value is a known member of the CodeAccountHealth enum.
 func (e CodeAccountHealth) Valid() bool {
 	switch e {
-	case Healthy:
+	case CodeAccountHealthHealthy:
 		return true
-	case QuotaLimited:
+	case CodeAccountHealthQuotaLimited:
 		return true
-	case Unavailable:
+	case CodeAccountHealthUnavailable:
 		return true
-	case Unknown:
+	case CodeAccountHealthUnknown:
 		return true
 	default:
 		return false
@@ -586,6 +610,7 @@ const (
 	ConfigurationPlanItemKindProject           ConfigurationPlanItemKind = "project"
 	ConfigurationPlanItemKindProvider          ConfigurationPlanItemKind = "provider"
 	ConfigurationPlanItemKindRoute             ConfigurationPlanItemKind = "route"
+	ConfigurationPlanItemKindRouteTemplate     ConfigurationPlanItemKind = "route_template"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationPlanItemKind enum.
@@ -606,6 +631,8 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 	case ConfigurationPlanItemKindProvider:
 		return true
 	case ConfigurationPlanItemKindRoute:
+		return true
+	case ConfigurationPlanItemKindRouteTemplate:
 		return true
 	default:
 		return false
@@ -663,6 +690,33 @@ func (e CredentialRequirement) Valid() bool {
 	case CredentialRequirementGrant:
 		return true
 	case CredentialRequirementRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FallbackCondition.
+const (
+	Budget        FallbackCondition = "budget"
+	ContentFilter FallbackCondition = "content_filter"
+	ContextWindow FallbackCondition = "context_window"
+	Exhausted     FallbackCondition = "exhausted"
+	RateLimit     FallbackCondition = "rate_limit"
+)
+
+// Valid indicates whether the value is a known member of the FallbackCondition enum.
+func (e FallbackCondition) Valid() bool {
+	switch e {
+	case Budget:
+		return true
+	case ContentFilter:
+		return true
+	case ContextWindow:
+		return true
+	case Exhausted:
+		return true
+	case RateLimit:
 		return true
 	default:
 		return false
@@ -1371,6 +1425,27 @@ func (e ProviderGrantLapsedEventEvent) Valid() bool {
 	}
 }
 
+// Defines values for ProviderHealthResponseSharedState.
+const (
+	ProviderHealthResponseSharedStateCurrent      ProviderHealthResponseSharedState = "current"
+	ProviderHealthResponseSharedStateUnavailable  ProviderHealthResponseSharedState = "unavailable"
+	ProviderHealthResponseSharedStateUnconfigured ProviderHealthResponseSharedState = "unconfigured"
+)
+
+// Valid indicates whether the value is a known member of the ProviderHealthResponseSharedState enum.
+func (e ProviderHealthResponseSharedState) Valid() bool {
+	switch e {
+	case ProviderHealthResponseSharedStateCurrent:
+		return true
+	case ProviderHealthResponseSharedStateUnavailable:
+		return true
+	case ProviderHealthResponseSharedStateUnconfigured:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProviderKind.
 const (
 	ProviderKindAnthropic        ProviderKind = "anthropic"
@@ -1407,6 +1482,24 @@ func (e ProviderKind) Valid() bool {
 	case ProviderKindVertexAi:
 		return true
 	case ProviderKindWatsonx:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProviderProbeResultStatus.
+const (
+	ProviderProbeResultStatusHealthy   ProviderProbeResultStatus = "healthy"
+	ProviderProbeResultStatusUnhealthy ProviderProbeResultStatus = "unhealthy"
+)
+
+// Valid indicates whether the value is a known member of the ProviderProbeResultStatus enum.
+func (e ProviderProbeResultStatus) Valid() bool {
+	switch e {
+	case ProviderProbeResultStatusHealthy:
+		return true
+	case ProviderProbeResultStatusUnhealthy:
 		return true
 	default:
 		return false
@@ -1491,6 +1584,48 @@ func (e PutProjectMemberRequestRole) Valid() bool {
 	}
 }
 
+// Defines values for RequestOrigin.
+const (
+	Caller     RequestOrigin = "caller"
+	Classifier RequestOrigin = "classifier"
+	Probe      RequestOrigin = "probe"
+	Shadow     RequestOrigin = "shadow"
+)
+
+// Valid indicates whether the value is a known member of the RequestOrigin enum.
+func (e RequestOrigin) Valid() bool {
+	switch e {
+	case Caller:
+		return true
+	case Classifier:
+		return true
+	case Probe:
+		return true
+	case Shadow:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RouteAffinitySource.
+const (
+	RouteAffinitySourceCacheKey RouteAffinitySource = "cache_key"
+	RouteAffinitySourceLabel    RouteAffinitySource = "label"
+)
+
+// Valid indicates whether the value is a known member of the RouteAffinitySource enum.
+func (e RouteAffinitySource) Valid() bool {
+	switch e {
+	case RouteAffinitySourceCacheKey:
+		return true
+	case RouteAffinitySourceLabel:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RouteDetailResponseState.
 const (
 	Active  RouteDetailResponseState = "active"
@@ -1527,8 +1662,48 @@ func (e RouteFidelityMode) Valid() bool {
 	}
 }
 
+// Defines values for RouteLegVia.
+const (
+	RouteLegViaFallback RouteLegVia = "fallback"
+	RouteLegViaSelector RouteLegVia = "selector"
+)
+
+// Valid indicates whether the value is a known member of the RouteLegVia enum.
+func (e RouteLegVia) Valid() bool {
+	switch e {
+	case RouteLegViaFallback:
+		return true
+	case RouteLegViaSelector:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RouteTemplateResultOutcome.
+const (
+	Draft     RouteTemplateResultOutcome = "draft"
+	Published RouteTemplateResultOutcome = "published"
+	Skipped   RouteTemplateResultOutcome = "skipped"
+)
+
+// Valid indicates whether the value is a known member of the RouteTemplateResultOutcome enum.
+func (e RouteTemplateResultOutcome) Valid() bool {
+	switch e {
+	case Draft:
+		return true
+	case Published:
+		return true
+	case Skipped:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoutingStrategy.
 const (
+	Capacity   RoutingStrategy = "capacity"
 	Latency    RoutingStrategy = "latency"
 	Price      RoutingStrategy = "price"
 	Throughput RoutingStrategy = "throughput"
@@ -1538,6 +1713,8 @@ const (
 // Valid indicates whether the value is a known member of the RoutingStrategy enum.
 func (e RoutingStrategy) Valid() bool {
 	switch e {
+	case Capacity:
+		return true
 	case Latency:
 		return true
 	case Price:
@@ -1545,6 +1722,72 @@ func (e RoutingStrategy) Valid() bool {
 	case Throughput:
 		return true
 	case Weighted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SelectorPredicateModalities.
+const (
+	SelectorPredicateModalitiesAudio SelectorPredicateModalities = "audio"
+	SelectorPredicateModalitiesFile  SelectorPredicateModalities = "file"
+	SelectorPredicateModalitiesImage SelectorPredicateModalities = "image"
+	SelectorPredicateModalitiesText  SelectorPredicateModalities = "text"
+	SelectorPredicateModalitiesVideo SelectorPredicateModalities = "video"
+)
+
+// Valid indicates whether the value is a known member of the SelectorPredicateModalities enum.
+func (e SelectorPredicateModalities) Valid() bool {
+	switch e {
+	case SelectorPredicateModalitiesAudio:
+		return true
+	case SelectorPredicateModalitiesFile:
+		return true
+	case SelectorPredicateModalitiesImage:
+		return true
+	case SelectorPredicateModalitiesText:
+		return true
+	case SelectorPredicateModalitiesVideo:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SimulatedAffinitySource.
+const (
+	SimulatedAffinitySourceCacheKey SimulatedAffinitySource = "cache_key"
+	SimulatedAffinitySourceLabel    SimulatedAffinitySource = "label"
+)
+
+// Valid indicates whether the value is a known member of the SimulatedAffinitySource enum.
+func (e SimulatedAffinitySource) Valid() bool {
+	switch e {
+	case SimulatedAffinitySourceCacheKey:
+		return true
+	case SimulatedAffinitySourceLabel:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SimulatedRouteLegVia.
+const (
+	SimulatedRouteLegViaFallback    SimulatedRouteLegVia = "fallback"
+	SimulatedRouteLegViaLessThannil SimulatedRouteLegVia = "<nil>"
+	SimulatedRouteLegViaSelector    SimulatedRouteLegVia = "selector"
+)
+
+// Valid indicates whether the value is a known member of the SimulatedRouteLegVia enum.
+func (e SimulatedRouteLegVia) Valid() bool {
+	switch e {
+	case SimulatedRouteLegViaFallback:
+		return true
+	case SimulatedRouteLegViaLessThannil:
+		return true
+	case SimulatedRouteLegViaSelector:
 		return true
 	default:
 		return false
@@ -1853,6 +2096,9 @@ type AcceptInvitationRequest struct {
 	Token       *string `json:"token,omitempty"`
 }
 
+// AdmissionPriority Admission class of a request. A saturated gateway dequeues critical, high, normal and low 8:4:2:1, and capacity shares divide provider quotas between them.
+type AdmissionPriority string
+
 // ApiKeyBudgetResponse defines model for ApiKeyBudgetResponse.
 type ApiKeyBudgetResponse struct {
 	Daily ApiKeyBudgetWindowResponse `json:"daily"`
@@ -1894,7 +2140,13 @@ type ApiKeyDetailResponse struct {
 	Id             openapi_types.UUID           `json:"id"`
 	LookupId       string                       `json:"lookup_id"`
 	MaxConcurrency nullable.Nullable[int32]     `json:"max_concurrency,omitempty"`
-	Name           string                       `json:"name"`
+
+	// MaxPriority Highest class a request may choose through X-OLP-Routing; defaults to priority.
+	MaxPriority nullable.Nullable[AdmissionPriority] `json:"max_priority,omitempty"`
+	Name        string                               `json:"name"`
+
+	// Priority Admission class of requests that name none; defaults to normal.
+	Priority nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
 
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id"`
@@ -1983,17 +2235,26 @@ type AttemptResponse struct {
 
 // AttemptRoutingMetadata defines model for AttemptRoutingMetadata.
 type AttemptRoutingMetadata struct {
-	CredentialSlotId    nullable.Nullable[openapi_types.UUID] `json:"credential_slot_id,omitempty"`
-	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id,omitempty"`
-	FirstOutputMs       nullable.Nullable[int64]              `json:"first_output_ms,omitempty"`
+	// Budgets Route, connection and slot whose spend caps this attempt spent from.
+	Budgets             nullable.Nullable[[]openapi_types.UUID] `json:"budgets,omitempty"`
+	CredentialSlotId    nullable.Nullable[openapi_types.UUID]   `json:"credential_slot_id,omitempty"`
+	CredentialVersionId nullable.Nullable[openapi_types.UUID]   `json:"credential_version_id,omitempty"`
+	FirstOutputMs       nullable.Nullable[int64]                `json:"first_output_ms,omitempty"`
 
 	// Interaction Metadata-only evidence distinguishing provider acceptance from client observation for strict interactions.
-	Interaction          *AttemptInteractionMetadata             `json:"interaction,omitempty"`
-	Mode                 nullable.Nullable[TransportMode]        `json:"mode,omitempty"`
-	Policy               nullable.Nullable[AppliedRoutingPolicy] `json:"policy,omitempty"`
-	PricingRevisionId    nullable.Nullable[openapi_types.UUID]   `json:"pricing_revision_id,omitempty"`
-	ProviderRevisionId   openapi_types.UUID                      `json:"provider_revision_id"`
-	StreamedOutputTokens nullable.Nullable[int64]                `json:"streamed_output_tokens,omitempty"`
+	Interaction *AttemptInteractionMetadata `json:"interaction,omitempty"`
+
+	// Leg The route that served an attempt when it is not the route the caller named.
+	Leg                *RouteLeg                               `json:"leg,omitempty"`
+	Mode               nullable.Nullable[TransportMode]        `json:"mode,omitempty"`
+	Policy             nullable.Nullable[AppliedRoutingPolicy] `json:"policy,omitempty"`
+	PricingRevisionId  nullable.Nullable[openapi_types.UUID]   `json:"pricing_revision_id,omitempty"`
+	ProviderRevisionId openapi_types.UUID                      `json:"provider_revision_id"`
+
+	// Retry Same-target retry number of this attempt.
+	Retry                nullable.Nullable[int]    `json:"retry,omitempty"`
+	Selector             nullable.Nullable[string] `json:"selector,omitempty"`
+	StreamedOutputTokens nullable.Nullable[int64]  `json:"streamed_output_tokens,omitempty"`
 }
 
 // AuditEventResponse defines model for AuditEventResponse.
@@ -2180,6 +2441,14 @@ type CatalogCapabilityHints struct {
 type ChangePasswordRequest struct {
 	CurrentPassword *string `json:"current_password,omitempty"`
 	NewPassword     *string `json:"new_password,omitempty"`
+}
+
+// ClassifierPredicate Sends the request text to another OLP route and tests the label it returns: a classification route's top label, or a generation route's reply. The call is an accounted request with its own deadline; a failure falls through to the next selector.
+type ClassifierPredicate struct {
+	Labels    []string                   `json:"labels"`
+	MinScore  nullable.Nullable[float32] `json:"min_score,omitempty"`
+	Route     string                     `json:"route"`
+	TimeoutMs int64                      `json:"timeout_ms"`
 }
 
 // CodeAccount defines model for CodeAccount.
@@ -2555,6 +2824,9 @@ type ConfigurationDocument struct {
 	Projects   []ConfigurationProjectEntry                  `json:"projects"`
 	Providers  []ConfigurationProviderEntry                 `json:"providers"`
 	Routes     []ConfigurationRouteEntry                    `json:"routes"`
+
+	// Templates Route templates; omitted when the installation declares none
+	Templates *[]ConfigurationTemplateEntry `json:"templates,omitempty"`
 }
 
 // ConfigurationDocumentApiVersion defines model for ConfigurationDocument.ApiVersion.
@@ -2662,7 +2934,14 @@ type ConfigurationProviderEntry struct {
 
 // ConfigurationRouteEntry defines model for ConfigurationRouteEntry.
 type ConfigurationRouteEntry struct {
+	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
+
+	// Budget Spend cap of the route itself.
+	Budget        nullable.Nullable[SpendCap]      `json:"budget,omitempty"`
 	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy"`
+
+	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
+	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
 
 	// Fidelity Omit, or send null, to declare a strict route.
 	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
@@ -2671,11 +2950,17 @@ type ConfigurationRouteEntry struct {
 	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
 
 	// Project Project name, or null for an installation-wide route
-	Project       nullable.Nullable[string]        `json:"project"`
-	Retired       *bool                            `json:"retired,omitempty"`
+	Project nullable.Nullable[string] `json:"project"`
+	Retired *bool                     `json:"retired,omitempty"`
+
+	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
+	Retry         *RouteRetry                      `json:"retry,omitempty"`
 	RoutingPolicy nullable.Nullable[RoutingPolicy] `json:"routing_policy"`
-	Slug          string                           `json:"slug"`
-	Targets       []ConfigurationRouteTarget       `json:"targets"`
+
+	// Selectors Ordered request selectors; the first match wins.
+	Selectors *[]RouteSelector           `json:"selectors,omitempty"`
+	Slug      string                     `json:"slug"`
+	Targets   []ConfigurationRouteTarget `json:"targets"`
 }
 
 // ConfigurationRouteTarget defines model for ConfigurationRouteTarget.
@@ -2683,10 +2968,14 @@ type ConfigurationRouteTarget struct {
 	Priority int32 `json:"priority"`
 
 	// Provider Provider name
-	Provider      string `json:"provider"`
-	ProviderModel string `json:"provider_model"`
-	TimeoutMs     int32  `json:"timeout_ms"`
-	Weight        int32  `json:"weight"`
+	Provider      string                          `json:"provider"`
+	ProviderModel string                          `json:"provider_model"`
+	Shadow        nullable.Nullable[ShadowTarget] `json:"shadow,omitempty"`
+
+	// Tags Labels selectors choose targets by.
+	Tags      *[]string `json:"tags,omitempty"`
+	TimeoutMs int32     `json:"timeout_ms"`
+	Weight    int32     `json:"weight"`
 }
 
 // ConfigurationSlotEntry defines model for ConfigurationSlotEntry.
@@ -2705,8 +2994,17 @@ type ConfigurationSlotEntry struct {
 
 // ConfigurationSlotLimits defines model for ConfigurationSlotLimits.
 type ConfigurationSlotLimits struct {
-	MaxConcurrency    nullable.Nullable[int64] `json:"max_concurrency"`
-	RequestsPerMinute nullable.Nullable[int64] `json:"requests_per_minute"`
+	// DailyCostLimit Exact decimal amount in the installation currency.
+	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	MaxConcurrency nullable.Nullable[int64]  `json:"max_concurrency"`
+
+	// MonthlyCostLimit Exact decimal amount in the installation currency.
+	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	RequestsPerMinute nullable.Nullable[int64]          `json:"requests_per_minute"`
+
+	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
+	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
 	TokensPerMinute   nullable.Nullable[int64] `json:"tokens_per_minute"`
 }
 
@@ -2717,10 +3015,35 @@ type ConfigurationSlotRestrictions struct {
 	AllowedRoutes  []string `json:"allowed_routes"`
 }
 
+// ConfigurationTemplateEntry A route template keyed by name. Applying stores it; provider activation and the template's apply operation generate its routes.
+type ConfigurationTemplateEntry struct {
+	AutoPublish      bool                             `json:"auto_publish"`
+	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity"`
+	MaxAttempts      int32                            `json:"max_attempts"`
+	ModelFilter      string                           `json:"model_filter"`
+	Name             string                           `json:"name"`
+	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
+
+	// Project Project name, or null for an installation-wide template
+	Project          nullable.Nullable[string]        `json:"project"`
+	ProviderSelector string                           `json:"provider_selector"`
+	RoutingPolicy    nullable.Nullable[RoutingPolicy] `json:"routing_policy"`
+	SlugPattern      string                           `json:"slug_pattern"`
+}
+
 // ConnectionLimits defines model for ConnectionLimits.
 type ConnectionLimits struct {
-	MaxConcurrency    nullable.Nullable[int32] `json:"max_concurrency,omitempty"`
-	RequestsPerMinute nullable.Nullable[int32] `json:"requests_per_minute,omitempty"`
+	// DailyCostLimit Exact decimal amount in the installation currency.
+	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
+
+	// MonthlyCostLimit Exact decimal amount in the installation currency.
+	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
+
+	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
+	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
 	TokensPerMinute   nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`
 }
 
@@ -2731,6 +3054,7 @@ type ConnectionOptions struct {
 
 	// CredentialHeaders Header names whose values are supplied in the encrypted credential JSON.
 	CredentialHeaders *[]string                           `json:"credential_headers,omitempty"`
+	HealthProbe       nullable.Nullable[HealthProbe]      `json:"health_probe,omitempty"`
 	Limits            nullable.Nullable[ConnectionLimits] `json:"limits,omitempty"`
 	Models            *map[string]ModelMetadata           `json:"models,omitempty"`
 
@@ -2794,12 +3118,18 @@ type CreateApiKeyRequest struct {
 	AllowedRoutes          *[]string `json:"allowed_routes,omitempty"`
 
 	// BudgetGroupId Shared budget group; must belong to the same project as the key (both may be null).
-	BudgetGroupId    nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
-	DailyCostLimit   nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
-	ExpiresAt        nullable.Nullable[time.Time]          `json:"expires_at,omitempty"`
-	MaxConcurrency   nullable.Nullable[int32]              `json:"max_concurrency,omitempty"`
-	MonthlyCostLimit nullable.Nullable[string]             `json:"monthly_cost_limit,omitempty"`
-	Name             string                                `json:"name"`
+	BudgetGroupId  nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
+	DailyCostLimit nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
+	ExpiresAt      nullable.Nullable[time.Time]          `json:"expires_at,omitempty"`
+	MaxConcurrency nullable.Nullable[int32]              `json:"max_concurrency,omitempty"`
+
+	// MaxPriority Highest class a request may choose through X-OLP-Routing; defaults to priority.
+	MaxPriority      nullable.Nullable[AdmissionPriority] `json:"max_priority,omitempty"`
+	MonthlyCostLimit nullable.Nullable[string]            `json:"monthly_cost_limit,omitempty"`
+	Name             string                               `json:"name"`
+
+	// Priority Admission class of requests that name none; defaults to normal.
+	Priority nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
 
 	// ProjectId Owning project; omit or null for an installation-wide key. Required for assigned principals.
 	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
@@ -2965,7 +3295,14 @@ type CreateProviderRequest struct {
 
 // CreateRouteDraftRequest defines model for CreateRouteDraftRequest.
 type CreateRouteDraftRequest struct {
+	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
+
+	// Budget Spend cap of the route itself.
+	Budget        nullable.Nullable[SpendCap]      `json:"budget,omitempty"`
 	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+
+	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
+	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
 
 	// Fidelity Omit, or send null, to declare a strict route.
 	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
@@ -2975,8 +3312,14 @@ type CreateRouteDraftRequest struct {
 
 	// ProjectId Owning project; omit or null for an installation-wide route. Required for assigned principals.
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
-	Slug      string                                `json:"slug"`
-	Targets   []RouteTargetRequest                  `json:"targets"`
+
+	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
+	Retry *RouteRetry `json:"retry,omitempty"`
+
+	// Selectors Ordered request selectors; the first match wins.
+	Selectors *[]RouteSelector     `json:"selectors,omitempty"`
+	Slug      string               `json:"slug"`
+	Targets   []RouteTargetRequest `json:"targets"`
 }
 
 // CredentialGrant What grant enrollment recorded on a credential version, and when the current access token of the grant beneath it expires. Grant material never leaves OLP.
@@ -3030,14 +3373,24 @@ type CredentialSlot struct {
 
 	// CredentialVersionId The credential version the slot serves with. A slot write binds the version it names, which must be neither revoked nor lapsed; one that sends null or omits it keeps the slot's current version unless it stages a pasted credential.
 	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id,omitempty"`
-	Enabled             *bool                                 `json:"enabled,omitempty"`
-	Id                  *openapi_types.UUID                   `json:"id,omitempty"`
-	MaxConcurrency      nullable.Nullable[int32]              `json:"max_concurrency,omitempty"`
-	Name                *string                               `json:"name,omitempty"`
-	Priority            *int32                                `json:"priority,omitempty"`
-	RequestsPerMinute   nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
-	TokensPerMinute     nullable.Nullable[int64]              `json:"tokens_per_minute,omitempty"`
-	Weight              *int32                                `json:"weight,omitempty"`
+
+	// DailyCostLimit Exact decimal amount in the installation currency.
+	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	Enabled        *bool                     `json:"enabled,omitempty"`
+	Id             *openapi_types.UUID       `json:"id,omitempty"`
+	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
+
+	// MonthlyCostLimit Exact decimal amount in the installation currency.
+	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	Name              *string                           `json:"name,omitempty"`
+	Priority          *int32                            `json:"priority,omitempty"`
+	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
+
+	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
+	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
+	TokensPerMinute   nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`
+	Weight            *int32                   `json:"weight,omitempty"`
 }
 
 // DiscoverModelsRequest defines model for DiscoverModelsRequest.
@@ -3059,6 +3412,31 @@ type DiscoveredModelRequest struct {
 // EnrollPasswordRequest defines model for EnrollPasswordRequest.
 type EnrollPasswordRequest struct {
 	NewPassword *string `json:"new_password,omitempty"`
+}
+
+// ExperimentSide defines model for ExperimentSide.
+type ExperimentSide struct {
+	EstimatedCost    nullable.Nullable[string]  `json:"estimated_cost"`
+	InputTokens      string                     `json:"input_tokens"`
+	MeanFirstByteMs  nullable.Nullable[float32] `json:"mean_first_byte_ms"`
+	MeanLatencyMs    nullable.Nullable[float32] `json:"mean_latency_ms"`
+	OutputTokens     string                     `json:"output_tokens"`
+	Successes        int64                      `json:"successes"`
+	UnpricedRequests int64                      `json:"unpriced_requests"`
+}
+
+// FallbackCondition exhausted: every attempt failed with a retryable class. context_window, content_filter, rate_limit: the route ended on that failure class. budget: a supply-side spend cap removed or refused the route's targets.
+type FallbackCondition string
+
+// FallbackStep One fallback the request started or would start.
+type FallbackStep struct {
+	// Conditions The conditions met, or for a standby fallback the ones it names
+	Conditions []FallbackCondition `json:"conditions"`
+	From       string              `json:"from"`
+
+	// Outcome planned when the fallback ranked attempts, standby when only a failed attempt could start it, or the reason it was skipped: fallback_route_unavailable, fallback_route_forbidden, fallback_route_repeated or the route's selection refusal
+	Outcome string `json:"outcome"`
+	Route   string `json:"route"`
 }
 
 // GrantDeviceAuthorization A device authorization the operator approves upstream: they open the verification URL, on any device, enter the user code and approve, while status requests poll the enrollment.
@@ -3123,6 +3501,11 @@ type GrantEnrollmentStatus struct {
 
 // GrantEnrollmentStatusStatus `pending` until the operator approves the device upstream; `completed` once the grant created a credential version; `denied` when the operator denied the device; `expired` when the device authorization expired first.
 type GrantEnrollmentStatusStatus string
+
+// HealthProbe Opts the connection into active health probes: bounded synthetic requests accounted to the installation.
+type HealthProbe struct {
+	IntervalSeconds int64 `json:"interval_seconds"`
+}
 
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
@@ -4027,6 +4410,12 @@ type PluginPagination struct {
 	Parameter string `json:"parameter"`
 }
 
+// PluginPredicate Runs the route_predicate hook of an approved, confined plugin over the request features. It can only narrow the candidate set.
+type PluginPredicate struct {
+	// Digest SHA-256 digest of an approved confined plugin exporting route_predicate
+	Digest string `json:"digest"`
+}
+
 // PluginProfile A provider profile the plugin supplies around a built-in dialect.
 type PluginProfile struct {
 	// CarriesTraffic Whether the plugin carries the profile's upstream traffic itself instead of OLP's transport: OLP hands it each finished request and reads the response and its stream back, so it sees all caller content, and the profile serves only transformed routes. Only an unconfined plugin carries traffic, and only HTTP and SSE.
@@ -4265,6 +4654,14 @@ type PricingSourceSnapshotListResponse struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
+// PriorityShares Percentages of the quota each admission class may hold once usage passes saturation_percent; they sum to 100.
+type PriorityShares struct {
+	Critical int64 `json:"critical"`
+	High     int64 `json:"high"`
+	Low      int64 `json:"low"`
+	Normal   int64 `json:"normal"`
+}
+
 // ProbeResponse defines model for ProbeResponse.
 type ProbeResponse struct {
 	CheckedAt        time.Time              `json:"checked_at"`
@@ -4500,8 +4897,13 @@ type ProviderGrantLapsedEventEvent string
 
 // ProviderHealthItem defines model for ProviderHealthItem.
 type ProviderHealthItem struct {
-	AttemptCount     int64                        `json:"attempt_count"`
-	AverageLatencyMs nullable.Nullable[float64]   `json:"average_latency_ms,omitempty"`
+	// ActiveProbe Latest active health probe of the provider.
+	ActiveProbe      nullable.Nullable[ProviderProbeResult] `json:"active_probe"`
+	AttemptCount     int64                                  `json:"attempt_count"`
+	AverageLatencyMs nullable.Nullable[float64]             `json:"average_latency_ms,omitempty"`
+
+	// CircuitOpenUntil When the fleet-shared circuit closes, while one is open. Gateways order the provider's targets last until then.
+	CircuitOpenUntil nullable.Nullable[time.Time] `json:"circuit_open_until"`
 	LastAttemptAt    nullable.Nullable[time.Time] `json:"last_attempt_at,omitempty"`
 	LastProbeAt      nullable.Nullable[time.Time] `json:"last_probe_at,omitempty"`
 	LastProbeDetail  nullable.Nullable[string]    `json:"last_probe_detail,omitempty"`
@@ -4521,10 +4923,16 @@ type ProviderHealthItem struct {
 
 // ProviderHealthResponse defines model for ProviderHealthResponse.
 type ProviderHealthResponse struct {
-	Items         []ProviderHealthItem      `json:"items"`
-	NextCursor    nullable.Nullable[string] `json:"next_cursor,omitempty"`
-	WindowMinutes int32                     `json:"window_minutes"`
+	Items      []ProviderHealthItem      `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+
+	// SharedState current: circuit and probe fields come from the fleet's shared state. unconfigured: no shared state is configured. unavailable: it could not be read.
+	SharedState   ProviderHealthResponseSharedState `json:"shared_state"`
+	WindowMinutes int32                             `json:"window_minutes"`
 }
+
+// ProviderHealthResponseSharedState current: circuit and probe fields come from the fleet's shared state. unconfigured: no shared state is configured. unavailable: it could not be read.
+type ProviderHealthResponseSharedState string
 
 // ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 type ProviderKind string
@@ -4666,6 +5074,19 @@ type ProviderPresetResponse struct {
 	// ProfileRevision Revision of profile_id.
 	ProfileRevision nullable.Nullable[string] `json:"profile_revision"`
 }
+
+// ProviderProbeResult defines model for ProviderProbeResult.
+type ProviderProbeResult struct {
+	// Class Failure class of an unhealthy probe.
+	Class      nullable.Nullable[string] `json:"class"`
+	LatencyMs  int64                     `json:"latency_ms"`
+	Model      string                    `json:"model"`
+	ObservedAt time.Time                 `json:"observed_at"`
+	Status     ProviderProbeResultStatus `json:"status"`
+}
+
+// ProviderProbeResultStatus defines model for ProviderProbeResult.Status.
+type ProviderProbeResultStatus string
 
 // ProviderProfile Immutable composition of independently owned dialect, hosting, authentication and transport contracts. Profile registration does not establish interaction fidelity qualification. A plugin profile's revision is the digest of the plugin module that supplies it; the catalogue lists the profiles of approved plugins.
 type ProviderProfile struct {
@@ -4952,30 +5373,48 @@ type ReferenceCatalog struct {
 
 // ReplaceRouteDraftRequest defines model for ReplaceRouteDraftRequest.
 type ReplaceRouteDraftRequest struct {
+	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
+
+	// Budget Spend cap of the route itself.
+	Budget        nullable.Nullable[SpendCap]      `json:"budget,omitempty"`
 	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+
+	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
+	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
 
 	// Fidelity Omit, or send null, to declare a strict route.
 	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
 	MaxAttempts      int32                            `json:"max_attempts"`
 	Operations       []string                         `json:"operations"`
 	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
-	Slug             string                           `json:"slug"`
-	Targets          []ReplaceRouteTargetRequest      `json:"targets"`
+
+	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
+	Retry *RouteRetry `json:"retry,omitempty"`
+
+	// Selectors Ordered request selectors; the first match wins.
+	Selectors *[]RouteSelector            `json:"selectors,omitempty"`
+	Slug      string                      `json:"slug"`
+	Targets   []ReplaceRouteTargetRequest `json:"targets"`
 }
 
 // ReplaceRouteTargetRequest defines model for ReplaceRouteTargetRequest.
 type ReplaceRouteTargetRequest struct {
-	Priority        int32              `json:"priority"`
-	ProviderModelId openapi_types.UUID `json:"provider_model_id"`
-	TimeoutMs       int32              `json:"timeout_ms"`
-	Weight          int32              `json:"weight"`
+	Priority        int32                           `json:"priority"`
+	ProviderModelId openapi_types.UUID              `json:"provider_model_id"`
+	Shadow          nullable.Nullable[ShadowTarget] `json:"shadow,omitempty"`
+
+	// Tags Labels selectors choose targets by.
+	Tags      *[]string `json:"tags,omitempty"`
+	TimeoutMs int32     `json:"timeout_ms"`
+	Weight    int32     `json:"weight"`
 }
 
 // RequestDetailResponse defines model for RequestDetailResponse.
 type RequestDetailResponse struct {
-	ApiKeyId     openapi_types.UUID `json:"api_key_id"`
-	AttemptCount int32              `json:"attempt_count"`
-	Attempts     []AttemptResponse  `json:"attempts"`
+	// ApiKeyId Null for installation traffic: shadow and probe requests.
+	ApiKeyId     nullable.Nullable[openapi_types.UUID] `json:"api_key_id"`
+	AttemptCount int32                                 `json:"attempt_count"`
+	Attempts     []AttemptResponse                     `json:"attempts"`
 
 	// Attribution Bounded allowlisted labels reported with this request; never content.
 	Attribution             map[string]string            `json:"attribution"`
@@ -4991,7 +5430,13 @@ type RequestDetailResponse struct {
 	Id                      openapi_types.UUID           `json:"id"`
 	InputTokens             nullable.Nullable[int64]     `json:"input_tokens,omitempty"`
 	Operation               string                       `json:"operation"`
-	OutputTokens            nullable.Nullable[int64]     `json:"output_tokens,omitempty"`
+
+	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. Shadow and probe requests belong to the installation and carry no key.
+	Origin       RequestOrigin            `json:"origin"`
+	OutputTokens nullable.Nullable[int64] `json:"output_tokens,omitempty"`
+
+	// ParentRequestId The caller request a shadow or classifier request derives from.
+	ParentRequestId nullable.Nullable[openapi_types.UUID] `json:"parent_request_id,omitempty"`
 
 	// PolicyDecisions Metadata-only content policy decisions recorded for this request.
 	PolicyDecisions     []PolicyDecision         `json:"policy_decisions"`
@@ -5058,10 +5503,14 @@ type RequestMetadataGatewayEpochResponse struct {
 	WriterClosed     bool                                  `json:"writer_closed"`
 }
 
+// RequestOrigin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. Shadow and probe requests belong to the installation and carry no key.
+type RequestOrigin string
+
 // RequestSummary defines model for RequestSummary.
 type RequestSummary struct {
-	ApiKeyId     openapi_types.UUID `json:"api_key_id"`
-	AttemptCount int32              `json:"attempt_count"`
+	// ApiKeyId Null for installation traffic: shadow and probe requests.
+	ApiKeyId     nullable.Nullable[openapi_types.UUID] `json:"api_key_id"`
+	AttemptCount int32                                 `json:"attempt_count"`
 
 	// Attribution Bounded allowlisted labels reported with this request; never content.
 	Attribution             map[string]string            `json:"attribution"`
@@ -5077,7 +5526,13 @@ type RequestSummary struct {
 	Id                      openapi_types.UUID           `json:"id"`
 	InputTokens             nullable.Nullable[int64]     `json:"input_tokens,omitempty"`
 	Operation               string                       `json:"operation"`
-	OutputTokens            nullable.Nullable[int64]     `json:"output_tokens,omitempty"`
+
+	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. Shadow and probe requests belong to the installation and carry no key.
+	Origin       RequestOrigin            `json:"origin"`
+	OutputTokens nullable.Nullable[int64] `json:"output_tokens,omitempty"`
+
+	// ParentRequestId The caller request a shadow or classifier request derives from.
+	ParentRequestId nullable.Nullable[openapi_types.UUID] `json:"parent_request_id,omitempty"`
 
 	// PolicyDecisions Metadata-only content policy decisions recorded for this request.
 	PolicyDecisions     []PolicyDecision         `json:"policy_decisions"`
@@ -5089,6 +5544,14 @@ type RequestSummary struct {
 	TotalLatencyMs      nullable.Nullable[int64] `json:"total_latency_ms,omitempty"`
 	Unpriced            nullable.Nullable[bool]  `json:"unpriced,omitempty"`
 	UsageComplete       nullable.Nullable[bool]  `json:"usage_complete,omitempty"`
+}
+
+// RetryRule defines model for RetryRule.
+type RetryRule struct {
+	BaseBackoffMs     int64 `json:"base_backoff_ms"`
+	MaxBackoffMs      int64 `json:"max_backoff_ms"`
+	MaxRetries        int   `json:"max_retries"`
+	RespectRetryAfter bool  `json:"respect_retry_after"`
 }
 
 // RevokeNetworkCredentialResponse defines model for RevokeNetworkCredentialResponse.
@@ -5132,6 +5595,27 @@ type RouteActivationResponse struct {
 	RuntimeGeneration RuntimeGenerationResponse `json:"runtime_generation"`
 }
 
+// RouteAffinity Keeps requests that carry the same session key on the same target and slot while it stays eligible, by hashing the key into the rendezvous seed.
+type RouteAffinity struct {
+	// Label Attribution label carrying the session key when source is label.
+	Label  *string             `json:"label,omitempty"`
+	Source RouteAffinitySource `json:"source"`
+}
+
+// RouteAffinitySource defines model for RouteAffinity.Source.
+type RouteAffinitySource string
+
+// RouteBehavior defines model for RouteBehavior.
+type RouteBehavior struct {
+	Affinity  nullable.Nullable[RouteAffinity] `json:"affinity"`
+	Budget    nullable.Nullable[SpendCap]      `json:"budget"`
+	Fallbacks []RouteFallback                  `json:"fallbacks"`
+
+	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
+	Retry     RouteRetry      `json:"retry"`
+	Selectors []RouteSelector `json:"selectors"`
+}
+
 // RouteDetailResponse defines model for RouteDetailResponse.
 type RouteDetailResponse struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -5163,13 +5647,18 @@ type RouteDetailResponseState string
 
 // RouteDraftDetailResponse defines model for RouteDraftDetailResponse.
 type RouteDraftDetailResponse struct {
+	Affinity          nullable.Nullable[RouteAffinity]      `json:"affinity"`
 	BasedOnRevisionId nullable.Nullable[openapi_types.UUID] `json:"based_on_revision_id,omitempty"`
-	ContentPolicy     nullable.Nullable[ContentPolicy]      `json:"content_policy"`
-	CreatedAt         time.Time                             `json:"created_at"`
+
+	// Budget Spend cap of the route itself.
+	Budget        nullable.Nullable[SpendCap]      `json:"budget"`
+	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy"`
+	CreatedAt     time.Time                        `json:"created_at"`
 
 	// CreatedByEmail Email of the operator who created the draft.
 	CreatedByEmail nullable.Nullable[string] `json:"created_by_email,omitempty"`
 	Etag           openapi_types.UUID        `json:"etag"`
+	Fallbacks      []RouteFallback           `json:"fallbacks"`
 
 	// Fidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
 	Fidelity         RouteFidelity      `json:"fidelity"`
@@ -5181,10 +5670,14 @@ type RouteDraftDetailResponse struct {
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
 	ProjectName nullable.Nullable[string]             `json:"project_name"`
-	Slug        string                                `json:"slug"`
-	State       string                                `json:"state"`
-	Targets     []RouteTargetResponse                 `json:"targets"`
-	UpdatedAt   time.Time                             `json:"updated_at"`
+
+	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
+	Retry     RouteRetry            `json:"retry"`
+	Selectors []RouteSelector       `json:"selectors"`
+	Slug      string                `json:"slug"`
+	State     string                `json:"state"`
+	Targets   []RouteTargetResponse `json:"targets"`
+	UpdatedAt time.Time             `json:"updated_at"`
 }
 
 // RouteDraftListResponse defines model for RouteDraftListResponse.
@@ -5207,6 +5700,12 @@ type RouteDraftResponse struct {
 	State     string                                `json:"state"`
 }
 
+// RouteFallback defines model for RouteFallback.
+type RouteFallback struct {
+	On    []FallbackCondition `json:"on"`
+	Route string              `json:"route"`
+}
+
 // RouteFidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
 type RouteFidelity struct {
 	// Mode Strict preserves execution, observation, permitted continuation and effects relative to the selected target's native invocation. Transformed permits changing an invocation or its observed result, such as translating between dialects or redacting content. Native identity and qualified interaction are per-plan classes.
@@ -5215,6 +5714,16 @@ type RouteFidelity struct {
 
 // RouteFidelityMode Strict preserves execution, observation, permitted continuation and effects relative to the selected target's native invocation. Transformed permits changing an invocation or its observed result, such as translating between dialects or redacting content. Native identity and qualified interaction are per-plan classes.
 type RouteFidelityMode string
+
+// RouteLeg The route that served an attempt when it is not the route the caller named.
+type RouteLeg struct {
+	RevisionId openapi_types.UUID `json:"revision_id"`
+	Route      string             `json:"route"`
+	Via        RouteLegVia        `json:"via"`
+}
+
+// RouteLegVia defines model for RouteLeg.Via.
+type RouteLegVia string
 
 // RouteListResponse defines model for RouteListResponse.
 type RouteListResponse struct {
@@ -5229,9 +5738,15 @@ type RouteRetireResponse struct {
 	RuntimeGeneration RuntimeGenerationResponse `json:"runtime_generation"`
 }
 
+// RouteRetry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
+type RouteRetry map[string]RetryRule
+
 // RouteRevisionDiffResponse defines model for RouteRevisionDiffResponse.
 type RouteRevisionDiffResponse struct {
-	ContentPolicyChanged bool `json:"content_policy_changed"`
+	BehaviorAfter        RouteBehavior `json:"behavior_after"`
+	BehaviorBefore       RouteBehavior `json:"behavior_before"`
+	BehaviorChanged      bool          `json:"behavior_changed"`
+	ContentPolicyChanged bool          `json:"content_policy_changed"`
 
 	// FidelityAfter Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
 	FidelityAfter RouteFidelity `json:"fidelity_after"`
@@ -5262,31 +5777,62 @@ type RouteRevisionListResponse struct {
 
 // RouteRevisionResponse defines model for RouteRevisionResponse.
 type RouteRevisionResponse struct {
-	ActivatedAt   time.Time                        `json:"activated_at"`
-	ActivatedBy   openapi_types.UUID               `json:"activated_by"`
+	ActivatedAt time.Time                        `json:"activated_at"`
+	ActivatedBy openapi_types.UUID               `json:"activated_by"`
+	Affinity    nullable.Nullable[RouteAffinity] `json:"affinity"`
+
+	// Budget Spend cap of the route itself.
+	Budget        nullable.Nullable[SpendCap]      `json:"budget"`
 	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy"`
+	Fallbacks     []RouteFallback                  `json:"fallbacks"`
 
 	// Fidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
-	Fidelity         RouteFidelity         `json:"fidelity"`
-	Id               openapi_types.UUID    `json:"id"`
-	MaxAttempts      int32                 `json:"max_attempts"`
-	Operations       []string              `json:"operations"`
-	OverallTimeoutMs int32                 `json:"overall_timeout_ms"`
-	Revision         int32                 `json:"revision"`
-	RouteId          openapi_types.UUID    `json:"route_id"`
-	RoutingPolicy    RoutingPolicy         `json:"routing_policy"`
-	Slug             string                `json:"slug"`
-	SourceDraftId    openapi_types.UUID    `json:"source_draft_id"`
-	Targets          []RouteTargetResponse `json:"targets"`
+	Fidelity         RouteFidelity      `json:"fidelity"`
+	Id               openapi_types.UUID `json:"id"`
+	MaxAttempts      int32              `json:"max_attempts"`
+	Operations       []string           `json:"operations"`
+	OverallTimeoutMs int32              `json:"overall_timeout_ms"`
+
+	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
+	Retry         RouteRetry            `json:"retry"`
+	Revision      int32                 `json:"revision"`
+	RouteId       openapi_types.UUID    `json:"route_id"`
+	RoutingPolicy RoutingPolicy         `json:"routing_policy"`
+	Selectors     []RouteSelector       `json:"selectors"`
+	Slug          string                `json:"slug"`
+	SourceDraftId openapi_types.UUID    `json:"source_draft_id"`
+	Targets       []RouteTargetResponse `json:"targets"`
+}
+
+// RouteSelector The first selector whose predicate matches chooses the targets carrying any of its tags, or delegates the request to another route.
+type RouteSelector struct {
+	Id string `json:"id"`
+
+	// Route Delegates matching requests to this route instead of choosing tags.
+	Route *string   `json:"route,omitempty"`
+	Tags  *[]string `json:"tags,omitempty"`
+
+	// When Conjunction of request features the gateway computes during admission. Every stated condition must hold; attribution labels never take part.
+	When SelectorPredicate `json:"when"`
 }
 
 // RouteSimulationResponse defines model for RouteSimulationResponse.
 type RouteSimulationResponse struct {
-	DeterministicSeed string                          `json:"deterministic_seed"`
-	Mode              string                          `json:"mode"`
-	Operation         string                          `json:"operation"`
-	Surface           string                          `json:"surface"`
-	Targets           []RouteSimulationTargetResponse `json:"targets"`
+	Affinity          nullable.Nullable[SimulatedAffinity] `json:"affinity"`
+	DeterministicSeed string                               `json:"deterministic_seed"`
+
+	// Fallbacks Fallbacks the request started at plan time, then the ones a failed attempt could still start
+	Fallbacks []FallbackStep `json:"fallbacks"`
+
+	// Legs Routes the request moved to after the named route, in order
+	Legs      []SimulatedRouteLeg `json:"legs"`
+	Mode      string              `json:"mode"`
+	Operation string              `json:"operation"`
+
+	// Selectors The named route's selector trace
+	Selectors []SelectorOutcome               `json:"selectors"`
+	Surface   string                          `json:"surface"`
+	Targets   []RouteSimulationTargetResponse `json:"targets"`
 }
 
 // RouteSimulationTargetResponse defines model for RouteSimulationTargetResponse.
@@ -5304,11 +5850,15 @@ type RouteSimulationTargetResponse struct {
 
 // RouteTargetRequest defines model for RouteTargetRequest.
 type RouteTargetRequest struct {
-	Priority      int32              `json:"priority"`
-	ProviderId    openapi_types.UUID `json:"provider_id"`
-	ProviderModel string             `json:"provider_model"`
-	TimeoutMs     int64              `json:"timeout_ms"`
-	Weight        int32              `json:"weight"`
+	Priority      int32                           `json:"priority"`
+	ProviderId    openapi_types.UUID              `json:"provider_id"`
+	ProviderModel string                          `json:"provider_model"`
+	Shadow        nullable.Nullable[ShadowTarget] `json:"shadow,omitempty"`
+
+	// Tags Labels selectors choose targets by.
+	Tags      *[]string `json:"tags,omitempty"`
+	TimeoutMs int64     `json:"timeout_ms"`
+	Weight    int32     `json:"weight"`
 }
 
 // RouteTargetResponse defines model for RouteTargetResponse.
@@ -5326,9 +5876,135 @@ type RouteTargetResponse struct {
 	ProviderModel   string                            `json:"provider_model"`
 	ProviderModelId openapi_types.UUID                `json:"provider_model_id"`
 	ProviderName    string                            `json:"provider_name"`
+	Shadow          nullable.Nullable[ShadowTarget]   `json:"shadow"`
+	Tags            []string                          `json:"tags"`
 	TimeoutMs       int32                             `json:"timeout_ms"`
 	Weight          int32                             `json:"weight"`
 }
+
+// RouteTemplateApplyResponse defines model for RouteTemplateApplyResponse.
+type RouteTemplateApplyResponse struct {
+	Results           []RouteTemplateResult                        `json:"results"`
+	RuntimeGeneration nullable.Nullable[RuntimeGenerationResponse] `json:"runtime_generation"`
+}
+
+// RouteTemplateDetailResponse defines model for RouteTemplateDetailResponse.
+type RouteTemplateDetailResponse struct {
+	// AutoPublish Publish generated routes as soon as their model is certified, instead of leaving drafts for review.
+	AutoPublish bool               `json:"auto_publish"`
+	CreatedAt   time.Time          `json:"created_at"`
+	Etag        openapi_types.UUID `json:"etag"`
+
+	// Fidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
+	Fidelity    RouteFidelity      `json:"fidelity"`
+	Id          openapi_types.UUID `json:"id"`
+	MaxAttempts int32              `json:"max_attempts"`
+
+	// ModelFilter Case-insensitive pattern over the canonical model identity; `*` matches any run of characters and `?` one.
+	ModelFilter string `json:"model_filter"`
+
+	// Name Unique template name.
+	Name             string `json:"name"`
+	OverallTimeoutMs int32  `json:"overall_timeout_ms"`
+
+	// ProjectId Owning project; generated routes belong to it and only its connections are considered.
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+
+	// ProviderSelector `vendor:<catalog-id>` or `provider:<uuid>`: the connections whose certified models the template considers.
+	ProviderSelector string `json:"provider_selector"`
+
+	// Routes Every certified model the template has placed on a route.
+	Routes        []RouteTemplateResult            `json:"routes"`
+	RoutingPolicy nullable.Nullable[RoutingPolicy] `json:"routing_policy"`
+
+	// SlugPattern Route slug built from `{model}`, the canonical model identity, and optionally `{vendor}`; characters a slug cannot carry become hyphens.
+	SlugPattern string    `json:"slug_pattern"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// RouteTemplateListResponse defines model for RouteTemplateListResponse.
+type RouteTemplateListResponse struct {
+	Items      []RouteTemplateResponse   `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// RouteTemplateRequest defines model for RouteTemplateRequest.
+type RouteTemplateRequest struct {
+	// AutoPublish Publish generated routes as soon as their model is certified, instead of leaving drafts for review.
+	AutoPublish *bool `json:"auto_publish,omitempty"`
+
+	// Fidelity Fidelity of generated routes; omit, or send null, for strict.
+	Fidelity    nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	MaxAttempts int32                            `json:"max_attempts"`
+
+	// ModelFilter Case-insensitive pattern over the canonical model identity; `*` matches any run of characters and `?` one.
+	ModelFilter string `json:"model_filter"`
+
+	// Name Unique template name.
+	Name             string `json:"name"`
+	OverallTimeoutMs int32  `json:"overall_timeout_ms"`
+
+	// ProjectId Owning project; generated routes belong to it and only its connections are considered.
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+
+	// ProviderSelector `vendor:<catalog-id>` or `provider:<uuid>`: the connections whose certified models the template considers.
+	ProviderSelector string `json:"provider_selector"`
+
+	// RoutingPolicy Routing policy each generated draft starts with.
+	RoutingPolicy nullable.Nullable[RoutingPolicy] `json:"routing_policy,omitempty"`
+
+	// SlugPattern Route slug built from `{model}`, the canonical model identity, and optionally `{vendor}`; characters a slug cannot carry become hyphens.
+	SlugPattern string `json:"slug_pattern"`
+}
+
+// RouteTemplateResponse defines model for RouteTemplateResponse.
+type RouteTemplateResponse struct {
+	// AutoPublish Publish generated routes as soon as their model is certified, instead of leaving drafts for review.
+	AutoPublish bool               `json:"auto_publish"`
+	CreatedAt   time.Time          `json:"created_at"`
+	Etag        openapi_types.UUID `json:"etag"`
+
+	// Fidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
+	Fidelity    RouteFidelity      `json:"fidelity"`
+	Id          openapi_types.UUID `json:"id"`
+	MaxAttempts int32              `json:"max_attempts"`
+
+	// ModelFilter Case-insensitive pattern over the canonical model identity; `*` matches any run of characters and `?` one.
+	ModelFilter string `json:"model_filter"`
+
+	// Name Unique template name.
+	Name             string `json:"name"`
+	OverallTimeoutMs int32  `json:"overall_timeout_ms"`
+
+	// ProjectId Owning project; generated routes belong to it and only its connections are considered.
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+
+	// ProviderSelector `vendor:<catalog-id>` or `provider:<uuid>`: the connections whose certified models the template considers.
+	ProviderSelector string                           `json:"provider_selector"`
+	RoutingPolicy    nullable.Nullable[RoutingPolicy] `json:"routing_policy"`
+
+	// SlugPattern Route slug built from `{model}`, the canonical model identity, and optionally `{vendor}`; characters a slug cannot carry become hyphens.
+	SlugPattern string    `json:"slug_pattern"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// RouteTemplateResult defines model for RouteTemplateResult.
+type RouteTemplateResult struct {
+	CreatedAt       *time.Time                            `json:"created_at,omitempty"`
+	DraftId         nullable.Nullable[openapi_types.UUID] `json:"draft_id"`
+	Outcome         RouteTemplateResultOutcome            `json:"outcome"`
+	ProviderId      openapi_types.UUID                    `json:"provider_id"`
+	ProviderModelId openapi_types.UUID                    `json:"provider_model_id"`
+
+	// Reason Why the model was skipped, or why a generated draft was not published.
+	Reason        nullable.Nullable[string] `json:"reason"`
+	RouteSlug     string                    `json:"route_slug"`
+	TemplateId    openapi_types.UUID        `json:"template_id"`
+	UpstreamModel string                    `json:"upstream_model"`
+}
+
+// RouteTemplateResultOutcome defines model for RouteTemplateResult.Outcome.
+type RouteTemplateResultOutcome string
 
 // RoutingConstraints defines model for RoutingConstraints.
 type RoutingConstraints struct {
@@ -5355,6 +6031,9 @@ type RoutingDecision struct {
 	// EstimatedInputTokens The request's input tokens as this target's model counts them, which is the estimate routing weighs the target's context window by, or the estimate the caller supplied. Null when neither exists.
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
 
+	// Headroom Smallest remaining fraction of the best credential slot's request, token and concurrency quotas.
+	Headroom nullable.Nullable[float32] `json:"headroom,omitempty"`
+
 	// Incompatibility Stable safe incompatibility or local policy outcome; never contains prompts, tool arguments, native state or credential values.
 	Incompatibility *InteractionIncompatibility `json:"incompatibility,omitempty"`
 
@@ -5371,10 +6050,19 @@ type RoutingDecision struct {
 	ProviderId            openapi_types.UUID              `json:"provider_id"`
 	Reason                nullable.Nullable[string]       `json:"reason,omitempty"`
 	RequestedOutputTokens nullable.Nullable[int64]        `json:"requested_output_tokens,omitempty"`
-	Strategy              RoutingStrategy                 `json:"strategy"`
-	TargetId              openapi_types.UUID              `json:"target_id"`
-	UpstreamModel         string                          `json:"upstream_model"`
-	VendorId              nullable.Nullable[string]       `json:"vendor_id,omitempty"`
+
+	// Selector The request selector that chose this target.
+	Selector nullable.Nullable[string] `json:"selector,omitempty"`
+
+	// Shadow The target mirrors traffic rather than serving it.
+	Shadow   *bool              `json:"shadow,omitempty"`
+	Strategy RoutingStrategy    `json:"strategy"`
+	TargetId openapi_types.UUID `json:"target_id"`
+
+	// Unhealthy Fleet health marks the provider unhealthy, so the target was ordered after healthy ones.
+	Unhealthy     *bool                     `json:"unhealthy,omitempty"`
+	UpstreamModel string                    `json:"upstream_model"`
+	VendorId      nullable.Nullable[string] `json:"vendor_id,omitempty"`
 }
 
 // RoutingPolicy defines model for RoutingPolicy.
@@ -5401,17 +6089,20 @@ type RoutingPreferences struct {
 	Ignore             *[]string               `json:"ignore,omitempty"`
 
 	// MaxAttempts Optional request ceiling; cannot exceed the published route budget.
-	MaxAttempts              nullable.Nullable[int]             `json:"max_attempts,omitempty"`
-	MaxPrice                 nullable.Nullable[PriceCeiling]    `json:"max_price,omitempty"`
-	Only                     nullable.Nullable[[]string]        `json:"only,omitempty"`
-	Order                    nullable.Nullable[[]string]        `json:"order,omitempty"`
-	PreferredMaxLatencyMs    nullable.Nullable[int64]           `json:"preferred_max_latency_ms,omitempty"`
-	PreferredMinThroughput   nullable.Nullable[int64]           `json:"preferred_min_throughput,omitempty"`
-	Quantizations            nullable.Nullable[[]string]        `json:"quantizations,omitempty"`
-	Regions                  nullable.Nullable[[]string]        `json:"regions,omitempty"`
-	RequireParameters        *bool                              `json:"require_parameters,omitempty"`
-	RequireZeroDataRetention *bool                              `json:"require_zero_data_retention,omitempty"`
-	Strategy                 nullable.Nullable[RoutingStrategy] `json:"strategy,omitempty"`
+	MaxAttempts            nullable.Nullable[int]          `json:"max_attempts,omitempty"`
+	MaxPrice               nullable.Nullable[PriceCeiling] `json:"max_price,omitempty"`
+	Only                   nullable.Nullable[[]string]     `json:"only,omitempty"`
+	Order                  nullable.Nullable[[]string]     `json:"order,omitempty"`
+	PreferredMaxLatencyMs  nullable.Nullable[int64]        `json:"preferred_max_latency_ms,omitempty"`
+	PreferredMinThroughput nullable.Nullable[int64]        `json:"preferred_min_throughput,omitempty"`
+
+	// Priority Admission class for this request, up to the key's max_priority. Only the X-OLP-Routing header carries it; routing policies refuse it.
+	Priority                 nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
+	Quantizations            nullable.Nullable[[]string]          `json:"quantizations,omitempty"`
+	Regions                  nullable.Nullable[[]string]          `json:"regions,omitempty"`
+	RequireParameters        *bool                                `json:"require_parameters,omitempty"`
+	RequireZeroDataRetention *bool                                `json:"require_zero_data_retention,omitempty"`
+	Strategy                 nullable.Nullable[RoutingStrategy]   `json:"strategy,omitempty"`
 }
 
 // RoutingPrice defines model for RoutingPrice.
@@ -5455,6 +6146,58 @@ type RuntimeGenerationListResponse struct {
 type RuntimeGenerationResponse struct {
 	Id       openapi_types.UUID `json:"id"`
 	Sequence int64              `json:"sequence"`
+}
+
+// SelectorOutcome How one selector judged the request. The first matched selector wins; the ones after it are not evaluated.
+type SelectorOutcome struct {
+	Id string `json:"id"`
+
+	// Label The classifier label the request received
+	Label   nullable.Nullable[string] `json:"label"`
+	Matched bool                      `json:"matched"`
+
+	// Outcome matched, not_matched, or why a predicate or delegation could not decide: predicate_unavailable, classifier_failed, classifier_forbidden, classifier_not_simulated, plugin_failed, plugin_not_simulated, selector_route_unavailable or selector_route_forbidden
+	Outcome string `json:"outcome"`
+}
+
+// SelectorPredicate Conjunction of request features the gateway computes during admission. Every stated condition must hold; attribution labels never take part.
+type SelectorPredicate struct {
+	Classifier      nullable.Nullable[ClassifierPredicate] `json:"classifier,omitempty"`
+	MaxInputTokens  nullable.Nullable[int64]               `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens nullable.Nullable[int64]               `json:"max_output_tokens,omitempty"`
+	MinInputTokens  nullable.Nullable[int64]               `json:"min_input_tokens,omitempty"`
+	MinOutputTokens nullable.Nullable[int64]               `json:"min_output_tokens,omitempty"`
+
+	// Modalities Matches when the input carries any of these modalities.
+	Modalities       *[]SelectorPredicateModalities     `json:"modalities,omitempty"`
+	Operations       *[]string                          `json:"operations,omitempty"`
+	Plugin           nullable.Nullable[PluginPredicate] `json:"plugin,omitempty"`
+	ReasoningEffort  *[]string                          `json:"reasoning_effort,omitempty"`
+	Streaming        nullable.Nullable[bool]            `json:"streaming,omitempty"`
+	StructuredOutput nullable.Nullable[bool]            `json:"structured_output,omitempty"`
+	Tools            nullable.Nullable[bool]            `json:"tools,omitempty"`
+}
+
+// SelectorPredicateModalities defines model for SelectorPredicate.Modalities.
+type SelectorPredicateModalities string
+
+// SelectorSavings One selector's attempts, compared with their own usage priced on the most expensive target the selector avoided. Only attempts with both prices are compared.
+type SelectorSavings struct {
+	Attempts         int64  `json:"attempts"`
+	BaselineCost     string `json:"baseline_cost"`
+	ComparedAttempts int64  `json:"compared_attempts"`
+	EstimatedCost    string `json:"estimated_cost"`
+	Route            string `json:"route"`
+	Savings          string `json:"savings"`
+	Selector         string `json:"selector"`
+}
+
+// SelectorSavingsResponse defines model for SelectorSavingsResponse.
+type SelectorSavingsResponse struct {
+	Currency nullable.Nullable[string] `json:"currency"`
+	End      time.Time                 `json:"end"`
+	Items    []SelectorSavings         `json:"items"`
+	Start    time.Time                 `json:"start"`
 }
 
 // SessionDetailResponse defines model for SessionDetailResponse.
@@ -5526,10 +6269,39 @@ type SetupStatus struct {
 	SetupRequired bool `json:"setup_required"`
 }
 
+// ShadowExperiment A route's primary path compared with one shadow target over the requests the shadow mirrored, from metadata only.
+type ShadowExperiment struct {
+	Pairs         int64              `json:"pairs"`
+	Primary       ExperimentSide     `json:"primary"`
+	ProviderId    openapi_types.UUID `json:"provider_id"`
+	Route         string             `json:"route"`
+	Shadow        ExperimentSide     `json:"shadow"`
+	UpstreamModel string             `json:"upstream_model"`
+}
+
+// ShadowExperimentResponse defines model for ShadowExperimentResponse.
+type ShadowExperimentResponse struct {
+	Currency nullable.Nullable[string] `json:"currency"`
+	End      time.Time                 `json:"end"`
+	Items    []ShadowExperiment        `json:"items"`
+	Start    time.Time                 `json:"start"`
+}
+
+// ShadowTarget Mirrors the sampled share of requests to this target after admission. The caller's response never comes from it.
+type ShadowTarget struct {
+	SampleRate float32 `json:"sample_rate"`
+}
+
 // SimulateRouteRequest defines model for SimulateRouteRequest.
 type SimulateRouteRequest struct {
 	// ApiKeyId Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected.
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
+
+	// Attribution Attribution labels the request would carry. They only matter to a route keeping sessions by a label.
+	Attribution *map[string]string `json:"attribution,omitempty"`
+
+	// ClassifierLabels The label each classifier selector would receive, by selector id. Simulation never calls a classifier; a classifier selector without a label here is reported as classifier_not_simulated.
+	ClassifierLabels *map[string]string `json:"classifier_labels,omitempty"`
 
 	// ClientContract Explicit registered observation contract, such as raw-vector-storage/1 or chat-anthropic-tools-v1. Required for native storage or retained tool continuation when applicable; never inferred from user agent or encoding. Inspection does not execute an operation.
 	ClientContract *string `json:"client_contract,omitempty"`
@@ -5558,6 +6330,28 @@ type SimulateRouteRequest struct {
 	Surface         string                     `json:"surface"`
 }
 
+// SimulatedAffinity Whether the request carried the session key its route keeps sessions by. When it does, that key seeds the target and slot ranking in place of the simulation seed.
+type SimulatedAffinity struct {
+	Label   nullable.Nullable[string] `json:"label"`
+	Session bool                      `json:"session"`
+	Source  SimulatedAffinitySource   `json:"source"`
+}
+
+// SimulatedAffinitySource defines model for SimulatedAffinity.Source.
+type SimulatedAffinitySource string
+
+// SimulatedRouteLeg A route the request moved to by selector delegation or fallback.
+type SimulatedRouteLeg struct {
+	Affinity  nullable.Nullable[SimulatedAffinity]    `json:"affinity"`
+	Decisions []RoutingDecision                       `json:"decisions"`
+	Route     string                                  `json:"route"`
+	Selectors []SelectorOutcome                       `json:"selectors"`
+	Via       nullable.Nullable[SimulatedRouteLegVia] `json:"via"`
+}
+
+// SimulatedRouteLegVia defines model for SimulatedRouteLeg.Via.
+type SimulatedRouteLegVia string
+
 // SimulationDialect Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses.
 type SimulationDialect string
 
@@ -5578,6 +6372,12 @@ type SimulationQuerySettings map[string]string
 // SimulationRequest defines model for SimulationRequest.
 type SimulationRequest struct {
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
+
+	// Attribution Attribution labels the request would carry. They only matter to a route keeping sessions by a label.
+	Attribution *map[string]string `json:"attribution,omitempty"`
+
+	// ClassifierLabels The label each classifier selector would receive, by selector id. Simulation never calls a classifier; a classifier selector without a label here is reported as classifier_not_simulated.
+	ClassifierLabels *map[string]string `json:"classifier_labels,omitempty"`
 
 	// ClientContract Explicit registered observation contract, such as raw-vector-storage/1 or chat-anthropic-tools-v1. Required for native storage or retained tool continuation when applicable; never inferred from user agent or encoding. Inspection does not execute an operation.
 	ClientContract *string `json:"client_contract,omitempty"`
@@ -5644,6 +6444,15 @@ type SlotList struct {
 type SlotWrite struct {
 	Credential nullable.Nullable[string] `json:"credential,omitempty"`
 	Slot       CredentialSlot            `json:"slot"`
+}
+
+// SpendCap Daily and monthly cost caps. An exhausted cap removes its owner from selection.
+type SpendCap struct {
+	// DailyCostLimit Exact decimal amount in the installation currency.
+	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+
+	// MonthlyCostLimit Exact decimal amount in the installation currency.
+	MonthlyCostLimit nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
 }
 
 // StartGrantEnrollmentRequest defines model for StartGrantEnrollmentRequest.
@@ -5734,13 +6543,19 @@ type UpdateApiKeyRequest struct {
 	AllowedRoutes *[]string `json:"allowed_routes,omitempty"`
 
 	// BudgetGroupId Omit to keep the stored group; send null to clear it.
-	BudgetGroupId     nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
-	DailyCostLimit    nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
-	ExpiresAt         nullable.Nullable[time.Time]          `json:"expires_at,omitempty"`
-	MaxConcurrency    nullable.Nullable[int32]              `json:"max_concurrency,omitempty"`
-	MonthlyCostLimit  nullable.Nullable[string]             `json:"monthly_cost_limit,omitempty"`
-	Name              *string                               `json:"name,omitempty"`
-	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
+	BudgetGroupId  nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
+	DailyCostLimit nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
+	ExpiresAt      nullable.Nullable[time.Time]          `json:"expires_at,omitempty"`
+	MaxConcurrency nullable.Nullable[int32]              `json:"max_concurrency,omitempty"`
+
+	// MaxPriority Highest class a request may choose through X-OLP-Routing; defaults to priority.
+	MaxPriority      nullable.Nullable[AdmissionPriority] `json:"max_priority,omitempty"`
+	MonthlyCostLimit nullable.Nullable[string]            `json:"monthly_cost_limit,omitempty"`
+	Name             *string                              `json:"name,omitempty"`
+
+	// Priority Admission class of requests that name none; defaults to normal.
+	Priority          nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]             `json:"requests_per_minute,omitempty"`
 
 	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.
 	ResponseMetadata *bool                    `json:"response_metadata,omitempty"`
@@ -6783,6 +7598,37 @@ type ValidateRouteDraftParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// ListRouteTemplatesParams defines parameters for ListRouteTemplates.
+type ListRouteTemplatesParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateRouteTemplateParams defines parameters for CreateRouteTemplate.
+type CreateRouteTemplateParams struct {
+	// IdempotencyKey Unique route-template creation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteRouteTemplateParams defines parameters for DeleteRouteTemplate.
+type DeleteRouteTemplateParams struct {
+	IfMatch string `json:"If-Match"`
+}
+
+// ReplaceRouteTemplateParams defines parameters for ReplaceRouteTemplate.
+type ReplaceRouteTemplateParams struct {
+	IfMatch string `json:"If-Match"`
+}
+
+// ApplyRouteTemplateParams defines parameters for ApplyRouteTemplate.
+type ApplyRouteTemplateParams struct {
+	// IdempotencyKey Unique template application key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListRoutesParams defines parameters for ListRoutes.
 type ListRoutesParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -6892,6 +7738,20 @@ type UsageCompletenessParams struct {
 	Model      *string             `form:"model,omitempty" json:"model,omitempty"`
 	ApiKeyId   *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	Operation  *string             `form:"operation,omitempty" json:"operation,omitempty"`
+}
+
+// UsageSelectorSavingsParams defines parameters for UsageSelectorSavings.
+type UsageSelectorSavingsParams struct {
+	Start time.Time `form:"start" json:"start"`
+	End   time.Time `form:"end" json:"end"`
+	Route *string   `form:"route,omitempty" json:"route,omitempty"`
+}
+
+// UsageShadowExperimentsParams defines parameters for UsageShadowExperiments.
+type UsageShadowExperimentsParams struct {
+	Start time.Time `form:"start" json:"start"`
+	End   time.Time `form:"end" json:"end"`
+	Route *string   `form:"route,omitempty" json:"route,omitempty"`
 }
 
 // UsageSummaryParams defines parameters for UsageSummary.
@@ -7116,6 +7976,12 @@ type ReplaceRouteDraftJSONRequestBody = ReplaceRouteDraftRequest
 
 // SimulateRouteDraftJSONRequestBody defines body for SimulateRouteDraft for application/json ContentType.
 type SimulateRouteDraftJSONRequestBody = SimulateRouteRequest
+
+// CreateRouteTemplateJSONRequestBody defines body for CreateRouteTemplate for application/json ContentType.
+type CreateRouteTemplateJSONRequestBody = RouteTemplateRequest
+
+// ReplaceRouteTemplateJSONRequestBody defines body for ReplaceRouteTemplate for application/json ContentType.
+type ReplaceRouteTemplateJSONRequestBody = RouteTemplateRequest
 
 // PutRoutingPolicyJSONRequestBody defines body for PutRoutingPolicy for application/json ContentType.
 type PutRoutingPolicyJSONRequestBody = RoutingPolicy

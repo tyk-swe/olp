@@ -255,11 +255,11 @@ func TestOnlyTheKeysRequestAsksForTheAllowance(t *testing.T) {
 		t.Fatal("the key's request does not ask for its allowance")
 	}
 	provider := &runtime.Provider{ID: uuid.NewString(), Limits: &runtime.Limits{RequestsPerMinute: &rpm, TokensPerMinute: &tokens}}
-	if connectionRequest(provider, 5, time.Second).ReportRate {
+	if connectionRequest(provider, 5, time.Second, "").ReportRate {
 		t.Fatal("a provider connection's request asks for an allowance nothing reports")
 	}
 	slot := &runtime.Slot{ID: uuid.NewString(), RequestsPerMinute: &rpm, TokensPerMinute: &tokens}
-	if slotRequest(slot, 5, time.Second).ReportRate {
+	if slotRequest(slot, 5, time.Second, "").ReportRate {
 		t.Fatal("a credential slot's request asks for an allowance nothing reports")
 	}
 }

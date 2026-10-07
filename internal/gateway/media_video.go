@@ -46,7 +46,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 
 	localJobID := uuid.Must(uuid.NewV7()).String()
 	x.affinity = []byte(localJobID)
-	if e := s.prepareMedia(x, authority); e != nil {
+	if e := s.prepareMedia(r.Context(), x, authority); e != nil {
 		form.Cleanup()
 		s.mediaFail(x, w, e)
 		return
@@ -72,14 +72,17 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
-	ctx, cancel := context.WithTimeout(r.Context(), overall)
+	ctx, cancel := x.routeContext(r.Context())
 	defer cancel()
 	var e *Error
 	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, overall); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}
-	defer func() { settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log) }()
+	defer func() {
+		s.settleCaps(ctx, x)
+		settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
+	}()
 
 	deadline, _ := ctx.Deadline()
 	hold, slot, e := s.admitVideoSlot(ctx, x, attempt, &provider, slots, deadline)
@@ -117,8 +120,13 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	// dispatch on a detached context bounded by the route deadline.
 	dispatchCtx, dispatchCancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 	defer dispatchCancel()
-	fact, result, dispatchFailure := s.mediaAttempt(dispatchCtx, w, x, attempt, &provider, slot, len(x.facts)+1)
+	fact := s.newFact(x, attempt, slot, len(x.facts)+1)
+	fact.Budgets = hold.budgets
+	fact, result, dispatchFailure := s.mediaAttempt(dispatchCtx, w, x, attempt, &provider, slot, fact)
 	x.dispatched = dispatchFailure == nil || dispatchFailure.dispatched
+	if x.dispatched {
+		x.spendCaps(hold.budgets, attempt)
+	}
 	x.facts = append(x.facts, fact)
 	s.health.record(provider.ID, fact)
 	// A reply that lands just before the route deadline must still bind or
@@ -157,7 +165,7 @@ func (s *Server) admitVideoSlot(ctx context.Context, x *execution, attempt runti
 		if used >= x.budget || ctx.Err() != nil {
 			break
 		}
-		gate := s.gateSlot(ctx, provider, &slot, x.estimate, deadline)
+		gate := s.gateAttempt(ctx, x, attempt, provider, &slot, x.estimate, deadline)
 		switch gate.verdict {
 		case gateExpired:
 			return nil, runtime.Slot{}, (&attemptFailure{class: classTimeout}).toError()
@@ -168,11 +176,14 @@ func (s *Server) admitVideoSlot(ctx context.Context, x *execution, attempt runti
 			used++
 			x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, used, gate.rejection))
 			last = gate.rejection
-			if gate.rejection.quota == quotaConnection {
+			if gate.rejection.quota == quotaConnection || gate.rejection.quota == quotaRoute {
 				return nil, runtime.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
 			}
 		case gateUnmeterable:
 			unmeterable = true
+			if gate.quota == quotaConnection || gate.quota == quotaRoute {
+				return nil, runtime.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
+			}
 		case gateAdmitted:
 			return gate.hold, slot, nil
 		}
@@ -504,7 +515,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 		}
 	}
 	fact.SlotID = slot.ID
-	reservation, rejection, skip := s.Admission.reserveTarget(ctx, &provider, &slot, 0, timeout+media.ReconciliationLeaseSlack)
+	reservation, rejection, skip := s.Admission.reserveTarget(ctx, &provider, &slot, 0, timeout+media.ReconciliationLeaseSlack, "")
 	if skip {
 		rejection = &attemptFailure{class: classLimitsUnavailable}
 	}

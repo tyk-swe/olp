@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -44,11 +45,11 @@ func simulate(t *testing.T, snapshot *runtime.Snapshot, input simulationInput) [
 		t.Fatal(err)
 	}
 	s := &Server{Access: &access.Server{}}
-	decisions, err := s.inspectSimulation(snapshot, "route", input, inspectionKeyContext{}, nil, demand, func(string) runtime.Eligibility { return runtime.Eligible })
+	leg, _, _, err := s.leg(fixedSimulation(snapshot, input, demand), "route", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return decisions
+	return leg.Decisions
 }
 
 func decisionFor(t *testing.T, decisions []inspectedDecision, model string) inspectedDecision {
@@ -299,4 +300,15 @@ func TestStrictSimulationHonorsTheReplyBoundTheCallerSupplies(t *testing.T) {
 			t.Errorf("%s: requested output %v, eligible %v (%v), want the caller's 100 to fit beside 10", d.UpstreamModel, deref(d.RequestedOutputTokens), d.Eligible, deref(d.Reason))
 		}
 	}
+}
+
+// fixedSimulation simulates without a selected key and with every credential
+// eligible.
+func fixedSimulation(snapshot *runtime.Snapshot, input simulationInput, demand *runtime.TokenDemand) *simulation {
+	m := (&Server{}).newSimulation(context.Background(), snapshot, input, nil, demand)
+	m.key = func(runtime.Route) (inspectionKeyContext, error) { return inspectionKeyContext{}, nil }
+	m.eligibility = func(runtime.Route) (func(string) runtime.Eligibility, error) {
+		return func(string) runtime.Eligibility { return runtime.Eligible }, nil
+	}
+	return m
 }

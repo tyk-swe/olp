@@ -9,7 +9,8 @@
 // upstream's authority, whose grants the plugin enrolls and refreshes, at the
 // API each account's grant names; one serves OpenAI Responses where the
 // upstream serves only streaming requests; and one serves Chat Completions for
-// accounts that approve a device authorization instead.
+// accounts that approve a device authorization instead. It also judges route
+// selectors, matching agentic requests.
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o reference.wasm ./sdk/plugin/reference
 package main
@@ -140,6 +141,12 @@ func (reference) Sign(_ context.Context, r plugin.SignRequest) (plugin.SignResul
 		"X-Reference-Timestamp": timestamp,
 		"X-Reference-Signature": hex.EncodeToString(mac.Sum(nil)),
 	}}, nil
+}
+
+// MatchRoute matches agentic requests for a route selector: requests that
+// offer tools, or that ask for high reasoning effort over a long prompt.
+func (reference) MatchRoute(_ context.Context, f plugin.RouteFeatures) (plugin.RouteVerdict, error) {
+	return plugin.RouteVerdict{Match: f.Tools || f.ReasoningEffort == "high" && f.InputTokens >= 4000}, nil
 }
 
 func origin(address string) string {

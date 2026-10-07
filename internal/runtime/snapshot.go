@@ -59,6 +59,7 @@ type Slot struct {
 	RequestsPerMinute *int64   `json:"requests_per_minute,omitempty"`
 	TokensPerMinute   *int64   `json:"tokens_per_minute,omitempty"`
 	MaxConcurrency    *int64   `json:"max_concurrency,omitempty"`
+	Supply
 }
 
 // Allows applies the published slot restrictions shared by live requests and
@@ -79,6 +80,7 @@ type Limits struct {
 	RequestsPerMinute *int64 `json:"requests_per_minute,omitempty"`
 	TokensPerMinute   *int64 `json:"tokens_per_minute,omitempty"`
 	MaxConcurrency    *int64 `json:"max_concurrency,omitempty"`
+	Supply
 }
 
 // Provider is the serving view of one active provider revision.
@@ -119,7 +121,9 @@ type Provider struct {
 	ProjectID *string `json:"project_id,omitempty"`
 	// Limits is the quota shared by every slot of this connection.
 	Limits *Limits `json:"limits,omitempty"`
-	Slots  []Slot  `json:"slots,omitempty"`
+	// HealthProbe, when set, opts the connection into active probing.
+	HealthProbe *HealthProbe `json:"health_probe,omitempty"`
+	Slots       []Slot       `json:"slots,omitempty"`
 	// ObservedPrincipal is the upstream principal every slot of a provider
 	// authenticated by a grant observes, which its serving identity carries;
 	// empty for any other provider.
@@ -135,6 +139,10 @@ type Target struct {
 	Weight        int64  `json:"weight"`
 	Timeout       int64  `json:"timeout"`
 	RoutingID     string `json:"routing_id"`
+	// Tags name the target for route selectors.
+	Tags []string `json:"tags,omitempty"`
+	// Shadow marks a target that only receives mirrored traffic.
+	Shadow *Shadow `json:"shadow,omitempty"`
 }
 
 // Route is the latest published revision of one slug.
@@ -155,6 +163,7 @@ type Route struct {
 
 	ContentPolicy *contentpolicy.Policy `json:"content_policy,omitempty"`
 	Fidelity      RouteFidelity         `json:"fidelity"`
+	Behavior
 }
 
 // Snapshot is the complete immutable serving configuration.
@@ -289,7 +298,7 @@ func (s *Snapshot) Validate() error {
 		r.compiledContentPolicy = policy
 		s.Routes[slug] = r
 	}
-	return nil
+	return CheckRouteGraph(s.Routes)
 }
 
 func validUUID(value string) bool {

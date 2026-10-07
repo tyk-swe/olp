@@ -195,23 +195,23 @@ end
 -- accrual: the hash holds "sum" and one field per lease and the set one member per
 -- lease, so keys that disagree mean one of them lost state, and no sum read from
 -- either would describe what is held.
-local function pending_total(pending_key, expiry_key, now_ms)
+local function pending_total(pending_key, expiry_key, now_ms, read_only)
   local stored = redis.pcall("HGET", pending_key, "sum")
   local leases = redis.pcall("ZCARD", expiry_key)
   if type(stored) == "table" or type(leases) == "table" then
-    drop_pending(pending_key, expiry_key)
+    if not read_only then drop_pending(pending_key, expiry_key) end
     return 0, 0
   end
   if stored == false then
     -- Nothing is held, or a hash has lost its total.
-    if leases > 0 or redis.call("EXISTS", pending_key) == 1 then
+    if not read_only and (leases > 0 or redis.call("EXISTS", pending_key) == 1) then
       drop_pending(pending_key, expiry_key)
     end
     return 0, 0
   end
   local sum_hi, sum_lo = parse_amount(stored)
   if sum_hi == nil or leases < 1 or redis.call("HLEN", pending_key) ~= leases + 1 then
-    drop_pending(pending_key, expiry_key)
+    if not read_only then drop_pending(pending_key, expiry_key) end
     return 0, 0
   end
   local expired = redis.call("ZRANGEBYSCORE", expiry_key, "-inf", now_ms, "LIMIT", 0, SWEEP_LIMIT)
@@ -224,6 +224,9 @@ local function pending_total(pending_key, expiry_key, now_ms)
     if hi ~= nil then
       sum_hi, sum_lo = sub_amount(sum_hi, sum_lo, hi, lo)
     end
+  end
+  if read_only then
+    return sum_hi, sum_lo
   end
   redis.call("HDEL", pending_key, unpack(expired))
   redis.call("ZREM", expiry_key, unpack(expired))
@@ -333,7 +336,8 @@ end
 -- ARGV: daily_limit, monthly_limit, server time override (tests only), amount,
 --       lease_id, lease_ttl_ms. An empty limit disables that window; an amount
 --       of 0 is a request nothing could price, which is judged on accrued spend
---       alone and leaves nothing pending.
+--       alone and leaves nothing pending. "check" reads availability including
+--       pending spend without modifying any key.
 if #KEYS ~= 4 or #ARGV ~= 6 then
   return failure("invalid_arguments")
 end
@@ -356,7 +360,11 @@ if ARGV[2] ~= "" then
   monthly_hi, monthly_lo = parse_limit(ARGV[2])
 end
 local override = parse_safe_unsigned_integer(ARGV[3])
-local amount_hi, amount_lo = parse_amount(ARGV[4])
+local read_only = ARGV[4] == "check"
+local amount_hi, amount_lo = 0, 0
+if not read_only then
+  amount_hi, amount_lo = parse_amount(ARGV[4])
+end
 local lease_ttl = parse_safe_unsigned_integer(ARGV[6])
 local priced = amount_hi ~= nil and (amount_hi > 0 or amount_lo > 0)
 if override == nil or amount_hi == nil or lease_ttl == nil
@@ -408,27 +416,42 @@ if monthly_hi ~= nil and monthly_state ~= "current" then
   return {RESPONSE_VERSION, -1, "uninitialized_monthly_cost_state", 0, day_window, month_window}
 end
 
+if read_only then
+  local held_hi, held_lo = pending_total(KEYS[3], KEYS[4], now_ms, true)
+  local daily_total_hi, daily_total_lo = add_amount(daily_spent_hi, daily_spent_lo, held_hi, held_lo)
+  if daily_hi ~= nil and compare_amount(daily_total_hi, daily_total_lo, daily_hi, daily_lo) >= 0 then
+    return {RESPONSE_VERSION, 0, "daily_cost", math.min(day_ttl, PENDING_RETRY_MS), day_window, month_window}
+  end
+  local monthly_total_hi, monthly_total_lo = add_amount(monthly_spent_hi, monthly_spent_lo, held_hi, held_lo)
+  if monthly_hi ~= nil and compare_amount(monthly_total_hi, monthly_total_lo, monthly_hi, monthly_lo) >= 0 then
+    return {RESPONSE_VERSION, 0, "monthly_cost", math.min(month_ttl, PENDING_RETRY_MS), day_window, month_window}
+  end
+  return {RESPONSE_VERSION, 1, "ok", 0, day_window, month_window}
+end
+
 -- A priced request must fit beside what is already spent and what requests in
 -- flight may still spend. Retiring expired leases is the only write a
 -- rejection makes, and it changes no balance.
 local held_hi, held_lo = 0, 0
 if priced then
   held_hi, held_lo = pending_total(KEYS[3], KEYS[4], now_ms)
-  -- A lease that is already recorded was granted by an earlier delivery of this
-  -- same reservation: it is not charged again. One that has lapsed, but that the
-  -- bounded sweep has not reached, is retired and reserved afresh instead of
-  -- being granted a second time. The total is known to describe the leases, so
-  -- taking its amount off is exact and needs no second sweep.
+  -- Repeated deliveries never charge a lease twice. A larger estimate must
+  -- fit beside the other leases before replacing this lease's amount. A lapsed
+  -- lease outside the bounded sweep is retired and reserved afresh.
   local recorded = redis.call("ZSCORE", KEYS[4], ARGV[5])
-  if recorded ~= false and tonumber(recorded) > now_ms then
-    return {RESPONSE_VERSION, 1, "ok", 0, day_window, month_window}
-  end
   if recorded ~= false then
-    local lapsed_hi, lapsed_lo = parse_amount(redis.call("HGET", KEYS[3], ARGV[5]))
-    if lapsed_hi ~= nil then
-      held_hi, held_lo = sub_amount(held_hi, held_lo, lapsed_hi, lapsed_lo)
+    local prior_hi, prior_lo = parse_amount(redis.call("HGET", KEYS[3], ARGV[5]))
+    if prior_hi == nil then
+      return failure("invalid_pending_amount")
     end
-    release_lease(KEYS[3], KEYS[4], ARGV[5])
+    if tonumber(recorded) > now_ms then
+      if compare_amount(amount_hi, amount_lo, prior_hi, prior_lo) <= 0 then
+        return {RESPONSE_VERSION, 1, "ok", 0, day_window, month_window}
+      end
+    else
+      release_lease(KEYS[3], KEYS[4], ARGV[5])
+    end
+    held_hi, held_lo = sub_amount(held_hi, held_lo, prior_hi, prior_lo)
   end
   local pending_hi, pending_lo = held_hi, held_lo
   held_hi, held_lo = add_amount(pending_hi, pending_lo, amount_hi, amount_lo)

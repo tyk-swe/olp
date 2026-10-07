@@ -26,6 +26,9 @@ bind.
 | `OLP_HTTP_MAX_CONNECTIONS` | `1024` | Admitted TCP connections. |
 | `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS` | `256` | Inference work admission (1–100000); excess work receives 503. |
 | `OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS` | `32` | Management and console work admission (1–100000). |
+| `OLP_HTTP_ADMISSION_QUEUE_DEPTH` | `0` | Inference requests that may wait for a full pool (0–100000), dequeued weighted fair by priority. `0` answers 503 at once. |
+| `OLP_HTTP_ADMISSION_QUEUE_TIMEOUT` | `2s` | Longest admission-queue wait (1ms–1m), never beyond the route deadline. |
+| `OLP_HTTP_MAX_IN_FLIGHT_SHADOW_REQUESTS` | `16` | Mirrored shadow attempts in flight per gateway (1–100000); excess mirrors are dropped, never queued. |
 | `OLP_HTTP_CONNECTION_MAX_AGE_SECONDS` | `300` | Age at which HTTP/2 connections receive GOAWAY (1–86400). |
 | `OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS` | `30` | Grace period for draining connections (1–600). |
 | `OLP_PUBLIC_ORIGIN` | `http://127.0.0.1:8080` | OIDC redirects and generated links. |

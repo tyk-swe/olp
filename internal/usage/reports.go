@@ -410,7 +410,7 @@ func ReadBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension s
 			scope = scopeTarget
 		}
 	case DimensionAPIKey:
-		expression = "COALESCE(api_key_id::text, 'unknown')"
+		expression = "COALESCE(api_key_id::text, 'system')"
 	case DimensionOperation:
 		expression = "operation"
 	case DimensionModelFamily:

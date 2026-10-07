@@ -82,6 +82,27 @@ func (h *Host) Sign(ctx context.Context, digest string, provider abi.Provider, r
 	return result, err
 }
 
+// RoutePredicate runs the route_predicate hook of the confined plugin with
+// digest. An unconfined plugin never judges a route, since its executable
+// could see more than the call hands it.
+func (h *Host) RoutePredicate(ctx context.Context, digest string, input abi.RoutePredicate) (bool, error) {
+	entry := h.use(digest)
+	defer h.done(entry)
+	loaded, err := entry.wait(ctx)
+	if err != nil {
+		return false, err
+	}
+	if _, confined := loaded.(*Module); !confined {
+		return false, refuse(CodeUnconfinedDisabled, "Route predicates run only in confined plugins.")
+	}
+	var verdict abi.RouteVerdict
+	call := Call{Method: abi.MethodRoutePredicate, Params: input}
+	call.out = call.output(h.runtime.log, digest)
+	err = loaded.Call(ctx, call, &verdict)
+	h.failed(ctx, call.out, call.Method, err)
+	return verdict.Match, err
+}
+
 // Manifest returns the manifest of the plugin with digest, which Usable must
 // admit, such as for granting a call HTTP to the plugin's approved origins.
 func (h *Host) Manifest(ctx context.Context, digest string) (abi.Manifest, error) {

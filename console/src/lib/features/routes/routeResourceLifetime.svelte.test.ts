@@ -597,7 +597,11 @@ describe('route draft dry-run controls', () => {
       mode: 'unary',
       operation: 'generation',
       surface: 'openai',
-      targets: []
+      targets: [],
+      selectors: [],
+      affinity: null,
+      legs: [],
+      fallbacks: []
     });
     render({});
     await hydrated(draftA.slug);
@@ -627,7 +631,11 @@ describe('route draft dry-run controls', () => {
       mode: 'unary',
       operation: 'generation',
       surface: 'openai',
-      targets: []
+      targets: [],
+      selectors: [],
+      affinity: null,
+      legs: [],
+      fallbacks: []
     });
     render({});
     await hydrated(draftA.slug);

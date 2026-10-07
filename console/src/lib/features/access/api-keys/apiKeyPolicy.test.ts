@@ -59,7 +59,9 @@ describe('API key form state', () => {
       expiresAt: '',
       allowProviderState: false,
       responseMetadata: false,
-      allowedAttributionKeys: []
+      allowedAttributionKeys: [],
+      priority: '',
+      maxPriority: ''
     });
   });
 

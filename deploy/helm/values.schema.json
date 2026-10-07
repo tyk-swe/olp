@@ -318,6 +318,9 @@
         "httpMaxConnections": { "type": "integer", "minimum": 1, "maximum": 100000 },
         "httpMaxInFlightInferenceRequests": { "type": "integer", "minimum": 1, "maximum": 100000 },
         "httpMaxInFlightManagementRequests": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "httpAdmissionQueueDepth": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "httpAdmissionQueueTimeout": { "type": "string", "pattern": "^[0-9]+(ms|s|m)$" },
+        "httpMaxInFlightShadowRequests": { "type": "integer", "minimum": 1, "maximum": 100000 },
         "resources": { "type": "object" },
         "topologySpread": {
           "type": "object",

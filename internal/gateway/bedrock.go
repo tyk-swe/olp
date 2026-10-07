@@ -131,6 +131,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 	// size bounds the reservation and the reported usage settles it.
 	sized := int64(len(body)) / 4
 	x.estimate, x.sizedInput = max(resourceEstimate, sized), &sized
+	defer s.settleCaps(r.Context(), x)
 	p, e := s.selectPinSurface(r.Context(), x, &route, operation, "bedrock", mode, func(provider *runtime.Provider, model string) bool {
 		return bedrockQualified(provider, model, operation, mode)
 	})
@@ -191,6 +192,9 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint string, body []byte, stream bool) (*http.Response, *attemptFailure) {
 	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1)
 	fact.Mode = x.mode
+	if p.hold != nil {
+		fact.Budgets = p.hold.budgets
+	}
 	finish := func(class string, f *attemptFailure) *attemptFailure {
 		if f == nil {
 			f = &attemptFailure{}
@@ -224,6 +228,9 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 		return nil, finish(classCredential, nil)
 	}
 	resp, err := client.Do(req)
+	if p.hold != nil {
+		x.spendCaps(p.hold.budgets, p.attempt)
+	}
 	if err != nil {
 		class := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
 		return nil, finish(string(class), &attemptFailure{dispatched: true})

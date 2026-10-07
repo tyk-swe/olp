@@ -7,9 +7,14 @@ export type ApiKeyFormValue = {
   monthlyCostLimit?: string;
   /** `datetime-local` control value, or an empty string when no expiry is set. */
   expiresAt?: string;
+  /** Admission classes; empty means normal, and a ceiling of the default. */
+  priority?: string;
+  maxPriority?: string;
   /** Injected by tests; defaults to the current instant. */
   now?: Date;
 };
+
+const priorityRank = ['critical', 'high', 'normal', 'low'];
 
 export function validateApiKey(value: ApiKeyFormValue): Record<string, string> {
   const errors: Record<string, string> = {};
@@ -49,5 +54,11 @@ export function validateApiKey(value: ApiKeyFormValue): Record<string, string> {
       errors.expiresAt = 'Choose an expiry in the future.';
     }
   }
+  if (
+    value.maxPriority &&
+    priorityRank.indexOf(value.priority || 'normal') <
+      priorityRank.indexOf(value.maxPriority)
+  )
+    errors.priority = 'The default priority cannot exceed the highest one.';
   return errors;
 }

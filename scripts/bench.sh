@@ -9,7 +9,7 @@ usage() {
   cat <<'EOF' >&2
 usage: scripts/bench.sh
 
-  BENCH_SCENARIOS            comma-separated scenarios to run, from S1 to S6 (default: all six)
+  BENCH_SCENARIOS            comma-separated scenarios to run, from S1 to S6 and S1-shadow (default: all)
   BENCH_SERVICES             compose (default) starts disposable PostgreSQL and Valkey;
                              external uses the ones OLP_TEST_DATABASE_URL and OLP_TEST_VALKEY_URL
                              name, whose user may create databases
@@ -33,12 +33,14 @@ EOF
 [[ $# -eq 0 ]] || { [[ $1 == -h || $1 == --help ]] && usage 0; usage; }
 
 # Validate the scenario list before it becomes a regular expression.
-scenarios=${BENCH_SCENARIOS:-S1,S2,S3,S4,S5,S6}
+scenarios=${BENCH_SCENARIOS:-S1,S1-shadow,S2,S3,S4,S5,S6}
 selected=()
 IFS=',' read -r -a requested <<< "$scenarios"
 for scenario in "${requested[@]}"; do
-  [[ $scenario =~ ^S[1-6]$ ]] || { echo "BENCH_SCENARIOS must list scenarios from S1 to S6, got '$scenario'" >&2; exit 2; }
-  [[ " ${selected[*]:-} " == *" $scenario "* ]] || selected+=("$scenario")
+  [[ $scenario =~ ^(S[1-6]|S1-shadow)$ ]] || { echo "BENCH_SCENARIOS must list scenarios from S1 to S6 or S1-shadow, got '$scenario'" >&2; exit 2; }
+  # A scenario's test is named without the hyphen: S1-shadow runs TestScenarioS1Shadow.
+  test=${scenario/-shadow/Shadow}
+  [[ " ${selected[*]:-} " == *" $test "* ]] || selected+=("$test")
 done
 run_pattern="^TestScenario($(IFS='|'; echo "${selected[*]}"))\$"
 services=${BENCH_SERVICES:-compose}

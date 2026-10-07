@@ -18,6 +18,7 @@
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import { validateApiKey } from '$lib/features/access/api-keys/keyValidation';
   import {
+    admissionPriorities,
     buildApiKeyPolicyInput,
     createApiKeyFormState,
     expiryUnchanged,
@@ -121,7 +122,9 @@
       dailyCostLimit: form.dailyCostLimit,
       monthlyCostLimit: form.monthlyCostLimit,
       // An untouched expiry is not re-sent, so it needs no future check.
-      expiresAt: expiryUnchanged(form, editing) ? undefined : form.expiresAt
+      expiresAt: expiryUnchanged(form, editing) ? undefined : form.expiresAt,
+      priority: form.priority,
+      maxPriority: form.maxPriority
     });
     if (Object.keys(errors).length) {
       await focusFormError(root);
@@ -430,6 +433,41 @@
             class="field-error"
             id="concurrency-error">{errors.maxConcurrency}</small
           >{/if}
+      </div>
+      <div class="form-field">
+        <label for="priority">Admission priority</label><select
+          id="priority"
+          bind:value={form.priority}
+          disabled={!canManage}
+          aria-invalid={errors.priority ? 'true' : undefined}
+          aria-describedby={errors.priority
+            ? 'priority-error'
+            : 'priority-help'}
+          ><option value="">Normal</option
+          >{#each admissionPriorities as priority (priority)}<option
+              value={priority}>{priority}</option
+            >{/each}</select
+        >
+        <small id="priority-help" class="section-help"
+          >The class a saturated gateway queues this key's requests in.</small
+        >{#if errors.priority}<small class="field-error" id="priority-error"
+            >{errors.priority}</small
+          >{/if}
+      </div>
+      <div class="form-field">
+        <label for="max-priority">Highest requestable priority</label><select
+          id="max-priority"
+          bind:value={form.maxPriority}
+          disabled={!canManage}
+          aria-describedby="max-priority-help"
+          ><option value="">Its default</option
+          >{#each admissionPriorities as priority (priority)}<option
+              value={priority}>{priority}</option
+            >{/each}</select
+        >
+        <small id="max-priority-help" class="section-help"
+          >Callers may ask for up to this class in the X-OLP-Routing header.</small
+        >
       </div>
     </div>
   </section>

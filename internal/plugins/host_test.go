@@ -142,6 +142,26 @@ func TestReferencePluginSignsWithAnHMACOfItsCredential(t *testing.T) {
 	}
 }
 
+// A confined plugin judges route selectors by request features alone.
+func TestReferencePluginJudgesRouteSelectors(t *testing.T) {
+	t.Parallel()
+	host, _ := newTestHost(t, Interpreted, DefaultLimits, nil, testutil.BuildPlugin(t, "./sdk/plugin/reference"))
+	for _, tc := range []struct {
+		features abi.RoutePredicate
+		want     bool
+	}{
+		{abi.RoutePredicate{Operation: "generation", Tools: true}, true},
+		{abi.RoutePredicate{Operation: "generation", ReasoningEffort: "high", InputTokens: 8000}, true},
+		{abi.RoutePredicate{Operation: "generation", ReasoningEffort: "high", InputTokens: 80}, false},
+	} {
+		tc.features.Route, tc.features.Selector = "assistant", "agentic"
+		match, err := host.RoutePredicate(t.Context(), "reference", tc.features)
+		if err != nil || match != tc.want {
+			t.Fatalf("%+v: match %v, %v", tc.features, match, err)
+		}
+	}
+}
+
 // A host compiles a plugin's module once and serves later calls from the
 // instances it keeps, so no request compiles or instantiates anything.
 func TestHostCompilesAPluginOnceAndReusesItsInstances(t *testing.T) {

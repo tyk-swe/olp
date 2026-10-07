@@ -53,7 +53,10 @@ type Config struct {
 	AdmissionPool *observability.Pool
 	// Signer runs the signing hooks of plugin profiles. Without one, a
 	// provider whose profile declares signing authorizes no request.
-	Signer connectors.Signer
+	// Predicates runs the route_predicate hooks of confined plugins that
+	// route selectors name. Without it plugin predicates never match.
+	Predicates RoutePredicates
+	Signer     connectors.Signer
 	// Carrier runs the unconfined plugins that carry their profiles' traffic.
 	// Without one, a provider whose profile's plugin carries its traffic
 	// sends no request.
@@ -62,6 +65,9 @@ type Config struct {
 	// plugins. Elsewhere, the gateway refuses targets of providers whose
 	// plugin is unconfined.
 	UnconfinedPlugins bool
+	// MaxShadowInFlight bounds the mirrored requests in flight on this
+	// gateway; mirrors beyond it are dropped. Zero means the default.
+	MaxShadowInFlight int
 }
 
 // Runtime is the pinned authority, release and credential source.
@@ -109,8 +115,13 @@ type Server struct {
 	auth        *connectors.Auth
 	admission   *observability.Pool
 	health      *healthTracker
-	now         func() time.Time
-	counted     func(estimate.Family)
+	fleet       *fleetHealth
+	// unhealthy is fleet.unhealthy bound once, so selection never allocates
+	// a method value per request.
+	unhealthy func(string) bool
+	shadows   *shadowing
+	now       func() time.Time
+	counted   func(estimate.Family)
 }
 
 // upstreamHeaderTimeout caps the wait for upstream response headers; the
@@ -136,6 +147,9 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 	if err := estimate.Preload(); err != nil {
 		log.Warn("tokenizer unavailable; its models are estimated by the four-characters-per-token rule", "error", err.Error())
 	}
+	health := newHealthTracker(time.Now)
+	health.changes = make(chan circuitChange, 64)
+	fleet := &fleetHealth{now: time.Now}
 	return &Server{
 		Runtime:     rt,
 		Sink:        LogSink{Log: log},
@@ -146,7 +160,10 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 		connections: egress.NewConnectionClientCache(128),
 		auth:        auth,
 		admission:   pool,
-		health:      newHealthTracker(time.Now),
+		health:      health,
+		fleet:       fleet,
+		unhealthy:   fleet.unhealthy,
+		shadows:     newShadowing(cfg.MaxShadowInFlight),
 		now:         time.Now,
 	}
 }
@@ -292,13 +309,38 @@ func ClientIP(r *http.Request, trusted []netip.Prefix) string {
 
 // admit takes an inference slot. When the public admission middleware already
 // charged this request the context carries its permit and no second slot is
-// taken; otherwise the server's own pool bounds the call, so direct handler
-// use (and any composition that skips the middleware) stays bounded.
+// taken; a permit the middleware only queued waits here in the normal class.
+// Otherwise the server's own pool bounds the call, so direct handler use (and
+// any composition that skips the middleware) stays bounded.
 func (s *Server) admit(ctx context.Context) bool {
+	if permit := observability.PermitFromContext(ctx); permit != nil {
+		return permit.Await(ctx, observability.ClassNormal, time.Time{})
+	}
+	return s.admission.Acquire()
+}
+
+// admitLater is admit for requests that resolve their key and priority
+// first: a queued permit is left waiting for awaitAdmission.
+func (s *Server) admitLater(ctx context.Context) bool {
 	if observability.PermitFromContext(ctx) != nil {
 		return true
 	}
 	return s.admission.Acquire()
+}
+
+// awaitAdmission waits for the slot a queued request reserved, in its
+// priority class and never past ctx's deadline, then answers the same 503 a
+// full pool does. A request admitted outright returns at once.
+func (s *Server) awaitAdmission(ctx context.Context, x *execution) *Error {
+	permit := observability.PermitFromContext(ctx)
+	if !permit.Queued() {
+		return nil
+	}
+	deadline, _ := ctx.Deadline()
+	if permit.Await(ctx, observability.ClassOf(x.priority), deadline) {
+		return nil
+	}
+	return overloaded
 }
 
 // release returns the slot admit took, whether that was the outer permit or
@@ -360,9 +402,30 @@ func bodyReadError(err error) *Error {
 	return invalidRequest("invalid_request", "The request body could not be read.", nil)
 }
 
-// routingHeader carries per-request preferences for weighted, price, latency,
-// or throughput routing. Preferences can only lower the published attempt budget.
+// routingHeader carries per-request routing preferences and the admission
+// priority. Preferences can only lower the published attempt budget, and the
+// priority can only stay within the key's ceiling.
 const routingHeader = "X-OLP-Routing"
+
+// routingControls reads the routing header and resolves the request's
+// admission class: the key's own priority unless the header asks for another
+// within the key's ceiling. Asking above it is refused like any other budget
+// increase.
+func routingControls(r *http.Request, policy access.KeyPolicy) (*runtime.Preferences, string, *Error) {
+	preferences, e := routingPreferences(r)
+	if e != nil {
+		return nil, "", e
+	}
+	if preferences == nil || preferences.Priority == nil {
+		return preferences, policy.DefaultPriority(), nil
+	}
+	priority, ceiling := *preferences.Priority, policy.PriorityCeiling()
+	if access.PriorityRank(priority) < access.PriorityRank(ceiling) {
+		param := routingHeader
+		return nil, "", invalidRequest("priority_increase_forbidden", "This API key may request priority "+ceiling+" at most.", &param)
+	}
+	return preferences, priority, nil
+}
 
 func routingPreferences(r *http.Request) (*runtime.Preferences, *Error) {
 	values := r.Header.Values("X-OLP-Routing")
@@ -453,6 +516,11 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			// client is gone: a concurrency slot nobody releases is a slot
 			// every replica keeps counting.
 			s.settleAdmission(r.Context(), x)
+			// Mirrors start once the caller's response is complete, so they
+			// never add to its latency.
+			if out != nil {
+				s.mirror(x)
+			}
 		}()
 		// A context timeout alone cannot interrupt a blocked socket read.
 		rc := http.NewResponseController(w)
@@ -462,7 +530,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			writeError(w, e)
 			return
 		}
-		if !s.admit(r.Context()) {
+		if !s.admitLater(r.Context()) {
 			x.failure, status = overloaded, overloaded.Status
 			writeError(w, overloaded)
 			return
@@ -474,7 +542,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			writeError(w, e)
 			return
 		}
-		x.keyID, x.affinity = authority.ID, []byte(authority.ID)
+		x.keyID, x.affinity, x.mirrors = authority.ID, []byte(authority.ID), true
 		x.budgetGroupID = authority.BudgetGroupID
 		x.responseMetadata = authority.Policy.ResponseMetadata
 		x.authority = authority
@@ -538,22 +606,12 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 				return
 			}
 		}
-		if x.preferences, e = routingPreferences(r); e != nil {
+		if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
 		}
-		if e := s.prepare(r.Context(), x, func(route *runtime.Route) *Error {
-			if !authority.Allows("inference", route.Slug, x.request.release.Snapshot.Routes[route.Slug].ProjectID, s.now()) {
-				return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
-			}
-			return nil
-		}); e != nil {
-			x.failure, status = e, e.Status
-			writeError(w, e)
-			return
-		}
-		if e := s.enforceContentPolicy(x); e != nil {
+		if e := s.prepare(r.Context(), x, s.keyAuthorizer(authority)); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
@@ -564,11 +622,16 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		// The lease outlives the route deadline it is sized against: it is the
 		// backstop for a replica that dies mid-request, not the deadline.
 		x.estimate = requestEstimate(x)
-		overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
+		overall := time.Duration(x.named().OverallTimeout) * time.Millisecond
 		// Admission is part of the same deadline as execution; starting a new
 		// full deadline afterwards could outlive the concurrency reservation.
-		ctx, cancel := context.WithTimeout(r.Context(), overall)
+		ctx, cancel := x.routeContext(r.Context())
 		defer cancel()
+		if e = s.awaitAdmission(ctx, x); e != nil {
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
 		reservationEstimate := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
 		if x.lease, e = s.Admission.reserveKeyCosted(ctx, authority, x.clientSurface(), reservationEstimate, overall, s.costReservation(x, authority)); e != nil {
 			x.failure, status = e, e.Status
@@ -654,8 +717,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 	if x.parsed.Stream {
 		x.mode = "streaming"
 	}
-	snapshot := x.snapshot()
-	route, ok := snapshot.Routes[x.parsed.Route]
+	route, ok := x.snapshot().Routes[x.parsed.Route]
 	if !ok {
 		return modelNotFound(x.parsed.Route)
 	}
@@ -667,9 +729,19 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 		if e := s.pinAttempts(ctx, x); e != nil {
 			return e
 		}
-		snapshot = x.snapshot()
-		route = *x.route
 	}
+	// A pinned resource, a continuation and provider state belong to the
+	// route that holds them, so those requests never leave it.
+	x.bind(canonicalPlanner, authorize, x.pin != nil || x.continuation != nil || x.providerState)
+	return s.planNamed(ctx, x)
+}
+
+// planCanonical plans x.route for a canonical request and applies the route's
+// content policy to it. A selector that delegates moves the request on to its
+// route, which is planned in turn.
+func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
+	snapshot := x.snapshot()
+	route := *x.route
 	if x.strict() {
 		if x.actor == "playground" {
 			param := "client_contract"
@@ -689,7 +761,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 	var semantic error
 	var policyDecisions []contentpolicy.Decision
 	source := x.summarizeSource()
-	options := s.selectionOptions(x)
+	options := s.selectionOptions(ctx, x)
 	// A target's context window is weighed against the request as the model that
 	// would serve it counts it, so the demand follows the target.
 	options.Parameters = source.parameters
@@ -750,6 +822,7 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 			options.Effective = nil
 		}
 	}
+	options.Preferences = x.legPreferences()
 	plan, err := runtime.PlanRequest(snapshot, route.Slug, x.family.Operation(), x.family.Surface(), x.mode, x.affinity, options)
 	if err != nil {
 		var se *runtime.SelectionError
@@ -758,10 +831,10 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 		}
 		return requestError(err)
 	}
-	x.decisions = plan.Decisions
-	x.policy = plan.Policy
-	x.attempts = plan.Attempts
-	x.budget = plan.Budget
+	if plan.Delegate != "" {
+		return s.delegate(ctx, x, plan)
+	}
+	x.adoptPlan(plan)
 	if len(plan.Attempts) == 0 {
 		if semantic != nil {
 			for _, decision := range policyDecisions {
@@ -779,9 +852,9 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}
 	if x.pin != nil {
-		x.budget = 1
+		x.budget, x.allowance = 1, 1
 	}
-	return nil
+	return s.enforceContentPolicy(x)
 }
 
 // modelObject renders a route as an OpenAI model object.

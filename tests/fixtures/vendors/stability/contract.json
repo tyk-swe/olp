@@ -22,6 +22,6 @@
       "code": "",
       "message": "Your request was flagged by our content moderation system."
     },
-    "class": "upstream_client"
+    "class": "content_filter"
   }
 }

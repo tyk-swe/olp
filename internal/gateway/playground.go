@@ -275,11 +275,6 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 		s.finish(x, nil, e.Status)
 		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
 	}
-	if e := s.enforceContentPolicy(x); e != nil {
-		x.failure = e
-		s.finish(x, nil, e.Status)
-		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
-	}
 	x.estimate = requestEstimate(x)
 	if !s.admit(r.Context()) {
 		x.failure = overloaded
@@ -336,7 +331,7 @@ func (p *Playground) response(x *execution, out *outcome, in playgroundRequest) 
 	if in.operation() != "generation" {
 		res := map[string]any{
 			"id":          x.request.id,
-			"model":       x.route.Slug,
+			"model":       x.named().Slug,
 			"output_text": "",
 			"tool_calls":  []map[string]any{},
 			"latency_ms":  p.Gateway.now().Sub(x.request.startedAt).Milliseconds(),
@@ -359,7 +354,7 @@ func (p *Playground) response(x *execution, out *outcome, in playgroundRequest) 
 	}
 	res := map[string]any{
 		"id":          x.request.id,
-		"model":       x.route.Slug,
+		"model":       x.named().Slug,
 		"output_text": c.OutputText,
 		"tool_calls":  tools,
 		"latency_ms":  p.Gateway.now().Sub(x.request.startedAt).Milliseconds(),
@@ -410,11 +405,6 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 	s := p.Gateway
 	x := p.execution(r, principal, parsed, family, in.Routing)
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
-		x.failure = e
-		s.finish(x, nil, e.Status)
-		return access.Fail(e.Status, e.Code, e.Message)
-	}
-	if e := s.enforceContentPolicy(x); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
 		return access.Fail(e.Status, e.Code, e.Message)
@@ -492,7 +482,7 @@ func (sw *playgroundStreamWriter) finish(x *execution, out *outcome) {
 	}
 	meta := map[string]any{
 		"id":      x.request.id,
-		"model":   x.route.Slug,
+		"model":   x.named().Slug,
 		"routing": routingEvidence(x),
 	}
 	if out.completion != nil && out.completion.Usage != nil {

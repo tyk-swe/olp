@@ -286,6 +286,27 @@ func TestReserveGivesBackAnEstimateWhoseOutcomeIsUnknown(t *testing.T) {
 	}
 }
 
+func TestIncreasingCostPreservesTheOriginalLeaseWhenTheReplyIsLost(t *testing.T) {
+	server := &scripted{answer: answering(t, map[string][2]any{"reserve_cost": {costGranted, nil}, "settle_cost": {costSettled, nil}})}
+	limiter := &Limiter{client: server, namespace: "olp:test"}
+	request := costRequest(false)
+	lease, err := limiter.Reserve(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.answer = answering(t, map[string][2]any{"reserve_cost": {nil, lostReply}, "settle_cost": {costSettled, nil}})
+	request.CostEstimate, request.RetainCostReservation = "0.5", true
+	if _, err := limiter.Reserve(t.Context(), request); !isService(err) {
+		t.Fatalf("increase error = %v, want the lost reply", err)
+	}
+	if server.ran(settleCostScript) != 0 {
+		t.Fatal("an ambiguous increase released the original reservation")
+	}
+	if err := lease.Refund(t.Context()); err != nil || server.ran(settleCostScript) != 1 {
+		t.Fatalf("original lease did not release its reservation: %v", err)
+	}
+}
+
 func isService(err error) bool {
 	_, ok := errors.AsType[*ServiceError](err)
 	return ok

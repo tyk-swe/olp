@@ -1,10 +1,13 @@
 package usage
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -91,8 +94,9 @@ const markReceiptPersistedSQL = `UPDATE olp.request_metadata_event_receipts
 const insertRequestSQL = `INSERT INTO olp.requests
         (id, runtime_generation_id, api_key_id, budget_group_id, route_slug, operation, surface,
          started_at, completed_at, status_code, error_class, total_latency_ms, first_byte_ms,
-         attempt_count, created_at, attribution, policy_decisions)
-    VALUES ($1::uuid, $2::uuid, $3::uuid, $14::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $8, $15::jsonb, $16::jsonb)
+         attempt_count, created_at, attribution, policy_decisions, origin, parent_request_id)
+    VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, $14::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $8,
+            $15::jsonb, $16::jsonb, $17, $18::uuid)
     ON CONFLICT (id, started_at) DO NOTHING`
 
 const insertAttemptSQL = `INSERT INTO olp.attempts
@@ -120,11 +124,11 @@ const insertFactSQL = `INSERT INTO olp.attempt_usage_facts
          provider_unpriced_counted, model_unpriced_counted, target_unpriced_counted,
          request_incomplete_counted, provider_incomplete_counted,
          model_incomplete_counted, target_incomplete_counted, attribution,
-         estimated_input_tokens, estimate_provenance, model_family)
-    VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, $24::uuid, $7::uuid, $8, $9, $10, $11, $12,
+         estimated_input_tokens, estimate_provenance, model_family, selector, baseline_cost)
+    VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NULLIF($6, '')::uuid, $24::uuid, $7::uuid, $8, $9, $10, $11, $12,
             $13, $14, $15, $16, $17, $18, $25, $26, $27, $19::numeric, $20::numeric, $21, $22::uuid, $23,
             false, false, false, false, false, false, false, false, false, false, false, false, $28::jsonb,
-            $29, $30, $31)
+            $29, $30, $31, $32, $33::numeric)
     ON CONFLICT (request_id, attempt_ordinal) DO NOTHING`
 
 // factTotalsSQL sums exactly the facts this event inserted. The receipt
@@ -252,14 +256,22 @@ func PersistEventTx(ctx context.Context, tx pgx.Tx, ev *Event, payload []byte) (
 	if _, err = tx.Exec(ctx, insertAnchorSQL, ev.RequestID, ev.RequestStartedAt); err != nil {
 		return Persisted{}, fmt.Errorf("persist request metadata anchor: %w", err)
 	}
+	supply := map[string]limits.CostSnapshot{}
 	for _, attempt := range validated.Attempts {
-		if err = insertFact(ctx, tx, ev, attempt); err != nil {
+		charge, err := insertFact(ctx, tx, ev, attempt)
+		if err != nil {
+			return Persisted{}, err
+		}
+		if err = chargeSupply(ctx, tx, ev, attempt, charge, supply); err != nil {
 			return Persisted{}, err
 		}
 	}
 	snapshots, err := applyCostDelta(ctx, tx, ev)
 	if err != nil {
 		return Persisted{}, err
+	}
+	for _, owner := range slices.Sorted(maps.Keys(supply)) {
+		snapshots = append(snapshots, supply[owner])
 	}
 	if _, err = tx.Exec(ctx, recomputeMarkersSQL, ev.RequestID); err != nil {
 		return Persisted{}, fmt.Errorf("recompute usage markers: %w", err)
@@ -343,7 +355,8 @@ func insertRequestRows(ctx context.Context, tx pgx.Tx, ev *Event, validated *Val
 		ev.RouteSlug, ev.Operation, ev.Surface, ev.RequestStartedAt, ev.RequestCompletedAt,
 		validated.StatusCode, ev.ErrorClass, validated.LatencyMS, validated.FirstByteMS,
 		validated.AttemptCount, ev.BudgetGroupID, string(AttributionJSON(ev.Attribution)),
-		string(contentpolicy.DecisionsJSON(ev.PolicyDecisions))); err != nil {
+		string(contentpolicy.DecisionsJSON(ev.PolicyDecisions)), cmp.Or(ev.Origin, OriginCaller),
+		ev.ParentRequestID); err != nil {
 		return fmt.Errorf("persist request metadata request: %w", err)
 	}
 	for _, attempt := range validated.Attempts {
@@ -366,7 +379,7 @@ func insertRequestRows(ctx context.Context, tx pgx.Tx, ev *Event, validated *Val
 // attempt that never reached a provider is not billable and carries no price; an
 // attempt whose evidence never arrived is billing uncertain, priced if it can
 // be, and never counted as complete.
-func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAttempt) error {
+func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAttempt) (factCharge, error) {
 	usage := attempt.Usage
 	status := chargeNotBillable
 	switch {
@@ -379,7 +392,7 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAtte
 	if status != chargeNotBillable {
 		var err error
 		if pricing, err = priceAttempt(ctx, tx, ev, attempt); err != nil {
-			return err
+			return factCharge{}, err
 		}
 	}
 	usageComplete := status == chargeNotBillable || usage.Complete
@@ -389,6 +402,16 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAtte
 	successfulWithoutUsage := !usage.Observed && attempt.Attempt.ErrorClass == nil &&
 		attempt.StatusCode != nil && *attempt.StatusCode >= 200 && *attempt.StatusCode <= 299
 	unpriced := status != chargeNotBillable && (successfulWithoutUsage || !pricing.complete)
+	var selector, baselineCost *string
+	if routing := attempt.Attempt.Routing; routing != nil {
+		selector = routing.Selector
+		if routing.Baseline != nil && pricing.estimatedCost != nil {
+			var err error
+			if baselineCost, err = priceBaseline(ctx, tx, ev, attempt); err != nil {
+				return factCharge{}, err
+			}
+		}
+	}
 	if _, err := tx.Exec(ctx, insertFactSQL,
 		attempt.Attempt.ID, ev.EventID, ev.RequestID, ev.RequestStartedAt, attempt.Ordinal,
 		ev.APIKeyID, attempt.Attempt.ProviderID, ev.RouteSlug, attempt.Attempt.UpstreamModel,
@@ -398,8 +421,43 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAtte
 		ev.BudgetGroupID, usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens,
 		usage.CacheWrite1HInputTokens, string(AttributionJSON(ev.Attribution)),
 		attempt.Attempt.EstimatedInputTokens, attempt.Attempt.EstimateProvenance, attempt.Attempt.ModelFamily,
+		selector, baselineCost,
 	); err != nil {
-		return fmt.Errorf("persist attempt usage fact: %w", err)
+		return factCharge{}, fmt.Errorf("persist attempt usage fact: %w", err)
+	}
+	return factCharge{billable: status != chargeNotBillable, cost: pricing.estimatedCost, unpriced: unpriced}, nil
+}
+
+// factCharge is what one attempt fact may be charged: its estimated cost, nil
+// when it has none, and whether it is billable without a price.
+type factCharge struct {
+	billable bool
+	cost     *string
+	unpriced bool
+}
+
+// chargeSupply folds a billable attempt's charge into the spend windows of
+// every capped route, connection and slot it was dispatched against, keeping
+// each owner's latest balance. The balances name the request, so installing
+// them also removes what the gateway reserved against those caps.
+func chargeSupply(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAttempt, charge factCharge, balances map[string]limits.CostSnapshot) error {
+	if !charge.billable || attempt.Attempt.Routing == nil {
+		return nil
+	}
+	cost, unpriced := "0", int64(0)
+	if charge.cost != nil {
+		cost = *charge.cost
+	}
+	if charge.unpriced {
+		unpriced = 1
+	}
+	for _, owner := range attempt.Attempt.Routing.Budgets {
+		snapshot, err := limits.AddSupplyCostDelta(ctx, tx, owner, ev.ObservedAt, cost, unpriced)
+		if err != nil {
+			return fmt.Errorf("apply supply cost delta: %w", err)
+		}
+		snapshot.RequestID = ev.RequestID
+		balances[owner] = snapshot
 	}
 	return nil
 }
@@ -414,7 +472,9 @@ func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) ([]limits.CostSna
 	if err := tx.QueryRow(ctx, factTotalsSQL, ev.EventID).Scan(&facts, &cost, &unpriced); err != nil {
 		return nil, fmt.Errorf("total attempt usage facts: %w", err)
 	}
-	if facts == 0 {
+	// Keyless requests are the installation's own: they spend from no key's
+	// or group's budget.
+	if facts == 0 || ev.APIKeyID == "" {
 		return nil, nil
 	}
 	snapshot, err := limits.AddCostDelta(ctx, tx, ev.APIKeyID, ev.ObservedAt, cost, unpriced)

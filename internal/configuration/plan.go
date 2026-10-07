@@ -1,6 +1,7 @@
 package configuration
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -413,8 +414,8 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 					return nil, err
 				}
 			}
-			if !providers.ValidQuota(slot.Limits) {
-				return nil, access.Invalid(sfield, "Use positive limits: requests and concurrency at most 2147483647, tokens at most 9007199254740991.")
+			if err := providers.ValidLimits(sfield+".limits", slot.Limits); err != nil {
+				return nil, err
 			}
 			if slot.CredentialRef != nil {
 				want := CredentialRef(p.Name, slot.Name)
@@ -487,6 +488,12 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 				return nil, err
 			}
 		}
+		tagged := func(tag string) bool {
+			return slices.ContainsFunc(rt.Targets, func(t TargetEntry) bool { return t.Shadow == nil && slices.Contains(t.Tags, tag) })
+		}
+		if err := rt.behavior().Validate(rt.Slug, tagged); err != nil {
+			return nil, err
+		}
 		for j, t := range rt.Targets {
 			tfield := prefix + ".targets." + strconv.Itoa(j)
 			provider, ok := docProviders[strings.ToLower(t.Provider)]
@@ -503,6 +510,18 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 			if lower(rt.Project) != lower(provider.Project) {
 				return nil, access.Fail(422, "target_project_mismatch", "Target "+strconv.Itoa(j)+" belongs to a different project than the route.")
 			}
+		}
+	}
+	templateNames := map[string]bool{}
+	for i := range doc.Templates {
+		t := &doc.Templates[i]
+		field := "templates." + strconv.Itoa(i)
+		if templateNames[t.Name] {
+			return nil, access.Invalid(field+".name", "Template names must be unique.")
+		}
+		templateNames[t.Name] = true
+		if err := t.normalize(); err != nil {
+			return nil, withFieldPrefix(err, field)
 		}
 	}
 	if doc.Pricing != nil {
@@ -729,6 +748,27 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			}
 		}
 	}
+	current, err := exportTemplates(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	for i := range doc.Templates {
+		desired := &doc.Templates[i]
+		if desired.Project != nil && !projectNames[strings.ToLower(*desired.Project)] {
+			result.blocker("route_template", desired.Name, "project_unknown")
+		}
+		existing := templateNamed(current, desired.Name)
+		switch {
+		case existing == nil:
+			result.item("route_template", desired.Name, "create", "")
+		case lower(existing.Project) != lower(desired.Project):
+			result.conflict("route_template", desired.Name, "route_template_project_mismatch")
+		case sameTemplate(desired, existing):
+			result.item("route_template", desired.Name, "noop", "")
+		default:
+			result.item("route_template", desired.Name, "replace", "")
+		}
+	}
 	if doc.Pricing != nil {
 		changed, err := s.pricingChanged(ctx, q, doc)
 		if err != nil {
@@ -869,8 +909,11 @@ func (s *Server) currentProviderEntry(ctx context.Context, q access.Queryer, p *
 
 func (s *Server) currentRouteEntry(ctx context.Context, q access.Queryer, draftID string, desired *RouteEntry, state *stateView) (*RouteEntry, error) {
 	entry := &RouteEntry{Slug: desired.Slug, Project: desired.Project}
-	var operations, targets []byte
-	if err := q.QueryRow(ctx, "SELECT operations,overall_timeout_ms,max_attempts,targets,content_policy,fidelity FROM olp.route_drafts WHERE id=$1", draftID).Scan(&operations, &entry.OverallTimeoutMS, &entry.MaxAttempts, &targets, &entry.ContentPolicy, &entry.Fidelity); err != nil {
+	var operations, targets, behavior []byte
+	if err := q.QueryRow(ctx, "SELECT operations,overall_timeout_ms,max_attempts,targets,content_policy,fidelity,behavior FROM olp.route_drafts WHERE id=$1", draftID).Scan(&operations, &entry.OverallTimeoutMS, &entry.MaxAttempts, &targets, &entry.ContentPolicy, &entry.Fidelity, &behavior); err != nil {
+		return nil, err
+	}
+	if err := entry.setBehavior(behavior); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &entry.Operations); err != nil {
@@ -881,7 +924,7 @@ func (s *Server) currentRouteEntry(ctx context.Context, q access.Queryer, draftI
 		return nil, err
 	}
 	for _, t := range published {
-		entry.Targets = append(entry.Targets, TargetEntry{Provider: t.ProviderName, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int(t.TimeoutMS)})
+		entry.Targets = append(entry.Targets, targetEntry(t))
 	}
 	var policy []byte
 	err := q.QueryRow(ctx, "SELECT policy FROM olp.routing_policies WHERE scope='route-draft' AND scope_id=$1", draftID).Scan(&policy)
@@ -928,4 +971,37 @@ func bindingFingerprint(doc *Document, digest string, bindings map[string]string
 		sealed = append(sealed, map[string]string{"ref": name, "sha256": hex.EncodeToString(sum[:])})
 	}
 	return map[string]any{"document_digest": digest, "expected_digest": expected, "secret_bindings": sealed}
+}
+
+func templateNamed(templates []TemplateEntry, name string) *TemplateEntry {
+	for i := range templates {
+		if templates[i].Name == name {
+			return &templates[i]
+		}
+	}
+	return nil
+}
+
+// sameTemplate compares two normalized templates, ignoring project name case.
+func sameTemplate(a, b *TemplateEntry) bool {
+	x, y := *a, *b
+	x.Project, y.Project = nil, nil
+	if x.normalize() != nil || y.normalize() != nil {
+		return false
+	}
+	left, _ := json.Marshal(x)
+	right, _ := json.Marshal(y)
+	return bytes.Equal(left, right)
+}
+
+// withFieldPrefix places a validation problem under the document field that
+// holds the value it names.
+func withFieldPrefix(err error, prefix string) error {
+	var problem *access.Problem
+	if errors.As(err, &problem) && problem.Field != "" {
+		copied := *problem
+		copied.Field = prefix + "." + problem.Field
+		return &copied
+	}
+	return err
 }

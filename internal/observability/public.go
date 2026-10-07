@@ -14,10 +14,12 @@ const RetryAfterOverload = "1"
 
 // PublicAdmission bounds the whole public listener before routing: every
 // request is charged against its surface's pool, and a full pool rejects
-// without queueing. Inference surfaces take the inference pool and every
+// unless its queue has room. Inference surfaces take the inference pool and every
 // other public request takes the management pool, so a flood of console or
-// management calls cannot starve inference, and vice versa. The permit rides the request context so inner handlers
-// can release it early; the final release runs when the handler returns.
+// management calls cannot starve inference, and vice versa. The permit rides
+// the request context so inner handlers can await a queued slot once they know
+// the request's priority, or release it early; the final release runs when the
+// handler returns.
 type PublicAdmission struct {
 	Inference  *Pool
 	Management *Pool
@@ -40,7 +42,7 @@ func (a *PublicAdmission) Wrap(next http.Handler) http.Handler {
 		if classified.Inference && a.InferenceEnabled {
 			pool = a.Inference
 		}
-		permit := pool.AcquirePermit()
+		permit := pool.Enter()
 		if permit == nil {
 			w.Header().Set("Retry-After", RetryAfterOverload)
 			a.Reject(w, r, classified.Name)

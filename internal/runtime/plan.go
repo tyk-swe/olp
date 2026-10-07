@@ -2,9 +2,11 @@ package runtime
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
+	"math/big"
 	"slices"
 	"time"
 
@@ -52,6 +54,24 @@ type SelectionOptions struct {
 	UnconfinedPlugins bool
 	Accept            func(Provider, Target) error
 	Effective         func(Provider, Target) (Names, *TokenDemand)
+	// Supply reads the live capacity and spend state the plan needs in one
+	// round trip, bounded by Context. The planner reads it at most once, and
+	// only when the capacity strategy or a spend cap applies.
+	Context context.Context
+	Supply  SupplyReader
+	// Unhealthy reports a provider that fleet health avoids. Its targets stay
+	// eligible but move to the end of the attempt order.
+	Unhealthy func(providerID string) bool
+	// Features describe the request to route selectors, which are not
+	// evaluated without them.
+	Features *Features
+	// Evaluate decides a selector's classifier or plugin predicate.
+	Evaluate func(Selector) PredicateResult
+	// Permitted reports whether the key may use a route a selector delegates
+	// to.
+	Permitted func(Route) bool
+	// Mirror seeds shadow sampling; without it no shadow target is sampled.
+	Mirror []byte
 }
 type Decision struct {
 	Incompatibility       *Incompatibility    `json:"incompatibility,omitempty"`
@@ -72,6 +92,10 @@ type Decision struct {
 	RequestedOutputTokens *int64              `json:"requested_output_tokens"`
 	ContextLength         *int64              `json:"context_length"`
 	MaxOutputTokens       *int64              `json:"max_output_tokens"`
+	Selector              *string             `json:"selector,omitempty"`
+	Shadow                bool                `json:"shadow,omitempty"`
+	Unhealthy             bool                `json:"unhealthy,omitempty"`
+	Headroom              *float64            `json:"headroom,omitempty"`
 }
 
 // Incompatibility describes an unsatisfied semantic obligation without retaining
@@ -91,7 +115,62 @@ type Plan struct {
 	Decisions []Decision
 	Policy    EffectivePolicy
 	Budget    int
+	// Selectors trace the route's selectors evaluated for the request.
+	// Delegate names the route a matching selector hands the request to, in
+	// which case the plan has no attempts of its own.
+	Selectors []SelectorOutcome
+	Delegate  string
+	// Shadows are the sampled shadow targets eligible to mirror the request.
+	Shadows []Attempt
+	// Baseline is the route's most expensive eligible target when a selector
+	// narrowed the route, against which usage reports measure the selector's
+	// savings; nil without a narrowing selector or a known price.
+	Baseline *Baseline
 }
+
+// Baseline names the target a request would have cost most on.
+type Baseline struct {
+	ProviderID    string
+	UpstreamModel string
+	VendorID      string
+}
+
+// Selected is the selector that matched, or empty when none did.
+func (p Plan) Selected() string {
+	for _, outcome := range p.Selectors {
+		if outcome.Matched {
+			return outcome.ID
+		}
+	}
+	return ""
+}
+
+// Conditions names the fallback conditions a plan without attempts meets:
+// context_window when a target's context cannot hold the request, and budget
+// when a spend cap removed a target.
+func (p Plan) Conditions() []string {
+	if len(p.Attempts) > 0 || p.Delegate != "" {
+		return nil
+	}
+	var out []string
+	for _, d := range p.Decisions {
+		if d.Reason == nil || d.Shadow {
+			continue
+		}
+		condition := ""
+		switch {
+		case *d.Reason == "context_length_exceeded" || *d.Reason == "max_output_tokens_exceeded":
+			condition = FallbackContextWindow
+		case BudgetReason(*d.Reason):
+			condition = FallbackBudget
+		}
+		if condition != "" && !slices.Contains(out, condition) {
+			out = append(out, condition)
+		}
+	}
+	return out
+}
+
 type rankedCandidate struct {
 	slots      []Slot
 	skipped    []skippedSlot
@@ -99,6 +178,9 @@ type rankedCandidate struct {
 	decision   Decision
 	order      int
 	preference int
+	shadow     bool
+	// allowed marks a target that only the matching selector excluded.
+	allowed bool
 }
 
 // PlanRequest evaluates targets, orders eligible candidates, and explains the
@@ -122,18 +204,61 @@ func PlanRequest(s *Snapshot, slug, operation, surface, mode string, affinity []
 		return plan, unsupportedBudget()
 	}
 	plan.Budget = policy.Preferences.Budget(route.MaxAttempts)
-	rows, e := evaluateCandidates(s, route, operation, surface, mode, affinity, policy, options)
+	chosen := selectTargets(s, route, operation, options)
+	plan.Selectors = chosen.trace
+	if chosen.selector != nil && chosen.selector.Route != "" {
+		plan.Delegate = chosen.selector.Route
+		return plan, nil
+	}
+	rows, e := evaluateCandidates(s, route, operation, surface, mode, affinity, policy, chosen, options)
 	if e != nil {
 		return plan, e
+	}
+	capacity := policy.Strategy == "capacity"
+	if query := supplyQuery(route, rows, s, capacity && options.CheckSlots); !query.empty() {
+		var state *SupplyState
+		if options.Supply != nil {
+			state = options.Supply.ReadSupply(cmp.Or(options.Context, context.Background()), query)
+		}
+		applySupply(route, rows, s, state)
+		for i := range rows {
+			if capacity {
+				OrderSlots(rows[i].slots, state)
+			}
+			rows[i].attempt.Slots = slotIDs(rows[i].slots)
+		}
+	}
+	if chosen.selector != nil && len(chosen.selector.Tags) > 0 {
+		plan.Baseline = baseline(rows, operation)
 	}
 	orderCandidates(rows, policy.Strategy, operation)
 	plan.addCandidates(rows, options.CheckSlots)
 	return plan, nil
 }
 
+// baseline is the most expensive known-price target that would serve the
+// request but for the selector, or nil when no such price is known.
+func baseline(rows []rankedCandidate, operation string) *Baseline {
+	var most *rankedCandidate
+	var price *big.Rat
+	for i := range rows {
+		row := &rows[i]
+		if row.shadow || !row.decision.Eligible && !row.allowed {
+			continue
+		}
+		if p := row.decision.Price.Scalar(operation); p != nil && (price == nil || p.Cmp(price) > 0) {
+			most, price = row, p
+		}
+	}
+	if most == nil {
+		return nil
+	}
+	return &Baseline{ProviderID: most.attempt.ProviderID, UpstreamModel: most.attempt.UpstreamModel, VendorID: most.attempt.VendorID}
+}
+
 // evaluateCandidates preserves admission order: published eligibility and
 // source constraints precede preparation, then effective request constraints.
-func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode string, affinity []byte, policy EffectivePolicy, options SelectionOptions) ([]rankedCandidate, error) {
+func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode string, affinity []byte, policy EffectivePolicy, chosen selection, options SelectionOptions) ([]rankedCandidate, error) {
 	now := options.Now
 	if now.IsZero() {
 		now = time.Now()
@@ -145,7 +270,11 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 	rows := make([]rankedCandidate, 0, len(route.Targets))
 	for _, target := range route.Targets {
 		provider, exists := s.Providers[target.ProviderID]
-		row := rankedCandidate{decision: Decision{TargetID: target.ID, ProviderID: target.ProviderID, UpstreamModel: target.ProviderModel, Priority: target.Priority, Strategy: policy.Strategy}, order: len(policy.Preferences.Order)}
+		row := rankedCandidate{decision: Decision{TargetID: target.ID, ProviderID: target.ProviderID, UpstreamModel: target.ProviderModel, Priority: target.Priority, Strategy: policy.Strategy, Shadow: target.Shadow != nil}, order: len(policy.Preferences.Order), shadow: target.Shadow != nil}
+		if chosen.selector != nil && !row.shadow {
+			row.decision.Selector = &chosen.selector.ID
+		}
+		row.decision.Unhealthy = options.Unhealthy != nil && options.Unhealthy(target.ProviderID)
 		if provider.VendorID != "" {
 			row.decision.VendorID = &provider.VendorID
 		}
@@ -179,6 +308,13 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 			reason = "plugin_unconfined_disabled"
 		case !provider.Supports(target.ProviderModel, operation, surface, mode):
 			reason = "capability_not_certified"
+		case row.shadow && (options.Mirror == nil || !Sampled(target.ID, options.Mirror, target.Shadow.SampleRate)):
+			reason = "shadow_not_sampled"
+		case !row.shadow && !chosen.admits(target):
+			reason = "selector_excluded"
+		}
+		if reason == "selector_excluded" {
+			row.allowed = capacityReason(metadata, demand) == "" && constraintReason(policy, provider, metadata, row.decision.Price, options.Parameters) == ""
 		}
 		if reason == "" {
 			reason = capacityReason(metadata, demand)
@@ -262,6 +398,12 @@ func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 			}
 			return 1
 		}
+		if a.decision.Unhealthy != b.decision.Unhealthy {
+			if b.decision.Unhealthy {
+				return -1
+			}
+			return 1
+		}
 		if order := cmp.Compare(a.attempt.Priority, b.attempt.Priority); order != 0 {
 			return order
 		}
@@ -272,6 +414,11 @@ func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 			return order
 		}
 		switch strategy {
+		case "capacity":
+			ah, bh := a.decision.Headroom, b.decision.Headroom
+			if order := compareKnown(deref(ah), ah != nil, deref(bh), bh != nil); order != 0 {
+				return order
+			}
 		case "price":
 			ap, bp := a.decision.Price.Scalar(operation), b.decision.Price.Scalar(operation)
 			if (ap == nil) != (bp == nil) {
@@ -317,6 +464,13 @@ func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 func (plan *Plan) addCandidates(rows []rankedCandidate, checkSlots bool) {
 	ordinal := 0
 	for _, row := range rows {
+		if row.shadow {
+			if row.decision.Eligible {
+				plan.Shadows = append(plan.Shadows, row.attempt)
+			}
+			plan.Decisions = append(plan.Decisions, row.decision)
+			continue
+		}
 		if !row.decision.Eligible {
 			plan.Decisions = append(plan.Decisions, row.decision)
 			continue
@@ -456,4 +610,11 @@ func constraintReason(policy EffectivePolicy, p Provider, m ModelMetadata, price
 	}
 	return ""
 }
+func deref(v *float64) float64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
 func unsupportedBudget() error { return &SelectionError{Code: "attempt_budget_increase_forbidden"} }

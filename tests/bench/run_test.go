@@ -248,6 +248,10 @@ func provision(t *testing.T, c *console, mock *mockProcess, gw *gatewayProcess, 
 			targets = append(targets, routeTarget{Provider: provider, Priority: priority, Timeout: p.timeout()})
 		}
 	}
+	if p.Shadow {
+		shadow := c.addProvider("Bench shadow", mock.origin+"/v1", shadowModel, gw.Limits.Pool, p.Surfaces)
+		targets = append(targets, routeTarget{Provider: shadow, Timeout: p.timeout(), Shadow: true})
+	}
 	// Time for every attempt, and a little over.
 	c.addRoute(routeSlug, targets, len(p.Models), p.timeout()*time.Duration(len(p.Models))+10*time.Second)
 	budget := ""

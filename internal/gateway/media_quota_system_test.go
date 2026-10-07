@@ -8,7 +8,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,7 +21,81 @@ import (
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestIntegrationVideoCreateReservesAndSettlesSupplyCaps(t *testing.T) {
+	for _, scope := range []string{"route", "provider", "slot"} {
+		t.Run(scope, func(t *testing.T) {
+			limiter := mediaLimiter(t)
+			f := seedMediaFixture(t, "none", false)
+			f.gateway.Admission = NewAdmission(limiter, nil, f.log)
+			provider := f.snapshot.Providers[f.providerID]
+			route := f.snapshot.Routes["video-default"]
+			ceiling, owner := "1", ""
+			switch scope {
+			case "route":
+				route.Budget = &runtime.CostLimits{DailyCostLimit: &ceiling}
+				owner = route.ID
+			case "provider":
+				provider.Limits = &runtime.Limits{DailyCostLimit: &ceiling}
+				owner = provider.ID
+			case "slot":
+				provider.Slots[0].DailyCostLimit = &ceiling
+				owner = provider.Slots[0].ID
+			}
+			installBudgetBalance(t, limiter, owner)
+			f.rt.inputs = &usage.RoutingInputs{RefreshedAt: time.Now(), Prices: []usage.RoutingPrice{{Price: usage.Price{
+				ProviderKind: provider.Kind, Model: mediaVideoModel, Operation: "video_create", UnitPrice: costText("0.1"),
+			}}}}
+			started, release := make(chan struct{}), make(chan struct{})
+			blocked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				close(started)
+				<-release
+				f.upstream.srv.Config.Handler.ServeHTTP(w, r)
+			}))
+			t.Cleanup(blocked.Close)
+			t.Cleanup(func() { close(release) })
+			provider.Endpoint = blocked.URL + "/v1"
+			f.snapshot.Providers[provider.ID], f.snapshot.Routes[route.Slug] = provider, route
+			body := strings.Replace(videoCreateBody, "--video-boundary--", "--video-boundary\r\nContent-Disposition: form-data; name=\"seconds\"\r\n\r\n8\r\n--video-boundary--", 1)
+			finished := make(chan *http.Response, 1)
+			go func() {
+				finished <- f.call(t, http.MethodPost, "/v1/videos", videoCreateContentType, strings.NewReader(body))
+			}()
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("first create did not reach its provider")
+			}
+			if reserved, err := limiter.Reserved(t.Context(), owner); err != nil || reserved != "0.8" {
+				t.Fatalf("in-flight video reservation = %s, %v", reserved, err)
+			}
+			resp := f.call(t, http.MethodPost, "/v1/videos", videoCreateContentType, strings.NewReader(body))
+			refused := decodeJSON(t, resp)
+			if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, refused) != "supply_budget_exhausted" {
+				t.Fatalf("concurrent create exceeded cap: %d %v", resp.StatusCode, refused)
+			}
+			release <- struct{}{}
+			resp = <-finished
+			created := decodeJSON(t, resp)
+			if resp.StatusCode != http.StatusCreated {
+				t.Fatalf("admitted create: %d %v", resp.StatusCode, created)
+			}
+			f.awaitCompleted(t, 2)
+			env := f.sink.last(t)
+			if len(env.Attempts) != 1 || !slices.Contains(env.Attempts[0].Budgets, owner) {
+				t.Fatalf("missing supply budget accounting: %+v", env)
+			}
+			if reserved, err := limiter.Reserved(t.Context(), owner); err != nil || reserved != "0.8" {
+				t.Fatalf("settled video cost = %s, %v", reserved, err)
+			}
+			if f.upstream.createCalls.Load() != 1 {
+				t.Fatal("cap-refused create reached upstream")
+			}
+		})
+	}
+}
 
 func TestIntegrationVideoCreateReservesAndSettlesSharedQuotas(t *testing.T) {
 	for _, scope := range []string{"key", "provider", "credential"} {
@@ -42,11 +118,11 @@ func TestIntegrationVideoCreateReservesAndSettlesSharedQuotas(t *testing.T) {
 				request = keyRequest(authority, 0, time.Minute)
 			case "provider":
 				provider.Limits = &runtime.Limits{RequestsPerMinute: &one, MaxConcurrency: &one}
-				request = connectionRequest(&provider, 0, time.Minute)
+				request = connectionRequest(&provider, 0, time.Minute, "")
 			case "credential":
 				provider.Slots[0].RequestsPerMinute = &one
 				provider.Slots[0].MaxConcurrency = &one
-				request = slotRequest(&provider.Slots[0], 0, time.Minute)
+				request = slotRequest(&provider.Slots[0], 0, time.Minute, "")
 			}
 			f.snapshot.Providers[f.providerID] = provider
 			held, err := limiter.Reserve(t.Context(), request)
@@ -131,11 +207,11 @@ func TestIntegrationVideoLifecycleReservesAndSettlesSharedQuotas(t *testing.T) {
 					request = keyRequest(authority, 0, time.Minute)
 				case "provider":
 					provider.Limits = &runtime.Limits{RequestsPerMinute: &one, MaxConcurrency: &one}
-					request = connectionRequest(&provider, 0, time.Minute)
+					request = connectionRequest(&provider, 0, time.Minute, "")
 				case "credential":
 					provider.Slots[0].RequestsPerMinute = &one
 					provider.Slots[0].MaxConcurrency = &one
-					request = slotRequest(&provider.Slots[0], 0, time.Minute)
+					request = slotRequest(&provider.Slots[0], 0, time.Minute, "")
 				}
 				f.rt.keys[f.bearer] = authority
 				f.snapshot.Providers[f.providerID] = provider
@@ -357,10 +433,10 @@ func TestIntegrationMediaStreamHoldsTargetConcurrencyUntilCompletion(t *testing.
 				one := int64(1)
 				if scope == "provider" {
 					p.Limits = &runtime.Limits{MaxConcurrency: &one}
-					request = connectionRequest(&p, 0, time.Second)
+					request = connectionRequest(&p, 0, time.Second, "")
 				} else {
 					p.Slots[0].MaxConcurrency = &one
-					request = slotRequest(&p.Slots[0], 0, time.Second)
+					request = slotRequest(&p.Slots[0], 0, time.Second, "")
 				}
 				h.rt.release.Snapshot.Providers[id] = p
 			}

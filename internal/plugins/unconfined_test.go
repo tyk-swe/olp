@@ -500,3 +500,15 @@ func TestUnconfinedProcessLogRedactionTracksItsCalls(t *testing.T) {
 		}
 	}
 }
+
+// Route predicates run only in confined plugins, so an unconfined plugin is
+// never asked to judge a selector.
+func TestUnconfinedPluginsNeverJudgeRouteSelectors(t *testing.T) {
+	t.Parallel()
+	u, file := unconfinedFixture(t, DefaultLimits, nil)
+	host := newUnconfinedHost(t, u, file)
+	var refusal *Error
+	if match, err := host.RoutePredicate(t.Context(), file.Digest, abi.RoutePredicate{Route: "assistant", Selector: "agentic", Tools: true}); match || !errors.As(err, &refusal) || refusal.Code != CodeUnconfinedDisabled {
+		t.Fatalf("match %v, %v", match, err)
+	}
+}

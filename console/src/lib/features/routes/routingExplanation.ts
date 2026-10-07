@@ -30,7 +30,22 @@ export type ExplanationRow = {
   estimate: string | null;
   interaction: RoutingDecision['interaction'];
   incompatibility: RoutingDecision['incompatibility'];
+  /** What adaptive routing contributed: shadowing, selectors, health and
+   * capacity headroom. */
+  notes: string[];
 };
+
+/** Short notes on what adaptive routing contributed to one decision. */
+export function adaptiveNotes(decision: RoutingDecision): string[] {
+  const notes: string[] = [];
+  if (decision.shadow) notes.push('Shadow target: mirrors, never serves');
+  if (decision.selector) notes.push(`Chosen by selector ${decision.selector}`);
+  if (decision.unhealthy)
+    notes.push('Unhealthy across the fleet, so ordered last');
+  if (decision.headroom != null)
+    notes.push(`${Math.round(decision.headroom * 100)}% capacity headroom`);
+  return notes;
+}
 
 const provenanceLabels: Record<string, string> = {
   tokenizer: 'exact count',
@@ -76,7 +91,8 @@ function decisionRow(
     metadataObservedAt: decision.metadata_observed_at ?? null,
     estimate: describeEstimate(decision),
     interaction: decision.interaction,
-    incompatibility: decision.incompatibility
+    incompatibility: decision.incompatibility,
+    notes: adaptiveNotes(decision)
   };
 }
 
@@ -132,7 +148,8 @@ export function simulationRows(targets: SimulationTarget[]): ExplanationRow[] {
       metadataObservedAt: null,
       estimate: null,
       interaction: undefined,
-      incompatibility: undefined
+      incompatibility: undefined,
+      notes: []
     };
   });
 }

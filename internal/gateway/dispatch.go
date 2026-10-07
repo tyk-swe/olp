@@ -37,6 +37,7 @@ type gateResult struct {
 	verdict   gateVerdict
 	rejection *attemptFailure // gateRejected: the refusing quota
 	hold      *dispatchHold   // gateAdmitted: the resources to settle
+	quota     string          // gateUnmeterable: the unreadable cap's scope
 }
 
 // dispatchHold owns what one admitted slot holds until its upstream attempt
@@ -47,6 +48,24 @@ type dispatchHold struct {
 	reservation *targetReservation
 	probed      bool
 	settled     bool
+	budgets     []string
+}
+
+// gateAttempt adds request spend caps to the shared slot admission boundary.
+// Its hold carries the owners that accounting and settlement must charge.
+func (s *Server) gateAttempt(ctx context.Context, x *execution, attempt runtime.Attempt, provider *runtime.Provider, slot *runtime.Slot, estimate int64, deadline time.Time) gateResult {
+	caps := s.holdCaps(ctx, x, attempt, provider, slot, deadline)
+	if caps.quota != "" {
+		if caps.refusal != nil {
+			return gateResult{verdict: gateRejected, rejection: caps.refusal}
+		}
+		return gateResult{verdict: gateUnmeterable, quota: caps.quota}
+	}
+	gate := s.gateSlot(ctx, provider, slot, estimate, deadline, x.priority)
+	if gate.hold != nil {
+		gate.hold.budgets = caps.owners
+	}
+	return gate
 }
 
 // settle reconciles and releases the quota reservation once the attempt has
@@ -120,7 +139,7 @@ func (s *Server) slotGrantGeneration(slot *runtime.Slot) int64 {
 // connection and slot quota reservations, and the provider circuit's exclusive
 // half-open probe. An admitted slot's hold carries the reservation and the probe
 // until the attempt settles or releaseHold abandons them before dispatch.
-func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot *runtime.Slot, estimate int64, deadline time.Time) gateResult {
+func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot *runtime.Slot, estimate int64, deadline time.Time, priority string) gateResult {
 	// Authority can change while an earlier credential attempt is pending.
 	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Runtime.Eligibility(*slot.CredentialID) != runtime.Eligible {
 		return gateResult{verdict: gateSkip}
@@ -142,7 +161,7 @@ func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot 
 	if s.cooling(ctx, provider.ID, slot) {
 		return gateResult{verdict: gateSkip}
 	}
-	reservation, rejection, skip := s.Admission.reserveTarget(ctx, provider, slot, estimate, ttl)
+	reservation, rejection, skip := s.Admission.reserveTarget(ctx, provider, slot, estimate, ttl, priority)
 	if skip {
 		return gateResult{verdict: gateUnmeterable}
 	}

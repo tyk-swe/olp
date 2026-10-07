@@ -538,7 +538,7 @@ func onePrincipal(slots []slotRow, cfg *Configuration) error {
 }
 
 func (row *slotRow) published(authMode string) runtime.RevisionSlot {
-	slot := runtime.Slot{ID: row.ID, Name: row.Name, Enabled: row.Enabled, Priority: row.Priority, Weight: row.Weight, AllowedModels: row.Restrictions.AllowedModels, AllowedRoutes: row.Restrictions.AllowedRoutes, AllowedAPIKeys: row.Restrictions.AllowedAPIKeys, RequestsPerMinute: row.Limits.RequestsPerMinute, TokensPerMinute: row.Limits.TokensPerMinute, MaxConcurrency: row.Limits.MaxConcurrency}
+	slot := runtime.Slot{ID: row.ID, Name: row.Name, Enabled: row.Enabled, Priority: row.Priority, Weight: row.Weight, AllowedModels: row.Restrictions.AllowedModels, AllowedRoutes: row.Restrictions.AllowedRoutes, AllowedAPIKeys: row.Restrictions.AllowedAPIKeys, RequestsPerMinute: row.Limits.RequestsPerMinute, TokensPerMinute: row.Limits.TokensPerMinute, MaxConcurrency: row.Limits.MaxConcurrency, Supply: row.Limits.Supply}
 	var principal string
 	if connectors.SecretRequired(authMode) {
 		slot.Enabled = slot.Enabled && !row.CredentialRevoked
@@ -623,6 +623,11 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 		}
 		if _, err = tx.Exec(ctx, "UPDATE olp.providers SET state='active',active_revision=$2,active_revision_id=$3,draft_dirty=false,etag=$4,updated_at=now() WHERE id=$1", current.ID, revision, revisionID, etag); err != nil {
 			return access.Reply{}, err
+		}
+		if s.Activated != nil {
+			if err = s.Activated(ctx, tx, current.ID, p.UserID()); err != nil {
+				return access.Reply{}, err
+			}
 		}
 		generation, err := runtime.Publish(ctx, tx, p.UserID())
 		if err != nil {

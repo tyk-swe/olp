@@ -69,10 +69,15 @@ type Config struct {
 	ConnectionDrainTimeoutSeconds int
 	MaxInFlightInference          int
 	MaxInFlightManagement         int
-	MaxJSONBodyBytes              int64
-	MaxMediaBodyBytes             int64
-	ProviderMaxResponseBytes      int64
-	ProviderMaxEventBytes         int64
+	// A bounded admission queue holds inference work while the pool is full;
+	// a depth of zero answers 503 at once.
+	AdmissionQueueDepth      int
+	AdmissionQueueTimeout    time.Duration
+	MaxInFlightShadow        int
+	MaxJSONBodyBytes         int64
+	MaxMediaBodyBytes        int64
+	ProviderMaxResponseBytes int64
+	ProviderMaxEventBytes    int64
 	// Optional OTLP/HTTP trace export. Credentials live only in the headers
 	// file; ambient OTEL_* header variables are rejected at install time.
 	OTLPTracesEndpoint     string
@@ -134,6 +139,9 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.IntVar(&c.ConnectionDrainTimeoutSeconds, "http-connection-drain-timeout-seconds", 30, "maximum age drain time")
 	f.IntVar(&c.MaxInFlightInference, "http-max-in-flight-inference-requests", 256, "inference work admission")
 	f.IntVar(&c.MaxInFlightManagement, "http-max-in-flight-management-requests", 32, "management and console request admission")
+	f.IntVar(&c.AdmissionQueueDepth, "http-admission-queue-depth", 0, "inference requests that may wait for admission by priority")
+	f.DurationVar(&c.AdmissionQueueTimeout, "http-admission-queue-timeout", 2*time.Second, "longest wait in the admission queue")
+	f.IntVar(&c.MaxInFlightShadow, "http-max-in-flight-shadow-requests", 16, "mirrored shadow attempts in flight; excess mirrors are dropped")
 	f.StringVar(&c.OTLPTracesEndpoint, "otlp-traces-endpoint", "", "OTLP/HTTP trace export URL")
 	f.StringVar(&c.OTLPHeadersFile, "otlp-headers-file", "", "mounted JSON object of OTLP exporter headers")
 	f.Float64Var(&c.TraceSampleRatio, "trace-sample-ratio", 1.0, "trace sampling ratio")
@@ -289,6 +297,12 @@ func (c Config) Validate() error {
 	if c.MaxInFlightManagement < 1 || c.MaxInFlightManagement > 100000 {
 		return errors.New("OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS must be between 1 and 100000")
 	}
+	if c.AdmissionQueueDepth < 0 || c.AdmissionQueueDepth > 100000 {
+		return errors.New("OLP_HTTP_ADMISSION_QUEUE_DEPTH must be between 0 and 100000")
+	}
+	if c.MaxInFlightShadow < 1 || c.MaxInFlightShadow > 100000 {
+		return errors.New("OLP_HTTP_MAX_IN_FLIGHT_SHADOW_REQUESTS must be between 1 and 100000")
+	}
 	for _, origin := range c.GatewayCORSAllowedOrigins {
 		u, err := url.Parse(origin)
 		if err != nil || u.Hostname() == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" || strings.Contains(origin, "*") {
@@ -329,6 +343,7 @@ func (c Config) Validate() error {
 		{"OLP_DEPENDENCY_REQUEST_TIMEOUT", c.RequestTimeout, time.Minute},
 		{"OLP_STARTUP_TIMEOUT", c.StartupTimeout, time.Minute},
 		{"OLP_SHUTDOWN_TIMEOUT", c.ShutdownTimeout, 10 * time.Minute},
+		{"OLP_HTTP_ADMISSION_QUEUE_TIMEOUT", c.AdmissionQueueTimeout, time.Minute},
 	} {
 		if setting.value < time.Millisecond || setting.value > setting.max {
 			return fmt.Errorf("%s must be between 1ms and %s", setting.name, setting.max)

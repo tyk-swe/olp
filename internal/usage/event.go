@@ -19,15 +19,36 @@ import (
 // event carries it; any other version is malformed.
 const WireVersion = 1
 
+// Origins name whom a request was made for. A caller request is made for the
+// API key that sent it. The gateway makes the others on its own account:
+// shadow mirrors of caller traffic, classifier calls of request selectors and
+// health probes. Shadow and probe requests belong to the installation and
+// carry no API key; a classifier call is made for, and charged to, the key
+// whose request it routes.
+const (
+	OriginCaller     = "caller"
+	OriginShadow     = "shadow"
+	OriginClassifier = "classifier"
+	OriginProbe      = "probe"
+)
+
+// Keyless reports whether requests of an origin carry no API key.
+func Keyless(origin string) bool { return origin == OriginShadow || origin == OriginProbe }
+
 // Event is one request's content-free metadata. Every optional field is
 // serialized explicitly, so a reader can tell "absent" from "not yet known".
 type Event struct {
-	Version             int               `json:"version"`
-	EventID             string            `json:"event_id"`
-	RequestID           string            `json:"request_id"`
-	RuntimeGenerationID string            `json:"runtime_generation_id"`
-	APIKeyID            string            `json:"api_key_id"`
-	Attribution         map[string]string `json:"attribution,omitempty"`
+	Version             int    `json:"version"`
+	EventID             string `json:"event_id"`
+	RequestID           string `json:"request_id"`
+	RuntimeGenerationID string `json:"runtime_generation_id"`
+	// APIKeyID is empty exactly when the origin is keyless.
+	APIKeyID    string            `json:"api_key_id"`
+	Attribution map[string]string `json:"attribution,omitempty"`
+	// Origin is empty for a caller request. ParentRequestID names the caller
+	// request a shadow or classifier request was made for.
+	Origin          string  `json:"origin,omitempty"`
+	ParentRequestID *string `json:"parent_request_id,omitempty"`
 
 	PolicyDecisions         []contentpolicy.Decision `json:"policy_decisions,omitempty"`
 	BudgetGroupID           *string                  `json:"budget_group_id"`
@@ -172,7 +193,49 @@ type Routing struct {
 	CredentialVersionID  *string              `json:"credential_version_id"`
 	ProviderRevisionID   string               `json:"provider_revision_id"`
 	PricingRevisionID    *string              `json:"pricing_revision_id"`
+	// Leg is the route an attempt ran on when that is not the route the
+	// caller named: a selector's delegate or a fallback. It is nil on the
+	// named route.
+	Leg *RouteLeg `json:"leg,omitempty"`
+	// Selector names the route selector that narrowed the attempt's targets.
+	Selector *string `json:"selector,omitempty"`
+	// Retry numbers a same-target retry from 1; it is nil on a first try.
+	Retry *int `json:"retry,omitempty"`
+	// Budgets are the supply-side spend caps the attempt's cost counts
+	// against: its connection, credential slot or route, by identifier.
+	Budgets []string `json:"budgets,omitempty"`
+	// Baseline is the most expensive target the selector avoided, which
+	// accounting prices with the attempt's own usage to report the
+	// selector's savings. It is nil without a narrowing selector.
+	Baseline *Baseline `json:"baseline,omitempty"`
 }
+
+// Baseline names the provider model a selector's savings are measured
+// against.
+type Baseline struct {
+	ProviderID    string  `json:"provider_id"`
+	UpstreamModel string  `json:"upstream_model"`
+	VendorID      *string `json:"vendor_id,omitempty"`
+}
+
+// RouteLeg is a route an attempt ran on in place of the named one, pinned to
+// the revision the request's release carried.
+type RouteLeg struct {
+	Route      string `json:"route"`
+	RevisionID string `json:"revision_id"`
+	// Via is how the request reached the route: "selector" or "fallback".
+	Via string `json:"via"`
+}
+
+// Leg routes, by how a request reaches them.
+const (
+	ViaSelector = "selector"
+	ViaFallback = "fallback"
+)
+
+// maxAttemptBudgets bounds the caps one attempt counts against: one each for
+// its connection, slot and route.
+const maxAttemptBudgets = 3
 
 // Encode renders the event as a versioned stream payload.
 func Encode(e *Event) ([]byte, error) {
@@ -221,6 +284,8 @@ type wireEvent struct {
 	RuntimeGenerationID     *string            `json:"runtime_generation_id"`
 	APIKeyID                *string            `json:"api_key_id"`
 	Attribution             *map[string]string `json:"attribution"`
+	Origin                  *string            `json:"origin"`
+	ParentRequestID         *string            `json:"parent_request_id"`
 	PolicyDecisions         *[]wireDecision    `json:"policy_decisions"`
 	BudgetGroupID           *string            `json:"budget_group_id"`
 	ProviderID              *string            `json:"provider_id"`
@@ -299,9 +364,14 @@ type wireRouting struct {
 	CredentialVersionID  *string              `json:"credential_version_id"`
 	ProviderRevisionID   *string              `json:"provider_revision_id"`
 	PricingRevisionID    *string              `json:"pricing_revision_id"`
+	Leg                  *RouteLeg            `json:"leg"`
+	Selector             *string              `json:"selector"`
+	Retry                *int                 `json:"retry"`
+	Budgets              []string             `json:"budgets"`
+	Baseline             *Baseline            `json:"baseline"`
 }
 
-// knownOperations and knownSurfaces are the canonical labels; an event outside them would
+// knownOperations, knownSurfaces and knownOrigins are the canonical labels; an event outside them would
 // be rejected by the fact table's constraints long after the delivery was
 // acknowledged, so it is rejected here instead.
 var knownOperations = map[string]struct{}{
@@ -316,6 +386,8 @@ var knownSurfaces = map[string]struct{}{
 	"openai": {}, "anthropic": {}, "gemini": {}, "bedrock": {}, "native": {}, "unknown": {},
 }
 
+var knownOrigins = map[string]struct{}{OriginCaller: {}, OriginShadow: {}, OriginClassifier: {}, OriginProbe: {}}
+
 func (w wireEvent) decode() (*Event, error) {
 	event := &Event{Version: WireVersion}
 	var err error
@@ -328,8 +400,24 @@ func (w wireEvent) decode() (*Event, error) {
 	if event.RuntimeGenerationID, err = requiredUUID("runtime_generation_id", w.RuntimeGenerationID); err != nil {
 		return nil, err
 	}
-	if event.APIKeyID, err = requiredUUID("api_key_id", w.APIKeyID); err != nil {
+	if w.Origin != nil && *w.Origin != OriginCaller {
+		if _, known := knownOrigins[*w.Origin]; !known {
+			return nil, errors.New("request metadata field origin is not supported")
+		}
+		event.Origin = *w.Origin
+	}
+	if Keyless(event.Origin) {
+		if w.APIKeyID != nil && *w.APIKeyID != "" {
+			return nil, fmt.Errorf("request metadata field api_key_id must be empty for %s requests", event.Origin)
+		}
+	} else if event.APIKeyID, err = requiredUUID("api_key_id", w.APIKeyID); err != nil {
 		return nil, err
+	}
+	if event.ParentRequestID, err = optionalUUID("parent_request_id", w.ParentRequestID); err != nil {
+		return nil, err
+	}
+	if (event.ParentRequestID != nil) != (event.Origin == OriginShadow || event.Origin == OriginClassifier) {
+		return nil, errors.New("request metadata field parent_request_id belongs to shadow and classifier requests")
 	}
 	if w.Attribution != nil {
 		event.Attribution = *w.Attribution
@@ -527,8 +615,48 @@ func (w wireRouting) decode() (*Routing, error) {
 	if routing.PricingRevisionID, err = optionalUUID("routing.pricing_revision_id", w.PricingRevisionID); err != nil {
 		return nil, err
 	}
+	if leg := w.Leg; leg != nil {
+		if !routeSlug.MatchString(leg.Route) || (leg.Via != ViaSelector && leg.Via != ViaFallback) {
+			return nil, errors.New("routing.leg is malformed")
+		}
+		if _, err = requiredUUID("routing.leg.revision_id", &leg.RevisionID); err != nil {
+			return nil, err
+		}
+		routing.Leg = leg
+	}
+	if w.Selector != nil && !selectorID.MatchString(*w.Selector) {
+		return nil, errors.New("routing.selector is malformed")
+	}
+	if w.Retry != nil && *w.Retry < 1 {
+		return nil, errors.New("routing.retry is out of range")
+	}
+	if len(w.Budgets) > maxAttemptBudgets {
+		return nil, errors.New("routing.budgets names too many caps")
+	}
+	for _, owner := range w.Budgets {
+		if _, err = requiredUUID("routing.budgets", &owner); err != nil {
+			return nil, err
+		}
+	}
+	if b := w.Baseline; b != nil {
+		if w.Selector == nil || b.UpstreamModel == "" || len(b.UpstreamModel) > 512 {
+			return nil, errors.New("routing.baseline is malformed")
+		}
+		if _, err = requiredUUID("routing.baseline.provider_id", &b.ProviderID); err != nil {
+			return nil, err
+		}
+		routing.Baseline = b
+	}
+	routing.Selector, routing.Retry, routing.Budgets = w.Selector, w.Retry, w.Budgets
 	return routing, nil
 }
+
+// routeSlug and selectorID mirror the route model's identifiers, which
+// accounting cannot import.
+var (
+	routeSlug  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,99}$`)
+	selectorID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+)
 
 func missingField(field string) error {
 	return fmt.Errorf("request metadata field %s is missing", field)

@@ -56,7 +56,11 @@ type Server struct {
 	Plugins *plugins.Host
 	// Catalog is the reference catalog this release ships, whose facts
 	// discovery offers beside a provider's models.
-	Catalog     *catalog.Signed
+	Catalog *catalog.Signed
+	// Activated runs inside a provider activation's transaction, after the
+	// new revision is recorded and before the release is published, so
+	// route templates can place the models it certified.
+	Activated   func(ctx context.Context, tx pgx.Tx, providerID, actor string) error
 	Log         *slog.Logger
 	client      *http.Client
 	connections *egress.ConnectionClientCache

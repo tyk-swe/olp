@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/management/contract"
 )
 
@@ -20,6 +22,15 @@ type Management struct {
 	Access *access.Server
 	Cache  *Cache
 	Pool   access.Queryer
+	// Fleet reads the circuit and probe state gateways share; nil when no
+	// shared state is configured.
+	Fleet FleetHealth
+}
+
+// FleetHealth reads the provider health the gateway fleet shares.
+type FleetHealth interface {
+	Circuits(ctx context.Context, now time.Time) (map[string]time.Time, error)
+	Probes(ctx context.Context) (map[string]limits.ProbeResult, error)
 }
 
 // Register mounts the health routes on the management surface.
@@ -58,18 +69,66 @@ func (m *Management) providerHealth(r *http.Request, p access.Principal) (access
 	if err != nil {
 		return access.Reply{}, err
 	}
+	shared, circuits, probes := m.fleet(r.Context())
 	items := make([]contract.ProviderHealthItem, len(page.Items))
 	for i, record := range page.Items {
 		items[i] = providerHealthItem(&record)
+		if until, open := circuits[record.ProviderID]; open {
+			items[i].CircuitOpenUntil = nullable.NewNullableWithValue(until.UTC())
+			if items[i].Status != "disabled" {
+				items[i].Status = "unavailable"
+			}
+		}
+		if probe, ok := probes[record.ProviderID]; ok {
+			items[i].ActiveProbe = nullable.NewNullableWithValue(probeResult(probe))
+		}
 	}
 	response := contract.ProviderHealthResponse{
 		Items:         items,
 		WindowMinutes: int32(window),
+		SharedState:   shared,
 	}
 	if page.NextCursor != nil {
 		response.NextCursor = nullable.NewNullableWithValue(base64.RawURLEncoding.EncodeToString([]byte(*page.NextCursor)))
 	}
 	return access.OK(response), nil
+}
+
+// fleet reads the shared circuits and probe results. An unreadable store
+// leaves every item without them rather than failing the listing.
+func (m *Management) fleet(ctx context.Context) (contract.ProviderHealthResponseSharedState, map[string]time.Time, map[string]limits.ProbeResult) {
+	if m.Fleet == nil {
+		return contract.ProviderHealthResponseSharedStateUnconfigured, nil, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, fleetReadTimeout)
+	defer cancel()
+	circuits, err := m.Fleet.Circuits(ctx, time.Now())
+	if err != nil {
+		return contract.ProviderHealthResponseSharedStateUnavailable, nil, nil
+	}
+	probes, err := m.Fleet.Probes(ctx)
+	if err != nil {
+		return contract.ProviderHealthResponseSharedStateUnavailable, nil, nil
+	}
+	return contract.ProviderHealthResponseSharedStateCurrent, circuits, probes
+}
+
+// fleetReadTimeout bounds the shared-state reads of one listing.
+const fleetReadTimeout = time.Second
+
+func probeResult(probe limits.ProbeResult) contract.ProviderProbeResult {
+	result := contract.ProviderProbeResult{
+		Status:     contract.ProviderProbeResultStatus(probe.Status),
+		Model:      probe.Model,
+		ObservedAt: probe.ObservedAt.UTC(),
+		LatencyMs:  probe.LatencyMS,
+	}
+	if probe.Class != "" {
+		result.Class = nullable.NewNullableWithValue(probe.Class)
+	} else {
+		result.Class = nullable.NewNullNullable[string]()
+	}
+	return result
 }
 
 // providerHealthItem renders one record in the management wire shape.
@@ -85,6 +144,8 @@ func providerHealthItem(record *ProviderHealthRecord) contract.ProviderHealthIte
 		RateLimitCount:      record.RateLimitCount,
 		ServerErrorCount:    record.ServerErrorCount,
 		TransportErrorCount: record.TransportErrorCount,
+		CircuitOpenUntil:    nullable.NewNullNullable[time.Time](),
+		ActiveProbe:         nullable.NewNullNullable[contract.ProviderProbeResult](),
 	}
 	if record.AverageLatencyMs != nil {
 		item.AverageLatencyMs = nullable.NewNullableWithValue(*record.AverageLatencyMs)

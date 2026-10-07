@@ -25,6 +25,9 @@ import {
 } from '$lib/features/routes/api';
 import DraftEditorProbe from './test/DraftEditorProbe.svelte';
 import { draft, provider, providerSpec } from './test/draftFixtures';
+import { emptyBehavior } from '$lib/features/routes/routeEditor';
+
+const noBehavior = emptyBehavior();
 
 const navigation = vi.hoisted(() => ({ beforeNavigate: vi.fn() }));
 vi.mock('$app/navigation', () => ({ ...navigation, goto: vi.fn() }));
@@ -732,6 +735,9 @@ it('shows before and after policies when only the routing policy changed', async
     fidelity_changed: false,
     fidelity_before: { mode: 'strict' },
     fidelity_after: { mode: 'strict' },
+    behavior_changed: false,
+    behavior_before: noBehavior,
+    behavior_after: noBehavior,
     routing_policy_changed: true,
     routing_policy_before: before,
     routing_policy_after: after,

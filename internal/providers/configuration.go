@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -26,6 +27,8 @@ type Limits struct {
 	MaxConcurrency    *int64 `json:"max_concurrency"`
 	RequestsPerMinute *int64 `json:"requests_per_minute"`
 	TokensPerMinute   *int64 `json:"tokens_per_minute"`
+	// Supply carries the quota's spend caps and per-priority shares.
+	runtime.Supply
 }
 
 // Options carries connector options and per-model metadata.
@@ -43,6 +46,9 @@ type Options struct {
 	// PluginOptions holds a plugin provider's values for the options its
 	// plugin profile declares, by option name.
 	PluginOptions map[string]string `json:"plugin_options,omitempty"`
+	// HealthProbe opts the connection into active health probing, which
+	// sends billable synthetic requests.
+	HealthProbe *runtime.HealthProbe `json:"health_probe,omitempty"`
 }
 
 // Configuration is the stored connection configuration; it is the contract's
@@ -243,10 +249,28 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 	if err := openai.ValidateDefaults(c.Options.ParameterDefaults); err != nil {
 		return access.Invalid("configuration.options.parameter_defaults", err.Error())
 	}
-	if c.Options.Limits != nil {
-		if !ValidQuota(*c.Options.Limits) {
-			return access.Invalid("configuration.options.limits", "Use positive limits: requests and concurrency at most 2147483647, tokens at most 9007199254740991.")
+	if c.Options.HealthProbe != nil {
+		if err := c.Options.HealthProbe.Validate("configuration.options.health_probe"); err != nil {
+			return err
 		}
+	}
+	if c.Options.Limits != nil {
+		return ValidLimits("configuration.options.limits", *c.Options.Limits)
+	}
+	return nil
+}
+
+// ValidLimits checks a connection or slot quota: its windows, its spend caps,
+// and that priority shares divide at least one window.
+func ValidLimits(field string, q Limits) error {
+	if !ValidQuota(q) {
+		return access.Invalid(field, "Use positive limits: requests and concurrency at most 2147483647, tokens at most 9007199254740991.")
+	}
+	if err := q.Supply.Validate(field); err != nil {
+		return err
+	}
+	if q.Shared() && q.RequestsPerMinute == nil && q.TokensPerMinute == nil && q.MaxConcurrency == nil {
+		return access.Invalid(field+".priority_shares", "Priority shares divide a quota; declare a request, token or concurrency limit.")
 	}
 	return nil
 }

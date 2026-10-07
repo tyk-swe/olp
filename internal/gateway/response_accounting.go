@@ -37,7 +37,7 @@ func (s *Server) pendingResponseUsage(x *execution, fact *AttemptFact, metadata 
 	ev := accountingEvent(Envelope{
 		AccountingID: x.request.accountingID(), KeyID: x.keyID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution,
-		PolicyDecisions: x.policyDecisions, Route: x.route.Slug,
+		PolicyDecisions: x.policyDecisions, Route: x.named().Slug,
 		Operation: x.family.Operation(), Surface: x.family.Surface(),
 		RuntimeGenerationID: x.request.release.Snapshot.Generation.ID,
 		StartedAt:           x.request.startedAt, CompletedAt: now,

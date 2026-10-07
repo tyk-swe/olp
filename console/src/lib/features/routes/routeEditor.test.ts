@@ -5,12 +5,14 @@ import {
   buildCreateRouteDraftInput,
   buildReplaceRouteDraftInput,
   certifiedCapabilities,
+  emptyBehavior,
   fidelityLabel,
   eligibleTargetTuples,
   hasOutputRules,
   missingTargetOperations,
   modesFor,
   operationOptions,
+  parseSelectors,
   policyRulesFrom,
   routeEligibilityWarnings,
   surfacesFor,
@@ -370,20 +372,25 @@ describe('Route Studio API payloads', () => {
       max_attempts: 2,
       content_policy: null,
       fidelity: { mode: 'strict' },
+      ...emptyBehavior(),
       targets: [
         {
           provider_id: 'provider-a',
           provider_model: 'model-upstream-a',
           priority: 1,
           weight: 100,
-          timeout_ms: 60_000
+          timeout_ms: 60_000,
+          tags: [],
+          shadow: null
         },
         {
           provider_id: 'provider-b',
           provider_model: 'model-upstream-b',
           priority: 2,
           weight: 25,
-          timeout_ms: 60_000
+          timeout_ms: 60_000,
+          tags: [],
+          shadow: null
         }
       ]
     });
@@ -397,18 +404,23 @@ describe('Route Studio API payloads', () => {
       max_attempts: 2,
       content_policy: null,
       fidelity: { mode: 'strict' },
+      ...emptyBehavior(),
       targets: [
         {
           provider_model_id: 'model-a',
           priority: 1,
           weight: 100,
-          timeout_ms: 60_000
+          timeout_ms: 60_000,
+          tags: [],
+          shadow: null
         },
         {
           provider_model_id: 'model-b',
           priority: 2,
           weight: 25,
-          timeout_ms: 60_000
+          timeout_ms: 60_000,
+          tags: [],
+          shadow: null
         }
       ]
     });
@@ -646,5 +658,162 @@ describe('route fidelity', () => {
     expect(fidelityLabel(undefined)).toBe('Strict');
     expect(fidelityLabel({ mode: 'strict' })).toBe('Strict');
     expect(fidelityLabel({ mode: 'transformed' })).toBe('Transformed');
+  });
+});
+
+describe('route resilience', () => {
+  const tagged = (tags: string[], shadowSampleRate: number | null = null) => ({
+    ...target,
+    tags,
+    shadowSampleRate
+  });
+  const withBehavior = (
+    behavior: Partial<ReturnType<typeof emptyBehavior>>,
+    targets = [tagged(['fast'])]
+  ): RouteEditorValues => ({
+    ...validEditor,
+    targets,
+    behavior: { ...emptyBehavior(), ...behavior }
+  });
+
+  it('sends fallbacks, selectors, retry, affinity, budget, tags and shadows', () => {
+    const values = withBehavior(
+      {
+        fallbacks: [{ route: 'backup', on: ['exhausted', 'content_filter'] }],
+        selectors: [
+          { id: 'short', when: { max_input_tokens: 1000 }, tags: ['fast'] }
+        ],
+        retry: {
+          rate_limit: {
+            max_retries: 2,
+            base_backoff_ms: 100,
+            max_backoff_ms: 2000,
+            respect_retry_after: true
+          }
+        },
+        affinity: { source: 'cache_key' },
+        budget: { daily_cost_limit: '25.50', monthly_cost_limit: null }
+      },
+      [tagged(['fast']), tagged([], 0.1)]
+    );
+    expect(validateRouteEditor(values)).toBeNull();
+    const payload = buildReplaceRouteDraftInput(values);
+    expect(payload.fallbacks).toEqual(values.behavior!.fallbacks);
+    expect(payload.selectors).toEqual(values.behavior!.selectors);
+    expect(payload.budget).toEqual({
+      daily_cost_limit: '25.50',
+      monthly_cost_limit: null
+    });
+    expect(payload.targets.map((t) => [t.tags, t.shadow])).toEqual([
+      [['fast'], null],
+      [[], { sample_rate: 0.1 }]
+    ]);
+  });
+
+  it('refuses what the server refuses before saving', () => {
+    const cases: [RouteEditorValues, RegExp][] = [
+      [
+        withBehavior({
+          fallbacks: [{ route: 'support-chat-v2', on: ['exhausted'] }]
+        }),
+        /another route/
+      ],
+      [
+        withBehavior({ fallbacks: [{ route: 'backup', on: [] }] }),
+        /at least one condition/
+      ],
+      [
+        withBehavior({ selectors: [{ id: 'gpu', when: {}, tags: ['gpu'] }] }),
+        /no serving target carries/
+      ],
+      [
+        withBehavior({ selectors: [{ id: 'none', when: {} }] }),
+        /tags or a route/
+      ],
+      [
+        withBehavior({ affinity: { source: 'label', label: '9bad' } }),
+        /attribution label/
+      ],
+      [
+        withBehavior({
+          budget: { daily_cost_limit: null, monthly_cost_limit: null }
+        }),
+        /daily or monthly/
+      ],
+      [
+        withBehavior({
+          budget: { daily_cost_limit: '1e3', monthly_cost_limit: null }
+        }),
+        /decimal/
+      ],
+      [withBehavior({}, [tagged(['Fast'])]), /lowercase/],
+      [withBehavior({}, [tagged([], 0.5)]), /serves callers/],
+      [withBehavior({}, [tagged([]), tagged([], 1.5)]), /greater than 0/],
+      [
+        {
+          ...withBehavior({}),
+          selectorsError: 'Selectors must be a JSON array of selector objects.'
+        },
+        /JSON array/
+      ]
+    ];
+    for (const [values, message] of cases)
+      expect(validateRouteEditor(values)).toMatch(message);
+  });
+
+  it('reads selectors typed as JSON', () => {
+    expect(parseSelectors('')).toEqual([]);
+    expect(parseSelectors('[{"id":"a","when":{},"route":"b"}]')).toEqual([
+      { id: 'a', when: {}, route: 'b' }
+    ]);
+    expect(parseSelectors('{"id":"a"}')).toMatch(/JSON array/);
+    expect(parseSelectors('[')).toMatch(/JSON array/);
+  });
+
+  it.each([
+    '[null]',
+    '[1]',
+    '[[]]',
+    '[{"id":"a","when":{},"tags":"foo"}]',
+    '[{"id":"a","when":{},"tags":[null]}]',
+    '[{"id":"a","when":{},"route":42}]',
+    '[{"id":"a","when":null}]',
+    '[{"id":"a","when":[]}]',
+    '[{"id":"a","when":{"tools":"yes"}}]',
+    '[{"id":"a","when":{"max_input_tokens":"10"}}]',
+    '[{"id":"a","when":{"modalities":"text"}}]',
+    '[{"id":"a","when":{"classifier":{"route":"b","labels":"x","timeout_ms":10}}}]',
+    '[{"id":"a","when":{"plugin":[]}}]',
+    '[{"tags":"foo"}]'
+  ])('reports malformed selector shapes inline: %s', (text) => {
+    const result = parseSelectors(text);
+    expect(result).toMatch(/JSON array/);
+    expect(
+      validateRouteEditor({
+        ...withBehavior({}),
+        selectorsError: typeof result === 'string' ? result : null
+      })
+    ).toMatch(/JSON array/);
+  });
+
+  it('accepts typed dynamic and static predicate fields', () => {
+    const selectors = [
+      {
+        id: 'a',
+        tags: ['fast'],
+        when: {
+          operations: ['generation'],
+          min_input_tokens: null,
+          max_output_tokens: 10,
+          tools: true,
+          streaming: null,
+          modalities: ['text'],
+          reasoning_effort: ['high'],
+          classifier: { route: 'b', labels: ['simple'], timeout_ms: 100 },
+          plugin: null
+        }
+      }
+    ];
+    expect(parseSelectors(JSON.stringify(selectors))).toEqual(selectors);
   });
 });

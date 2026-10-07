@@ -53,6 +53,12 @@ gateway:
   # The management value is reserved and is not borrowable by inference.
   httpMaxInFlightInferenceRequests: 256
   httpMaxInFlightManagementRequests: 32
+  # Inference work beyond the pool may wait here, dequeued by priority, for
+  # at most the timeout. Zero refuses excess work at once.
+  httpAdmissionQueueDepth: 0
+  httpAdmissionQueueTimeout: 2s
+  # Mirrored shadow attempts run in their own pool and are dropped when full.
+  httpMaxInFlightShadowRequests: 16
   service:
     enabled: true
     type: ClusterIP

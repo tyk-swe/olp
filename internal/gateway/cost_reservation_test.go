@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -54,6 +55,34 @@ func costExecution(t *testing.T, body string, family openai.Family, budget int, 
 
 func budgeted() access.Authority {
 	return admissionAuthority(access.KeyPolicy{DailyCostLimit: costText("5.00")})
+}
+
+func TestVideoCostBoundUsesRequestedDurationAndProviderDefault(t *testing.T) {
+	for _, tc := range []struct {
+		seconds *string
+		want    string
+	}{{nil, "0.4"}, {costText("8"), "0.8"}, {costText("12"), "1.2"}} {
+		x := &execution{media: &media.Request{Op: media.OpVideoCreate, Seconds: tc.seconds}}
+		attempt := runtime.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{UnitPrice: costText("0.1")}}}
+		if got := x.attemptCostBound(attempt).String(); got != tc.want {
+			t.Fatalf("duration %v reserves %s, want %s", tc.seconds, got, tc.want)
+		}
+	}
+}
+
+func TestUnitPricedVideoUsageSettlesWithoutTokenRates(t *testing.T) {
+	owner := uuid.NewString()
+	x := &execution{media: &media.Request{Op: media.OpVideoCreate}, facts: []AttemptFact{{
+		Budgets: []string{owner}, UsageObserved: true, UsageComplete: true,
+		Usage: &openai.Usage{MediaUnits: costText("8")}, Price: &usage.RoutingPrice{Price: usage.Price{UnitPrice: costText("0.1")}},
+	}}}
+	if got := x.costOf(owner).String(); got != "0.8" {
+		t.Fatalf("unit-only video settled %s, want 0.8", got)
+	}
+	input, output, _ := accountingTokens(&x.facts[0])
+	if input != nil || output != nil {
+		t.Fatal("unit-only media accounting invented token usage")
+	}
 }
 
 func TestCostReservationIsTheMostTheRequestCouldCost(t *testing.T) {
@@ -166,6 +195,43 @@ func TestCredentialSlotRetriesAreEachReserved(t *testing.T) {
 	x.budget = 1
 	if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != "0.000162" {
 		t.Fatalf("one dispatch reserves %q, want 0.000162", hold.amount)
+	}
+}
+
+func TestSameSlotRetriesReserveTokensAndCostWithinTheAttemptBudget(t *testing.T) {
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 3,
+		runtime.Attempt{Price: costPrice()})
+	x.request.id, x.request.minted = uuid.NewString(), true
+	x.route.Retry = runtime.Retry{
+		classRateLimit:      {MaxRetries: 2},
+		classUpstreamServer: {MaxRetries: 1},
+	}
+	s := &Server{}
+	for _, tc := range []struct {
+		budget int
+		cost   string
+	}{{3, "0.000486"}, {2, "0.000324"}, {1, "0.000162"}, {0, ""}} {
+		x.budget = tc.budget
+		if got := s.dispatchableAttempts(x); got != tc.budget {
+			t.Fatalf("budget %d reserves %d dispatches", tc.budget, got)
+		}
+		if got := keyReservationEstimate(18, s.dispatchableAttempts(x)); got != 18*int64(max(tc.budget, 1)) {
+			t.Fatalf("budget %d reserves %d tokens", tc.budget, got)
+		}
+		if hold := s.costReservation(x, budgeted()); hold.amount != tc.cost {
+			t.Fatalf("budget %d reserves %q, want %q", tc.budget, hold.amount, tc.cost)
+		}
+	}
+}
+
+func TestRetryCostReservationCoversSkippingCheapRetries(t *testing.T) {
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 3,
+		runtime.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{InputPerMillion: costText("0.1"), OutputPerMillion: costText("1")}}},
+		runtime.Attempt{Price: costPrice()})
+	x.request.id, x.request.minted = uuid.NewString(), true
+	x.route.Retry = runtime.Retry{classRateLimit: {MaxRetries: 2}}
+	if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != "0.000486" {
+		t.Fatalf("reserves %q, want enough for three expensive dispatches", hold.amount)
 	}
 }
 

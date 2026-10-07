@@ -13,7 +13,7 @@ the scheduled time, the percentiles, the mock's pacing, and what makes a run
 valid and a target judged), so a change to anything here runs them, and they
 run under `-race` in CI with the rest.
 
-The scenarios, `TestScenarioS1` to `TestScenarioS6`, are the one thing `make
+The scenarios, `TestScenarioS1` to `TestScenarioS6` and `TestScenarioS1Shadow`, are the one thing `make
 test-bench` skips. They need services and fail without them, by design (a
 benchmark that silently measured nothing would be worse than one that did not
 run), so `go test -tags=bench ./tests/bench/...` with nothing skipped fails; run
@@ -143,6 +143,7 @@ which is how a reference run points it at tuned dedicated ones, and with
 | S4 | First target returns 503, second succeeds | 1,000 RPS | the first target's model always answers 503 |
 | S5 | Anthropic Messages streaming, translated to an OpenAI upstream | 1,000 RPS | as S2 |
 | S6 | Slow-reader streams | 10,000 held open at once | 40,000-token completions, read at 8 KiB/s |
+| S1-shadow | S1 with a shadow target sampling every request | 1,000 RPS | as S1, for both the serving and the shadow model |
 
 A scenario runs this sequence in one session, and fails if any step does:
 

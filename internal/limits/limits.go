@@ -216,6 +216,10 @@ type Request struct {
 	// replaces the reservation instead of counting beside it. Required with a
 	// CostEstimate.
 	RequestID string
+	// RetainCostReservation keeps an existing reservation on an ambiguous
+	// cost-reservation failure. Its original lease remains responsible for
+	// settlement while a request increases the amount held before another attempt.
+	RetainCostReservation bool
 	// CostGrace is how long past LeaseTTL the reservation survives if nothing
 	// settles it. Zero means DefaultCostGrace.
 	CostGrace time.Duration
@@ -226,6 +230,38 @@ type Request struct {
 	// reports on, is answered with the decision alone, and so is a request that
 	// limits neither requests nor tokens, which has no allowance to state.
 	ReportRate bool
+	// Share divides the rate and concurrency limits between admission
+	// classes. The zero Share leaves them undivided.
+	Share Share
+}
+
+// Share is the part of a quota one admission class may hold once the quota is
+// saturated: until use reaches SaturationPercent of a limit any class may take
+// what is idle, and beyond it the class is held to Percent of the limit.
+type Share struct {
+	Class             string
+	Percent           int64
+	SaturationPercent int64
+}
+
+func (s Share) divides() bool { return s.Class != "" }
+
+func (s Share) valid() bool {
+	return validClass(s.Class) && s.Percent >= 0 && s.Percent <= 100 &&
+		s.SaturationPercent >= 1 && s.SaturationPercent <= 100
+}
+
+// validClass accepts the lowercase class names the scripts count by.
+func validClass(class string) bool {
+	if class == "" || len(class) > 16 {
+		return false
+	}
+	for _, c := range class {
+		if c < 'a' || c > 'z' {
+			return false
+		}
+	}
+	return true
 }
 
 // HasHardLimits reports whether any budget applies. A request without one needs
@@ -298,6 +334,9 @@ func (r Request) Validate() error {
 	}
 	if r.TokensPerMinute != nil && r.RequestedTokens < 1 {
 		return &InvalidRequestError{Reason: "requested tokens must be positive when a token limit applies"}
+	}
+	if r.Share.divides() && !r.Share.valid() {
+		return &InvalidRequestError{Reason: "a share names a lowercase class, a percent from 0 to 100 and a saturation from 1 to 100"}
 	}
 	for _, limit := range [...]struct {
 		value *string
@@ -465,6 +504,9 @@ func SlotLookup(slotID string) string { return "ps_" + simpleUUID(slotID) }
 
 func BudgetGroupLookup(id string) string { return "bg_" + simpleUUID(id) }
 
+// RouteLookup names a route's own spend cap.
+func RouteLookup(routeID string) string { return "rt_" + simpleUUID(routeID) }
+
 // CredentialScope names the cooldown that follows one credential version, so a
 // rotation is not punished for the version it replaced. Grants also scope
 // refusals to the dispatched generation; static credentials use zero.
@@ -549,6 +591,7 @@ func (l *Limiter) Reserve(ctx context.Context, r Request) (*Lease, error) {
 		hasRate:        r.HasRateLimits(),
 	}
 	if r.HasCostBudget() {
+		lease.costRequest = &r
 		reserved, err := l.reserveCost(ctx, r, scriptKeys)
 		if err != nil {
 			return nil, err
@@ -565,6 +608,12 @@ func (l *Limiter) Reserve(ctx context.Context, r Request) (*Lease, error) {
 		return lease, nil
 	}
 	lease.id = uuid.Must(uuid.NewV7()).String()
+	if r.Share.divides() {
+		// The class prefixes the lease so the script can count the class's
+		// concurrency among the quota's leases.
+		lease.class = r.Share.Class
+		lease.id = r.Share.Class + "." + lease.id
+	}
 	granted, err := l.reserveRate(ctx, r, scriptKeys, lease)
 	if err != nil {
 		_, outage := errors.AsType[*ServiceError](err)
@@ -582,11 +631,16 @@ func (l *Limiter) Reserve(ctx context.Context, r Request) (*Lease, error) {
 // reserveRate counts the request against the rate and concurrency limits.
 func (l *Limiter) reserveRate(ctx context.Context, r Request, scriptKeys keys, lease *Lease) (scriptResult, error) {
 	stated := r.reportsRate()
-	value, err := l.eval(ctx, reserveLimitsScript,
-		[]string{scriptKeys.rate, scriptKeys.concurrency},
+	args := []string{
 		optionalLimit(r.RequestsPerMinute), optionalLimit(r.TokensPerMinute),
 		strconv.FormatInt(r.RequestedTokens, 10), optionalLimit(r.MaxConcurrency),
-		lease.id, strconv.FormatInt(r.LeaseTTL.Milliseconds(), 10), switchArg(stated))
+		lease.id, strconv.FormatInt(r.LeaseTTL.Milliseconds(), 10), switchArg(stated),
+	}
+	if r.Share.divides() {
+		args = append(args, r.Share.Class, strconv.FormatInt(r.Share.Percent, 10),
+			strconv.FormatInt(r.Share.SaturationPercent, 10))
+	}
+	value, err := l.eval(ctx, reserveLimitsScript, []string{scriptKeys.rate, scriptKeys.concurrency}, args...)
 	if err != nil {
 		return scriptResult{}, err
 	}
@@ -668,7 +722,7 @@ func (l *Limiter) reserveCost(ctx context.Context, r Request, scriptKeys keys) (
 	// the estimate is given back; releasing a lease that is not there does nothing.
 	// A command that never reached Valkey reserved nothing, and during an outage is
 	// not asked again.
-	if r.CostEstimate != "" && ambiguousFailure(err) {
+	if r.CostEstimate != "" && !r.RetainCostReservation && ambiguousFailure(err) {
 		(&Lease{
 			limiter: l, costReserved: true, pendingKey: scriptKeys.pending, expiryKey: scriptKeys.expiry,
 			costID: canonicalUUID(r.RequestID),
@@ -780,6 +834,9 @@ type Lease struct {
 	hasRequest             bool
 	hasRate                bool
 	concurrencyExpiresAtMS int64
+	// class is the admission class the lease was counted in when its quota is
+	// divided into shares.
+	class string
 	// rate is the allowance the rate script answered the reservation with. Only a
 	// request that asked for one holds it, so that no other lease is made larger
 	// by it.
@@ -795,6 +852,36 @@ type Lease struct {
 	costID       string
 	costGrace    time.Duration
 	actualCost   string
+	costRequest  *Request
+}
+
+// GrowCost reserves the new total cost of a request without taking its rate or
+// concurrency allowance again. Earlier holds survive a refused increase and
+// settle with the original lease, including its budget group.
+func (le *Lease) GrowCost(ctx context.Context, amount, requestID string, ttl time.Duration) error {
+	if le == nil {
+		return nil
+	}
+	if err := le.group.GrowCost(ctx, amount, requestID, ttl); err != nil {
+		return err
+	}
+	if le.costRequest == nil {
+		return nil
+	}
+	r := *le.costRequest
+	r.CostEstimate, r.RequestID, r.LeaseTTL = amount, requestID, ttl
+	r.RetainCostReservation = le.costReserved
+	keys := le.limiter.keysFor(r)
+	reserved, err := le.limiter.reserveCost(ctx, r, keys)
+	if err != nil {
+		return err
+	}
+	if reserved {
+		le.costReserved = true
+		le.pendingKey, le.expiryKey = keys.pending, keys.expiry
+		le.costID, le.costGrace = canonicalUUID(requestID), r.costGrace()
+	}
+	return nil
 }
 
 // RateState reports the request and token allowance this reservation was
@@ -952,8 +1039,7 @@ func (le *Lease) Refund(ctx context.Context) error {
 	return errors.Join(err, cleanup(ctx, func(ctx context.Context) error {
 		_, err := le.limiter.eval(ctx, refundLimitsScript,
 			[]string{le.rateKey, le.concurrencyKey},
-			strconv.FormatInt(le.windowID, 10), requests,
-			strconv.FormatInt(tokens, 10), le.id)
+			le.classed(strconv.FormatInt(le.windowID, 10), requests, strconv.FormatInt(tokens, 10), le.id)...)
 		return err
 	}))
 }
@@ -978,9 +1064,18 @@ func (le *Lease) Reconcile(ctx context.Context, actualTokens int64) error {
 	}
 	return errors.Join(err, cleanup(ctx, func(ctx context.Context) error {
 		_, err := le.limiter.eval(ctx, reconcileLimitsScript, []string{le.rateKey},
-			strconv.FormatInt(le.windowID, 10), strconv.FormatInt(adjustment, 10), le.id)
+			le.classed(strconv.FormatInt(le.windowID, 10), strconv.FormatInt(adjustment, 10), le.id)...)
 		return err
 	}))
+}
+
+// classed appends the lease's share class to a script's arguments, so the
+// script adjusts the class's counts with the quota's.
+func (le *Lease) classed(args ...string) []string {
+	if le.class != "" {
+		return append(args, le.class)
+	}
+	return args
 }
 
 // Release frees the concurrency slot. Requests and tokens stay consumed: the
@@ -1037,23 +1132,7 @@ func (l *Limiter) ProviderUsage(ctx context.Context, lookup string) (Usage, erro
 	if err != nil {
 		return Usage{}, err
 	}
-	items, ok := replyItems(value, 3)
-	if !ok {
-		return Usage{}, ErrUnexpectedResponse
-	}
-	counters := [3]int64{}
-	for index := range counters {
-		counter, ok := replyInt(items[index])
-		if !ok || counter < 0 || counter > maxLuaInteger {
-			return Usage{}, ErrUnexpectedResponse
-		}
-		counters[index] = counter
-	}
-	return Usage{
-		RequestsThisMinute: counters[0],
-		TokensThisMinute:   counters[1],
-		ConcurrentRequests: counters[2],
-	}, nil
+	return parseUsage(value)
 }
 
 // Cooldown parks a scope for d, extending an existing cooldown but never

@@ -362,6 +362,9 @@ func startGateway(t *testing.T, s settings, in *installation, limits gatewayLimi
 	g := &gatewayProcess{Instance: "bench-gateway", Limits: limits, Settings: map[string]string{
 		"OLP_HTTP_MAX_CONNECTIONS":                  strconv.Itoa(limits.MaxConnections),
 		"OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS": strconv.Itoa(limits.MaxInFlight),
+		// Shadow traffic gets as much room as callers, so a mirrored scenario
+		// measures mirroring rather than the drops of a small pool.
+		"OLP_HTTP_MAX_IN_FLIGHT_SHADOW_REQUESTS": strconv.Itoa(limits.MaxInFlight),
 		// Connections are kept for the whole run instead of being drained
 		// after the default five minutes.
 		"OLP_HTTP_CONNECTION_MAX_AGE_SECONDS":       "86400",
