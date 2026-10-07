@@ -370,13 +370,14 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id string, tr
 	err = tx.QueryRow(ctx, `SELECT a.id::text,a.project_id::text,a.provider_id::text,a.credential_id::text,a.principal,a.models,a.name,a.enabled,a.etag::text,a.health,a.allowance,olp.code_account_available(a)
 		FROM olp.code_accounts a JOIN olp.code_pool_accounts pa ON pa.account_id=a.id
 		JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
+		JOIN olp.code_route_revisions v ON v.id=$7
 		WHERE pa.pool_id=$1 AND a.project_id=$2 AND a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id
 		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
 		AND a.models @> $3::jsonb AND ($4='' OR a.id::text=$4) AND a.provider_id::text=ANY($5::text[])
-		AND (a.id::text=ANY($6::text[]) OR NOT EXISTS(SELECT 1 FROM olp.code_accounts t JOIN olp.providers tp ON tp.id=t.provider_id
-			WHERE t.id::text=ANY($6::text[]) AND `+codeadapter.SQL("tp.configuration")+` IS NOT DISTINCT FROM `+codeadapter.SQL("p.configuration")+`))
+		AND (a.id::text=ANY($6::text[]) OR NOT EXISTS(SELECT 1 FROM olp.code_accounts t
+			WHERE t.id::text=ANY($6::text[]) AND `+codeadapter.SQL("v.connections->(t.provider_id::text)")+` IS NOT DISTINCT FROM `+codeadapter.SQL("v.connections->(a.provider_id::text)")+`))
 		ORDER BY array_position($6::text[],a.id::text) NULLS LAST,olp.code_account_available(a) DESC,a.id LIMIT 1`,
-		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &models, &a.Name, &a.Enabled, &a.ETag, &a.Health, &allowance, &available)
+		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &models, &a.Name, &a.Enabled, &a.ETag, &a.Health, &allowance, &available)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !available {
 		return a, codemode.Refuse(503, "code_account_unavailable")
 	}

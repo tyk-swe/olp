@@ -48,8 +48,18 @@ func (s *Server) CodeClientConfiguration(r *http.Request, p access.Principal) (a
 		return access.Reply{}, err
 	}
 	if len(offers) == 0 {
-		// A revision whose accounts name no adapter serves nothing; its
-		// configuration is Codex's, as before adapters existed.
+		// The Codex fallback fits a revision whose frozen connections name
+		// no adapter, as before adapters existed. When they do, the pool
+		// has stopped serving the published subscriptions: no honest
+		// configuration exists until an account returns or the route is
+		// republished.
+		var frozen []codemode.Adapter
+		if err = s.Access.Pool.QueryRow(r.Context(), `SELECT `+codeadapter.SQLAdapters("connections")+` FROM olp.code_route_revisions WHERE id=$1`, revision).Scan(&frozen); err != nil {
+			return access.Reply{}, err
+		}
+		if len(frozen) != 0 {
+			return access.Reply{}, access.Fail(409, "code_route_unserved", "No pool account serves this route's published subscriptions; restore one or republish.")
+		}
 		offers = codexOffers(route.Models)
 	}
 	query := r.URL.Query()

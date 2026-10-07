@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -224,6 +225,71 @@ func TestCodeFoundationRotationAndLiveAuthority(t *testing.T) {
 	f.exec(t, `UPDATE olp.api_keys SET revoked_at=now() WHERE id=$1`, f.key)
 	_, err = f.store.Admit(t.Context(), f.input("fresh", "", nil))
 	codeRefusal(t, err, "code_permission_denied")
+}
+
+// A tree holds one account of each subscription family, which the frozen
+// connections of the route's revision identify. Editing a provider's draft
+// configuration after publication must not move that comparison: it could
+// reject a valid account of another frozen family or admit a second account
+// of a family the tree already pins.
+func TestCodeFoundationFrozenFamiliesSurviveProviderDrafts(t *testing.T) {
+	f := newCodeFixture(t)
+	h, owner := f.h, f.owner
+	f.exec(t, `UPDATE olp.api_keys SET policy=jsonb_set(policy,'{allowed_routes}','["coding","mixed"]') WHERE id=$1`, f.key)
+	// Two providers of the Z.ai family through different profiles, and one
+	// OpenCode Go provider, frozen into the mixed route's connections.
+	add := func(name, profile string, models []string) (provider string, account map[string]any) {
+		provider = access.NewID()
+		f.exec(t, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,'plugin','draft',$3,$4,$5,$6,$7)`,
+			provider, name, `{"kind":"plugin","auth_mode":"grant","profile_id":"`+profile+`"}`, access.NewID(), access.NewID(), f.user, f.project)
+		credential := access.NewID()
+		f.exec(t, `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts) VALUES($1,$2,1,'fixture-digest',$3,'{}')`, credential, provider, "principal-"+profile)
+		f.exec(t, `INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, credential)
+		account = h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": name, "enabled": true, "models": models}, idem("account-"+profile), 201)
+		return provider, account
+	}
+	zai, glm := add("ZAI plan", codeplans.ZAIProfile, []string{"glm-5.3"})
+	bigmodel, kimiB := add("BigModel plan", codeplans.BigModelProfile, []string{"minimax-m3"})
+	opencodego, kimiO := add("OpenCode Go", codeplans.OpenCodeGoProfile, []string{"minimax-m3"})
+	glmID, kimiBID, kimiOID := glm["id"].(string), kimiB["id"].(string), kimiO["id"].(string)
+	pool := h.want(owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": f.project, "name": "Mixed pool", "kind": "shared", "owner_user_id": nil, "account_ids": []string{glmID, kimiBID, kimiOID}, "api_key_ids": []string{f.key}}, idem("mixed-pool"), 201)
+	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": f.project, "slug": "mixed", "pool_id": pool["id"], "models": []string{"glm-5.3", "minimax-m3"}, "enabled": true}, idem("mixed-route"), 201)
+	published := h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(draft, idem("mixed-publish")), 200)
+	route := codePublicDecode[codemode.Route](t, published)
+	in := func(conversation, model string) resources.CodeAdmission {
+		return resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: []string{zai, bigmodel, opencodego}, Operation: codemode.Operation{Name: "messages.create", Model: model, Identity: codemode.Identity{Conversation: conversation}}}
+	}
+	edit := func(provider, profile string) {
+		f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{profile_id}',to_jsonb($2::text)) WHERE id=$1`, provider, profile)
+	}
+	permit, err := f.store.Admit(t.Context(), in("c1", "glm-5.3"))
+	if err != nil || permit.Account.ID != glmID {
+		t.Fatalf("GLM pin: %v %v", permit.Account.ID, err)
+	}
+	// The OpenCode provider's draft claims the Z.ai family: the tree must
+	// still admit its account, the only frozen family it does not pin yet.
+	edit(opencodego, codeplans.ZAIProfile)
+	permit, err = f.store.Admit(t.Context(), in("c1", "minimax-m3"))
+	if err != nil {
+		t.Fatal("frozen OpenCode Go family refused after a draft edit:", err)
+	}
+	if permit.Pin.Model != "minimax-m3" || permit.Account.ID != kimiOID {
+		t.Fatalf("minimax pinned %v, want the OpenCode Go account %v", permit.Account.ID, kimiOID)
+	}
+	// The BigModel provider's draft claims OpenCode Go: the tree must still
+	// refuse it as the Z.ai family it already pins, not admit a second one.
+	edit(bigmodel, codeplans.OpenCodeGoProfile)
+	permit, err = f.store.Admit(t.Context(), in("c2", "glm-5.3"))
+	if err != nil || permit.Account.ID != glmID {
+		t.Fatalf("second tree's GLM pin: %v %v", permit.Account.ID, err)
+	}
+	permit, err = f.store.Admit(t.Context(), in("c2", "minimax-m3"))
+	if err != nil {
+		t.Fatal("second tree's minimax refused:", err)
+	}
+	if permit.Account.ID != kimiOID {
+		t.Fatalf("second tree pinned %v, want %v: the BigModel account shares its frozen Z.ai family", permit.Account.ID, kimiOID)
+	}
 }
 
 func TestCodeFoundationTokenReservationsAcrossReplicas(t *testing.T) {

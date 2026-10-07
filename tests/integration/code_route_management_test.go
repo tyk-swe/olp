@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -101,6 +102,36 @@ func TestCodeRouteDraftRetainsActivePublication(t *testing.T) {
 		t.Fatal("list did not advance publication")
 	}
 	f.h.want(f.owner, "GET", path+"/client-config?gateway_url=https://gateway.example", nil, nil, 409)
+}
+
+// A revision whose frozen connections name subscription families stops
+// serving client configuration when its pool stops serving them; it must not
+// fabricate Codex configuration for an unserved mix.
+func TestCodeRouteClientConfigurationFollowsFrozenSubscriptions(t *testing.T) {
+	f := newCodeFixture(t)
+	path := "/api/v1/code/routes/" + f.route.ID + "/client-config?gateway_url=https://gateway.example"
+	// Give the fixture provider an adapter profile and republish, so the
+	// route's frozen connections name a subscription family.
+	f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{profile_id}','"zai-coding-plan"') WHERE id=$1`, f.provider)
+	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": []string{"native-model"}, "enabled": true}, map[string]string{"If-Match": `"` + f.route.ETag + `"`}, 200)
+	f.route = codePublicDecode[codemode.Route](t, f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(draft, idem("adapter-publish")), 200))
+	if config := f.h.want(f.owner, "GET", path, nil, nil, 200); fmt.Sprint(config["adapters"]) != "[zai_coding]" {
+		t.Fatalf("served route adapters: %v", config["adapters"])
+	}
+	f.exec(t, `DELETE FROM olp.code_pool_accounts WHERE pool_id=$1`, f.pool)
+	if problem := f.h.want(f.owner, "GET", path, nil, nil, 409); problem["type"] != "https://openllmproxy.dev/problems/code_route_unserved" {
+		t.Fatalf("unserved route: %v", problem)
+	}
+	// A revision whose connections name no adapter keeps the Codex fallback
+	// it had before adapters existed, even with no serving accounts.
+	f.exec(t, `INSERT INTO olp.code_pool_accounts(pool_id,account_id) VALUES($1,$2)`, f.pool, f.account)
+	f.exec(t, `UPDATE olp.providers SET configuration=configuration::jsonb-'profile_id' WHERE id=$1`, f.provider)
+	draft = f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": []string{"native-model"}, "enabled": true}, map[string]string{"If-Match": `"` + f.route.ETag + `"`}, 200)
+	f.route = codePublicDecode[codemode.Route](t, f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(draft, idem("legacy-publish")), 200))
+	f.exec(t, `DELETE FROM olp.code_pool_accounts WHERE pool_id=$1`, f.pool)
+	if config := f.h.want(f.owner, "GET", path, nil, nil, 200); config["client"] != "codex" {
+		t.Fatalf("legacy route client: %v", config["client"])
+	}
 }
 
 func TestCodeRouteSlugsReservedAcrossDraftsAndPublication(t *testing.T) {
