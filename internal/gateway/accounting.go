@@ -241,6 +241,11 @@ func accountingTokens(fact *AttemptFact) (input, output, cached *int64) {
 	if fact.Usage == nil {
 		return nil, nil, nil
 	}
+	// Unit-only media usage reports no token dimensions. Inventing zero token
+	// counts would require token rates and leave a unit-priced video unpriced.
+	if fact.Usage.MediaUnits != nil && fact.Usage.InputTokens == 0 && fact.Usage.OutputTokens == 0 && fact.Usage.CachedInputTokens == nil {
+		return nil, nil, nil
+	}
 	in, out := max(fact.Usage.InputTokens, 0), max(fact.Usage.OutputTokens, 0)
 	if fact.Usage.CachedInputTokens != nil {
 		hit := max(*fact.Usage.CachedInputTokens, 0)

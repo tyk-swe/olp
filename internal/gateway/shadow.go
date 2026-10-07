@@ -23,13 +23,18 @@ type shadowing struct {
 	mirrored atomic.Int64
 	dropped  atomic.Int64
 	running  sync.WaitGroup
+	mu       sync.Mutex
+	closed   bool
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 func newShadowing(capacity int) *shadowing {
 	if capacity <= 0 {
 		capacity = defaultShadowInFlight
 	}
-	return &shadowing{slots: make(chan struct{}, capacity)}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &shadowing{slots: make(chan struct{}, capacity), ctx: ctx, cancel: cancel}
 }
 
 // ShadowCounts reports the shadow requests started and those dropped because
@@ -40,6 +45,26 @@ func (s *Server) ShadowCounts() (mirrored, dropped int64) {
 
 // WaitShadows blocks until every running shadow request has finished.
 func (s *Server) WaitShadows() { s.shadows.running.Wait() }
+
+// DrainShadows stops mirror intake and waits for accounting and cap settlement.
+// Mirrors still running at the shutdown deadline are cancelled.
+func (s *Server) DrainShadows(ctx context.Context) error {
+	s.shadows.mu.Lock()
+	s.shadows.closed = true
+	s.shadows.mu.Unlock()
+	defer s.shadows.cancel()
+	done := make(chan struct{})
+	go func() {
+		s.WaitShadows()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
 // mirrorable reports whether a request may be mirrored: stateless generation,
 // embeddings and rerank, whose repetition at another target has no effect a
@@ -73,6 +98,12 @@ func (x *execution) mirrorSeed() []byte {
 // attempt, and accounting to the route rather than to the caller's key.
 func (s *Server) mirror(x *execution) {
 	if len(x.shadows) == 0 {
+		return
+	}
+	s.shadows.mu.Lock()
+	defer s.shadows.mu.Unlock()
+	if s.shadows.closed {
+		s.shadows.dropped.Add(int64(len(x.shadows)))
 		return
 	}
 	for _, attempt := range x.shadows {
@@ -135,7 +166,7 @@ func (s *Server) runShadow(parent *execution, attempt runtime.Attempt) {
 			return nil
 		}
 	}
-	ctx := context.Background()
+	ctx := s.shadows.ctx
 	out := s.execute(ctx, x)
 	status := 200
 	if out.err != nil {

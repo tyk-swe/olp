@@ -172,6 +172,7 @@ func (s *Server) holdCaps(ctx context.Context, x *execution, attempt runtime.Att
 // reservations settle at cost rather than being given back.
 func (x *execution) spendCaps(owners []string, attempt runtime.Attempt) {
 	bound := x.attemptCostBound(attempt)
+	x.spentCost = x.spentCost.Add(bound)
 	for i := range x.caps {
 		if slices.Contains(owners, x.caps[i].owner) {
 			x.caps[i].dispatched = true

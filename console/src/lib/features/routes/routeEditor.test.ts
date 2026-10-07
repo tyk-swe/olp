@@ -769,4 +769,51 @@ describe('route resilience', () => {
     expect(parseSelectors('{"id":"a"}')).toMatch(/JSON array/);
     expect(parseSelectors('[')).toMatch(/JSON array/);
   });
+
+  it.each([
+    '[null]',
+    '[1]',
+    '[[]]',
+    '[{"id":"a","when":{},"tags":"foo"}]',
+    '[{"id":"a","when":{},"tags":[null]}]',
+    '[{"id":"a","when":{},"route":42}]',
+    '[{"id":"a","when":null}]',
+    '[{"id":"a","when":[]}]',
+    '[{"id":"a","when":{"tools":"yes"}}]',
+    '[{"id":"a","when":{"max_input_tokens":"10"}}]',
+    '[{"id":"a","when":{"modalities":"text"}}]',
+    '[{"id":"a","when":{"classifier":{"route":"b","labels":"x","timeout_ms":10}}}]',
+    '[{"id":"a","when":{"plugin":[]}}]',
+    '[{"tags":"foo"}]'
+  ])('reports malformed selector shapes inline: %s', (text) => {
+    const result = parseSelectors(text);
+    expect(result).toMatch(/JSON array/);
+    expect(
+      validateRouteEditor({
+        ...withBehavior({}),
+        selectorsError: typeof result === 'string' ? result : null
+      })
+    ).toMatch(/JSON array/);
+  });
+
+  it('accepts typed dynamic and static predicate fields', () => {
+    const selectors = [
+      {
+        id: 'a',
+        tags: ['fast'],
+        when: {
+          operations: ['generation'],
+          min_input_tokens: null,
+          max_output_tokens: 10,
+          tools: true,
+          streaming: null,
+          modalities: ['text'],
+          reasoning_effort: ['high'],
+          classifier: { route: 'b', labels: ['simple'], timeout_ms: 100 },
+          plugin: null
+        }
+      }
+    ];
+    expect(parseSelectors(JSON.stringify(selectors))).toEqual(selectors);
+  });
 });

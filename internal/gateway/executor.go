@@ -104,11 +104,13 @@ type execution struct {
 	// it is on. spent counts attempts across routes, budget is the ceiling
 	// on spent for the current route, and allowance the primary budget.
 	primary        *runtime.Route
+	deadline       time.Time
 	planner        planner
 	authorize      func(*runtime.Route) *Error
 	fixed          bool
 	spent          int
 	allowance      int
+	spentCost      usage.Cost
 	seed           []byte
 	leg            *usage.RouteLeg
 	selector       string
@@ -412,8 +414,7 @@ func forwardable(status int) bool {
 // execute adapts canonical inference to shared attempt execution. The
 // canonical transport retains its first-byte and streaming idle deadlines.
 func (s *Server) execute(ctx context.Context, x *execution) *outcome {
-	overall := time.Duration(x.named().OverallTimeout) * time.Millisecond
-	ctx, cancel := context.WithTimeout(ctx, overall)
+	ctx, cancel := x.routeContext(ctx)
 	defer cancel()
 	out := runAttempts(ctx, s, x, attemptAdapter[*openai.Completion]{
 		estimate: x.attemptReservation,

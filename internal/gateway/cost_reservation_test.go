@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -54,6 +55,34 @@ func costExecution(t *testing.T, body string, family openai.Family, budget int, 
 
 func budgeted() access.Authority {
 	return admissionAuthority(access.KeyPolicy{DailyCostLimit: costText("5.00")})
+}
+
+func TestVideoCostBoundUsesRequestedDurationAndProviderDefault(t *testing.T) {
+	for _, tc := range []struct {
+		seconds *string
+		want    string
+	}{{nil, "0.4"}, {costText("8"), "0.8"}, {costText("12"), "1.2"}} {
+		x := &execution{media: &media.Request{Op: media.OpVideoCreate, Seconds: tc.seconds}}
+		attempt := runtime.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{UnitPrice: costText("0.1")}}}
+		if got := x.attemptCostBound(attempt).String(); got != tc.want {
+			t.Fatalf("duration %v reserves %s, want %s", tc.seconds, got, tc.want)
+		}
+	}
+}
+
+func TestUnitPricedVideoUsageSettlesWithoutTokenRates(t *testing.T) {
+	owner := uuid.NewString()
+	x := &execution{media: &media.Request{Op: media.OpVideoCreate}, facts: []AttemptFact{{
+		Budgets: []string{owner}, UsageObserved: true, UsageComplete: true,
+		Usage: &openai.Usage{MediaUnits: costText("8")}, Price: &usage.RoutingPrice{Price: usage.Price{UnitPrice: costText("0.1")}},
+	}}}
+	if got := x.costOf(owner).String(); got != "0.8" {
+		t.Fatalf("unit-only video settled %s, want 0.8", got)
+	}
+	input, output, _ := accountingTokens(&x.facts[0])
+	if input != nil || output != nil {
+		t.Fatal("unit-only media accounting invented token usage")
+	}
 }
 
 func TestCostReservationIsTheMostTheRequestCouldCost(t *testing.T) {

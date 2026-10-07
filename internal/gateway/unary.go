@@ -207,7 +207,7 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *execution
 	}
 	x.estimate = requestEstimate(x)
 	overall := time.Duration(x.primary.OverallTimeout) * time.Millisecond
-	ctx, cancel := context.WithTimeout(r.Context(), overall)
+	ctx, cancel := x.routeContext(r.Context())
 	defer cancel()
 	if e = s.awaitAdmission(ctx, x); e != nil {
 		return fail(e)

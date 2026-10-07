@@ -625,7 +625,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		overall := time.Duration(x.named().OverallTimeout) * time.Millisecond
 		// Admission is part of the same deadline as execution; starting a new
 		// full deadline afterwards could outlive the concurrency reservation.
-		ctx, cancel := context.WithTimeout(r.Context(), overall)
+		ctx, cancel := x.routeContext(r.Context())
 		defer cancel()
 		if e = s.awaitAdmission(ctx, x); e != nil {
 			x.failure, status = e, e.Status

@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"slices"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -48,11 +49,22 @@ func (x *execution) named() *runtime.Route {
 // planNamed plans the primary route. A route that cannot plan any attempt for
 // a reason one of its fallbacks names moves the request on before dispatch.
 func (s *Server) planNamed(ctx context.Context, x *execution) *Error {
+	ctx, cancel := x.routeContext(ctx)
+	defer cancel()
 	e := s.replan(ctx, x)
 	if e != nil && len(x.planConditions) > 0 && s.fallBack(ctx, x, x.planConditions) {
 		return nil
 	}
 	return e
+}
+
+// routeContext starts the named route's deadline once, before classifiers and
+// other dynamic planning. Admission, dispatch and fallback share what remains.
+func (x *execution) routeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if x.deadline.IsZero() {
+		x.deadline = time.Now().Add(time.Duration(x.named().OverallTimeout) * time.Millisecond)
+	}
+	return context.WithDeadline(ctx, x.deadline)
 }
 
 // replan plans x.route with the request's own planner.

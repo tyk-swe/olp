@@ -209,7 +209,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execu
 		return
 	}
 	overall := time.Duration(x.primary.OverallTimeout) * time.Millisecond
-	ctx, cancel := context.WithTimeout(ctx, overall)
+	ctx, cancel := x.routeContext(ctx)
 	defer cancel()
 	var e *Error
 	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, overall); e != nil {

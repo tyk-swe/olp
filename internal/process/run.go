@@ -460,6 +460,14 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	defer cancel()
 	drainListeners(shutdown, listeners, emitter)
 	cancelRequests()
+	if gw != nil {
+		if err := gw.DrainShadows(shutdown); err != nil {
+			log.Warn("shutdown budget reached before shadows drained", "error", err)
+			if emitter != nil {
+				emitter.MarkUnclean()
+			}
+		}
+	}
 	if rt != nil {
 		rt.Stop()
 	}

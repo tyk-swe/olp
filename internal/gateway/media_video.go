@@ -72,7 +72,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
-	ctx, cancel := context.WithTimeout(r.Context(), overall)
+	ctx, cancel := x.routeContext(r.Context())
 	defer cancel()
 	var e *Error
 	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, overall); e != nil {
@@ -122,6 +122,10 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	defer dispatchCancel()
 	fact, result, dispatchFailure := s.mediaAttempt(dispatchCtx, w, x, attempt, &provider, slot, len(x.facts)+1)
 	x.dispatched = dispatchFailure == nil || dispatchFailure.dispatched
+	if x.dispatched {
+		x.spendCaps(hold.budgets, attempt)
+	}
+	fact.Budgets = hold.budgets
 	x.facts = append(x.facts, fact)
 	s.health.record(provider.ID, fact)
 	// A reply that lands just before the route deadline must still bind or
@@ -160,7 +164,7 @@ func (s *Server) admitVideoSlot(ctx context.Context, x *execution, attempt runti
 		if used >= x.budget || ctx.Err() != nil {
 			break
 		}
-		gate := s.gateSlot(ctx, provider, &slot, x.estimate, deadline, x.priority)
+		gate := s.gateAttempt(ctx, x, attempt, provider, &slot, x.estimate, deadline)
 		switch gate.verdict {
 		case gateExpired:
 			return nil, runtime.Slot{}, (&attemptFailure{class: classTimeout}).toError()
@@ -171,11 +175,14 @@ func (s *Server) admitVideoSlot(ctx context.Context, x *execution, attempt runti
 			used++
 			x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, used, gate.rejection))
 			last = gate.rejection
-			if gate.rejection.quota == quotaConnection {
+			if gate.rejection.quota == quotaConnection || gate.rejection.quota == quotaRoute {
 				return nil, runtime.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
 			}
 		case gateUnmeterable:
 			unmeterable = true
+			if gate.quota == quotaConnection || gate.quota == quotaRoute {
+				return nil, runtime.Slot{}, s.videoAdmissionError(ctx, x, last, unmeterable)
+			}
 		case gateAdmitted:
 			return gate.hold, slot, nil
 		}

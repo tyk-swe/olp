@@ -37,6 +37,7 @@ type gateResult struct {
 	verdict   gateVerdict
 	rejection *attemptFailure // gateRejected: the refusing quota
 	hold      *dispatchHold   // gateAdmitted: the resources to settle
+	quota     string          // gateUnmeterable: the unreadable cap's scope
 }
 
 // dispatchHold owns what one admitted slot holds until its upstream attempt
@@ -47,6 +48,24 @@ type dispatchHold struct {
 	reservation *targetReservation
 	probed      bool
 	settled     bool
+	budgets     []string
+}
+
+// gateAttempt adds request spend caps to the shared slot admission boundary.
+// Its hold carries the owners that accounting and settlement must charge.
+func (s *Server) gateAttempt(ctx context.Context, x *execution, attempt runtime.Attempt, provider *runtime.Provider, slot *runtime.Slot, estimate int64, deadline time.Time) gateResult {
+	caps := s.holdCaps(ctx, x, attempt, provider, slot, deadline)
+	if caps.quota != "" {
+		if caps.refusal != nil {
+			return gateResult{verdict: gateRejected, rejection: caps.refusal}
+		}
+		return gateResult{verdict: gateUnmeterable, quota: caps.quota}
+	}
+	gate := s.gateSlot(ctx, provider, slot, estimate, deadline, x.priority)
+	if gate.hold != nil {
+		gate.hold.budgets = caps.owners
+	}
+	return gate
 }
 
 // settle reconciles and releases the quota reservation once the attempt has

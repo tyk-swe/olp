@@ -41,6 +41,9 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapt
 		if len(conditions) == 0 || !s.fallBack(ctx, x, conditions) {
 			return out
 		}
+		if e := s.reserveFallbackCost(ctx, x); e != nil {
+			return attemptOutcome[Result]{err: e}
+		}
 	}
 }
 
@@ -78,25 +81,7 @@ route:
 			if !x.servingAllowed(&provider, attempt.UpstreamModel, slot, false) {
 				continue
 			}
-			caps := s.holdCaps(ctx, x, attempt, &provider, &slot, deadline)
-			if caps.quota != "" {
-				if caps.refusal == nil {
-					unmeterable = true
-				} else {
-					x.spent++
-					x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, x.spent, caps.refusal))
-					last = caps.refusal
-					met = meet(met, classBudget)
-				}
-				switch caps.quota {
-				case quotaRoute:
-					break route // every target shares the route's cap
-				case quotaConnection:
-					next = true
-				}
-				continue
-			}
-			gate := s.gateSlot(ctx, &provider, &slot, adapter.estimate(attempt, &provider), deadline, x.priority)
+			gate := s.gateAttempt(ctx, x, attempt, &provider, &slot, adapter.estimate(attempt, &provider), deadline)
 			switch gate.verdict {
 			case gateExpired:
 				return attemptOutcome[Result]{err: (&attemptFailure{class: classTimeout}).toError()}, nil
@@ -109,9 +94,16 @@ route:
 				x.facts = append(x.facts, s.rejectedFact(x, attempt, slot, x.spent, gate.rejection))
 				last = gate.rejection
 				met = meet(met, gate.rejection.class)
+				if gate.rejection.quota == quotaRoute {
+					break route
+				}
 				next = gate.rejection.quota == quotaConnection // every sibling shares this quota
 			case gateUnmeterable:
 				unmeterable = true
+				if gate.quota == quotaRoute {
+					break route
+				}
+				next = gate.quota == quotaConnection
 			case gateAdmitted:
 				if !x.servingAllowed(&provider, attempt.UpstreamModel, slot, true) {
 					s.releaseHold(ctx, gate.hold)
@@ -126,9 +118,9 @@ route:
 				x.dispatched = x.dispatched || dispatched
 				gate.hold.settle(ctx, dispatched, totalTokens(fact.Usage))
 				if dispatched {
-					x.spendCaps(caps.owners, attempt)
+					x.spendCaps(gate.hold.budgets, attempt)
 				}
-				fact.Retry, fact.Budgets = retry, caps.owners
+				fact.Retry, fact.Budgets = retry, gate.hold.budgets
 				x.facts = append(x.facts, fact)
 				// Recording the attempt also releases its half-open probe.
 				s.health.record(provider.ID, fact)

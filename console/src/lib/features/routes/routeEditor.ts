@@ -121,11 +121,73 @@ export function parseSelectors(text: string): RouteSelector[] | string {
   if (!text.trim()) return [];
   try {
     const parsed: unknown = JSON.parse(text);
-    if (Array.isArray(parsed)) return parsed as RouteSelector[];
+    if (Array.isArray(parsed) && parsed.every(isSelector)) return parsed;
   } catch {
     // Reported below.
   }
   return 'Selectors must be a JSON array of selector objects.';
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === 'string')
+  );
+}
+
+function isSelector(value: unknown): value is RouteSelector {
+  if (
+    !isObject(value) ||
+    typeof value.id !== 'string' ||
+    !isObject(value.when) ||
+    (value.route !== undefined && typeof value.route !== 'string') ||
+    (value.tags !== undefined && !isStringArray(value.tags)) ||
+    Object.keys(value).some(
+      (key) => !['id', 'when', 'route', 'tags'].includes(key)
+    )
+  )
+    return false;
+  return Object.entries(value.when).every(([key, field]) => {
+    switch (key) {
+      case 'operations':
+      case 'modalities':
+      case 'reasoning_effort':
+        return isStringArray(field);
+      case 'min_input_tokens':
+      case 'max_input_tokens':
+      case 'min_output_tokens':
+      case 'max_output_tokens':
+        return field === null || Number.isSafeInteger(field);
+      case 'streaming':
+      case 'tools':
+      case 'structured_output':
+        return field === null || typeof field === 'boolean';
+      case 'classifier':
+        return (
+          field === null ||
+          (isObject(field) &&
+            typeof field.route === 'string' &&
+            isStringArray(field.labels) &&
+            Number.isSafeInteger(field.timeout_ms) &&
+            (field.min_score == null || typeof field.min_score === 'number') &&
+            Object.keys(field).every((name) =>
+              ['route', 'labels', 'timeout_ms', 'min_score'].includes(name)
+            ))
+        );
+      case 'plugin':
+        return (
+          field === null ||
+          (isObject(field) &&
+            typeof field.digest === 'string' &&
+            Object.keys(field).every((name) => name === 'digest'))
+        );
+      default:
+        return false;
+    }
+  });
 }
 
 /** Omitted modes are strict, matching the server's default. */

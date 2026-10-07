@@ -591,6 +591,7 @@ func (l *Limiter) Reserve(ctx context.Context, r Request) (*Lease, error) {
 		hasRate:        r.HasRateLimits(),
 	}
 	if r.HasCostBudget() {
+		lease.costRequest = &r
 		reserved, err := l.reserveCost(ctx, r, scriptKeys)
 		if err != nil {
 			return nil, err
@@ -851,6 +852,36 @@ type Lease struct {
 	costID       string
 	costGrace    time.Duration
 	actualCost   string
+	costRequest  *Request
+}
+
+// GrowCost reserves the new total cost of a request without taking its rate or
+// concurrency allowance again. Earlier holds survive a refused increase and
+// settle with the original lease, including its budget group.
+func (le *Lease) GrowCost(ctx context.Context, amount, requestID string, ttl time.Duration) error {
+	if le == nil {
+		return nil
+	}
+	if err := le.group.GrowCost(ctx, amount, requestID, ttl); err != nil {
+		return err
+	}
+	if le.costRequest == nil {
+		return nil
+	}
+	r := *le.costRequest
+	r.CostEstimate, r.RequestID, r.LeaseTTL = amount, requestID, ttl
+	r.RetainCostReservation = le.costReserved
+	keys := le.limiter.keysFor(r)
+	reserved, err := le.limiter.reserveCost(ctx, r, keys)
+	if err != nil {
+		return err
+	}
+	if reserved {
+		le.costReserved = true
+		le.pendingKey, le.expiryKey = keys.pending, keys.expiry
+		le.costID, le.costGrace = canonicalUUID(requestID), r.costGrace()
+	}
+	return nil
 }
 
 // RateState reports the request and token allowance this reservation was

@@ -2,9 +2,13 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"slices"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -40,6 +44,14 @@ func (s *Server) costReservation(x *execution, authority access.Authority) costR
 	if !costBudgeted(authority) {
 		return costReservation{}
 	}
+	bound := s.routeCostBound(x)
+	if bound.IsZero() {
+		return costReservation{}
+	}
+	return costReservation{amount: bound.String(), requestID: x.request.accountingID()}
+}
+
+func (s *Server) routeCostBound(x *execution) usage.Cost {
 	var bound usage.Cost
 	attempts := x.attempts
 	if retryDispatches(x.route) > 1 {
@@ -55,10 +67,31 @@ func (s *Server) costReservation(x *execution, authority access.Authority) costR
 		// Each visit is a dispatch that may be billed on its own.
 		bound = bound.Add(x.attemptCostBound(attempt))
 	})
-	if bound.IsZero() {
-		return costReservation{}
+	return bound
+}
+
+// reserveFallbackCost covers the remaining route's work alongside the bound
+// already dispatched, even when an earlier attempt could not report its usage.
+func (s *Server) reserveFallbackCost(ctx context.Context, x *execution) *Error {
+	if x.lease == nil || !costBudgeted(x.authority) {
+		return nil
 	}
-	return costReservation{amount: bound.String(), requestID: x.request.accountingID()}
+	bound := x.spentCost.Add(s.routeCostBound(x))
+	if bound.IsZero() {
+		return nil
+	}
+	deadline, _ := ctx.Deadline()
+	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
+	defer cancel()
+	err := x.lease.GrowCost(decision, bound.String(), x.request.accountingID(), max(time.Until(deadline), time.Second))
+	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
+		s.Admission.recordRejection(exceeded.Dimension)
+		return rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
+	}
+	if err != nil {
+		return limitsUnavailable()
+	}
+	return nil
 }
 
 // attemptCostBound is the most one attempt could cost, and nothing when it has no
@@ -69,6 +102,17 @@ func (s *Server) costReservation(x *execution, authority access.Authority) costR
 func (x *execution) attemptCostBound(attempt runtime.Attempt) usage.Cost {
 	if attempt.Price == nil {
 		return usage.Cost{}
+	}
+	if x.media != nil {
+		if x.media.Op != media.OpVideoCreate {
+			return usage.Cost{}
+		}
+		seconds := "4"
+		if x.media.Seconds != nil {
+			seconds = *x.media.Seconds
+		}
+		bound, _ := attempt.Price.Price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds})
+		return bound
 	}
 	provider, ok := x.snapshot().Providers[attempt.ProviderID]
 	if !ok {

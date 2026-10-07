@@ -79,6 +79,32 @@ func TestClassifierWaitsForTheCallersQueuePermit(t *testing.T) {
 	}
 }
 
+func TestClassifierSharesTheNamedRoutesOverallDeadline(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.republish(func(s *runtime.Snapshot, _, b runtime.Provider) {
+		triage(s, b, runtime.Predicate{Classifier: &runtime.ClassifierPredicate{Route: classifierSlug, Labels: []string{"complex"}, TimeoutMS: 1000}})
+		route := s.Routes[routeSlug]
+		route.OverallTimeout = 50
+		s.Routes[routeSlug] = route
+	})
+	h.mock.set("a", completion(modelA, answerText))
+	h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(250 * time.Millisecond):
+			completion(modelB, "complex")(w, r)
+		}
+	})
+	started := time.Now()
+	resp, body := h.chat(fullKey, nil)
+	if resp.StatusCode == http.StatusOK || time.Since(started) >= 200*time.Millisecond {
+		t.Fatalf("classifier escaped the route deadline: status=%d elapsed=%s body=%s", resp.StatusCode, time.Since(started), body)
+	}
+	if h.mock.count("a") != 0 || h.mock.count("b") != 1 {
+		t.Fatalf("dispatches beyond deadline: %d/%d", h.mock.count("a"), h.mock.count("b"))
+	}
+}
+
 func TestNativeClassifierPredicateReturnsLabelsAndFallsThroughOnFailure(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, provider string
