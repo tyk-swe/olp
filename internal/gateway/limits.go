@@ -217,16 +217,16 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Autho
 		group = lease
 	}
 	request := keyRequest(authority, estimate, ttl)
-	// The allowance is stated for a response that will report it. A surface
-	// whose SDKs read no rate-limit headers, Gemini, Bedrock and the native
-	// operations, would be answered an allowance nothing writes, and the reply
-	// costs the request about a dozen allocations to build.
-	request.ReportRate = rateHeadersOf(surface) != nil
 	if !request.HasHardLimits() {
 		// Nothing to enforce, so nothing to store: a key without hard limits
 		// reaches Valkey only for the group it belongs to.
 		return group, nil
 	}
+	// The allowance is stated for a response that will report it. A surface
+	// whose SDKs read no rate-limit headers, Gemini, Bedrock and the native
+	// operations, would be answered an allowance nothing writes, and the reply
+	// costs the request about a dozen allocations to build.
+	request.ReportRate = rateHeadersOf(surface) != nil
 	if !a.ready() {
 		return nil, limitsUnavailable()
 	}
