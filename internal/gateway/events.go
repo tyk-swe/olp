@@ -21,7 +21,13 @@ type Envelope struct {
 	// cannot be stored under a key their subject chooses.
 	AccountingID string
 	Actor        string
-	KeyID        string
+	// KeyID is the API key the request is accounted to; it is empty for the
+	// gateway's keyless requests, whose Origin says why they were made.
+	KeyID string
+	// Origin is empty for a caller request. ParentRequestID is the accounting
+	// identity of the caller request a shadow or classifier request serves.
+	Origin          string
+	ParentRequestID string
 
 	BudgetGroupID *string
 
@@ -60,7 +66,17 @@ type Envelope struct {
 
 // AttemptFact records one credential attempt against one target.
 type AttemptFact struct {
-	Interaction        *usage.InteractionEvidence
+	Interaction *usage.InteractionEvidence
+	// Leg is the fallback or selector route the attempt ran on; nil on the
+	// route the caller named. Selector is the selector that chose its target,
+	// Retry how many times the route's retry policy repeated it, and Budgets
+	// the capped route, connection and slot its spend counts against.
+	// Baseline is the most expensive target the selector avoided.
+	Leg                *usage.RouteLeg
+	Selector           string
+	Baseline           *usage.Baseline
+	Retry              int
+	Budgets            []string
 	FirstOutput        *time.Duration
 	Strategy           string
 	PolicyDigest       string

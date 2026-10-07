@@ -77,20 +77,20 @@ of [M3](m03-routing-resilience.md).
 | Hard policy constraints | [Tag routing](https://docs.litellm.ai/docs/proxy/tag_routing), [sensitive data routing](https://docs.litellm.ai/docs/proxy/guardrails/sensitive_data_routing) | Region, quantization, data collection, zero data retention, required parameters and price, intersected across scopes | `Ahead` | |
 | Per-request routing controls | Request metadata and tags | `X-OLP-Routing`, which can only narrow published policy | `Parity` | |
 | Routing explanation | `/utils/transform_request` shows the provider request | Deterministic draft and published route simulation of attempt order | `Ahead` | |
-| Rate-limit-aware and least-busy routing | [Routing strategies](https://docs.litellm.ai/docs/routing) | Not available | `Gap` | M3.2 |
-| Retries with per-error policy | [Reliability](https://docs.litellm.ai/docs/proxy/reliability) | Failover across targets and slots; no same-target backoff policy | `Partial` | M3.9 |
-| Cross-model fallbacks | [Fallbacks](https://docs.litellm.ai/docs/proxy/reliability), including context-window and content-policy fallbacks | Failover inside a route, including context-window rejections | `Partial` | M3.1 |
+| Rate-limit-aware and least-busy routing | [Routing strategies](https://docs.litellm.ai/docs/routing) | `capacity` strategy ordering slots by remaining request, token and concurrency headroom from the admission windows, in one pipelined read, explained in simulation | `Parity` | |
+| Retries with per-error policy | [Reliability](https://docs.litellm.ai/docs/proxy/reliability) | Per-class same-slot retries with full-jitter backoff and `Retry-After`, inside the attempt budget and never after commitment | `Parity` | |
+| Cross-model fallbacks | [Fallbacks](https://docs.litellm.ai/docs/proxy/reliability), including context-window and content-policy fallbacks | Fallback routes on exhaustion, context window, content filter, rate limit and spend caps, acyclic and bounded by the named route's deadline and budget | `Ahead` | |
 | Context-window pre-checks | Pre-call checks | Model facts exclude targets whose context cannot fit the estimate, counted for each target's model family | `Parity` | |
-| Cooldowns shared across replicas | Redis-backed cooldowns | Shared credential and slot cooldowns in Valkey; per-gateway circuits | `Partial` | M3.5 |
+| Cooldowns shared across replicas | Redis-backed cooldowns | Shared credential and slot cooldowns and circuits in Valkey, honored fleet-wide within five seconds | `Parity` | |
 | Timeouts | [Timeouts](https://docs.litellm.ai/docs/proxy/timeout) | Route deadline, target timeouts, first-byte and idle bounds | `Parity` | |
-| Priority request queue | [Request prioritization](https://docs.litellm.ai/docs/scheduler) (beta) | A full admission pool answers 503 | `Gap` | M3.3 |
-| Dynamic capacity allocation | [Dynamic TPM/RPM allocation](https://docs.litellm.ai/docs/proxy/dynamic_rate_limit) | Not available | `Gap` | M3.3 |
-| Provider and deployment budgets | [Budget routing](https://docs.litellm.ai/docs/proxy/provider_budget_routing) | Not available | `Gap` | M3.4 |
-| Health-check-driven routing | [Health check routing](https://docs.litellm.ai/docs/proxy/health_check_routing) | Passive circuit breakers | `Gap` | M3.5 |
-| Traffic mirroring | [Traffic mirroring](https://docs.litellm.ai/docs/traffic_mirroring) | Not available | `Gap` | M3.6 |
-| Automatic request routing | [Auto routing](https://docs.litellm.ai/docs/auto_router/), [adaptive router](https://docs.litellm.ai/docs/adaptive_router) (beta) | Not available | `Gap` | M3.7 |
-| Custom routing logic | [Routing plugins](https://docs.litellm.ai/docs/routing_plugins) | Not available | `Gap` | M3.7 |
-| Wildcard routing | [Wildcard routing](https://docs.litellm.ai/docs/wildcard_routing) | Explicit routes and bulk route creation in the console | `Partial` | M3.8 |
+| Priority request queue | [Request prioritization](https://docs.litellm.ai/docs/scheduler) (beta) | Bounded weighted-fair admission queue in four classes, with key-capped priority | `Parity` | |
+| Dynamic capacity allocation | [Dynamic TPM/RPM allocation](https://docs.litellm.ai/docs/proxy/dynamic_rate_limit) | Per-priority shares of connection and slot quotas above a saturation threshold, enforced atomically across gateways | `Parity` | |
+| Provider and deployment budgets | [Budget routing](https://docs.litellm.ai/docs/proxy/provider_budget_routing) | Exact-decimal daily and monthly caps on connections, slots and routes that remove them from selection and can start a fallback | `Ahead` | |
+| Health-check-driven routing | [Health check routing](https://docs.litellm.ai/docs/proxy/health_check_routing) | Opt-in accounted active probes and fleet-shared circuits that order unhealthy targets last | `Parity` | |
+| Traffic mirroring | [Traffic mirroring](https://docs.litellm.ai/docs/traffic_mirroring) | Sampled shadow targets under the request's hard constraints, in their own pool, accounted to the route, with an experiment report | `Ahead` | |
+| Automatic request routing | [Auto routing](https://docs.litellm.ai/docs/auto_router/), [adaptive router](https://docs.litellm.ai/docs/adaptive_router) (beta) | Ordered route selectors over request features and classifier routes, simulated before publication, with a savings report | `Parity` | |
+| Custom routing logic | [Routing plugins](https://docs.litellm.ai/docs/routing_plugins) | Confined WebAssembly route predicates that can only narrow the candidate set | `Ahead` | |
+| Wildcard routing | [Wildcard routing](https://docs.litellm.ai/docs/wildcard_routing) | Route templates that publish newly certified models as ordinary routes, without uncertified passthrough | `Ahead` | |
 | Per-team credential routing | [Credential routing](https://docs.litellm.ai/docs/proxy/credential_routing) | Project boundaries and slot route and key restrictions | `Parity` | |
 
 ## Caching

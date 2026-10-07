@@ -25,7 +25,7 @@ func (s *Snapshot) PinnedCurrent(route Route, provider Provider, target Target, 
 	}
 	matchedTarget := false
 	for _, candidate := range currentRoute.Targets {
-		if candidate.ID == target.ID && candidate == target && candidate.ProviderID == provider.ID && candidate.ProviderModel == target.ProviderModel {
+		if candidate.ID == target.ID && reflect.DeepEqual(candidate, target) && candidate.ProviderID == provider.ID && candidate.ProviderModel == target.ProviderModel {
 			matchedTarget = true
 			break
 		}

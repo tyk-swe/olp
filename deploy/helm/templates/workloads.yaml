@@ -114,6 +114,12 @@ spec:
               value: {{ default 256 $component.httpMaxInFlightInferenceRequests | quote }}
             - name: OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS
               value: {{ default 32 $component.httpMaxInFlightManagementRequests | quote }}
+            - name: OLP_HTTP_ADMISSION_QUEUE_DEPTH
+              value: {{ default 0 $component.httpAdmissionQueueDepth | quote }}
+            - name: OLP_HTTP_ADMISSION_QUEUE_TIMEOUT
+              value: {{ default "2s" $component.httpAdmissionQueueTimeout | quote }}
+            - name: OLP_HTTP_MAX_IN_FLIGHT_SHADOW_REQUESTS
+              value: {{ default 16 $component.httpMaxInFlightShadowRequests | quote }}
             - name: OLP_HTTP_CONNECTION_MAX_AGE_SECONDS
               value: {{ $root.Values.config.httpConnectionMaxAgeSeconds | quote }}
             - name: OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS

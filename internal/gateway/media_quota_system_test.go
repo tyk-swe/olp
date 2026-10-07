@@ -42,11 +42,11 @@ func TestIntegrationVideoCreateReservesAndSettlesSharedQuotas(t *testing.T) {
 				request = keyRequest(authority, 0, time.Minute)
 			case "provider":
 				provider.Limits = &runtime.Limits{RequestsPerMinute: &one, MaxConcurrency: &one}
-				request = connectionRequest(&provider, 0, time.Minute)
+				request = connectionRequest(&provider, 0, time.Minute, "")
 			case "credential":
 				provider.Slots[0].RequestsPerMinute = &one
 				provider.Slots[0].MaxConcurrency = &one
-				request = slotRequest(&provider.Slots[0], 0, time.Minute)
+				request = slotRequest(&provider.Slots[0], 0, time.Minute, "")
 			}
 			f.snapshot.Providers[f.providerID] = provider
 			held, err := limiter.Reserve(t.Context(), request)
@@ -131,11 +131,11 @@ func TestIntegrationVideoLifecycleReservesAndSettlesSharedQuotas(t *testing.T) {
 					request = keyRequest(authority, 0, time.Minute)
 				case "provider":
 					provider.Limits = &runtime.Limits{RequestsPerMinute: &one, MaxConcurrency: &one}
-					request = connectionRequest(&provider, 0, time.Minute)
+					request = connectionRequest(&provider, 0, time.Minute, "")
 				case "credential":
 					provider.Slots[0].RequestsPerMinute = &one
 					provider.Slots[0].MaxConcurrency = &one
-					request = slotRequest(&provider.Slots[0], 0, time.Minute)
+					request = slotRequest(&provider.Slots[0], 0, time.Minute, "")
 				}
 				f.rt.keys[f.bearer] = authority
 				f.snapshot.Providers[f.providerID] = provider
@@ -357,10 +357,10 @@ func TestIntegrationMediaStreamHoldsTargetConcurrencyUntilCompletion(t *testing.
 				one := int64(1)
 				if scope == "provider" {
 					p.Limits = &runtime.Limits{MaxConcurrency: &one}
-					request = connectionRequest(&p, 0, time.Second)
+					request = connectionRequest(&p, 0, time.Second, "")
 				} else {
 					p.Slots[0].MaxConcurrency = &one
-					request = slotRequest(&p.Slots[0], 0, time.Second)
+					request = slotRequest(&p.Slots[0], 0, time.Second, "")
 				}
 				h.rt.release.Snapshot.Providers[id] = p
 			}

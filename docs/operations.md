@@ -73,6 +73,12 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   and a grant that no provider configuration uses any more is
   [retired](plugins.md#grant-refresh) instead of refreshed. A refresh the
   upstream answered is recorded even when the worker is shutting down.
+- **Health probes:** every 15 seconds, sends each routed model of a connection
+  that enables [active probes](provider-routing.md#credential-pools-and-limits)
+  one bounded synthetic request when its interval is due, claiming the probe in
+  Valkey so the fleet probes each model once per interval. Results and the
+  circuits they open join the fleet's shared health state; probe usage is
+  accounted to the installation with origin `probe`.
 - **Request metadata consumer:** uses its own Valkey connection for blocking
   reads. It replays its pending entries before reclaiming idle deliveries,
   persists each event once, then acknowledges and deletes it. Events without
@@ -160,6 +166,15 @@ next minute's reconciliation pass. Known exhausted windows return HTTP 429
 outages with `limits.valkey_unavailable=fail_open`; rate/concurrency-only keys
 keep their configured outage behavior. Never remove a budget or insert
 synthetic zero spend to bypass initialization.
+
+Supply-side caps on connections, credential slots and routes follow the same
+rules with their own authority, `olp.supply_cost_windows`, which accounting
+charges for each attempt the cap applied to. Publication records the declared
+caps in `olp.supply_budgets`, and the next reconciliation pass initializes
+their windows; until then, or while their state is unreadable, the capped
+connection, slot or route is skipped with a `*_budget_unavailable` plan reason
+instead of failing the request. An exhausted cap removes it from selection,
+which can start a route's `budget` fallback.
 
 Reconciliation replaces malformed hashes (including non-integer `unpriced`
 fields or non-hash values) from matching authoritative snapshots, without
@@ -402,13 +417,16 @@ read, acknowledge, or reconcile one another's state.
 | --- | --- |
 | `<prefix>limits:{<lookup>}:rate` | Request and token windows for one lookup. |
 | `<prefix>limits:{<lookup>}:concurrency` | Concurrency leases for one lookup. |
-| `<prefix>limits:{<cost owner>}:cost:day` and `:cost:month` | Current UTC spend windows for an API-key or budget-group UUID. |
+| `<prefix>limits:{<cost owner>}:cost:day` and `:cost:month` | Current UTC spend windows for an API-key, budget-group, connection, slot or route UUID. |
 | `<prefix>limits:{<cost owner>}:cost:pending` and `:cost:expiry` | Cost reserved by requests in flight against that owner: a hash of each request's amount and their total, and the set of when each lapses. Advisory; absent when nothing is in flight. |
 | `<prefix>limits:provider-cooldown:<scope>` | Credential-version and slot cooldowns. |
+| `<prefix>limits:health:circuits` | Each provider whose circuit the fleet holds open, until when. Gateways publish transitions and read it every two seconds. |
+| `<prefix>limits:health:probes` and `:health:probe:<provider>/<model>` | Each provider's latest active probe result, and the claim that keeps one probe per model and interval. |
 | `<prefix>request-metadata` | The request metadata stream, read by consumer group `olp:persistence`. |
 
 A lookup is the key's lookup identifier, `pc_<provider uuid>` for a connection,
-or `ps_<slot uuid>` for a credential slot; the braces are the cluster hash tag,
+`ps_<slot uuid>` for a credential slot, or `rt_<route uuid>` for a route's
+spend cap; the braces are the cluster hash tag,
 so one key's dimensions stay on one slot. Cost keys are tagged by the API key or
 budget-group UUID, so key rotation preserves spend and group members share one
 balance.

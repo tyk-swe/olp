@@ -120,7 +120,7 @@ func (s *Server) slotGrantGeneration(slot *runtime.Slot) int64 {
 // connection and slot quota reservations, and the provider circuit's exclusive
 // half-open probe. An admitted slot's hold carries the reservation and the probe
 // until the attempt settles or releaseHold abandons them before dispatch.
-func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot *runtime.Slot, estimate int64, deadline time.Time) gateResult {
+func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot *runtime.Slot, estimate int64, deadline time.Time, priority string) gateResult {
 	// Authority can change while an earlier credential attempt is pending.
 	if connectors.SecretRequired(provider.AuthMode) && slot.CredentialID != nil && s.Runtime.Eligibility(*slot.CredentialID) != runtime.Eligible {
 		return gateResult{verdict: gateSkip}
@@ -142,7 +142,7 @@ func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot 
 	if s.cooling(ctx, provider.ID, slot) {
 		return gateResult{verdict: gateSkip}
 	}
-	reservation, rejection, skip := s.Admission.reserveTarget(ctx, provider, slot, estimate, ttl)
+	reservation, rejection, skip := s.Admission.reserveTarget(ctx, provider, slot, estimate, ttl, priority)
 	if skip {
 		return gateResult{verdict: gateUnmeterable}
 	}

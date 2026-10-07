@@ -32,6 +32,11 @@ const (
 	// ContextWindow is a typed rejection of a request too large for the
 	// target's context window, which a target with a larger one may serve.
 	ContextWindow Class = "context_window"
+	// ContentFilter is a typed refusal of the request's content by the
+	// provider's own safety system. Another target of the same route would
+	// most likely refuse it too, so it ends the route; a route may still
+	// declare a fallback for it. It says nothing about the provider's health.
+	ContentFilter Class = "content_filter"
 	// Ambiguous marks a failure whose work the upstream may have performed on
 	// a call that must not repeat it; it never fails over.
 	Ambiguous Class = "ambiguous"
@@ -209,6 +214,8 @@ func (c Classifier) rejection(status int, stated *openai.UpstreamError) Class {
 		return ServerError
 	case contextRejected(stated):
 		return c.contextClass()
+	case filterRejected(stated):
+		return ContentFilter
 	}
 	return ClientError
 }
@@ -228,6 +235,8 @@ func (c Classifier) inBand(stated *openai.UpstreamError, committed bool) Class {
 	switch {
 	case contextRejected(stated):
 		return c.contextClass()
+	case filterRejected(stated):
+		return ContentFilter
 	case has("authentication", "unauthenticated", "invalidapikey", "accessdenied", "permissiondenied") || stated.Code == "401" || stated.Code == "403":
 		return Credential
 	case has("ratelimit", "resourceexhausted", "throttl") || stated.Code == "429":
@@ -257,6 +266,14 @@ var contextWindowCodes = map[string]bool{
 	"prompttoolong":            true,
 }
 
+var contentFilterCodes = map[string]bool{
+	"contentfilter":                true,
+	"contentfiltered":              true,
+	"contentpolicyviolation":       true,
+	"contentmoderation":            true,
+	"responsibleaipolicyviolation": true,
+}
+
 var codeFold = strings.NewReplacer("_", "", "-", "", " ", "")
 
 // contextRejected matches typed context-window codes and types exactly;
@@ -267,6 +284,16 @@ func contextRejected(e *openai.UpstreamError) bool {
 	}
 	return contextWindowCodes[codeFold.Replace(strings.ToLower(e.Code))] ||
 		contextWindowCodes[codeFold.Replace(strings.ToLower(e.Type))]
+}
+
+// filterRejected matches typed content-filter codes and types exactly, as
+// contextRejected does.
+func filterRejected(e *openai.UpstreamError) bool {
+	if e == nil {
+		return false
+	}
+	return contentFilterCodes[codeFold.Replace(strings.ToLower(e.Code))] ||
+		contentFilterCodes[codeFold.Replace(strings.ToLower(e.Type))]
 }
 
 // Trace reports through reached when a net/http request may have reached the

@@ -53,6 +53,8 @@
         </dd>
         {#if row.estimate}<dt>Estimated input</dt>
           <dd>{row.estimate}</dd>{/if}
+        {#if row.notes.length}<dt>Adaptive routing</dt>
+          <dd>{row.notes.join(' · ')}</dd>{/if}
         <dt>Model facts observed</dt>
         <dd>
           {row.metadataObservedAt

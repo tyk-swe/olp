@@ -1,4 +1,11 @@
 <script lang="ts">
+  /** Comma-separated tags, as the operator types them. */
+  function splitTags(text: string): string[] {
+    return text
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  }
   import { resolve } from '$app/paths';
   import {
     eligibleTargetTuples,
@@ -91,6 +98,39 @@
               oninput={editor.touch}
               disabled={!editor.canManage}
             />
+          </div>
+          <div class="form-field">
+            <label for={`tags-${index}`}>Selector tags</label><input
+              id={`tags-${index}`}
+              value={(target.tags ?? []).join(', ')}
+              placeholder="fast, tools"
+              oninput={(event) => {
+                target.tags = splitTags(event.currentTarget.value);
+                editor.touch();
+              }}
+              disabled={!editor.canManage}
+            />
+          </div>
+          <div class="form-field">
+            <label for={`shadow-${index}`}>Shadow sample</label><input
+              id={`shadow-${index}`}
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              placeholder="Serves callers"
+              value={target.shadowSampleRate ?? ''}
+              oninput={(event) => {
+                const value = event.currentTarget.value;
+                target.shadowSampleRate = value === '' ? null : Number(value);
+                editor.touch();
+              }}
+              disabled={!editor.canManage}
+              aria-describedby={`shadow-help-${index}`}
+            />
+            <small id={`shadow-help-${index}`}
+              >Mirror this share of requests here; leave empty to serve.</small
+            >
           </div>
         </div>
         <button
@@ -223,6 +263,10 @@
     grid-column: 2;
     grid-template-columns: minmax(12rem, 2fr) repeat(3, minmax(7rem, 1fr));
     gap: 0.6rem;
+  }
+  .target-fields small {
+    color: var(--foreground-subtle);
+    font-size: var(--text-caption);
   }
   .remove-target {
     grid-column: 3;

@@ -63,6 +63,13 @@
     "allows_failover": true
   },
   {
+    "name": "typed content-filter refusal is terminal within the route",
+    "phase": "first_byte",
+    "class": "content_filter",
+    "response_committed": false,
+    "allows_failover": false
+  },
+  {
     "name": "context rejection after commit is terminal",
     "phase": "body",
     "class": "context_window",

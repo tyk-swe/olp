@@ -144,7 +144,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	if x.preferences, e = routingPreferences(r); e != nil {
+	if x.preferences, x.priority, e = routingControls(r, authority.Policy); e != nil {
 		fail(e)
 		return
 	}
@@ -177,7 +177,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		}
 		x.pinnedSlot = &p.slot
 		deadline, _ := ctx.Deadline()
-		gate := s.gateSlot(ctx, &p.provider, &p.slot, x.estimate, deadline)
+		gate := s.gateSlot(ctx, &p.provider, &p.slot, x.estimate, deadline, x.priority)
 		if gate.verdict != gateAdmitted {
 			fail(gateError(gate))
 			return
@@ -457,7 +457,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 	}
 	x.pinnedSlot = &p.slot
 	deadline, _ := ctx.Deadline()
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, deadline)
+	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, deadline, "")
 	if gate.verdict != gateAdmitted {
 		fail(gateError(gate))
 		return

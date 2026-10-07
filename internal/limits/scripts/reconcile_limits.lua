@@ -2,7 +2,8 @@
 -- active fixed UTC-minute window. Reconciliation is idempotent per lease so
 -- callers may safely retry an ambiguous transport failure.
 -- KEYS: stable rate hash
--- ARGV: reservation window_id, token_adjustment, lease_id
+-- ARGV: reservation window_id, token_adjustment, lease_id, and the share class
+--       the lease was counted in, if any.
 
 local MAX_SAFE_INTEGER_TEXT = "9007199254740991"
 local MAX_SAFE_INTEGER = tonumber(MAX_SAFE_INTEGER_TEXT)
@@ -63,22 +64,37 @@ if redis.call("HEXISTS", KEYS[1], reconciliation_field) == 1 then
   return 0
 end
 
+local class = ARGV[4]
+if class ~= nil and string.match(class, "^[a-z]+$") == nil then
+  return redis.error_reply("invalid share class")
+end
+
 local current_tpm = parse_safe_unsigned_integer(redis.call("HGET", KEYS[1], "tpm"))
 if current_tpm == nil then
   return redis.error_reply("invalid token state")
 end
-local updated
-if adjustment > 0 and current_tpm > MAX_SAFE_INTEGER - adjustment then
-  -- The configured limit cannot exceed this ceiling, so saturation preserves
-  -- fail-closed enforcement without storing an inexact Lua number.
-  updated = MAX_SAFE_INTEGER
-else
-  updated = current_tpm + adjustment
+
+local function adjusted(current)
+  if adjustment > 0 and current > MAX_SAFE_INTEGER - adjustment then
+    -- The configured limit cannot exceed this ceiling, so saturation preserves
+    -- fail-closed enforcement without storing an inexact Lua number.
+    return MAX_SAFE_INTEGER
+  end
+  return math.max(0, current + adjustment)
 end
-if updated < 0 then
-  updated = 0
-end
--- Update the token count and idempotence marker in one command. A script
+
+-- Update the token counts and idempotence marker in one command. A script
 -- runtime error cannot leave a successful adjustment without its marker.
-redis.call("HSET", KEYS[1], "tpm", updated, reconciliation_field, 1)
+if class ~= nil then
+  local class_field = "tpm:" .. class
+  local class_tpm = redis.call("HGET", KEYS[1], class_field)
+  class_tpm = class_tpm == false and 0 or parse_safe_unsigned_integer(class_tpm)
+  if class_tpm == nil then
+    return redis.error_reply("invalid token state")
+  end
+  redis.call("HSET", KEYS[1], "tpm", adjusted(current_tpm), class_field, adjusted(class_tpm),
+             reconciliation_field, 1)
+else
+  redis.call("HSET", KEYS[1], "tpm", adjusted(current_tpm), reconciliation_field, 1)
+end
 return 1

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"slices"
 	"strconv"
 	"time"
@@ -47,6 +48,44 @@ func check(d *draft, live map[string]*resolved) error {
 	return nil
 }
 
+// checkReferences verifies that every route a draft falls back to, delegates
+// to or classifies with is active, and every plugin its selectors run is an
+// approved confined plugin, so activation never dangles. A route retired
+// afterwards is skipped at request time with a recorded reason.
+func checkReferences(ctx context.Context, q access.Queryer, d *draft) error {
+	behavior, err := runtime.DecodeBehavior(d.Behavior)
+	if err != nil {
+		return err
+	}
+	for _, slug := range behavior.References() {
+		var active bool
+		if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.routes WHERE slug=$1 AND state='active')", slug).Scan(&active); err != nil {
+			return err
+		}
+		if !active {
+			return access.Fail(422, "route_reference_unknown", "Route "+slug+" is not an active route.")
+		}
+	}
+	for _, selector := range behavior.Selectors {
+		if p := selector.When.Plugin; p != nil {
+			var usable bool
+			if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.plugins WHERE digest=$1 AND approved_at IS NOT NULL AND module IS NOT NULL)", p.Digest).Scan(&usable); err != nil {
+				return err
+			}
+			if !usable {
+				return access.Fail(422, "route_plugin_unavailable", "Selector "+selector.ID+" names a plugin that is not an approved confined plugin.")
+			}
+		}
+	}
+	return nil
+}
+
+func sameBehavior(a, b []byte) bool {
+	left, _ := runtime.DecodeBehavior(a)
+	right, _ := runtime.DecodeBehavior(b)
+	return reflect.DeepEqual(left, right)
+}
+
 func (s *Server) validateDraft(r *http.Request, _ access.Principal) (access.Reply, error) {
 	a := s.Access
 	id, err := access.IDParam(r, "draft_id")
@@ -80,6 +119,9 @@ func (s *Server) validateDraft(r *http.Request, _ access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 	if err = check(current, live); err != nil {
+		return access.Reply{}, err
+	}
+	if err = checkReferences(r.Context(), tx, current); err != nil {
 		return access.Reply{}, err
 	}
 	if err = compileDraftExecution(r.Context(), tx, current); err != nil {
@@ -139,18 +181,50 @@ func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Repl
 	if err = access.Match(r, current.ETag); err != nil {
 		return access.Reply{}, err
 	}
-	if err = reserveOrdinarySlug(r.Context(), tx, current.Slug); err != nil {
-		return access.Reply{}, err
-	}
-	live, err := s.resolve(r.Context(), tx, current.Targets)
+	promoted, err := s.promote(r.Context(), tx, current, p.UserID())
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = check(current, live); err != nil {
+	generation, err := runtime.Publish(r.Context(), tx, p.UserID())
+	if err != nil {
 		return access.Reply{}, err
 	}
-	if err = compileDraftExecution(r.Context(), tx, current); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route.activate", "route", promoted.routeID, "success"); err != nil {
 		return access.Reply{}, err
+	}
+	result := access.Detail(map[string]any{"route_id": promoted.routeID, "revision_id": promoted.revisionID, "revision": promoted.revision, "draft_etag": promoted.etag, "runtime_generation": generation}, promoted.etag)
+	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
+		return access.Reply{}, err
+	}
+	return access.Commit(r, tx, result)
+}
+
+// promotion is the route revision a draft became.
+type promotion struct {
+	routeID, revisionID string
+	revision            int
+	etag                string
+}
+
+// promote checks a locked draft against live provider state and records it
+// as its route's next revision without publishing a release, so a caller can
+// promote several drafts and publish once.
+func (s *Server) promote(ctx context.Context, tx pgx.Tx, current *draft, actor string) (promotion, error) {
+	if err := reserveOrdinarySlug(ctx, tx, current.Slug); err != nil {
+		return promotion{}, err
+	}
+	live, err := s.resolve(ctx, tx, current.Targets)
+	if err != nil {
+		return promotion{}, err
+	}
+	if err = check(current, live); err != nil {
+		return promotion{}, err
+	}
+	if err = checkReferences(ctx, tx, current); err != nil {
+		return promotion{}, err
+	}
+	if err = compileDraftExecution(ctx, tx, current); err != nil {
+		return promotion{}, err
 	}
 	for i := range current.Targets {
 		t := &current.Targets[i]
@@ -161,50 +235,39 @@ func (s *Server) activateDraft(r *http.Request, _ access.Principal) (access.Repl
 	var routeID string
 	var revision int
 	var routeProject *string
-	err = tx.QueryRow(r.Context(), "SELECT id::text,latest_revision,project_id::text FROM olp.routes WHERE slug=$1 FOR UPDATE", current.Slug).Scan(&routeID, &revision, &routeProject)
+	err = tx.QueryRow(ctx, "SELECT id::text,latest_revision,project_id::text FROM olp.routes WHERE slug=$1 FOR UPDATE", current.Slug).Scan(&routeID, &revision, &routeProject)
 	revisionID := access.NewID()
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		routeID, revision = access.NewID(), 1
-		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id) VALUES($1,$2,$3,1,$4,$5,$6)", routeID, current.Slug, p.UserID(), revisionID, access.NewID(), current.ProjectID); err != nil {
-			return access.Reply{}, err
+		if _, err = tx.Exec(ctx, "INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag,project_id) VALUES($1,$2,$3,1,$4,$5,$6)", routeID, current.Slug, actor, revisionID, access.NewID(), current.ProjectID); err != nil {
+			return promotion{}, err
 		}
 	case err != nil:
-		return access.Reply{}, err
+		return promotion{}, err
 	case !sameProject(routeProject, current.ProjectID):
-		return access.Reply{}, access.Fail(409, "route_project_mismatch", "An existing route with this slug belongs to a different project.")
+		return promotion{}, access.Fail(409, "route_project_mismatch", "An existing route with this slug belongs to a different project.")
 	default:
 		revision++
 	}
 	operations, _ := json.Marshal(current.Operations)
 	targets, _ := json.Marshal(current.Targets)
-	policy, _, err := loadPolicy(r.Context(), tx, "route-draft", current.ID, false)
+	policy, _, err := loadPolicy(ctx, tx, "route-draft", current.ID, false)
 	if err != nil {
-		return access.Reply{}, err
+		return promotion{}, err
 	}
 	encodedPolicy, _ := json.Marshal(policy)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,content_policy,fidelity) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", revisionID, routeID, revision, current.Slug, operations, current.OverallTimeoutMS, current.MaxAttempts, targets, current.ID, p.UserID(), encodedPolicy, current.ContentPolicy, current.Fidelity); err != nil {
-		return access.Reply{}, err
+	if _, err = tx.Exec(ctx, "INSERT INTO olp.route_revisions(id,route_id,revision,slug,operations,overall_timeout_ms,max_attempts,targets,source_draft_id,activated_by,routing_policy,content_policy,fidelity,behavior) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)", revisionID, routeID, revision, current.Slug, operations, current.OverallTimeoutMS, current.MaxAttempts, targets, current.ID, actor, encodedPolicy, current.ContentPolicy, current.Fidelity, current.Behavior); err != nil {
+		return promotion{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.routes SET latest_revision=$2,latest_revision_id=$3,state='active',retired_at=NULL,retired_by=NULL,etag=$4 WHERE id=$1", routeID, revision, revisionID, access.NewID()); err != nil {
-		return access.Reply{}, err
+	if _, err = tx.Exec(ctx, "UPDATE olp.routes SET latest_revision=$2,latest_revision_id=$3,state='active',retired_at=NULL,retired_by=NULL,etag=$4 WHERE id=$1", routeID, revision, revisionID, access.NewID()); err != nil {
+		return promotion{}, err
 	}
 	etag := access.NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.route_drafts SET state='validated',targets=$2,etag=$3,based_on_revision_id=$4,updated_at=now() WHERE id=$1", id, targets, etag, revisionID); err != nil {
-		return access.Reply{}, err
+	if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET state='validated',targets=$2,etag=$3,based_on_revision_id=$4,updated_at=now() WHERE id=$1", current.ID, targets, etag, revisionID); err != nil {
+		return promotion{}, err
 	}
-	generation, err := runtime.Publish(r.Context(), tx, p.UserID())
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "route.activate", "route", routeID, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	result := access.Detail(map[string]any{"route_id": routeID, "revision_id": revisionID, "revision": revision, "draft_etag": etag, "runtime_generation": generation}, etag)
-	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
-		return access.Reply{}, err
-	}
-	return access.Commit(r, tx, result)
+	return promotion{routeID: routeID, revisionID: revisionID, revision: revision, etag: etag}, nil
 }
 
 type revisionRow struct {
@@ -218,18 +281,19 @@ type revisionRow struct {
 	Targets          []runtime.PublishedTarget
 	ContentPolicy    []byte
 	Fidelity         []byte
+	Behavior         []byte
 	SourceDraftID    string
 	ActivatedBy      string
 	ActivatedAt      time.Time
 	Policy           *runtime.Policy
 }
 
-const revisionColumns = "v.id::text,v.route_id::text,v.revision,v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.content_policy,v.source_draft_id::text,v.activated_by::text,v.activated_at,v.routing_policy,v.fidelity"
+const revisionColumns = "v.id::text,v.route_id::text,v.revision,v.slug,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.content_policy,v.source_draft_id::text,v.activated_by::text,v.activated_at,v.routing_policy,v.fidelity,v.behavior"
 
 func scanRevision(row pgx.Row) (*revisionRow, error) {
 	var v revisionRow
 	var operations, targets, policy []byte
-	if err := row.Scan(&v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.ContentPolicy, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy, &v.Fidelity); err != nil {
+	if err := row.Scan(&v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.ContentPolicy, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy, &v.Fidelity, &v.Behavior); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &v.Operations); err != nil {
@@ -259,7 +323,7 @@ func loadRevision(ctx context.Context, q access.Queryer, routeID, ref string) (*
 }
 
 func (v *revisionRow) json(live map[string]*resolved) map[string]any {
-	return map[string]any{"id": v.ID, "route_id": v.RouteID, "revision": v.Revision, "slug": v.Slug, "overall_timeout_ms": v.OverallTimeoutMS, "max_attempts": v.MaxAttempts, "source_draft_id": v.SourceDraftID, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "operations": v.Operations, "targets": targetsJSON(v.Targets, live), "routing_policy": policyOrDefault(v.Policy), "content_policy": json.RawMessage(v.ContentPolicy), "fidelity": json.RawMessage(v.Fidelity)}
+	return behaviorJSON(map[string]any{"id": v.ID, "route_id": v.RouteID, "revision": v.Revision, "slug": v.Slug, "overall_timeout_ms": v.OverallTimeoutMS, "max_attempts": v.MaxAttempts, "source_draft_id": v.SourceDraftID, "activated_by": v.ActivatedBy, "activated_at": v.ActivatedAt, "operations": v.Operations, "targets": targetsJSON(v.Targets, live), "routing_policy": policyOrDefault(v.Policy), "content_policy": json.RawMessage(v.ContentPolicy), "fidelity": json.RawMessage(v.Fidelity)}, v.Behavior)
 }
 
 type routeRow struct {
@@ -302,7 +366,7 @@ func scanRoute(row pgx.Row) (*routeRow, error) {
 	var r routeRow
 	var v revisionRow
 	var operations, targets, policy []byte
-	if err := row.Scan(&r.ID, &r.Slug, &r.State, &r.ETag, &r.RetiredAt, &r.RetiredBy, &r.CreatedAt, &r.RevisionCount, &r.CreatedByEmail, &r.ProjectID, &r.ProjectName, &v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.ContentPolicy, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy, &v.Fidelity); err != nil {
+	if err := row.Scan(&r.ID, &r.Slug, &r.State, &r.ETag, &r.RetiredAt, &r.RetiredBy, &r.CreatedAt, &r.RevisionCount, &r.CreatedByEmail, &r.ProjectID, &r.ProjectName, &v.ID, &v.RouteID, &v.Revision, &v.Slug, &operations, &v.OverallTimeoutMS, &v.MaxAttempts, &targets, &v.ContentPolicy, &v.SourceDraftID, &v.ActivatedBy, &v.ActivatedAt, &policy, &v.Fidelity, &v.Behavior); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(operations, &v.Operations); err != nil {
@@ -533,7 +597,7 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 		switch {
 		case !ok:
 			added = append(added, label(t))
-		case prev.Priority != t.Priority || prev.Weight != t.Weight || prev.TimeoutMS != t.TimeoutMS:
+		case prev.Priority != t.Priority || prev.Weight != t.Weight || prev.TimeoutMS != t.TimeoutMS || !slices.Equal(prev.Tags, t.Tags) || !reflect.DeepEqual(prev.Shadow, t.Shadow):
 			changed = append(changed, label(t))
 		}
 	}
@@ -564,6 +628,7 @@ func (s *Server) revisionDiff(r *http.Request, p access.Principal) (access.Reply
 		"routing_policy_changed": !samePolicy(from.Policy, to.Policy), "routing_policy_before": policyOrDefault(from.Policy), "routing_policy_after": policyOrDefault(to.Policy),
 		"content_policy_changed": !bytes.Equal(bytes.TrimSpace(from.ContentPolicy), bytes.TrimSpace(to.ContentPolicy)),
 		"fidelity_changed":       !bytes.Equal(bytes.TrimSpace(from.Fidelity), bytes.TrimSpace(to.Fidelity)), "fidelity_before": json.RawMessage(from.Fidelity), "fidelity_after": json.RawMessage(to.Fidelity),
+		"behavior_changed": !sameBehavior(from.Behavior, to.Behavior), "behavior_before": behaviorJSON(map[string]any{}, from.Behavior), "behavior_after": behaviorJSON(map[string]any{}, to.Behavior),
 	}), nil
 }
 
@@ -610,7 +675,7 @@ func (s *Server) restoreRevision(r *http.Request, _ access.Principal) (access.Re
 		targets[i].ID = access.NewID()
 	}
 	encoded, _ := json.Marshal(targets)
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,based_on_revision_id,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", draftID, v.Slug, operations, v.OverallTimeoutMS, v.MaxAttempts, encoded, v.ContentPolicy, v.ID, etag, p.UserID(), project, v.Fidelity); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,based_on_revision_id,etag,created_by,project_id,fidelity,behavior) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", draftID, v.Slug, operations, v.OverallTimeoutMS, v.MaxAttempts, encoded, v.ContentPolicy, v.ID, etag, p.UserID(), project, v.Fidelity, v.Behavior); err != nil {
 		return access.Reply{}, err
 	}
 	if v.Policy != nil {

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"time"
@@ -50,11 +51,44 @@ func (a *AccountingSink) logger() *slog.Logger {
 	return a.Log
 }
 
+// PersistingSink records each terminal request directly, for a process that
+// originates requests of its own but carries no metadata stream: the health
+// probe worker. Persist runs synchronously and its failures are logged, never
+// retried; a probe's record is evidence, not a ledger the caller depends on.
+type PersistingSink struct {
+	Persist func(ctx context.Context, event *usage.Event, payload []byte) error
+	Log     *slog.Logger
+}
+
+// persistTimeout bounds writing one directly persisted record.
+const persistTimeout = 10 * time.Second
+
+// Terminal records one finished request.
+func (p *PersistingSink) Terminal(e Envelope) {
+	event := accountingEvent(e)
+	if event == nil {
+		return
+	}
+	payload, err := json.Marshal(event)
+	if err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), persistTimeout)
+		err = p.Persist(ctx, event, payload)
+		cancel()
+	}
+	if err != nil {
+		log := p.Log
+		if log == nil {
+			log = slog.Default()
+		}
+		log.Warn("usage event not recorded", "request_id", e.RequestID, "error", err.Error())
+	}
+}
+
 // accountingEvent renders one envelope as a usage event, or nil when there is
-// nothing to account for: no API key owns the request, or it ended before a
-// route and a runtime generation could be attributed to it.
+// nothing to account for: no API key owns a caller request, or it ended before
+// a route and a runtime generation could be attributed to it.
 func accountingEvent(e Envelope) *usage.Event {
-	if e.KeyID == "" || e.Route == "" || e.RuntimeGenerationID == "" {
+	if (e.KeyID == "" && !usage.Keyless(e.Origin)) || e.Route == "" || e.RuntimeGenerationID == "" {
 		return nil
 	}
 	if len(e.Attempts) > 0 && e.Attempts[len(e.Attempts)-1].ResponseUsageDeferred {
@@ -66,6 +100,8 @@ func accountingEvent(e Envelope) *usage.Event {
 		RequestID:           e.AccountingID,
 		RuntimeGenerationID: e.RuntimeGenerationID,
 		APIKeyID:            e.KeyID,
+		Origin:              e.Origin,
+		ParentRequestID:     optionalText(e.ParentRequestID),
 		Attribution:         e.Attribution,
 		PolicyDecisions:     e.PolicyDecisions,
 		BudgetGroupID:       e.BudgetGroupID,
@@ -130,8 +166,16 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 			CredentialSlotID:    optionalText(fact.SlotID),
 			CredentialVersionID: optionalText(fact.CredentialID),
 			ProviderRevisionID:  fact.ProviderRevisionID,
+			Leg:                 fact.Leg,
+			Selector:            optionalText(fact.Selector),
+			Baseline:            fact.Baseline,
 		},
 	}
+	if fact.Retry > 0 {
+		retry := fact.Retry
+		attempt.Routing.Retry = &retry
+	}
+	attempt.Routing.Budgets = fact.Budgets
 	if fact.PolicyDigest != "" {
 		policy, _ := json.Marshal(map[string]any{"digest": fact.PolicyDigest, "strategy": fact.Strategy, "pricing_pinned": true, "vendor_id": fact.VendorID})
 		rawPolicy := json.RawMessage(policy)

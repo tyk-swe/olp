@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,7 +15,6 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
-	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -38,6 +36,8 @@ type simulationInput struct {
 	SemanticHeaders      map[string]string    `json:"semantic_headers"`
 	QuerySettings        map[string]string    `json:"query_settings"`
 	APIKeyID             *string              `json:"api_key_id"`
+	Attribution          map[string]string    `json:"attribution"`
+	ClassifierLabels     map[string]string    `json:"classifier_labels"`
 }
 
 func tokenDemand(estimated, output *int64) (*runtime.TokenDemand, error) {
@@ -86,6 +86,20 @@ func (d *simulatedDemand) outputBound(request *openai.Request) *int64 {
 		return d.output
 	}
 	return runtime.EffectiveOutputLimit(request)
+}
+
+// request is the demand selectors weigh: the caller's number, or else the
+// request counted without a model of its own, as the gateway counts it.
+func (d *simulatedDemand) request() *runtime.TokenDemand {
+	if d.prompt == nil {
+		return d.fixed
+	}
+	e := d.prompt.Estimate(estimate.ForModel(""), nil)
+	demand := &runtime.TokenDemand{EstimatedInputTokens: e.Input, MaxOutputTokens: e.Output}
+	if d.output != nil {
+		demand.MaxOutputTokens = d.output
+	}
+	return demand
 }
 
 // sourceDemand is the planner's per-target demand, or nil when the caller's
@@ -160,6 +174,9 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 	if len(input.Seed) > 256 {
 		return access.Reply{}, access.Invalid("seed", "Use at most 256 characters.")
 	}
+	if err = validSimulationLabels(input); err != nil {
+		return access.Reply{}, err
+	}
 	d, err := loadDraft(r.Context(), s.Access.Pool, id, false)
 	if err != nil {
 		return access.Reply{}, err
@@ -193,6 +210,9 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 	}
 	route := simulationRoute(routingID, d.Slug, fidelity, d.Operations, d.OverallTimeoutMS, d.MaxAttempts, d.Targets)
 	route.ProjectID = d.ProjectID
+	if route.Behavior, err = runtime.DecodeBehavior(d.Behavior); err != nil {
+		return access.Reply{}, err
+	}
 	if len(d.ContentPolicy) > 0 && string(d.ContentPolicy) != "null" {
 		route.ContentPolicy, err = contentpolicy.Decode(d.ContentPolicy)
 		if err != nil {
@@ -208,22 +228,23 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	eligibility, err := routeCredentialEligibility(r.Context(), tx, snapshot, route)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	demand, err := tokenDemand(input.EstimatedInputTokens, input.MaxOutputTokens)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	key, err := s.inspectionKey(r, tx, p, input.APIKeyID, route)
+	m := s.newSimulation(r.Context(), snapshot, input, inputs, demand)
+	m.key = func(route runtime.Route) (inspectionKeyContext, error) {
+		return s.inspectionKey(r, tx, p, input.APIKeyID, route)
+	}
+	m.eligibility = func(route runtime.Route) (func(string) runtime.Eligibility, error) {
+		return routeCredentialEligibility(r.Context(), tx, snapshot, route)
+	}
+	explained, err := s.explain(m, d.Slug)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	decisions, err := s.inspectSimulation(snapshot, d.Slug, input, key, inputs, demand, eligibility)
-	if err != nil {
-		return access.Reply{}, err
-	}
+	named := explained.Legs[0]
+	decisions := named.Decisions
 	targets := []map[string]any{}
 	for _, decision := range decisions {
 		var name string
@@ -238,7 +259,10 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 		}
 		targets = append(targets, map[string]any{"target_id": decision.TargetID, "provider_id": decision.ProviderID, "provider_name": name, "provider_model": decision.UpstreamModel, "priority": decision.Priority, "eligible": decision.Eligible, "attempt": decision.Attempt, "reason": decision.Reason, "decision": decision})
 	}
-	return access.OK(map[string]any{"deterministic_seed": input.Seed, "operation": input.Operation, "surface": input.Surface, "mode": input.Mode, "targets": targets}), nil
+	return access.OK(map[string]any{
+		"deterministic_seed": input.Seed, "operation": input.Operation, "surface": input.Surface, "mode": input.Mode, "targets": targets,
+		"selectors": named.Selectors, "affinity": named.Affinity, "legs": explained.Legs[1:], "fallbacks": explained.Fallbacks,
+	}), nil
 }
 
 func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
@@ -256,6 +280,8 @@ type simulationRequest struct {
 	Dialect              string                     `json:"dialect"`
 	SemanticHeaders      map[string]string          `json:"semantic_headers"`
 	QuerySettings        map[string]string          `json:"query_settings"`
+	Attribution          map[string]string          `json:"attribution"`
+	ClassifierLabels     map[string]string          `json:"classifier_labels"`
 }
 
 // simulateRouting answers the console's routing simulator against the routes
@@ -319,15 +345,10 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 			return access.Reply{}, err
 		}
 	}
-	key, err := s.inspectionKey(r, tx, p, input.APIKeyID, route)
-	if err != nil {
+	if _, err = s.inspectionKey(r, tx, p, input.APIKeyID, route); err != nil {
 		return access.Reply{}, err
 	}
 	inputs, err := s.routingInputs(r, tx)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	eligibility, err := routeCredentialEligibility(r.Context(), tx, snapshot, snapshot.Routes[slug])
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -341,59 +362,23 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 		EstimatedInputTokens: input.EstimatedInputTokens, MaxOutputTokens: input.MaxOutputTokens,
 		Dialect: input.Dialect, ClientContract: input.ClientContract,
 		SemanticHeaders: input.SemanticHeaders, QuerySettings: input.QuerySettings,
+		Attribution: input.Attribution, ClassifierLabels: input.ClassifierLabels,
 	}
-	decisions, err := s.inspectSimulation(snapshot, slug, inspection, key, inputs, demand, eligibility)
+	if err = validSimulationLabels(inspection); err != nil {
+		return access.Reply{}, err
+	}
+	m := s.newSimulation(r.Context(), snapshot, inspection, inputs, demand)
+	m.key = func(route runtime.Route) (inspectionKeyContext, error) {
+		return s.inspectionKey(r, tx, p, input.APIKeyID, route)
+	}
+	m.eligibility = func(route runtime.Route) (func(string) runtime.Eligibility, error) {
+		return routeCredentialEligibility(r.Context(), tx, snapshot, route)
+	}
+	leg, _, _, err := s.leg(m, slug, "")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.OK(decisions), nil
-}
-
-// inspectSimulation shares semantic inspection and routing explanations across
-// draft and published routes. Callers own loading, validation and authorization;
-// inspection never reserves state or dispatches an upstream request.
-func (s *Server) inspectSimulation(snapshot *runtime.Snapshot, slug string, input simulationInput, key inspectionKeyContext, inputs *usage.RoutingInputs, demand *runtime.TokenDemand, eligibility func(string) runtime.Eligibility) ([]inspectedDecision, error) {
-	route := snapshot.Routes[slug]
-	context, err := inspectionContext(input.SemanticHeaders, input.QuerySettings, key.allowProviderState)
-	if err != nil {
-		return nil, err
-	}
-	parsed, unary, mediaRequest, err := inspectorAnyRequest(input.Request, input.Operation, input.Surface, input.Mode, input.Dialect, slug, route.Fidelity.Strict())
-	if err != nil {
-		return nil, err
-	}
-	if input.Operation == "generation" {
-		if err = inspectionClientContract(input.ClientContract, &context, s.Access.Keys != nil); err != nil {
-			return nil, err
-		}
-	}
-	counted := newSimulatedDemand(parsed, input, demand)
-	accept, effective, inspections := inspectionAccept(route, parsed, context, counted)
-	if unary != nil {
-		accept, effective, inspections = inspectionUnaryAccept(route, *unary, context, input.ClientContract, demand)
-	}
-	if mediaRequest != nil {
-		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, context, input.ClientContract, demand)
-	}
-	options := runtime.SelectionOptions{
-		KeyID: key.id, Preferences: input.Preferences, Inputs: inputs, TokenDemand: counted.fixed, Demand: counted.sourceDemand(),
-		CheckSlots: true, CredentialEligibility: eligibility, UnconfinedPlugins: s.UnconfinedPlugins,
-		Accept: accept, Effective: effective,
-	}
-	if key.reason != "" {
-		options.Accept = nil
-		options.Effective = nil
-	}
-	if parsed != nil {
-		options.Parameters = sync.OnceValue(func() []string { return protocols.ParameterNames(parsed) })
-	}
-
-	plan, err := runtime.PlanRequest(snapshot, slug, input.Operation, input.Surface, input.Mode, []byte(input.Seed), options)
-	if err != nil {
-		return nil, err
-	}
-	applyInspectionKeyReason(plan.Decisions, key.reason)
-	return inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections, counted.estimates), nil
+	return access.OK(leg.Decisions), nil
 }
 
 // Register mounts the route surface.
@@ -414,15 +399,37 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/routes/{route_id}/revisions/diff", s.revisionDiff)
 	s.Access.Route(mux, "GET /api/v1/routes/{route_id}/revisions/{revision_id}", s.revision)
 	s.Access.Route(mux, "POST /api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft", s.restoreRevision)
+	s.Access.Route(mux, "GET /api/v1/route-templates", s.templates)
+	s.Access.Route(mux, "POST /api/v1/route-templates", s.createTemplate)
+	s.Access.Route(mux, "GET /api/v1/route-templates/{template_id}", s.template)
+	s.Access.Route(mux, "PUT /api/v1/route-templates/{template_id}", s.replaceTemplate)
+	s.Access.Route(mux, "DELETE /api/v1/route-templates/{template_id}", s.deleteTemplate)
+	s.Access.Route(mux, "POST /api/v1/route-templates/{template_id}/apply", s.applyTemplate)
 	s.Access.Route(mux, "GET /api/v1/routing-policies/{scope}/{id}", s.policy)
 	s.Access.Route(mux, "PUT /api/v1/routing-policies/{scope}/{id}", s.putPolicy)
 	s.Access.Route(mux, "POST /api/v1/routing/simulate", s.simulateRouting, access.MaxBody(1<<20))
 }
 
+// validSimulationLabels bounds the attribution and classifier labels a
+// simulation stands in with.
+func validSimulationLabels(input simulationInput) error {
+	for field, labels := range map[string]map[string]string{"attribution": input.Attribution, "classifier_labels": input.ClassifierLabels} {
+		if len(labels) > 16 {
+			return access.Invalid(field, "Use at most 16 labels.")
+		}
+		for name, value := range labels {
+			if name == "" || len(name) > 64 || len(value) > 256 {
+				return access.Invalid(field, "Use names of 1 to 64 characters and values of at most 256.")
+			}
+		}
+	}
+	return nil
+}
+
 func simulationRoute(id, slug string, fidelity runtime.RouteFidelity, operations []string, timeout, budget int, targets []runtime.PublishedTarget) runtime.Route {
 	r := runtime.Route{ID: id, RoutingID: id, Slug: slug, Fidelity: fidelity, Operations: operations, OverallTimeout: int64(timeout), MaxAttempts: budget}
 	for _, t := range targets {
-		r.Targets = append(r.Targets, runtime.Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID})
+		r.Targets = append(r.Targets, runtime.Target{ID: t.ID, ProviderID: t.ProviderID, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, Timeout: t.TimeoutMS, RoutingID: t.ProviderModelID, Tags: t.Tags, Shadow: t.Shadow})
 	}
 	return r
 }

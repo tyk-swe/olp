@@ -89,6 +89,13 @@ const (
 	// why the plugin could not carry it. CodeNotSent reports a request that
 	// never reached the upstream.
 	MethodCarry = "carry"
+	// MethodRoutePredicate takes a RoutePredicate and returns a RouteVerdict.
+	// OLP calls it while it plans a request on a route whose selector names
+	// the plugin, and only on a confined plugin. The call carries the
+	// request's features, never its content, and grants no capability but
+	// log; a selector the plugin matches can only narrow the route's targets
+	// or delegate to a route the key may use.
+	MethodRoutePredicate = "route_predicate"
 )
 
 // Capabilities a plugin calls on OLP. OLP grants each call only the
@@ -146,6 +153,28 @@ const (
 	// approved it.
 	CodeExpiredToken = "expired_token"
 )
+
+// RoutePredicate is the request a route selector's plugin predicate judges:
+// the features OLP computed during admission.
+type RoutePredicate struct {
+	Route        string `json:"route"`
+	Selector     string `json:"selector"`
+	Operation    string `json:"operation"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens *int64 `json:"output_tokens,omitempty"`
+	Streaming    bool   `json:"streaming"`
+	Tools        bool   `json:"tools"`
+	// Modalities are the kinds of input parts, from text, image, audio, video
+	// and file.
+	Modalities       []string `json:"modalities,omitempty"`
+	StructuredOutput bool     `json:"structured_output"`
+	ReasoningEffort  string   `json:"reasoning_effort,omitempty"`
+}
+
+// RouteVerdict answers a RoutePredicate.
+type RouteVerdict struct {
+	Match bool `json:"match"`
+}
 
 // Request is one call, from OLP to a plugin or from a plugin to OLP.
 type Request struct {
@@ -440,6 +469,10 @@ const (
 	// ClassTerminal: the request itself was refused. It does not fail over,
 	// and the caller receives the upstream's rejection.
 	ClassTerminal = "terminal"
+	// ClassContentFilter: the upstream's safety system refused the request's
+	// content. It is terminal within the route, does not count against the
+	// provider's health, and may start a route's content_filter fallback.
+	ClassContentFilter = "content_filter"
 )
 
 // SignRequest is the parameter of MethodSign: one upstream request, placed by

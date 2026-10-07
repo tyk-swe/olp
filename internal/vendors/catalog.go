@@ -133,7 +133,7 @@ var contracts = []Contract{
 		MediaWires: map[string]string{"image_generation": "stability", "image_edit": "stability"}, AccountProbe: "v1/user/balance",
 		// Stability refuses moderated content with 403, which is no
 		// credential failure.
-		ErrorClasses: []ErrorClass{{Status: 403, Type: "content_moderation", Class: "upstream_client"}}}, nil),
+		ErrorClasses: []ErrorClass{{Status: 403, Type: "content_moderation", Class: "content_filter"}}}, nil),
 	compatiblePreset("recraft", "Recraft", "Recraft", "Recraft raster image generation.", "https://external.api.recraft.ai/v1", Link{"Recraft API endpoints", "https://www.recraft.ai/docs/api-reference/endpoints"}, Contract{
 		Operations: []string{"image_generation"}, ProbeOperation: "image_generation", Parameters: []string{"n", "size", "output_format", "response_format"},
 		MediaWires: map[string]string{"image_generation": "recraft"}, AccountProbe: "users/me"}, nil),
@@ -257,8 +257,8 @@ func (c Contract) validate() error {
 		}
 	}
 	for _, rule := range c.ErrorClasses {
-		if rule.Status < 400 || rule.Status > 599 || !slices.Contains([]string{"credential", "rate_limit", "upstream_server", "upstream_client"}, rule.Class) {
-			return fmt.Errorf("an error class needs an unsuccessful status and a failover class")
+		if rule.Status < 400 || rule.Status > 599 || !slices.Contains([]string{"credential", "rate_limit", "upstream_server", "upstream_client", "content_filter"}, rule.Class) {
+			return fmt.Errorf("an error class needs an unsuccessful status and a routing class")
 		}
 	}
 	if c.AccountProbe != "" && (strings.HasPrefix(c.AccountProbe, "/") || strings.Contains(c.AccountProbe, "..") || strings.ContainsAny(c.AccountProbe, "#\\")) {

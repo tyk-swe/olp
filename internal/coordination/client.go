@@ -16,6 +16,7 @@ import (
 
 	glide "github.com/valkey-io/valkey-glide/go/v2"
 	"github.com/valkey-io/valkey-glide/go/v2/config"
+	"github.com/valkey-io/valkey-glide/go/v2/pipeline"
 )
 
 func Configuration(rawURL, caFile string, timeout time.Duration) (*config.ClientConfiguration, error) {
@@ -154,11 +155,58 @@ func (c *Client) Do(ctx context.Context, args ...string) (any, error) {
 	if err == nil {
 		return value, nil
 	}
+	return nil, commandError(err)
+}
+
+// Pipeline sends commands in one round trip, without atomicity, and returns
+// their replies in order. A command the server refuses is reported in its
+// place as an error value, so one bad reply leaves the others readable.
+func (c *Client) Pipeline(ctx context.Context, commands ...[]string) ([]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, &CommandError{Cause: err}
+	}
+	batch := pipeline.NewStandaloneBatch(false)
+	for _, command := range commands {
+		batch.CustomCommand(slices.Clone(command))
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil, &CommandError{Cause: glide.NewClosingError("client closed")}
+	}
+	c.calls.Add(1)
+	c.mu.Unlock()
+	// The same registration discipline as Do keeps a cancelled pipeline's
+	// native call owned until it completes or the client closes.
+	type result struct {
+		values []any
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		defer c.calls.Done()
+		values, err := c.raw.Exec(context.WithoutCancel(ctx), *batch, false)
+		done <- result{values, err}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, &CommandError{Cause: ctx.Err(), Ambiguous: true}
+	case response := <-done:
+		if response.err != nil {
+			return nil, commandError(response.err)
+		}
+		return response.values, nil
+	}
+}
+
+// commandError classifies a GLIDE failure: a transport failure leaves the
+// command's outcome unknown, while a refusal proves it did not run.
+func commandError(err error) error {
 	var timeout *glide.TimeoutError
 	var disconnected *glide.DisconnectError
 	var connection *glide.ConnectionError
 	var closing *glide.ClosingError
 	ambiguous := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
 		errors.As(err, &timeout) || errors.As(err, &disconnected) || errors.As(err, &connection) || errors.As(err, &closing)
-	return nil, &CommandError{Cause: err, Ambiguous: ambiguous}
+	return &CommandError{Cause: err, Ambiguous: ambiguous}
 }

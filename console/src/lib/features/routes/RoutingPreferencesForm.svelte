@@ -103,7 +103,9 @@
         >Weighted</option
       ><option value="price">Price</option><option value="latency"
         >Latency</option
-      ><option value="throughput">Throughput</option></select
+      ><option value="throughput">Throughput</option><option value="capacity"
+        >Capacity headroom</option
+      ></select
     >
   {/if}
   {#each listFields as field (field.key)}

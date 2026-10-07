@@ -3,6 +3,7 @@ package configuration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"strconv"
 	"strings"
@@ -121,10 +122,11 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 		if err := routes.ValidateFidelityPolicy(route.Fidelity, route.ContentPolicy); err != nil {
 			return err
 		}
-		input := routes.DraftInput{Slug: route.Slug, Operations: route.Operations, OverallTimeoutMS: route.OverallTimeoutMS, MaxAttempts: route.MaxAttempts, ContentPolicy: route.ContentPolicy, Fidelity: route.Fidelity}
+		input := routes.DraftInput{Slug: route.Slug, Operations: route.Operations, OverallTimeoutMS: route.OverallTimeoutMS, MaxAttempts: route.MaxAttempts, ContentPolicy: route.ContentPolicy, Fidelity: route.Fidelity,
+			Fallbacks: route.Fallbacks, Selectors: route.Selectors, Retry: route.Retry, Affinity: route.Affinity, Budget: route.Budget}
 		for _, t := range route.Targets {
 			providerID := providerIDs[strings.ToLower(t.Provider)]
-			input.Targets = append(input.Targets, routes.TargetInput{ProviderID: &providerID, ProviderModel: &t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: t.TimeoutMS})
+			input.Targets = append(input.Targets, routes.TargetInput{ProviderID: &providerID, ProviderModel: &t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: t.TimeoutMS, Tags: t.Tags, Shadow: t.Shadow})
 		}
 		targets, err := routes.ValidateDraftInput(ctx, tx, &input, projectID, nil)
 		if err != nil {
@@ -135,12 +137,12 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 		var draftID string
 		if staged {
 			draftID = draft.ID
-			if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,updated_at=now() WHERE id=$1 AND slug=$2", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), input.Fidelity); err != nil {
+			if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,behavior=$10,updated_at=now() WHERE id=$1 AND slug=$2", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), input.Fidelity, input.Behavior); err != nil {
 				return err
 			}
 		} else {
 			draftID = access.NewID()
-			if _, err = tx.Exec(ctx, "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11)", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), p.UserID(), projectID, input.Fidelity); err != nil {
+			if _, err = tx.Exec(ctx, "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity,behavior) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), p.UserID(), projectID, input.Fidelity, input.Behavior); err != nil {
 				return err
 			}
 		}
@@ -154,6 +156,9 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 				return err
 			}
 		}
+	}
+	if err := applyTemplates(ctx, tx, p, doc, projectIDs); err != nil {
+		return err
 	}
 	if doc.Pricing != nil {
 		changed, err := s.pricingChanged(ctx, tx, doc)
@@ -322,4 +327,42 @@ func (s *Server) replaceDraftContents(ctx context.Context, tx pgx.Tx, providerID
 		}
 	}
 	return nil
+}
+
+// applyTemplates creates or replaces the document's route templates. Applying
+// a template never generates routes itself; provider activation and the
+// template's apply operation do.
+func applyTemplates(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document, projectIDs map[string]string) error {
+	for i := range doc.Templates {
+		entry := &doc.Templates[i]
+		var projectID *string
+		if entry.Project != nil {
+			id := projectIDs[strings.ToLower(*entry.Project)]
+			projectID = &id
+		}
+		var id string
+		var existingProject *string
+		err := tx.QueryRow(ctx, "SELECT id::text,project_id::text FROM olp.route_templates WHERE name=$1 FOR UPDATE", entry.Name).Scan(&id, &existingProject)
+		replace := err == nil
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			id = access.NewID()
+		case err != nil:
+			return err
+		case !sameProjectID(existingProject, projectID):
+			return access.Fail(409, "route_template_project_mismatch", "Route template "+entry.Name+" belongs to a different project.")
+		}
+		input := entry.input(projectID)
+		if err = routes.ValidateTemplateInput(&input); err != nil {
+			return withFieldPrefix(err, "templates."+strconv.Itoa(i))
+		}
+		if err = routes.WriteTemplate(ctx, tx, id, access.NewID(), p.UserID(), &input, replace); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sameProjectID(a, b *string) bool {
+	return (a == nil) == (b == nil) && (a == nil || *a == *b)
 }

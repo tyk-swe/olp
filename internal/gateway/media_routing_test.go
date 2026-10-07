@@ -505,7 +505,7 @@ func TestGateProbeReleasedWhenDispatchAbandoned(t *testing.T) {
 	h.gateway.health.mu.Unlock()
 
 	slot := a.Slots[0]
-	gate := h.gateway.gateSlot(t.Context(), &a, &slot, 100, time.Now().Add(time.Minute))
+	gate := h.gateway.gateSlot(t.Context(), &a, &slot, 100, time.Now().Add(time.Minute), "")
 	if gate.verdict != gateAdmitted || gate.hold == nil || !gate.hold.probed {
 		t.Fatalf("expected an admitted probe, got %+v", gate)
 	}
@@ -544,7 +544,7 @@ func TestPinnedSettleReturnsHalfOpenProbe(t *testing.T) {
 			h.gateway.health.mu.Unlock()
 
 			slot := a.Slots[0]
-			gate := h.gateway.gateSlot(t.Context(), &a, &slot, 100, time.Now().Add(time.Minute))
+			gate := h.gateway.gateSlot(t.Context(), &a, &slot, 100, time.Now().Add(time.Minute), "")
 			if gate.verdict != gateAdmitted || !gate.hold.probed {
 				t.Fatalf("expected an admitted probe, got %+v", gate)
 			}

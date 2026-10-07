@@ -120,7 +120,7 @@ func (s *Server) selectPin(ctx context.Context, x *execution, route *runtime.Rou
 
 func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runtime.Route, operation, surface, mode string, qualified func(*runtime.Provider, string) bool) (*pin, *Error) {
 	snapshot := x.request.release.Snapshot
-	options := s.selectionOptions(x)
+	options := s.selectionOptions(ctx, x)
 	options.Accept = func(p runtime.Provider, t runtime.Target) error {
 		if !qualified(&p, t.ProviderModel) {
 			return errors.New("provider capability unavailable")
@@ -166,7 +166,7 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 		if !s.slotAvailable(x, attempt, slot) || s.cooling(ctx, provider.ID, slot) {
 			continue
 		}
-		gate := s.gateSlot(ctx, &provider, slot, max(resourceEstimate, x.estimate), deadline)
+		gate := s.gateSlot(ctx, &provider, slot, max(resourceEstimate, x.estimate), deadline, x.priority)
 		switch gate.verdict {
 		case gateAdmitted:
 			return &pin{target: target, provider: provider, attempt: attempt, slot: *slot, model: attempt.UpstreamModel, hold: gate.hold}, nil
@@ -1217,7 +1217,7 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
+	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
 	if gate.verdict != gateAdmitted {
 		s.stateFail(x, w, gateError(gate), x.family)
 		return
@@ -1361,7 +1361,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
+	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
 	if gate.verdict != gateAdmitted {
 		s.stateFail(x, w, gateError(gate), x.family)
 		return
@@ -1509,7 +1509,7 @@ func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedU
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond))
+	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
 	if gate.verdict != gateAdmitted {
 		s.stateFail(x, w, gateError(gate), x.family)
 		return

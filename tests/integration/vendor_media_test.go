@@ -193,9 +193,10 @@ func TestReviewedVendorMedia(t *testing.T) {
 		if status != http.StatusOK || len(data) != 1 || data[0].(map[string]any)["b64_json"] != pixel || accept != "application/json" || fields["aspect_ratio"] != "2:3" {
 			t.Fatalf("Stability image: %d %v %s %v", status, reply, accept, fields)
 		}
-		// Moderation is the caller's error, which leaves the credential usable.
+		// Moderation is a content filter refusing the caller's request, which
+		// leaves the credential usable.
 		status, reply, _ = h.gateway("POST", "/v1/images/generations", secret, map[string]any{"model": slug, "prompt": "forbidden", "response_format": "b64_json"})
-		if failure, _ := reply["error"].(map[string]any); status == http.StatusOK || failure["code"] != "upstream_rejected" {
+		if failure, _ := reply["error"].(map[string]any); status != http.StatusBadRequest || failure["code"] != "content_filter" {
 			t.Fatalf("moderated image: %d %v", status, reply)
 		}
 		status, _, _ = h.gateway("POST", "/v1/images/generations", secret, map[string]any{"model": slug, "prompt": "a second illustration", "response_format": "b64_json"})

@@ -75,7 +75,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 			for i, rs := range revisionSlots {
 				slot := SlotEntry{Name: rs.Name, IsDefault: rs.Default, Position: i, Enabled: rs.Enabled, Priority: rs.Priority, Weight: rs.Weight,
 					Restrictions: Restrictions{AllowedAPIKeys: []string{}, AllowedModels: orEmpty(rs.AllowedModels), AllowedRoutes: orEmpty(rs.AllowedRoutes)},
-					Limits:       providers.Limits{MaxConcurrency: rs.MaxConcurrency, RequestsPerMinute: rs.RequestsPerMinute, TokensPerMinute: rs.TokensPerMinute}}
+					Limits:       providers.Limits{MaxConcurrency: rs.MaxConcurrency, RequestsPerMinute: rs.RequestsPerMinute, TokensPerMinute: rs.TokensPerMinute, Supply: rs.Supply}}
 				if rs.CredentialID != nil {
 					ref := CredentialRef(name, rs.Name)
 					slot.CredentialRef = &ref
@@ -121,7 +121,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		referenceGrants(pp.entry)
 		doc.Providers = append(doc.Providers, *pp.entry)
 	}
-	routes, err := q.Query(ctx, `SELECT r.slug,pr.name,r.state='retired',v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.routing_policy,v.content_policy,v.fidelity
+	routes, err := q.Query(ctx, `SELECT r.slug,pr.name,r.state='retired',v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.routing_policy,v.content_policy,v.fidelity,v.behavior
         FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id
         LEFT JOIN olp.projects pr ON pr.id=r.project_id ORDER BY r.slug`)
 	if err != nil {
@@ -130,8 +130,11 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	defer routes.Close()
 	for routes.Next() {
 		var route RouteEntry
-		var operations, targets, policy []byte
-		if err = routes.Scan(&route.Slug, &route.Project, &route.Retired, &operations, &route.OverallTimeoutMS, &route.MaxAttempts, &targets, &policy, &route.ContentPolicy, &route.Fidelity); err != nil {
+		var operations, targets, policy, behavior []byte
+		if err = routes.Scan(&route.Slug, &route.Project, &route.Retired, &operations, &route.OverallTimeoutMS, &route.MaxAttempts, &targets, &policy, &route.ContentPolicy, &route.Fidelity, &behavior); err != nil {
+			return nil, err
+		}
+		if err = route.setBehavior(behavior); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(operations, &route.Operations); err != nil {
@@ -142,7 +145,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 			return nil, err
 		}
 		for _, t := range published {
-			route.Targets = append(route.Targets, TargetEntry{Provider: t.ProviderName, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int(t.TimeoutMS)})
+			route.Targets = append(route.Targets, targetEntry(t))
 		}
 		if policy != nil {
 			var p runtime.Policy
@@ -154,6 +157,9 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		doc.Routes = append(doc.Routes, route)
 	}
 	if err = routes.Err(); err != nil {
+		return nil, err
+	}
+	if doc.Templates, err = exportTemplates(ctx, q); err != nil {
 		return nil, err
 	}
 	revisions, _, err := usage.ListRevisions(ctx, q, nil, 1)
@@ -311,4 +317,30 @@ func orEmpty(values []string) []string {
 		return []string{}
 	}
 	return values
+}
+
+// exportTemplates reads every route template, keyed by name.
+func exportTemplates(ctx context.Context, q access.Queryer) ([]TemplateEntry, error) {
+	rows, err := q.Query(ctx, `SELECT t.name,pr.name,t.provider_selector,t.model_filter,t.slug_pattern,t.overall_timeout_ms,t.max_attempts,t.fidelity,t.routing_policy,t.auto_publish
+		FROM olp.route_templates t LEFT JOIN olp.projects pr ON pr.id=t.project_id ORDER BY t.name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TemplateEntry
+	for rows.Next() {
+		var t TemplateEntry
+		var policy []byte
+		if err = rows.Scan(&t.Name, &t.Project, &t.ProviderSelector, &t.ModelFilter, &t.SlugPattern, &t.OverallTimeoutMS, &t.MaxAttempts, &t.Fidelity, &policy, &t.AutoPublish); err != nil {
+			return nil, err
+		}
+		if len(policy) > 0 {
+			t.RoutingPolicy = &runtime.Policy{}
+			if err = json.Unmarshal(policy, t.RoutingPolicy); err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }

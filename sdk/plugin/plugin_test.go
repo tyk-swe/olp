@@ -23,6 +23,15 @@ type signing struct {
 
 func (s signing) Sign(ctx context.Context, r SignRequest) (SignResult, error) { return s.sign(ctx, r) }
 
+type routing struct {
+	manifestOnly
+	match func(RouteFeatures) bool
+}
+
+func (r routing) MatchRoute(_ context.Context, features RouteFeatures) (RouteVerdict, error) {
+	return RouteVerdict{Match: r.match(features)}, nil
+}
+
 type panicking struct{}
 
 func (panicking) Manifest() Manifest { panic("declared nothing") }
@@ -259,5 +268,22 @@ func TestLogRecordsFlattenAttributes(t *testing.T) {
 	want := abi.LogRecord{Level: "warn", Message: "refresh failed", Attrs: map[string]string{"plugin": "acme", "grant.attempt": "2", "grant.upstream.status": "401"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("record %+v, want %+v", got, want)
+	}
+}
+
+// A RoutePredicate judges a route selector by the request's features alone.
+func TestServeAnswersTheRoutePredicateCall(t *testing.T) {
+	p := routing{match: func(f RouteFeatures) bool { return f.Tools && f.InputTokens > 1000 }}
+	for request, want := range map[string]bool{
+		`{"method":"route_predicate","params":{"route":"assistant","selector":"agentic","operation":"generation","input_tokens":4000,"tools":true}}`: true,
+		`{"method":"route_predicate","params":{"route":"assistant","selector":"agentic","operation":"generation","input_tokens":40,"tools":true}}`:   false,
+	} {
+		var verdict RouteVerdict
+		if response := serveWith(t, p, request); response.Error != nil || json.Unmarshal(response.Result, &verdict) != nil || verdict.Match != want {
+			t.Fatalf("%s: response %+v", request, response)
+		}
+	}
+	if response := serveWith(t, manifestOnly{}, `{"method":"route_predicate","params":{}}`); response.Error == nil || response.Error.Code != abi.CodeUnknownMethod {
+		t.Fatalf("a plugin without RoutePredicate answered %+v", response)
 	}
 }

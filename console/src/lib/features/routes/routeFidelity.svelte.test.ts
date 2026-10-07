@@ -17,6 +17,9 @@ import {
 import InteractionInspector from './InteractionInspector.svelte';
 import RouteFidelityProbe from './test/RouteFidelityProbe.svelte';
 import { draft } from '$lib/forms/test/draftFixtures';
+import { emptyBehavior } from '$lib/features/routes/routeEditor';
+
+const noBehavior = emptyBehavior();
 
 vi.mock('$app/navigation', () => ({ beforeNavigate: vi.fn(), goto: vi.fn() }));
 vi.mock('$app/state', () => ({
@@ -235,6 +238,9 @@ describe('route revision history', () => {
       fidelity_changed: true,
       fidelity_before: { mode: 'strict' },
       fidelity_after: { mode: 'transformed' },
+      behavior_changed: false,
+      behavior_before: noBehavior,
+      behavior_after: noBehavior,
       routing_policy_changed: false,
       routing_policy_before: revision(1, 'strict').routing_policy,
       routing_policy_after: revision(2, 'transformed').routing_policy,

@@ -27,6 +27,9 @@ type State struct {
 	LimiterCounts func() (failOpen, dailyRejections, monthlyRejections int64)
 	// Circuits counts currently open upstream circuits.
 	Circuits func() int64
+	// Shadows counts mirrored shadow attempts and those dropped for want of
+	// shadow capacity.
+	Shadows func() (mirrored, dropped int64)
 	// Emitter snapshots the local request metadata buffer.
 	Emitter func() *usage.Snapshot
 	// Spool reports media spool capacity and usage; nil means no spool.

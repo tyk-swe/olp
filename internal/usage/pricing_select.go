@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -154,14 +155,30 @@ func priceAttempt(ctx context.Context, tx pgx.Tx, event *Event, attempt Validate
 	if err != nil {
 		return attemptPricing{}, err
 	}
+	return priceUsage(ctx, tx, event, attempt.Usage, attempt.Attempt.ProviderID, attempt.Attempt.UpstreamModel, pin)
+}
+
+// priceBaseline prices an attempt's usage on the baseline a selector avoided,
+// at the price in effect when the attempt ran. It invents no usage: a
+// baseline that cannot price the attempt's dimensions has no cost.
+func priceBaseline(ctx context.Context, tx pgx.Tx, event *Event, attempt ValidatedAttempt) (*string, error) {
+	baseline := attempt.Attempt.Routing.Baseline
+	pricing, err := priceUsage(ctx, tx, event, attempt.Usage, baseline.ProviderID, baseline.UpstreamModel, routingPin{vendorID: baseline.VendorID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return pricing.estimatedCost, err
+}
+
+func priceUsage(ctx context.Context, tx pgx.Tx, event *Event, usage AttemptUsage, providerID, model string, pin routingPin) (attemptPricing, error) {
 	var pricing attemptPricing
-	err = tx.QueryRow(ctx, priceAttemptSQL,
-		attempt.Attempt.ProviderID, attempt.Attempt.UpstreamModel, event.Operation, event.ObservedAt,
-		attempt.Usage.InputTokens, attempt.Usage.OutputTokens, attempt.Usage.MediaUnits,
-		attempt.Usage.Complete, attempt.Usage.CachedInputTokens,
+	err := tx.QueryRow(ctx, priceAttemptSQL,
+		providerID, model, event.Operation, event.ObservedAt,
+		usage.InputTokens, usage.OutputTokens, usage.MediaUnits,
+		usage.Complete, usage.CachedInputTokens,
 		pin.pricingRevisionID, pin.providerRevisionID, pin.pinned, pin.vendorID,
-		attempt.Usage.CacheWriteInputTokens, attempt.Usage.CacheWrite5MInputTokens,
-		attempt.Usage.CacheWrite1HInputTokens,
+		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens,
+		usage.CacheWrite1HInputTokens,
 	).Scan(&pricing.pricingRevisionID, &pricing.currency, &pricing.complete, &pricing.estimatedCost)
 	if err != nil {
 		return attemptPricing{}, fmt.Errorf("price attempt: %w", err)

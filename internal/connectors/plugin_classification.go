@@ -14,10 +14,11 @@ import (
 // declaredClasses maps the failure classes a plugin profile declares to the
 // classes that govern failover and cooldown.
 var declaredClasses = map[string]upstream.Class{
-	abi.ClassCredential:  upstream.Credential,
-	abi.ClassRateLimited: upstream.RateLimit,
-	abi.ClassRetryable:   upstream.ServerError,
-	abi.ClassTerminal:    upstream.ClientError,
+	abi.ClassCredential:    upstream.Credential,
+	abi.ClassRateLimited:   upstream.RateLimit,
+	abi.ClassRetryable:     upstream.ServerError,
+	abi.ClassTerminal:      upstream.ClientError,
+	abi.ClassContentFilter: upstream.ContentFilter,
 }
 
 // parseClassification reads a hosting adaptation's failure classification.
@@ -39,7 +40,7 @@ func parseClassification(declared []abi.FailureRule) ([]upstream.Rule, error) {
 		case !errorValue(rule.Type):
 			return nil, &ProfileError{Field: field + ".type", Message: "Match an error type of at most 256 characters without control characters."}
 		case !known:
-			return nil, &ProfileError{Field: field + ".class", Message: "Classify the failures as credential, rate_limited, retryable or terminal."}
+			return nil, &ProfileError{Field: field + ".class", Message: "Classify the failures as credential, rate_limited, retryable, terminal or content_filter."}
 		}
 		rules = append(rules, upstream.Rule{Status: rule.Status, Code: rule.Code, Type: rule.Type, Class: class})
 	}

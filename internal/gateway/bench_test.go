@@ -186,7 +186,7 @@ func BenchmarkAdmission(b *testing.B) {
 		var operations int64
 		b.ReportAllocs()
 		for b.Loop() {
-			reservation, rejection, skip := admission.reserveTarget(ctx, provider, slot, benchEstimate, 30*time.Second)
+			reservation, rejection, skip := admission.reserveTarget(ctx, provider, slot, benchEstimate, 30*time.Second, "")
 			if reservation == nil || rejection != nil || skip {
 				b.Fatalf("the target was not admitted: %v %v %v", reservation, rejection, skip)
 			}
@@ -247,7 +247,7 @@ func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
 			server.settleAdmission(ctx, &execution{dispatched: true})
 		},
 		"target admission": func() {
-			reservation, rejection, skip := admission.reserveTarget(ctx, provider, slot, benchEstimate, time.Minute)
+			reservation, rejection, skip := admission.reserveTarget(ctx, provider, slot, benchEstimate, time.Minute, "")
 			if reservation != nil || rejection != nil || skip {
 				t.Fatalf("a target that limits nothing was given %v, %v, %v", reservation, rejection, skip)
 			}
@@ -352,7 +352,7 @@ func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
 	capped := &runtime.Provider{ID: benchOwner, Limits: &runtime.Limits{MaxConcurrency: int64ptr(32)}}
 	client = newAllowing(0, 0, 0, true)
 	admission = newAdmission(t, client)
-	reservation, rejection, skip := admission.reserveTarget(ctx, capped, slot, benchEstimate, time.Minute)
+	reservation, rejection, skip := admission.reserveTarget(ctx, capped, slot, benchEstimate, time.Minute, "")
 	if reservation == nil || rejection != nil || skip || client.calls.Load() != 1 {
 		t.Errorf("a target limited to 32 concurrent requests was given %v, %v, skip %v after %d commands, want one reservation", reservation, rejection, skip, client.calls.Load())
 	}

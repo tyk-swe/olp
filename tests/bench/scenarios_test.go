@@ -65,6 +65,8 @@ type plan struct {
 	Failover bool `json:"failover,omitempty"`
 	// Budget gives the key a cost budget and prices the model.
 	Budget bool `json:"cost_budget,omitempty"`
+	// Shadow adds a shadow target, of shadowModel, that mirrors every request.
+	Shadow bool `json:"shadow,omitempty"`
 	// SlowReadBPS makes readers consume each stream at this many bytes per
 	// second.
 	SlowReadBPS int `json:"slow_read_bytes_per_second,omitempty"`
@@ -100,6 +102,8 @@ const (
 	// admission counts a prompt with the exact encoder. The mock matches it by
 	// name, and deploy/litellm calls the same one.
 	s3Model = "gpt-4o-bench"
+	// shadowModel is the upstream model of S1-shadow's shadow target.
+	shadowModel = "bench-shadow"
 )
 
 // rule is a mock behavior with the given timing and completion length.
@@ -185,6 +189,17 @@ var (
 			p := base(s, 1000, rule(upstreamTTFT, 20, 64), 64)
 			p.Dialect, p.SurfacePath, p.StreamShare = loadgen.Anthropic, "/anthropic", 1
 			p.Surfaces = []string{"openai", "anthropic"}
+			return p
+		},
+	}
+	// S1-shadow: S1 with every request mirrored to a shadow target, which
+	// must leave the caller's latency where S1 has it.
+	s1Shadow = scenario{
+		ID: "S1-shadow", Title: "S1 with every request mirrored to a shadow target",
+		Why: "Shadow traffic must not change caller-visible latency",
+		plan: func(s settings) plan {
+			p := s1.plan(s)
+			p.Shadow = true
 			return p
 		},
 	}
@@ -294,9 +309,10 @@ func (p plan) loadConfig(s settings, target, model, key string) loadgen.Config {
 	}
 }
 
-func TestScenarioS1(t *testing.T) { runScenario(t, s1) }
-func TestScenarioS2(t *testing.T) { runScenario(t, s2) }
-func TestScenarioS3(t *testing.T) { runScenario(t, s3) }
-func TestScenarioS4(t *testing.T) { runScenario(t, s4) }
-func TestScenarioS5(t *testing.T) { runScenario(t, s5) }
-func TestScenarioS6(t *testing.T) { runScenario(t, s6) }
+func TestScenarioS1(t *testing.T)       { runScenario(t, s1) }
+func TestScenarioS1Shadow(t *testing.T) { runScenario(t, s1Shadow) }
+func TestScenarioS2(t *testing.T)       { runScenario(t, s2) }
+func TestScenarioS3(t *testing.T)       { runScenario(t, s3) }
+func TestScenarioS4(t *testing.T)       { runScenario(t, s4) }
+func TestScenarioS5(t *testing.T)       { runScenario(t, s5) }
+func TestScenarioS6(t *testing.T)       { runScenario(t, s6) }

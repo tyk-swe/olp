@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 // Published identifies a recorded release.
@@ -40,7 +41,14 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string) (Published, error) {
 		if refusal := StrictRefusal(err); refusal != nil {
 			return Published{}, refusal
 		}
+		var refusal *Refusal
+		if errors.As(err, &refusal) {
+			return Published{}, access.Fail(422, refusal.Code, refusal.Message)
+		}
 		return Published{}, fmt.Errorf("release rejected: %w", err)
+	}
+	if err = limits.ReplaceSupplyBudgets(ctx, tx, snapshot.SupplyBudgets()); err != nil {
+		return Published{}, err
 	}
 	digest, err := snapshot.Digest()
 	if err != nil {
@@ -103,14 +111,14 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.content_policy,v.fidelity FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
+	rows, err = tx.Query(ctx, "SELECT r.id::text,r.slug,v.id::text,v.revision,v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.activated_at,v.routing_policy,r.project_id::text,v.content_policy,v.fidelity,v.behavior FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id WHERE r.state='active'")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var revision RouteRevision
-		if err = rows.Scan(&revision.ID, &revision.Slug, &revision.RevisionID, &revision.Revision, &revision.Operations, &revision.OverallTimeout, &revision.MaxAttempts, &revision.Targets, &revision.PublishedAt, &revision.Policy, &revision.ProjectID, &revision.ContentPolicy, &revision.Fidelity); err != nil {
+		if err = rows.Scan(&revision.ID, &revision.Slug, &revision.RevisionID, &revision.Revision, &revision.Operations, &revision.OverallTimeout, &revision.MaxAttempts, &revision.Targets, &revision.PublishedAt, &revision.Policy, &revision.ProjectID, &revision.ContentPolicy, &revision.Fidelity, &revision.Behavior); err != nil {
 			return nil, err
 		}
 		route, err := DecodeRouteRevision(revision)
@@ -157,7 +165,7 @@ func Compile(ctx context.Context, tx pgx.Tx) (*Snapshot, error) {
 // publishedLimits drops a connection quota that bounds nothing so clearing
 // every limit publishes the same snapshot as never setting one.
 func publishedLimits(l *Limits) *Limits {
-	if l == nil || (l.RequestsPerMinute == nil && l.TokensPerMinute == nil && l.MaxConcurrency == nil) {
+	if l == nil || (l.RequestsPerMinute == nil && l.TokensPerMinute == nil && l.MaxConcurrency == nil && l.Costs() == nil) {
 		return nil
 	}
 	return l

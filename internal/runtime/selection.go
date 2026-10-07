@@ -25,6 +25,10 @@ type Attempt struct {
 	VendorID           string
 	Price              *usage.RoutingPrice
 	Performance        *usage.Performance
+	// Slots, when set, are the credential slots live supply state left the
+	// attempt, in the order it ranked them. Without supply state the gateway
+	// orders the target's slots itself, exactly as the plan did.
+	Slots []string
 }
 
 // SelectionError names why no attempt could be planned.

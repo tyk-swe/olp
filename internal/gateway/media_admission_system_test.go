@@ -145,7 +145,7 @@ func TestIntegrationMediaConnectionQuotaRejectsOnceForSiblingCredentials(t *test
 		t.Fatal(err)
 	}
 	aID, a := mediaProvider(t, h, "a")
-	held, err := limiter.Reserve(t.Context(), connectionRequest(&a, 0, time.Minute))
+	held, err := limiter.Reserve(t.Context(), connectionRequest(&a, 0, time.Minute, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestIntegrationVideoCreatePreservesAttemptOrdinalsAfterSlotQuotaRejection(t
 	rejected.RequestsPerMinute = &one
 	provider.Slots = append([]runtime.Slot{rejected}, provider.Slots...)
 	f.snapshot.Providers[f.providerID] = provider
-	held, err := limiter.Reserve(t.Context(), slotRequest(&rejected, 0, time.Minute))
+	held, err := limiter.Reserve(t.Context(), slotRequest(&rejected, 0, time.Minute, ""))
 	if err != nil {
 		t.Fatal(err)
 	}

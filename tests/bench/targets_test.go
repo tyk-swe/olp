@@ -37,14 +37,17 @@ func evaluateTargets(r *result) []targetResult {
 		targets = append(targets, comparative(r)...)
 	}
 	switch r.Scenario {
-	case "S1":
+	case "S1", "S1-shadow":
 		targets = append(targets, s1Latency(r, "p95", s1P95LimitMs, func(p *percentiles) float64 { return p.P95 }, func(s loadgen.Summary) float64 { return s.P95Ms }),
 			s1Latency(r, "p99", s1P99LimitMs, func(p *percentiles) float64 { return p.P99 }, func(s loadgen.Summary) float64 { return s.P99Ms }))
 	case "S3":
 		targets = append(targets, s3Success(r), s3Resources(r))
 	}
+	if r.Scenario == "S1-shadow" {
+		targets = append(targets, shadowMirrored(r))
+	}
 	switch r.Scenario {
-	case "S1", "S2", "S3":
+	case "S1", "S1-shadow", "S2", "S3":
 		targets = append(targets, metadataLoss(r))
 	}
 	return targets
@@ -204,6 +207,25 @@ func s3Resources(r *result) targetResult {
 		Reason: "needs the LiteLLM high-throughput profile run on the same workload; scripts/bench-compare.sh settles it"}
 	t.Measured = ptr(float64(r.Gateway.VCPUs))
 	return t
+}
+
+// shadowMirrored checks that the shadow target received a mirror of every
+// request the callers sent: the upstream's requests beyond the callers' own.
+// The callers' latency is judged by S1's targets, and the key's usage, which
+// the run checks against what it sent, never counts the mirrors.
+func shadowMirrored(r *result) targetResult {
+	t := targetResult{ID: "shadow-mirrored", Description: "every request mirrored to the shadow target, none dropped",
+		Target: ">= 99% of caller requests mirrored", Unit: "share"}
+	if r.Run == nil {
+		return notChecked(t, "the run reported no requests")
+	}
+	callers := r.Run.Requests.WarmupSent + r.Run.Requests.Sent
+	if callers == 0 {
+		return notChecked(t, "the run sent no requests")
+	}
+	share := float64(r.MockStats.RunRequests-callers) / float64(callers)
+	t.Measured = ptr(share)
+	return judge(t, share >= 0.99)
 }
 
 func metadataLoss(r *result) targetResult {

@@ -40,6 +40,7 @@ func configureObservability(state *observability.State, rt *runtime.Manager, gw 
 	}
 	if gw != nil {
 		state.Circuits = gw.OpenCircuits
+		state.Shadows = gw.ShadowCounts
 		if gw.Admission != nil {
 			admission := gw.Admission
 			state.LimiterCounts = func() (failOpen, daily, monthly int64) {

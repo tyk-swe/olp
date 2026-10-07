@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M1](m01-measured-advantage.md) | Cost-optimized and capacity-aware deployments |
+| In progress | [M1](m01-measured-advantage.md) | Cost-optimized and capacity-aware deployments |
 
 OLP's planner already orders attempts by priority, preferred order and strategy
 under hard policy constraints, and explains the result through simulation. It
@@ -210,28 +210,46 @@ are recorded as attempts.
 | Shadow execution | `internal/gateway/attempts.go` |
 | Console | `console/src/lib/features/routes/` |
 
-## Decisions to settle
+## Decisions settled
 
-1. Whether selectors live on ordinary routes or on a distinct router route kind
-   (recommended: ordinary routes, so one route model covers every behavior).
-2. The staleness bound for shared circuit state (recommended: five seconds,
-   matching key-authority polling).
-3. Whether shadow traffic may target another project's routes (recommended: no).
+1. Selectors live on ordinary routes, so one route model, revision history and
+   simulation cover every behavior.
+2. Shared circuit state is read every two seconds and honored by every gateway
+   within five, matching key-authority polling.
+3. Shadow targets are targets of the route they mirror, so they never cross a
+   project boundary.
 
 ## Exit criteria
 
-- [ ] Fallbacks, selectors, templates and retry policy round-trip through route
+- [x] Fallbacks, selectors, templates and retry policy round-trip through route
       drafts, revisions, restore and configuration export, plan and apply.
-- [ ] Route simulation explains fallbacks, selector matches, capacity ordering
-      and affinity for a given request.
-- [ ] Integration tests prove that fallbacks never follow a committed stream,
+      *Done:* `TestRouteResilienceRoundTripsThroughDraftsRevisionsAndConfiguration`
+      and `TestRouteTemplatesPublishCertifiedModelsAsOrdinaryRoutes` in
+      `tests/integration/route_resilience_test.go`.
+- [x] Route simulation explains fallbacks, selector matches, capacity ordering
+      and affinity for a given request. *Done:* the simulation's `legs`,
+      `fallbacks`, `selectors` and `affinity`, and each decision's `headroom`,
+      `unhealthy` and `shadow` (`internal/routes/explain_test.go`).
+- [x] Integration tests prove that fallbacks never follow a committed stream,
       that requests cannot raise priority above the key's ceiling, and that
       capacity shares hold under concurrent load across two gateways.
-- [ ] A circuit opened on one gateway is honored by another within the staleness
-      bound.
+      *Done:* `TestRouteFallbacksAndPriorityCeilingsThroughTheGateway`,
+      `TestCapacitySharesHoldConnectionHeadroomForPriorityWorkAcrossGateways` and
+      `TestLimitsCapacitySharesHoldUnderConcurrentLoadAcrossGateways`.
+- [x] A circuit opened on one gateway is honored by another within the staleness
+      bound. *Done:* `TestCircuitOpenedOnOneGatewayIsHonoredByAnother` and
+      `TestActiveProbesShareTheirVerdictWithTheFleet`.
 - [ ] Shadow attempts never change caller-visible latency in benchmark S1 and
-      are excluded from key budgets.
+      are excluded from key budgets. *Done:* the S1-shadow scenario mirrors
+      every request and holds S1's targets at 30% of its rate on a development
+      host (added latency 1.14, 1.58 and 2.26 ms at p50, p95 and p99, against
+      S1's 1.20, 2.29 and 1.01 ms in the same session), and shadow requests carry
+      no key (`TestShadowTargetsMirrorTrafficAccountedToTheRoute`).
+      *Remaining:* a full-scale run on reference hardware, with M1's.
 - [ ] Every workstream meets the [performance budget](m01-measured-advantage.md#performance-budget)
       when unconfigured; the `capacity` strategy adds at most one Valkey round
-      trip per request.
-- [ ] The [parity matrix](parity.md) routing rows are `Parity` or better.
+      trip per request. *Done:* `TestUnconfiguredFeaturesAddNoAllocations`
+      still holds, and `TestCapacityStrategyAddsOneValkeyRoundTrip` counts one
+      pipelined read. *Remaining:* the reference-hardware S1 to S5 comparison,
+      with M1's.
+- [x] The [parity matrix](parity.md) routing rows are `Parity` or better.

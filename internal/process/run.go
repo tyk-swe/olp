@@ -181,7 +181,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	// is shared with the gateway so middleware and direct handler calls bound
 	// one capacity; media reconciliation gaps and durable metadata loss are
 	// process counters the metrics endpoint renders.
-	inferencePool := observability.NewPool(c.MaxInFlightInference)
+	inferencePool := observability.NewPool(c.MaxInFlightInference).Queue(c.AdmissionQueueDepth, c.AdmissionQueueTimeout)
 	managementPool := observability.NewPool(c.MaxInFlightManagement)
 	lossCounters := &usage.LossCounters{}
 	var mediaGapsTotal atomic.Uint64
@@ -190,6 +190,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	// reconciliation serves jobs against their pinned historical providers
 	// with credentials from the manager's credential source.
 	var keys *secrets.KeyRing
+	var prober *gateway.Server
 	if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
 		var auth *secrets.AuthKey
 		var bootstrap string
@@ -229,6 +230,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		if c.Mode.Management() || c.Mode.Inference() {
 			gw = gateway.New(rt, &policy, gateway.Config{
 				MaxInFlight:        c.MaxInFlightInference,
+				MaxShadowInFlight:  c.MaxInFlightShadow,
 				CORSAllowedOrigins: c.GatewayCORSAllowedOrigins,
 				InlineMedia:        protocols.InlineMediaLimits{Items: c.MaxInlineMediaItems, ItemBytes: c.MaxInlineMediaItemBytes, TotalBytes: c.MaxInlineMediaTotalBytes},
 				MaxBodyBytes:       c.MaxJSONBodyBytes,
@@ -238,6 +240,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				TrustedProxies:     c.TrustedProxyCIDRs,
 				AdmissionPool:      inferencePool,
 				Signer:             pluginHost,
+				Predicates:         pluginHost,
 				Carrier:            pluginHost,
 				UnconfinedPlugins:  unconfined != nil,
 			}, log)
@@ -250,6 +253,24 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				// Control-only processes also execute playground requests.
 				gw.Admission = gateway.NewAdmission(limiter, policy, log)
 			}
+		}
+		if limiter != nil && (c.Mode == config.Worker || c.Mode == config.All) {
+			// The worker plane's health probes run through a gateway of their
+			// own: planned, gated and priced like any request, and persisted
+			// directly, since a worker carries no metadata stream.
+			prober = gateway.New(rt, &policy, gateway.Config{
+				MaxInFlight:       1,
+				MaxResponseBytes:  c.ProviderMaxResponseBytes,
+				MaxEventBytes:     c.ProviderMaxEventBytes,
+				Signer:            pluginHost,
+				Carrier:           pluginHost,
+				UnconfinedPlugins: unconfined != nil,
+			}, log)
+			prober.Admission = gateway.NewAdmission(limiter, nil, log)
+			prober.Sink = &gateway.PersistingSink{Log: log, Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
+				_, err := usage.PersistEvent(ctx, pool, event, payload)
+				return err
+			}}
 		}
 		// Plugins that providers pin are compiled now rather than by the
 		// first call that needs them.
@@ -374,6 +395,11 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	if outage != nil {
 		go outage.run(ctx)
 	}
+	if gw != nil {
+		// Circuits are shared with the fleet only through Valkey; without it
+		// this returns at once and local circuits alone decide.
+		go gw.RunFleetHealth(ctx)
+	}
 	// The worker plane is cancelled last of all, because the consumer it runs
 	// is what turns the events the delivery plane just flushed into accounting.
 	workers, stopWorkers := context.WithCancel(context.WithoutCancel(ctx))
@@ -399,7 +425,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, keys, installation, &policy, log)
+		workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, prober, keys, installation, &policy, log)
 	}
 	liveMetrics := newLiveMetrics(rt, inferencePool, managementPool)
 	private := observability.NewHandler(obsCache, liveMetrics).ServeMux()

@@ -222,6 +222,8 @@ type routeTarget struct {
 	Provider providerRecord
 	Priority int
 	Timeout  time.Duration
+	// Shadow mirrors every request to the target instead of serving it.
+	Shadow bool
 }
 
 // addRoute publishes a route that may translate between dialects.
@@ -229,8 +231,12 @@ func (c *console) addRoute(slug string, targets []routeTarget, maxAttempts int, 
 	c.t.Helper()
 	var requested []any
 	for _, target := range targets {
-		requested = append(requested, map[string]any{"provider_id": target.Provider.ID, "provider_model": target.Provider.Model,
-			"priority": target.Priority, "weight": 1, "timeout_ms": target.Timeout.Milliseconds()})
+		entry := map[string]any{"provider_id": target.Provider.ID, "provider_model": target.Provider.Model,
+			"priority": target.Priority, "weight": 1, "timeout_ms": target.Timeout.Milliseconds()}
+		if target.Shadow {
+			entry["shadow"] = map[string]any{"sample_rate": 1}
+		}
+		requested = append(requested, entry)
 	}
 	draft := c.mutate(http.MethodPost, "/api/v1/route-drafts", map[string]any{
 		"slug": slug, "overall_timeout_ms": overall.Milliseconds(), "max_attempts": maxAttempts,

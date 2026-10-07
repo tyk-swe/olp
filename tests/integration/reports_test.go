@@ -523,8 +523,9 @@ func TestReportsGroupByDimensionAndBucket(t *testing.T) {
 	for _, item := range byKey.Items {
 		keys[item.Dimension] = item.RequestCount
 	}
-	if keys[f.Key] != 4 || keys["unknown"] != 1 {
-		t.Fatalf("api key breakdown = %v, want the seeded key with 4 and unknown with 1", keys)
+	// A row without a key is the installation's own, reported as system.
+	if keys[f.Key] != 4 || keys["system"] != 1 {
+		t.Fatalf("api key breakdown = %v, want the seeded key with 4 and system with 1", keys)
 	}
 
 	series, err := usage.ReadSeries(ctx, f.pool, repRange(f, 0, 3), usage.GranularityHour)

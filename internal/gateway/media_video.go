@@ -46,7 +46,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 
 	localJobID := uuid.Must(uuid.NewV7()).String()
 	x.affinity = []byte(localJobID)
-	if e := s.prepareMedia(x, authority); e != nil {
+	if e := s.prepareMedia(r.Context(), x, authority); e != nil {
 		form.Cleanup()
 		s.mediaFail(x, w, e)
 		return
@@ -79,7 +79,10 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, e)
 		return
 	}
-	defer func() { settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log) }()
+	defer func() {
+		s.settleCaps(ctx, x)
+		settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
+	}()
 
 	deadline, _ := ctx.Deadline()
 	hold, slot, e := s.admitVideoSlot(ctx, x, attempt, &provider, slots, deadline)
@@ -157,7 +160,7 @@ func (s *Server) admitVideoSlot(ctx context.Context, x *execution, attempt runti
 		if used >= x.budget || ctx.Err() != nil {
 			break
 		}
-		gate := s.gateSlot(ctx, provider, &slot, x.estimate, deadline)
+		gate := s.gateSlot(ctx, provider, &slot, x.estimate, deadline, x.priority)
 		switch gate.verdict {
 		case gateExpired:
 			return nil, runtime.Slot{}, (&attemptFailure{class: classTimeout}).toError()
@@ -504,7 +507,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 		}
 	}
 	fact.SlotID = slot.ID
-	reservation, rejection, skip := s.Admission.reserveTarget(ctx, &provider, &slot, 0, timeout+media.ReconciliationLeaseSlack)
+	reservation, rejection, skip := s.Admission.reserveTarget(ctx, &provider, &slot, 0, timeout+media.ReconciliationLeaseSlack, "")
 	if skip {
 		rejection = &attemptFailure{class: classLimitsUnavailable}
 	}

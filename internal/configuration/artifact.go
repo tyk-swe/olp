@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
@@ -21,6 +22,7 @@ type Document struct {
 	Projects   []ProjectEntry  `json:"projects"`
 	Providers  []ProviderEntry `json:"providers"`
 	Routes     []RouteEntry    `json:"routes"`
+	Templates  []TemplateEntry `json:"templates,omitempty"`
 	Pricing    *PricingEntry   `json:"pricing"`
 }
 
@@ -69,24 +71,82 @@ type ProviderEntry struct {
 }
 
 type TargetEntry struct {
-	Provider      string `json:"provider"`
-	ProviderModel string `json:"provider_model"`
-	Priority      int    `json:"priority"`
-	Weight        int64  `json:"weight"`
-	TimeoutMS     int    `json:"timeout_ms"`
+	Provider      string          `json:"provider"`
+	ProviderModel string          `json:"provider_model"`
+	Priority      int             `json:"priority"`
+	Weight        int64           `json:"weight"`
+	TimeoutMS     int             `json:"timeout_ms"`
+	Tags          []string        `json:"tags,omitempty"`
+	Shadow        *runtime.Shadow `json:"shadow,omitempty"`
+}
+
+func targetEntry(t runtime.PublishedTarget) TargetEntry {
+	return TargetEntry{Provider: t.ProviderName, ProviderModel: t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: int(t.TimeoutMS), Tags: t.Tags, Shadow: t.Shadow}
 }
 
 type RouteEntry struct {
-	Slug             string          `json:"slug"`
+	Slug             string              `json:"slug"`
+	Project          *string             `json:"project"`
+	Operations       []string            `json:"operations"`
+	OverallTimeoutMS int                 `json:"overall_timeout_ms"`
+	MaxAttempts      int                 `json:"max_attempts"`
+	Targets          []TargetEntry       `json:"targets"`
+	RoutingPolicy    *runtime.Policy     `json:"routing_policy"`
+	ContentPolicy    json.RawMessage     `json:"content_policy"`
+	Fidelity         json.RawMessage     `json:"fidelity"`
+	Fallbacks        []runtime.Fallback  `json:"fallbacks,omitempty"`
+	Selectors        []runtime.Selector  `json:"selectors,omitempty"`
+	Retry            runtime.Retry       `json:"retry,omitempty"`
+	Affinity         *runtime.Affinity   `json:"affinity,omitempty"`
+	Budget           *runtime.CostLimits `json:"budget,omitempty"`
+	Retired          bool                `json:"retired"`
+}
+
+// TemplateEntry is a route template. Apply stores it; provider activation and
+// the template's apply operation generate its routes.
+type TemplateEntry struct {
+	Name             string          `json:"name"`
 	Project          *string         `json:"project"`
-	Operations       []string        `json:"operations"`
+	ProviderSelector string          `json:"provider_selector"`
+	ModelFilter      string          `json:"model_filter"`
+	SlugPattern      string          `json:"slug_pattern"`
 	OverallTimeoutMS int             `json:"overall_timeout_ms"`
 	MaxAttempts      int             `json:"max_attempts"`
-	Targets          []TargetEntry   `json:"targets"`
-	RoutingPolicy    *runtime.Policy `json:"routing_policy"`
-	ContentPolicy    json.RawMessage `json:"content_policy"`
 	Fidelity         json.RawMessage `json:"fidelity"`
-	Retired          bool            `json:"retired"`
+	RoutingPolicy    *runtime.Policy `json:"routing_policy"`
+	AutoPublish      bool            `json:"auto_publish"`
+}
+
+func (t *TemplateEntry) input(projectID *string) routes.TemplateInput {
+	return routes.TemplateInput{
+		Name: t.Name, ProviderSelector: t.ProviderSelector, ModelFilter: t.ModelFilter, SlugPattern: t.SlugPattern,
+		OverallTimeoutMS: t.OverallTimeoutMS, MaxAttempts: t.MaxAttempts, Fidelity: t.Fidelity,
+		RoutingPolicy: t.RoutingPolicy, AutoPublish: t.AutoPublish, ProjectID: projectID,
+	}
+}
+
+// normalize applies what template validation stores, so a document compares
+// equal to the installation it was exported from.
+func (t *TemplateEntry) normalize() error {
+	in := t.input(nil)
+	if err := routes.ValidateTemplateInput(&in); err != nil {
+		return err
+	}
+	t.Fidelity, t.RoutingPolicy = in.Fidelity, in.RoutingPolicy
+	return nil
+}
+
+func (r *RouteEntry) behavior() runtime.Behavior {
+	return runtime.Behavior{Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget}
+}
+
+func (r *RouteEntry) setBehavior(raw []byte) error {
+	behavior, err := runtime.DecodeBehavior(raw)
+	if err != nil {
+		return err
+	}
+	r.Fallbacks, r.Selectors, r.Retry, r.Affinity, r.Budget = behavior.Fallbacks, behavior.Selectors, behavior.Retry, behavior.Affinity, behavior.Budget
+	return nil
 }
 
 type PriceEntry struct {
@@ -159,6 +219,12 @@ func canonicalRoute(r *RouteEntry) {
 	if r.Targets == nil {
 		r.Targets = []TargetEntry{}
 	}
+	for i := range r.Targets {
+		if len(r.Targets[i].Tags) == 0 {
+			r.Targets[i].Tags = nil
+		}
+		slices.Sort(r.Targets[i].Tags)
+	}
 	slices.SortFunc(r.Targets, func(a, b TargetEntry) int {
 		if c := strings.Compare(strings.ToLower(a.Provider), strings.ToLower(b.Provider)); c != 0 {
 			return c
@@ -225,6 +291,15 @@ func (d *Document) canonicalize() {
 	slices.SortFunc(d.Routes, func(a, b RouteEntry) int {
 		return strings.Compare(a.Slug, b.Slug)
 	})
+	for i := range d.Templates {
+		_ = d.Templates[i].normalize()
+	}
+	slices.SortFunc(d.Templates, func(a, b TemplateEntry) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	if len(d.Templates) == 0 {
+		d.Templates = nil
+	}
 	if d.Pricing != nil {
 		if d.Pricing.Prices == nil {
 			d.Pricing.Prices = []PriceEntry{}

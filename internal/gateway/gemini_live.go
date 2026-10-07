@@ -169,7 +169,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		x.failure, status = e, e.Status
 		return
 	}
-	if x.preferences, e = routingPreferences(r); e != nil {
+	if x.preferences, x.priority, e = routingControls(r, x.authority.Policy); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "invalid routing")
 		x.failure, status = e, e.Status
 		return

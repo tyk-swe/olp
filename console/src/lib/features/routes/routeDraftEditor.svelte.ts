@@ -38,8 +38,10 @@ import { useRole } from '$lib/features/access/session/useRole.svelte';
 import {
   buildCreateRouteDraftInput,
   buildReplaceRouteDraftInput,
+  emptyBehavior,
   hasOutputRules,
   modesFor,
+  parseSelectors,
   policyRulesFrom,
   routeEligibilityWarnings as findRouteEligibilityWarnings,
   routeLifecycleWarnings as findRouteLifecycleWarnings,
@@ -47,7 +49,8 @@ import {
   toRouteModelOptions,
   validateRouteEditor,
   type EditablePolicyRule,
-  type EditableTarget
+  type EditableTarget,
+  type RouteBehavior
 } from '$lib/features/routes/routeEditor';
 
 const simulationNotice =
@@ -75,6 +78,10 @@ export class RouteDraftEditorState {
   maxAttempts = $state(2);
   fidelity = $state<RouteDraft['fidelity']>({ mode: 'strict' });
   targets = $state<EditableTarget[]>([]);
+  behavior = $state<RouteBehavior>(emptyBehavior());
+  /** The route's selectors as the operator types them, in JSON. */
+  selectorsText = $state('[]');
+  selectors = $derived(parseSelectors(this.selectorsText));
   policyRules = $state<EditablePolicyRule[]>([]);
   outputPolicyActive = $derived(hasOutputRules(this.policyRules));
   sync = $state(initialConcurrentEdit());
@@ -129,7 +136,12 @@ export class RouteDraftEditorState {
     targets: this.targets,
     contentPolicyRules: this.policyRules,
     projectId: this.projectId,
-    fidelity: this.fidelity
+    fidelity: this.fidelity,
+    behavior: {
+      ...this.behavior,
+      selectors: typeof this.selectors === 'string' ? [] : this.selectors
+    },
+    selectorsError: typeof this.selectors === 'string' ? this.selectors : null
   });
   concurrentNotice = $derived(conflictNotice(this.sync));
   routeEligibilityWarnings = $derived(
@@ -162,6 +174,8 @@ export class RouteDraftEditorState {
     this.maxAttempts = 2;
     this.fidelity = { mode: 'strict' };
     this.targets = [];
+    this.behavior = emptyBehavior();
+    this.selectorsText = '[]';
     this.policyRules = [];
     this.sync = initialConcurrentEdit();
     this.policyDirty = false;
@@ -465,12 +479,22 @@ export class RouteDraftEditorState {
       this.overallTimeoutMs = current.overall_timeout_ms;
       this.maxAttempts = current.max_attempts;
       this.fidelity = current.fidelity;
+      this.behavior = {
+        fallbacks: current.fallbacks,
+        selectors: current.selectors,
+        retry: current.retry,
+        affinity: current.affinity,
+        budget: current.budget
+      };
+      this.selectorsText = JSON.stringify(current.selectors, null, 2);
       this.policyRules = policyRulesFrom(current.content_policy);
       this.targets = current.targets.map((target) => ({
         providerModelId: target.provider_model_id,
         priority: target.priority,
         weight: target.weight,
         timeoutMs: target.timeout_ms,
+        tags: [...target.tags],
+        shadowSampleRate: target.shadow?.sample_rate ?? null,
         stored: {
           providerModelId: target.provider_model_id,
           available: target.available,

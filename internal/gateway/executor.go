@@ -49,6 +49,10 @@ const (
 	classAmbiguous         = string(upstream.Ambiguous)
 	classLimitsUnavailable = "limits_unavailable"
 	classContextWindow     = string(upstream.ContextWindow)
+	classContentFilter     = string(upstream.ContentFilter)
+	// classBudget marks an attempt a spend cap on its connection, credential
+	// slot or route refused before dispatch.
+	classBudget = "budget"
 )
 
 // Canonical defaults retained by existing accounting fixtures.
@@ -94,6 +98,41 @@ type execution struct {
 	preferences          *runtime.Preferences
 	decisions            []runtime.Decision
 	policy               runtime.EffectivePolicy
+
+	// primary is the route the caller named. Its deadline and attempt budget
+	// bound the request across every route it moves on to; route is the one
+	// it is on. spent counts attempts across routes, budget is the ceiling
+	// on spent for the current route, and allowance the primary budget.
+	primary        *runtime.Route
+	planner        planner
+	authorize      func(*runtime.Route) *Error
+	fixed          bool
+	spent          int
+	allowance      int
+	seed           []byte
+	leg            *usage.RouteLeg
+	selector       string
+	baseline       *usage.Baseline
+	visited        []string
+	delegators     []*runtime.Route
+	frames         []fallbackFrame
+	planConditions []string
+	fallbacks      []runtime.FallbackStep
+	// caps are the supply-side spend caps the request holds reservations
+	// against, settled with its key reservation.
+	caps []capHold
+	// classified holds each classifier route's answer to this request.
+	classified map[string]classification
+	// mirrors is set where the request may be mirrored to the shadow targets
+	// its plan samples, which are kept in shadows.
+	mirrors bool
+	shadows []runtime.Attempt
+	// origin is whom the gateway makes the request for, empty for a caller
+	// request; parent is the caller request a shadow request mirrors.
+	origin string
+	parent string
+	// priority is the request's admission class.
+	priority string
 
 	policyDecisions []contentpolicy.Decision
 	emit            openai.Emit
@@ -181,7 +220,12 @@ type outcome struct {
 // provider, capped by its requested budget. Each target may be tried through
 // each of its usable credential slots.
 func (s *Server) dispatchableAttempts(x *execution) int {
-	return s.walkDispatchable(x, nil)
+	n := s.walkDispatchable(x, nil)
+	if x.mayLeaveRoute() {
+		// Fallback and delegating routes may spend the rest of the budget.
+		return max(n, x.allowance-x.spent)
+	}
+	return n
 }
 
 // walkDispatchable visits the attempts this request can hand to a provider in
@@ -190,7 +234,7 @@ func (s *Server) dispatchableAttempts(x *execution) int {
 // visited. Admission walks the same attempts the loop will, so what it reserves
 // covers what can be dispatched and no more.
 func (s *Server) walkDispatchable(x *execution, visit func(runtime.Attempt)) int {
-	remaining := x.budget
+	remaining := x.budget - x.spent
 	available := 0
 	for _, attempt := range x.attempts {
 		provider, ok := x.snapshot().Providers[attempt.ProviderID]
@@ -238,6 +282,8 @@ type attemptFailure struct {
 const (
 	quotaConnection = "connection"
 	quotaSlot       = "slot"
+	// quotaRoute is a route's own spend cap, which every target shares.
+	quotaRoute = "route"
 )
 
 // billingUncertain reports whether the upstream may have served and billed
@@ -257,7 +303,7 @@ func (f *attemptFailure) billingUncertain() bool {
 		return f.acceptance.Unresolved()
 	}
 	switch f.class {
-	case classRateLimit, classUpstreamClient, classCredential, classContextWindow:
+	case classRateLimit, classUpstreamClient, classCredential, classContextWindow, classContentFilter:
 		return false
 	}
 	return f.dispatched
@@ -305,6 +351,8 @@ func (f *attemptFailure) toError() (result *Error) {
 			return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "The provider credential limit was exceeded.", RetryAfter: f.retryAfter}
 		}
 		return &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "upstream_rate_limit", Message: "The upstream provider is rate limiting requests.", RetryAfter: f.retryAfter}
+	case classBudget:
+		return serverError(http.StatusServiceUnavailable, "supply_budget_exhausted", "The spend cap of the "+f.quota+" serving this request is exhausted.")
 	case classUpstreamServer:
 		return serverError(http.StatusBadGateway, "upstream_unavailable", "The upstream provider failed with HTTP "+strconv.Itoa(f.status)+".")
 	case classCredential:
@@ -315,6 +363,16 @@ func (f *attemptFailure) toError() (result *Error) {
 		return serverError(http.StatusBadGateway, code, "The upstream provider rejected the configured credential.")
 	case classProtocol:
 		return serverError(http.StatusBadGateway, "provider_protocol_error", "The upstream provider returned a malformed response.")
+	case classContentFilter:
+		message := "The upstream provider's content filter refused the request."
+		if f.upstream != nil && f.upstream.Message != "" {
+			message = f.upstream.Message
+		}
+		status := f.status
+		if !forwardable(status) {
+			status = http.StatusBadRequest
+		}
+		return &Error{Status: status, Type: "invalid_request_error", Code: "content_filter", Message: message}
 	case classUpstreamClient, classContextWindow:
 		message := "The upstream provider rejected the request."
 		if f.upstream != nil && f.upstream.Message != "" {
@@ -341,7 +399,7 @@ func forwardable(status int) bool {
 // execute adapts canonical inference to shared attempt execution. The
 // canonical transport retains its first-byte and streaming idle deadlines.
 func (s *Server) execute(ctx context.Context, x *execution) *outcome {
-	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
+	overall := time.Duration(x.named().OverallTimeout) * time.Millisecond
 	ctx, cancel := context.WithTimeout(ctx, overall)
 	defer cancel()
 	out := runAttempts(ctx, s, x, attemptAdapter[*openai.Completion]{
@@ -370,6 +428,9 @@ func (s *Server) slots(x *execution, attempt runtime.Attempt, provider *runtime.
 		return []runtime.Slot{*x.pinnedSlot}
 	}
 	ordered := runtime.SelectSlots(*provider, attempt.UpstreamModel, *x.route, x.keyID, x.operationName(), x.surfaceName(), x.mode, x.affinity)
+	if attempt.Slots != nil {
+		ordered = runtime.ArrangeSlots(ordered, attempt.Slots)
+	}
 	out := make([]runtime.Slot, 0, len(ordered))
 	for _, slot := range ordered {
 		if !s.slotAvailable(x, attempt, &slot) || (!s.Admission.ready() && (s.health.coolingDown(provider.ID, slot.ID) || s.health.coolingDown(provider.ID, credentialHealthKey(&slot, s.slotGrantGeneration(&slot))))) {
@@ -475,6 +536,9 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 		SlotID:             slot.ID,
 		Mode:               x.mode,
 		StartedAt:          s.now(),
+		Leg:                x.leg,
+		Selector:           x.selector,
+		Baseline:           x.baseline,
 	}
 	x.recordEstimate(&fact, a)
 	x.attemptCount, x.attemptVendor = ordinal, a.VendorID
@@ -776,7 +840,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			var projection *interaction.ToolProjection
 			projection, err = contract.NewToolProjection(min(resources.MaxContinuationBytes, int(s.cfg.MaxResponseBytes)))
 			if err == nil {
-				completion, err = protocols.StreamWithEvents(wire, wire, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, true, func([]byte) error { return nil }, func(event oif.Event) error {
+				completion, err = protocols.StreamWithEvents(wire, wire, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.named().Slug, true, func([]byte) error { return nil }, func(event oif.Event) error {
 					frames, e := projection.Observe(event)
 					if e != nil {
 						return e
@@ -817,7 +881,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				}
 			}
 		} else {
-			completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.route.Slug, x.parsed.IncludeUsage, emit, observe)
+			completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.named().Slug, x.parsed.IncludeUsage, emit, observe)
 		}
 		if err == nil && strictResponseIncomplete {
 			st.settled = true
@@ -833,7 +897,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		if err == nil {
 			if contract != nil {
 				var native *openai.Completion
-				native, err = protocols.DecodeRequest(wire, wire, raw, x.route.Slug, "", contract.EffectiveRequest())
+				native, err = protocols.DecodeRequest(wire, wire, raw, x.named().Slug, "", contract.EffectiveRequest())
 				if native != nil {
 					fact.Usage = native.Usage
 				}
@@ -861,7 +925,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 					if x.strict() && x.family == openai.FamilyResponses {
 						source := native.Native.Source()
 						if _, present := source.Lookup("/model"); present {
-							model, _ := json.Marshal(x.route.Slug)
+							model, _ := json.Marshal(x.named().Slug)
 							source, err = oif.Apply(source, []oif.Change{{Pointer: "/model", Value: string(model), Origin: oif.IdentityBinding, Reason: "published response model"}})
 						}
 						if err == nil {
@@ -871,7 +935,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				}
 			}
 			if err == nil && completion == nil {
-				completion, err = protocols.DecodeRequest(wire, x.family, raw, x.route.Slug, protocols.EmbeddingEncoding(x.parsed, provider.ParameterDefaults), x.parsed)
+				completion, err = protocols.DecodeRequest(wire, x.family, raw, x.named().Slug, protocols.EmbeddingEncoding(x.parsed, provider.ParameterDefaults), x.parsed)
 			}
 		}
 	}
@@ -1004,8 +1068,14 @@ func (s *Server) finish(x *execution, out *outcome, status int) {
 			}
 		}
 		if x.route != nil {
-			env.Route = x.route.Slug
-			env.RouteRevisionID = x.route.RevisionID
+			env.Route = x.named().Slug
+			env.RouteRevisionID = x.named().RevisionID
+		}
+		if x.origin != "" {
+			env.Origin, env.ParentRequestID = x.origin, x.parent
+			if usage.Keyless(x.origin) {
+				env.KeyID = ""
+			}
 		}
 		env.Usage = x.usage()
 		switch {

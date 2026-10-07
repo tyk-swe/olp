@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { components } from '$lib/api/schema';
 import {
+  adaptiveNotes,
   decisionRows,
   describeEstimate,
   simulationRows
@@ -114,5 +115,25 @@ describe('explanation rows', () => {
       null,
       '12 input tokens · four characters per token · anthropic'
     ]);
+  });
+});
+
+describe('adaptive routing notes', () => {
+  it('names shadowing, selectors, fleet health and capacity headroom', () => {
+    const decision = {
+      shadow: true,
+      selector: 'short',
+      unhealthy: true,
+      headroom: 0.425
+    } as Parameters<typeof adaptiveNotes>[0];
+    expect(adaptiveNotes(decision)).toEqual([
+      'Shadow target: mirrors, never serves',
+      'Chosen by selector short',
+      'Unhealthy across the fleet, so ordered last',
+      '43% capacity headroom'
+    ]);
+    expect(adaptiveNotes({} as Parameters<typeof adaptiveNotes>[0])).toEqual(
+      []
+    );
   });
 });

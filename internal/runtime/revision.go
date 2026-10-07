@@ -61,6 +61,7 @@ type Configuration struct {
 		ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
 		VendorID          string                           `json:"vendor_id"`
 		PluginOptions     map[string]string                `json:"plugin_options,omitempty"`
+		HealthProbe       *HealthProbe                     `json:"health_probe,omitempty"`
 	} `json:"options"`
 }
 
@@ -68,15 +69,17 @@ type Configuration struct {
 // provider model identity doubles as the routing identity so affinity survives
 // revisions that keep the same target.
 type PublishedTarget struct {
-	ID              string `json:"id"`
-	ProviderModelID string `json:"provider_model_id"`
-	ProviderID      string `json:"provider_id"`
-	ProviderName    string `json:"provider_name"`
-	ProviderModel   string `json:"provider_model"`
-	Priority        int    `json:"priority"`
-	Weight          int64  `json:"weight"`
-	TimeoutMS       int64  `json:"timeout_ms"`
-	Position        int    `json:"position"`
+	ID              string   `json:"id"`
+	ProviderModelID string   `json:"provider_model_id"`
+	ProviderID      string   `json:"provider_id"`
+	ProviderName    string   `json:"provider_name"`
+	ProviderModel   string   `json:"provider_model"`
+	Priority        int      `json:"priority"`
+	Weight          int64    `json:"weight"`
+	TimeoutMS       int64    `json:"timeout_ms"`
+	Position        int      `json:"position"`
+	Tags            []string `json:"tags,omitempty"`
+	Shadow          *Shadow  `json:"shadow,omitempty"`
 }
 
 // ProviderRevision contains scanned metadata and the stored documents of one
@@ -126,7 +129,7 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 		CloudRegion: cfg.CloudRegion, CloudProject: cfg.CloudProject, Deployment: cfg.Deployment, APIVersion: cfg.APIVersion,
 		Models: cfg.Options.Models, CredentialHeaders: cfg.Options.CredentialHeaders,
 		ParameterDefaults: cfg.Options.ParameterDefaults, VendorID: cfg.Options.VendorID,
-		Limits: cfg.Options.Limits, Capabilities: []Capability{},
+		Limits: cfg.Options.Limits, HealthProbe: cfg.Options.HealthProbe, Capabilities: []Capability{},
 	}
 	for _, model := range models {
 		for _, capability := range model.Capabilities {
@@ -168,6 +171,7 @@ type RouteRevision struct {
 	PublishedAt                                          time.Time
 	ProjectID                                            *string
 	Operations, Targets, Policy, ContentPolicy, Fidelity []byte
+	Behavior                                             []byte
 }
 
 // DecodeRouteRevision reconstructs a route without checking ownership,
@@ -201,8 +205,11 @@ func DecodeRouteRevision(revision RouteRevision) (Route, error) {
 	if err != nil {
 		return Route{}, fmt.Errorf("route %s fidelity: %w", revision.Slug, err)
 	}
+	if route.Behavior, err = DecodeBehavior(revision.Behavior); err != nil {
+		return Route{}, fmt.Errorf("route %s: %w", revision.Slug, err)
+	}
 	for _, target := range targets {
-		route.Targets = append(route.Targets, Target{ID: target.ID, ProviderID: target.ProviderID, ProviderModel: target.ProviderModel, Priority: target.Priority, Weight: target.Weight, Timeout: target.TimeoutMS, RoutingID: target.ProviderModelID})
+		route.Targets = append(route.Targets, Target{ID: target.ID, ProviderID: target.ProviderID, ProviderModel: target.ProviderModel, Priority: target.Priority, Weight: target.Weight, Timeout: target.TimeoutMS, RoutingID: target.ProviderModelID, Tags: target.Tags, Shadow: target.Shadow})
 	}
 	return route, nil
 }

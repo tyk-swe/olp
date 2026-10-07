@@ -4,6 +4,7 @@
   import RoutingPolicyEditor from './RoutingPolicyEditor.svelte';
   import { focusErrorSummary, focusFormError } from '$lib/forms/focusError';
   import RouteTargets from '$lib/features/routes/RouteTargets.svelte';
+  import RouteResilienceEditor from './RouteResilienceEditor.svelte';
   import RoutePublishPanel from '$lib/features/routes/RoutePublishPanel.svelte';
   import RouteSimulation from '$lib/features/routes/RouteSimulation.svelte';
   import { resolve } from '$app/paths';
@@ -204,12 +205,14 @@
           <p>
             Only before response bytes are committed, and only for
             connection/transport failures, configured timeouts, HTTP 401, HTTP
-            429, or HTTP 5xx. There are no hidden SDK retries, hedges, nested
-            routes, or retries after bytes reach the client. Weighted rendezvous
-            ordering is deterministic inside each priority group.
+            429, or HTTP 5xx. Retries and fallback routes are the ones this
+            draft declares; there are no hidden SDK retries, hedges, or retries
+            after bytes reach the client. Weighted rendezvous ordering is
+            deterministic inside each priority group.
           </p>
         </details>
       </section>
+      <RouteResilienceEditor {editor} />
     </div>
     <RoutePublishPanel {editor} />
   </form>

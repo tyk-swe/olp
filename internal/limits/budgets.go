@@ -412,8 +412,9 @@ const reconciliationGroupSnapshotsSQL = `WITH active_groups AS (
  MAX(unpriced_attempts) FILTER (WHERE window_kind='month')::bigint
  FROM reconciled GROUP BY budget_group_id ORDER BY budget_group_id`
 
-// ReconciliationSnapshots recomputes every active key's durable spend for the
-// windows containing now and returns the snapshots to install in Valkey. It
+// ReconciliationSnapshots recomputes every active key's and budget group's
+// durable spend for the windows containing now, adds the balances of every
+// capped supply owner, and returns the snapshots to install in Valkey. It
 // writes, so it must run on the connection that holds the reconciliation lock.
 func ReconciliationSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time) ([]CostSnapshot, error) {
 	windows := BudgetWindows(now)
@@ -452,7 +453,11 @@ func ReconciliationSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time)
 	if err := groupRows.Err(); err != nil {
 		return nil, err
 	}
-	return snapshots, nil
+	supply, err := supplySnapshots(ctx, conn, windows)
+	if err != nil {
+		return nil, err
+	}
+	return append(snapshots, supply...), nil
 }
 
 // scanSnapshot reads the six columns both budget statements project. A NULL in

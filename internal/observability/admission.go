@@ -5,17 +5,20 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 // MaxAdmissionCapacity bounds a configured admission pool.
 const MaxAdmissionCapacity = 1_000_000
 
 // Pool is a process-local bounded request pool with the counters the metrics
-// endpoint renders. A request that cannot enter is rejected, never queued.
+// endpoint renders. A request that cannot enter is rejected unless the pool
+// has a queue with room for it.
 type Pool struct {
 	sem      chan struct{}
 	admitted atomic.Int64
 	rejected atomic.Uint64
+	queue    *queue
 }
 
 // NewPool builds a pool with capacity slots. Capacity must be at least one.
@@ -32,24 +35,30 @@ func (p *Pool) Acquire() bool {
 }
 
 // AcquirePermit takes a slot and returns it as a Permit, or counts the
-// rejection and returns nil. It never blocks.
+// rejection and returns nil. It never blocks and never queues.
 func (p *Pool) AcquirePermit() *Permit {
-	select {
-	case p.sem <- struct{}{}:
-		p.admitted.Add(1)
-		permit := &Permit{pool: p}
-		permit.held.Store(true)
-		return permit
-	default:
-		p.rejected.Add(1)
-		return nil
+	if p.tryAcquire() {
+		return p.permit(permitHeld)
 	}
+	p.rejected.Add(1)
+	return nil
 }
 
-// Release returns a slot. It pairs strictly with a successful Acquire.
+func (p *Pool) permit(state int32) *Permit {
+	permit := &Permit{pool: p}
+	permit.state.Store(state)
+	return permit
+}
+
+// Release returns a slot. It pairs strictly with a successful Acquire. While
+// requests wait in the queue the slot passes to one of them instead.
 func (p *Pool) Release() {
-	<-p.sem
+	if q := p.queue; q != nil && q.waiting.Load() > 0 && q.handoff() {
+		return
+	}
+	// Uncount before freeing, so Admitted never overstates the held slots.
 	p.admitted.Add(-1)
+	<-p.sem
 }
 
 // Capacity is the configured slot count.
@@ -58,19 +67,53 @@ func (p *Pool) Capacity() int { return cap(p.sem) }
 // Admitted is the number of slots currently held.
 func (p *Pool) Admitted() int64 { return p.admitted.Load() }
 
-// Permit is one held admission slot. It is safe to release early — a handler
-// that finishes its expensive phase before responding can hand the slot back —
-// and double release is a no-op, so the owning middleware always defers one
-// final release without knowing what the handler already did.
+// Permit is one admission slot, held or still queued for. It is safe to
+// release early — a handler that finishes its expensive phase before
+// responding can hand the slot back — and double release is a no-op, so the
+// owning middleware always defers one final release without knowing what the
+// handler already did.
 type Permit struct {
-	pool *Pool
-	held atomic.Bool
+	pool  *Pool
+	state atomic.Int32
 }
 
-// Release returns the slot once.
+const (
+	permitReleased int32 = iota
+	permitHeld
+	permitQueued
+)
+
+// Queued reports whether the permit still waits for its slot.
+func (p *Permit) Queued() bool { return p != nil && p.state.Load() == permitQueued }
+
+// Await waits for a queued permit's slot in class's line, at most until the
+// queue timeout or deadline, whichever comes first. It reports whether the
+// permit now holds a slot; a held permit returns at once.
+func (p *Permit) Await(ctx context.Context, class int, deadline time.Time) bool {
+	if p == nil || p.state.Load() != permitQueued {
+		return p != nil && p.state.Load() == permitHeld
+	}
+	if class < 0 || class >= classCount {
+		class = ClassNormal
+	}
+	if !p.pool.await(ctx, class, deadline) {
+		return false
+	}
+	p.state.Store(permitHeld)
+	p.pool.queue.reserved.Add(-1)
+	return true
+}
+
+// Release returns the slot, or the queue position, once.
 func (p *Permit) Release() {
-	if p != nil && p.held.CompareAndSwap(true, false) {
+	if p == nil {
+		return
+	}
+	switch p.state.Swap(permitReleased) {
+	case permitHeld:
 		p.pool.Release()
+	case permitQueued:
+		p.pool.queue.reserved.Add(-1)
 	}
 }
 
@@ -111,5 +154,8 @@ func AdmissionMetrics(inference, management *Pool, body *strings.Builder) {
 	}
 	if management != nil {
 		management.metrics("management", body)
+	}
+	if inference != nil && inference.queue != nil {
+		inference.queue.metrics(body)
 	}
 }

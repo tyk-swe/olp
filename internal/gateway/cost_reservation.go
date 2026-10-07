@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -84,12 +85,16 @@ func (x *execution) attemptCostBound(attempt runtime.Attempt) usage.Cost {
 // as it has none in the accounting tables until its evidence arrives. It is a
 // pure function of the attempts, so it can be read at any point after they have
 // been recorded.
-func (x *execution) settledCost() usage.Cost {
+func (x *execution) settledCost() usage.Cost { return x.costOf("") }
+
+// costOf is settledCost restricted to the attempts whose spend counts against
+// a capped owner, or over every attempt when owner is empty.
+func (x *execution) costOf(owner string) usage.Cost {
 	var total usage.Cost
 	operation := x.operationName()
 	for index := range x.facts {
 		fact := &x.facts[index]
-		if !fact.UsageObserved || fact.Price == nil {
+		if !fact.UsageObserved || fact.Price == nil || owner != "" && !slices.Contains(fact.Budgets, owner) {
 			continue
 		}
 		if cost, ok := fact.Price.Cost(attemptUsage(fact, operation)); ok {
@@ -139,6 +144,7 @@ func (x *execution) responseCost() (usage.Cost, bool) {
 // never was gives everything back. Either way this runs before the usage event
 // is consumed or after, and the reservation script makes the order immaterial.
 func (s *Server) settleAdmission(ctx context.Context, x *execution) {
+	s.settleCaps(ctx, x)
 	if x.lease == nil {
 		// A request that reserved nothing has nothing to settle, and is not made to
 		// total the tokens it would have settled.

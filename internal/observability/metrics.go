@@ -173,6 +173,17 @@ func CollectMetrics(ctx context.Context, s *State) (string, error) {
 		boolInt(limiterConfigured && limiterHealthy), failOpen, dailyRejections, monthlyRejections,
 		circuits, mediaPending, mediaStale, mediaFailed, mediaGaps)
 
+	// Shadow traffic never delays callers, so capacity shortfalls drop mirrors
+	// and only this counter shows them.
+	var mirrored, shadowDropped int64
+	if s.Shadows != nil {
+		mirrored, shadowDropped = s.Shadows()
+	}
+	fmt.Fprintf(&body, "# HELP olp_shadow_requests_total Shadow attempts mirrored, or dropped because the shadow pool was full.\n"+
+		"# TYPE olp_shadow_requests_total counter\n"+
+		"olp_shadow_requests_total{outcome=\"mirrored\"} %d\n"+
+		"olp_shadow_requests_total{outcome=\"dropped\"} %d\n", mirrored, shadowDropped)
+
 	// Durably reported request-metadata loss totals. All three series are
 	// always emitted, including at zero: an absent line means the exporter
 	// itself is broken rather than that nothing was lost.

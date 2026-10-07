@@ -135,9 +135,10 @@ func (x *execution) unaryPlan(p *runtime.Provider, model string) (*operationplan
 	x.unary.plans[key] = plan
 	return plan, nil
 }
-func (s *Server) prepareUnary(x *execution) *Error {
-	if !x.authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) {
-		return permissionError("route_forbidden", "This key cannot use the requested route.")
+func (s *Server) prepareUnary(ctx context.Context, x *execution) *Error {
+	authorize := s.keyAuthorizer(x.authority)
+	if e := authorize(x.route); e != nil {
+		return e
 	}
 	if x.semanticQueryInvalid {
 		return invalidRequest("invalid_request", "The query is malformed or ambiguous.", nil)
@@ -145,8 +146,14 @@ func (s *Server) prepareUnary(x *execution) *Error {
 	if e := x.dropIngressQuery(); e != nil {
 		return e
 	}
+	x.bind(unaryPlanner, authorize, false)
+	return s.planNamed(ctx, x)
+}
+
+// planUnary plans x.route for a registered native operation.
+func (s *Server) planUnary(ctx context.Context, x *execution) *Error {
 	var incompatible error
-	options := s.selectionOptions(x)
+	options := s.selectionOptions(ctx, x)
 	options.Accept = func(p runtime.Provider, t runtime.Target) error {
 		_, err := x.unaryPlan(&p, t.ProviderModel)
 		if err != nil {
@@ -165,7 +172,10 @@ func (s *Server) prepareUnary(x *execution) *Error {
 	if err != nil {
 		return requestError(err)
 	}
-	x.decisions, x.policy, x.attempts, x.budget = plan.Decisions, plan.Policy, plan.Attempts, plan.Budget
+	if plan.Delegate != "" {
+		return s.delegate(ctx, x, plan)
+	}
+	x.adoptPlan(plan)
 	if len(plan.Attempts) == 0 {
 		if incompatible != nil {
 			return requestError(incompatible)
@@ -188,17 +198,20 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *execution
 		return &outcome{err: e, cancelled: e.Status == 0}, e.Status
 	}
 	var e *Error
-	x.preferences, e = routingPreferences(r)
+	x.preferences, x.priority, e = routingControls(r, x.authority.Policy)
 	if e != nil {
 		return fail(e)
 	}
-	if e = s.prepareUnary(x); e != nil {
+	if e = s.prepareUnary(r.Context(), x); e != nil {
 		return fail(e)
 	}
 	x.estimate = requestEstimate(x)
-	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
+	overall := time.Duration(x.primary.OverallTimeout) * time.Millisecond
 	ctx, cancel := context.WithTimeout(r.Context(), overall)
 	defer cancel()
+	if e = s.awaitAdmission(ctx, x); e != nil {
+		return fail(e)
+	}
 	x.lease, e = s.Admission.reserveKeyCosted(ctx, x.authority, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), overall, s.costReservation(x, x.authority))
 	if e != nil {
 		return fail(e)

@@ -44,6 +44,11 @@ export const draft: RouteDraft = {
   max_attempts: 1,
   content_policy: null,
   fidelity: { mode: 'strict' },
+  fallbacks: [],
+  selectors: [],
+  retry: {},
+  affinity: null,
+  budget: null,
   targets: [
     {
       lifecycle: null,
@@ -56,7 +61,9 @@ export const draft: RouteDraft = {
       provider_model_id: 'model-a',
       priority: 1,
       weight: 100,
-      timeout_ms: 60000
+      timeout_ms: 60000,
+      tags: [],
+      shadow: null
     }
   ],
   created_at: '2026-07-12T12:00:00Z',
