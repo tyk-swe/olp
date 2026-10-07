@@ -62,17 +62,40 @@ func canonicalMembers(value oif.Value, shape reflect.Type, fieldName string) err
 			return errors.New("object required")
 		}
 		fields := map[string]reflect.Type{}
-		for i := 0; i < shape.NumField(); i++ {
-			field := shape.Field(i)
-			tag := strings.Split(field.Tag.Get("json"), ",")[0]
-			if field.PkgPath != "" || tag == "-" {
-				continue
+		// Anonymous struct fields promote their members, the way encoding/json
+		// flattens them; a name the outer shape declares keeps the shallower
+		// field. json:",omitempty" still counts as no name.
+		var declare func(shape reflect.Type, promoted bool)
+		declare = func(shape reflect.Type, promoted bool) {
+			for i := 0; i < shape.NumField(); i++ {
+				field := shape.Field(i)
+				tag := strings.Split(field.Tag.Get("json"), ",")[0]
+				if tag == "-" {
+					continue
+				}
+				underlying := field.Type
+				for underlying.Kind() == reflect.Pointer {
+					underlying = underlying.Elem()
+				}
+				if field.Anonymous && tag == "" && underlying.Kind() == reflect.Struct {
+					declare(underlying, true)
+					continue
+				}
+				if field.PkgPath != "" {
+					continue
+				}
+				if tag == "" {
+					tag = field.Name
+				}
+				if promoted {
+					if _, taken := fields[tag]; taken {
+						continue
+					}
+				}
+				fields[tag] = field.Type
 			}
-			if tag == "" {
-				tag = field.Name
-			}
-			fields[tag] = field.Type
 		}
+		declare(shape, false)
 		for _, member := range value.Members() {
 			field, ok := fields[member.Name]
 			if !ok {
