@@ -418,8 +418,8 @@ func (s *Server) execute(ctx context.Context, x *execution) *outcome {
 	defer cancel()
 	out := runAttempts(ctx, s, x, attemptAdapter[*openai.Completion]{
 		estimate: x.attemptReservation,
-		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
-			return s.attempt(ctx, x, attempt, provider, slot, ordinal)
+		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, *openai.Completion, *attemptFailure) {
+			return s.attempt(ctx, x, attempt, provider, slot, fact)
 		},
 	})
 	return &outcome{
@@ -610,8 +610,7 @@ func (s *Server) rejectedFact(x *execution, a runtime.Attempt, slot runtime.Slot
 }
 
 // attempt performs one upstream call with one credential.
-func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *openai.Completion, *attemptFailure) {
-	fact := s.newFact(x, a, slot, ordinal)
+func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, *openai.Completion, *attemptFailure) {
 	cfg := provider.Connector()
 	kept := x.takeEncoded()
 	fact.Carried = cfg.CarriedByPlugin()

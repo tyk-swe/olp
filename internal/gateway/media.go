@@ -510,8 +510,8 @@ type mediaOutcome struct {
 func (s *Server) executeMedia(ctx context.Context, w http.ResponseWriter, x *execution) *mediaOutcome {
 	attempted := runAttempts(ctx, s, x, attemptAdapter[*media.Result]{
 		estimate: func(runtime.Attempt, *runtime.Provider) int64 { return x.estimate },
-		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *media.Result, *attemptFailure) {
-			return s.mediaAttempt(ctx, w, x, attempt, provider, slot, ordinal)
+		dispatch: func(ctx context.Context, attempt runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, *media.Result, *attemptFailure) {
+			return s.mediaAttempt(ctx, w, x, attempt, provider, slot, fact)
 		},
 	})
 	out := &mediaOutcome{
@@ -581,8 +581,7 @@ func mediaParameterNames(r *media.Request) []string {
 }
 
 // mediaAttempt performs one upstream media call with one credential.
-func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, *media.Result, *attemptFailure) {
-	fact := s.newFact(x, a, slot, ordinal)
+func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, *media.Result, *attemptFailure) {
 	attemptCtx, atr := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finishTrace := func() {
 		if atr == nil {

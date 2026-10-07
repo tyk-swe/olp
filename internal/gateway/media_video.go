@@ -120,12 +120,13 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	// dispatch on a detached context bounded by the route deadline.
 	dispatchCtx, dispatchCancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 	defer dispatchCancel()
-	fact, result, dispatchFailure := s.mediaAttempt(dispatchCtx, w, x, attempt, &provider, slot, len(x.facts)+1)
+	fact := s.newFact(x, attempt, slot, len(x.facts)+1)
+	fact.Budgets = hold.budgets
+	fact, result, dispatchFailure := s.mediaAttempt(dispatchCtx, w, x, attempt, &provider, slot, fact)
 	x.dispatched = dispatchFailure == nil || dispatchFailure.dispatched
 	if x.dispatched {
 		x.spendCaps(hold.budgets, attempt)
 	}
-	fact.Budgets = hold.budgets
 	x.facts = append(x.facts, fact)
 	s.health.record(provider.ID, fact)
 	// A reply that lands just before the route deadline must still bind or

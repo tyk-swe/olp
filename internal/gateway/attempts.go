@@ -17,7 +17,7 @@ import (
 // attempt numbering, settlement, health and retries.
 type attemptAdapter[Result any] struct {
 	estimate func(runtime.Attempt, *runtime.Provider) int64
-	dispatch func(context.Context, runtime.Attempt, *runtime.Provider, runtime.Slot, int) (AttemptFact, Result, *attemptFailure)
+	dispatch func(context.Context, runtime.Attempt, *runtime.Provider, runtime.Slot, AttemptFact) (AttemptFact, Result, *attemptFailure)
 }
 
 // attemptOutcome keeps the successful payload typed without coupling shared
@@ -111,7 +111,10 @@ route:
 				}
 				x.spent++
 				x.grantGeneration = 0
-				fact, result, failure := adapter.dispatch(ctx, attempt, &provider, slot, x.spent)
+				fact := s.newFact(x, attempt, slot, x.spent)
+				// Streams can persist accounting before dispatch returns.
+				fact.Retry, fact.Budgets = retry, gate.hold.budgets
+				fact, result, failure := adapter.dispatch(ctx, attempt, &provider, slot, fact)
 				// Only work handed to an upstream spends the request's key
 				// reservation. Local failures remain refundable.
 				dispatched := failure == nil || failure.dispatched
@@ -120,7 +123,6 @@ route:
 				if dispatched {
 					x.spendCaps(gate.hold.budgets, attempt)
 				}
-				fact.Retry, fact.Budgets = retry, gate.hold.budgets
 				x.facts = append(x.facts, fact)
 				// Recording the attempt also releases its half-open probe.
 				s.health.record(provider.ID, fact)

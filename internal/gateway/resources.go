@@ -120,6 +120,8 @@ func (s *Server) selectPin(ctx context.Context, x *execution, route *runtime.Rou
 
 func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runtime.Route, operation, surface, mode string, qualified func(*runtime.Provider, string) bool) (*pin, *Error) {
 	snapshot := x.request.release.Snapshot
+	// Pinned work must select a target on this route rather than delegate.
+	x.fixed = true
 	options := s.selectionOptions(ctx, x)
 	options.Accept = func(p runtime.Provider, t runtime.Target) error {
 		if !qualified(&p, t.ProviderModel) {

@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -113,6 +114,26 @@ func TestRetainedResponsesIgnoreRouteDelegatingSelectors(t *testing.T) {
 		if x.route.Slug != wantRoute || len(x.attempts) != 1 || x.attempts[0].ProviderID != wantProvider {
 			t.Fatalf("retained=%t route=%s attempts=%+v", retained, x.route.Slug, x.attempts)
 		}
+	}
+}
+
+func TestPinnedInteractionsIgnoreRouteDelegatingSelectors(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.republish(func(snapshot *runtime.Snapshot, a, b runtime.Provider) {
+		a.Kind, a.ProfileID, a.ProfileRevision = "gemini", "gemini-interactions", connectors.ProfileRevision
+		a.Endpoint = h.upstream.URL + "/v1beta"
+		a.Capabilities = []runtime.Capability{{Model: modelA, Operation: "generation", Surface: "gemini", Mode: "unary"}}
+		snapshot.Providers[a.ID] = a
+		splitRoutes(snapshot, b, runtime.Behavior{Selectors: []runtime.Selector{{ID: "delegate", Route: backupSlug}}})
+	})
+	h.mock.set("v1beta", status(http.StatusOK, `{"id":"int_1","status":"completed","steps":[],"usage":{"total_input_tokens":3,"total_output_tokens":2}}`))
+	request := httptest.NewRequest(http.MethodPost, "/gemini/v1beta/interactions", strings.NewReader(`{"model":"`+routeSlug+`","input":"hello","store":false}`))
+	request.Header.Set("X-Goog-Api-Key", fullKey)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	h.gateway.geminiInteractionCreate(response, request)
+	if response.Code != http.StatusOK || h.mock.count("v1beta") != 1 || h.mock.count("b") != 0 {
+		t.Fatalf("pinned request was displaced by a delegating selector: %d %s calls=%d/%d", response.Code, response.Body, h.mock.count("v1beta"), h.mock.count("b"))
 	}
 }
 

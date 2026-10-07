@@ -216,8 +216,8 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *execution
 	if e != nil {
 		return fail(e)
 	}
-	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a runtime.Attempt, p *runtime.Provider, slot runtime.Slot, n int) (AttemptFact, operationplan.Result, *attemptFailure) {
-		return s.unaryAttempt(ctx, x, a, p, slot, n)
+	result := runAttempts(ctx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(ctx context.Context, a runtime.Attempt, p *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+		return s.unaryAttempt(ctx, x, a, p, slot, fact)
 	}})
 	if result.err != nil {
 		out, status := fail(result.err)

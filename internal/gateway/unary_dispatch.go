@@ -19,8 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, ordinal int) (AttemptFact, operationplan.Result, *attemptFailure) {
-	fact := s.newFact(x, a, slot, ordinal)
+func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attempt, provider *runtime.Provider, slot runtime.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
 	state := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: true}}
 	attemptCtx, trace := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finish := func() {

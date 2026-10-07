@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"testing"
 	"time"
@@ -90,5 +91,48 @@ func TestSupplyReservationsCoverEveryDispatchedAttempt(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestBackgroundResponseUsageKeepsSupplyBudgetsDuringDispatch(t *testing.T) {
+	h := newHarness(t, Config{})
+	x := costExecution(t, `{"model":"team-chat","input":"hello","background":true,"stream":true}`, openai.FamilyResponses, 1,
+		runtime.Attempt{Price: costPrice()})
+	x.request = request{id: uuid.NewString(), minted: true, startedAt: time.Now(), release: h.rt.Release()}
+	x.keyID, x.mode, x.route.ID = h.keyID, "streaming", uuid.NewString()
+	x.route.RoutingID = x.route.ID
+	x.route.Budget = &runtime.CostLimits{DailyCostLimit: costText("1")}
+	provider := x.snapshot().Providers[x.attempts[0].ProviderID]
+	provider.Limits = &runtime.Limits{Supply: runtime.Supply{DailyCostLimit: costText("1")}}
+	provider.Slots[0].Weight, provider.Slots[0].DailyCostLimit = 1, costText("1")
+	x.snapshot().Providers[provider.ID] = provider
+	owners := []string{x.route.ID, provider.ID, provider.Slots[0].ID}
+	limiter, err := limits.New(&capReservations{}, "olp:test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.gateway.Admission = NewAdmission(limiter, nil, h.gateway.log)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	metadata := map[string]json.RawMessage{}
+	out := runAttempts(ctx, h.gateway, x, attemptAdapter[struct{}]{
+		estimate: x.attemptReservation,
+		dispatch: func(_ context.Context, _ runtime.Attempt, _ *runtime.Provider, _ runtime.Slot, fact AttemptFact) (AttemptFact, struct{}, *attemptFailure) {
+			if !h.gateway.pendingResponseUsage(x, &fact, metadata) {
+				t.Fatal("background dispatch did not retain pending usage")
+			}
+			fact.Class = classSuccess
+			return fact, struct{}{}, nil
+		},
+	})
+	if out.err != nil {
+		t.Fatal(out.err)
+	}
+	var event usage.Event
+	if err := json.Unmarshal(metadata["pending_usage"], &event); err != nil {
+		t.Fatal(err)
+	}
+	if len(event.Attempts) != 1 || event.Attempts[0].Routing == nil || !slices.Equal(event.Attempts[0].Routing.Budgets, owners) {
+		t.Fatalf("pending usage lost supply budget owners before dispatch returned: %+v", event.Attempts)
 	}
 }
