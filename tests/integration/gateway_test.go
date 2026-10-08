@@ -216,7 +216,11 @@ func (h *accessHarness) refresh() {
 func (h *accessHarness) authority(secret string) (access.Authority, error) {
 	h.t.Helper()
 	h.refresh()
-	return h.Runtime.Authenticate(secret)
+	a, err := h.Runtime.Authenticate(secret)
+	if err != nil {
+		return access.Authority{}, err
+	}
+	return *a, nil
 }
 
 // gateway performs an SDK-style request against the inference surface.

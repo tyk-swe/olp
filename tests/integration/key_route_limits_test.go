@@ -73,7 +73,7 @@ func TestKeyRouteRateLimitsAcrossGateways(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, refusal := f.h.Gateway.Admission.ReserveCodeRate(t.Context(), authority, 1, time.Minute, "other-route")
+	lease, refusal := f.h.Gateway.Admission.ReserveCodeRate(t.Context(), *authority, 1, time.Minute, "other-route")
 	if refusal != nil {
 		t.Fatalf("independent route refused: %v", refusal)
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
-func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority access.Authority, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
+func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *access.Authority, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
 	if !authority.OrganizationBudget.Limited() && !authority.InstallationBudget.Limited() && !authority.ProjectBudget.Limited() && !authority.ProjectAttributionBudgets.Matches(authority.Attribution) {
 		return nil, nil
 	}
@@ -124,7 +124,7 @@ func (s *Server) reserveSystemBudgets(ctx context.Context, x *execution) *Error 
 		authority = withoutCostBudgets(authority)
 	}
 	var failure *Error
-	x.lease, failure = s.Admission.reserveAggregateBudgets(ctx, authority, time.Duration(x.route.OverallTimeout)*time.Millisecond, s.costReservation(x, authority))
+	x.lease, failure = s.Admission.reserveAggregateBudgets(ctx, &authority, time.Duration(x.route.OverallTimeout)*time.Millisecond, s.costReservation(x, authority))
 	return failure
 }
 

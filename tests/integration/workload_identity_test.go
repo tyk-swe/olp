@@ -237,7 +237,7 @@ type workloadCodeRuntime struct {
 	manager *runtime.Manager
 }
 
-func (r workloadCodeRuntime) Authenticate(token string) (access.Authority, error) {
+func (r workloadCodeRuntime) Authenticate(token string) (*access.Authority, error) {
 	return r.manager.Authenticate(token)
 }
 

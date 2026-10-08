@@ -32,11 +32,11 @@ type codeForwardRuntime struct {
 
 func (r *codeForwardRuntime) Release() *runtime.Release              { return r.pinned }
 func (r *codeForwardRuntime) Eligibility(string) runtime.Eligibility { return runtime.Eligible }
-func (r *codeForwardRuntime) Authenticate(key string) (access.Authority, error) {
+func (r *codeForwardRuntime) Authenticate(key string) (*access.Authority, error) {
 	if key != "olp-code-fixture" {
-		return access.Authority{}, runtime.ErrInvalidKey
+		return nil, runtime.ErrInvalidKey
 	}
-	return r.authority, nil
+	return &r.authority, nil
 }
 
 type codeForwardAuthorizer struct{}

@@ -125,7 +125,7 @@ func provisionStrictRealtimeInProject(t *testing.T, h *accessHarness, owner *bro
 	if len(networkCredential) != 0 {
 		stored := h.want(owner, "POST", path+"/network-credentials", map[string]any{"credential": networkCredential[0]}, withMatch(provider, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusCreated)
 		configuration["options"] = map[string]any{"network": map[string]any{"credential_id": stored["credential_id"]}}
-		provider = h.want(owner, "PATCH", path, map[string]any{"project_id": projectID, "name": "Strict native realtime", "configuration": configuration}, etagHeader(stored), http.StatusOK)
+		provider = h.want(owner, "PATCH", path, map[string]any{"name": "Strict native realtime", "configuration": configuration}, etagHeader(stored), http.StatusOK)
 	}
 	if probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(provider), http.StatusOK); probe["succeeded"] != true {
 		t.Fatalf("native provider probe: %v", probe)

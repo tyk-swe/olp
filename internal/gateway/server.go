@@ -74,7 +74,7 @@ type Config struct {
 // *runtime.Manager implements it; fixtures and tests supply static releases.
 type Runtime interface {
 	Release() *runtime.Release
-	Authenticate(secret string) (access.Authority, error)
+	Authenticate(secret string) (*access.Authority, error)
 	// RoutingInputs returns current price and performance measurements, or
 	// nil when no measurements are available.
 	RoutingInputs() *usage.RoutingInputs
@@ -645,7 +645,8 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			return
 		}
 		reservationEstimate := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
-		if x.lease, e = s.Admission.reserveKeyCosted(ctx, x.admissionAuthority(authority), x.clientSurface(), reservationEstimate, overall, s.costReservation(x, authority), x.limitRoute()); e != nil {
+		admitted := x.admissionAuthority(authority)
+		if x.lease, e = s.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), reservationEstimate, overall, s.costReservation(x, authority), x.limitRoute()); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return

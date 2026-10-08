@@ -60,12 +60,12 @@ func (s *staticRuntime) Release() *runtime.Release { return s.release }
 
 func (s *staticRuntime) RoutingInputs() *usage.RoutingInputs { return nil }
 
-func (s *staticRuntime) Authenticate(secret string) (access.Authority, error) {
+func (s *staticRuntime) Authenticate(secret string) (*access.Authority, error) {
 	authority, ok := s.keys[secret]
 	if !ok {
-		return access.Authority{}, runtime.ErrInvalidKey
+		return nil, runtime.ErrInvalidKey
 	}
-	return authority, nil
+	return &authority, nil
 }
 
 func (s *staticRuntime) Eligibility(string) runtime.Eligibility { return runtime.Eligible }

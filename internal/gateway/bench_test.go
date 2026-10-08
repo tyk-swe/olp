@@ -161,7 +161,7 @@ func BenchmarkAdmission(b *testing.B) {
 			var operations int64
 			b.ReportAllocs()
 			for b.Loop() {
-				lease, e := admission.reserveKeyCosted(ctx, tc.authority, "openai", benchEstimate, 30*time.Second, tc.hold)
+				lease, e := admission.reserveKeyCosted(ctx, &tc.authority, "openai", benchEstimate, 30*time.Second, tc.hold)
 				if e != nil {
 					b.Fatal(e)
 				}

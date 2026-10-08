@@ -12,7 +12,7 @@ import (
 
 // Each boundary reserves independently. A later refusal refunds every earlier
 // reservation, while every dispatched request settles the complete chain.
-func (a *Admission) reserveEndUsers(ctx context.Context, authority access.Authority, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
+func (a *Admission) reserveEndUsers(ctx context.Context, authority *access.Authority, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
 	if authority.Policy.EndUserPolicy == nil && authority.ProjectEndUserPolicy == nil {
 		return nil, nil
 	}

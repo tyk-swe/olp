@@ -72,7 +72,7 @@ func TestIntegrationKeyOutageSettlesWhatTheBudgetGroupReserved(t *testing.T) {
 			}
 
 			hold := costReservation{amount: "0.25", requestID: uuid.NewString()}
-			lease, refusal := admission.reserveKeyCosted(t.Context(), authority, "openai", 100, time.Minute, hold)
+			lease, refusal := admission.reserveKeyCosted(t.Context(), &authority, "openai", 100, time.Minute, hold)
 			if policy == limits.FailClosed {
 				if lease != nil || refusal == nil || refusal.Status != http.StatusServiceUnavailable || refusal.Code != "distributed_limits_unavailable" {
 					t.Fatalf("reserveKeyCosted = %v, %v, want the request refused", lease, refusal)

@@ -120,7 +120,7 @@ func (s *Server) authorizeKey(token, scope string) (access.Authority, *Error) {
 	case !slices.Contains(authority.Policy.Scopes, scope):
 		return access.Authority{}, permissionError("permission_denied", "This API key does not have the "+scope+" scope.")
 	}
-	return authority, nil
+	return *authority, nil
 }
 
 // dropIngressQuery removes the query parameters a client surface sends that

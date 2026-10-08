@@ -124,34 +124,38 @@ func (m *Manager) loadWorkloadAuthority(ctx context.Context, tx pgx.Tx, state *a
 	return nil
 }
 
-func (m *Manager) authenticateWorkload(raw string, state authorityState) (access.Authority, error) {
+func (m *Manager) authenticateWorkload(raw string) (*access.Authority, error) {
 	token, e := workload.Parse(raw)
 	if e != nil {
-		return access.Authority{}, ErrInvalidKey
+		return nil, ErrInvalidKey
 	}
+	m.mu.RLock()
+	snapshot := m.authority
+	m.mu.RUnlock()
+	state := &snapshot
 	issuer, ok := state.workloadIssuers[token.Issuer()]
 	if !ok || !issuer.Config.Enabled {
-		return access.Authority{}, ErrInvalidKey
+		return nil, ErrInvalidKey
 	}
 	// Reject disabled algorithms/key IDs before any refresh request.
 	if !token.Allowed(issuer.Config, time.Now()) {
-		return access.Authority{}, ErrInvalidKey
+		return nil, ErrInvalidKey
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	keys, e := m.workloadKeys.Keys(ctx, issuer.ID, issuer.Config.JWKSURL, token.KeyID(), time.Now())
 	if e != nil {
-		return access.Authority{}, ErrStaleAuthority
+		return nil, ErrStaleAuthority
 	}
 	identity, e := token.Verify(issuer.Config, keys, time.Now())
 	if e != nil {
-		return access.Authority{}, ErrInvalidKey
+		return nil, ErrInvalidKey
 	}
 	pair, _ := json.Marshal([2]string{issuer.Config.Issuer, identity.Subject})
 	digest := hex.EncodeToString(m.auth.Digest(secrets.WorkloadDigest, string(pair)))
 	base, ok := issuer.bindings[identity.Mapping.Name]
 	if !ok {
-		return access.Authority{}, ErrInvalidKey
+		return nil, ErrInvalidKey
 	}
 	m.mu.RLock()
 	principal, known := state.workloadPrincipals[digest]
@@ -159,11 +163,11 @@ func (m *Manager) authenticateWorkload(raw string, state authorityState) (access
 	if !known {
 		principal, e = m.registerWorkload(ctx, state, issuer, identity.Mapping, digest)
 		if e != nil {
-			return access.Authority{}, e
+			return nil, e
 		}
 	}
 	if principal.ProjectID == nil || *principal.ProjectID != identity.Mapping.ProjectID || principal.WorkloadMapping != identity.Mapping.Name || principal.WorkloadIssuerID == nil || *principal.WorkloadIssuerID != issuer.ID {
-		return access.Authority{}, ErrInvalidKey
+		return nil, ErrInvalidKey
 	}
 	base.ID = principal.ID
 	base.LookupID = principal.LookupID
@@ -176,25 +180,25 @@ func (m *Manager) authenticateWorkload(raw string, state authorityState) (access
 	base.ExpiresAt = &identity.ExpiresAt
 	if identity.Mapping.EndUserClaim != nil {
 		if !access.ValidEndUserIdentifier(identity.EndUser) {
-			return access.Authority{}, ErrInvalidKey
+			return nil, ErrInvalidKey
 		}
 		base.EndUserDigest = m.EndUserDigest(base.ProjectID, identity.EndUser)
 	}
 	if !base.AllowsEndUser(base.EndUserDigest) {
-		return access.Authority{}, ErrInvalidKey
+		return nil, ErrInvalidKey
 	}
 	m.mu.RLock()
 	current := m.authority.id == state.id && time.Since(m.authority.readAt) <= AuthorityStaleAfter
 	m.mu.RUnlock()
 	if !current {
-		return access.Authority{}, ErrStaleAuthority
+		return nil, ErrStaleAuthority
 	}
-	return base, nil
+	return &base, nil
 }
 
 // First sight of a verified subject registers only its digest and stable owner.
 // The installation lock serializes enrollment with issuer/policy revocation.
-func (m *Manager) registerWorkload(ctx context.Context, state authorityState, issuer workloadIssuer, mapping workload.Mapping, digest string) (access.Authority, error) {
+func (m *Manager) registerWorkload(ctx context.Context, state *authorityState, issuer workloadIssuer, mapping workload.Mapping, digest string) (access.Authority, error) {
 	m.workloadRegistration.Lock()
 	defer m.workloadRegistration.Unlock()
 	tx, e := m.pool.Begin(ctx)

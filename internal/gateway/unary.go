@@ -212,7 +212,8 @@ func (s *Server) serveUnary(w http.ResponseWriter, r *http.Request, x *execution
 	if e = s.awaitAdmission(ctx, x); e != nil {
 		return fail(e)
 	}
-	x.lease, e = s.Admission.reserveKeyCosted(ctx, x.admissionAuthority(x.authority), x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), overall, s.costReservation(x, x.authority), x.limitRoute())
+	admitted := x.admissionAuthority(x.authority)
+	x.lease, e = s.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), overall, s.costReservation(x, x.authority), x.limitRoute())
 	if e != nil {
 		return fail(e)
 	}

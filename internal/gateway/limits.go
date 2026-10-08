@@ -172,7 +172,7 @@ func keyRequest(authority access.Authority, estimate int64, ttl time.Duration) l
 	}
 }
 
-func groupRequest(authority access.Authority, ttl time.Duration) *limits.Request {
+func groupRequest(authority *access.Authority, ttl time.Duration) *limits.Request {
 	if authority.BudgetGroupID == nil ||
 		(authority.BudgetGroupDailyCostLimit == nil && authority.BudgetGroupMonthlyCostLimit == nil && authority.BudgetGroupWeeklyCostLimit == nil && authority.BudgetGroupRPM == nil && authority.BudgetGroupTPM == nil && authority.BudgetGroupConcurrency == nil) {
 		return nil
@@ -194,13 +194,16 @@ func groupRequest(authority access.Authority, ttl time.Duration) *limits.Request
 // surface is the one the caller speaks, whose headers report the key's allowance
 // if it has any.
 func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration, route ...string) (*limits.Lease, *Error) {
-	return a.reserveKeyCosted(ctx, authority, surface, estimate, ttl, costReservation{}, route...)
+	return a.reserveKeyCosted(ctx, &authority, surface, estimate, ttl, costReservation{}, route...)
 }
 
 // reserveKeyCosted applies all configured caller boundaries and attaches their
 // leases for one settlement. Every refusal refunds earlier reservations. The
 // optional route identifies the ingress route for per-key route policy.
-func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
+func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
+	if keyBoundariesOnly(authority) {
+		return a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold)
+	}
 	aggregate, err := a.reserveAggregateBudgets(ctx, authority, ttl, hold)
 	if err != nil {
 		return nil, err
@@ -241,7 +244,15 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Autho
 	return lease, nil
 }
 
-func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
+// keyBoundariesOnly reports whether an authority configures no aggregate,
+// end-user or route boundary, as most keys do, so that admission skips
+// straight to the key and its group.
+func keyBoundariesOnly(authority *access.Authority) bool {
+	return authority.InstallationBudget == nil && authority.OrganizationBudget == nil && authority.ProjectBudget == nil && len(authority.ProjectAttributionBudgets) == 0 &&
+		authority.Policy.EndUserPolicy == nil && authority.ProjectEndUserPolicy == nil && len(authority.Policy.RouteLimits) == 0
+}
+
+func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
 	var group *limits.Lease
 	if request := groupRequest(authority, ttl); request != nil {
 		if !a.ready() {
@@ -276,7 +287,7 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority access.Aut
 		// reaches Valkey only for the group it belongs to.
 		return group, nil
 	}
-	request := keyRequest(authority, estimate, ttl)
+	request := keyRequest(*authority, estimate, ttl)
 	request.CostIncreases = authority.BudgetIncreases[authority.ID]
 	// The allowance is stated for a response that will report it. A surface
 	// whose SDKs read no rate-limit headers, Gemini, Bedrock and the native

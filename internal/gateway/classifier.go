@@ -239,6 +239,7 @@ func (s *Server) admitClassifier(ctx context.Context, x *execution) *Error {
 	x.estimate = requestEstimate(x)
 	ttl := time.Duration(x.named().OverallTimeout) * time.Millisecond
 	var e *Error
-	x.lease, e = s.Admission.reserveKeyCosted(ctx, x.admissionAuthority(x.authority), x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
+	admitted := x.admissionAuthority(x.authority)
+	x.lease, e = s.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
 	return e
 }

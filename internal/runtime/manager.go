@@ -101,7 +101,7 @@ type authorityState struct {
 	readAt                    time.Time
 	id                        string
 	sequence                  int64
-	keys                      map[string]keyRecord
+	keys                      map[string]*keyRecord
 	// ineligible holds the credential versions and network credentials that
 	// may not serve, with why.
 	ineligible map[string]Eligibility
@@ -227,7 +227,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 	if unchanged {
 		return nil
 	}
-	state := authorityState{loaded: true, readAt: start, id: id, sequence: sequence, keys: map[string]keyRecord{}}
+	state := authorityState{loaded: true, readAt: start, id: id, sequence: sequence, keys: map[string]*keyRecord{}}
 	if err = tx.QueryRow(ctx, "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&state.installationBudget); err != nil {
 		return err
 	}
@@ -290,7 +290,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 			record.authority.ProjectBudget = state.projectBudgets[*record.authority.ProjectID]
 			record.authority.ProjectAttributionBudgets = state.projectAttributionBudgets[*record.authority.ProjectID]
 		}
-		state.keys[record.authority.LookupID] = record
+		state.keys[record.authority.LookupID] = &record
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
@@ -342,7 +342,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 		if e = groupRows.Err(); e != nil {
 			return e
 		}
-		for lookup, record := range state.keys {
+		for _, record := range state.keys {
 			if record.authority.ProjectID == nil || record.authority.WorkloadIssuerID != nil {
 				continue
 			}
@@ -352,7 +352,6 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 			if e = record.authority.BindLimitTemplates(templatesByProject[*record.authority.ProjectID]); e != nil {
 				return e
 			}
-			state.keys[lookup] = record
 		}
 	}
 	state.workloadPrincipals = map[string]access.Authority{}
@@ -498,26 +497,30 @@ func (m *Manager) EndUserDigest(projectID *string, identifier string) string {
 	return access.DigestEndUser(m.auth, projectID, identifier)
 }
 
-// Authenticate resolves an API key against the last authority read.
-func (m *Manager) Authenticate(secret string) (access.Authority, error) {
+// Authenticate resolves an API key against the last authority read. The
+// authority it returns is shared with the installed key records: callers read
+// it and copy it before changing it.
+func (m *Manager) Authenticate(secret string) (*access.Authority, error) {
+	// An API key needs only the key records, and copying the whole authority
+	// would cost every request more than the lookup.
 	m.mu.RLock()
-	state := m.authority
+	loaded, readAt, keys := m.authority.loaded, m.authority.readAt, m.authority.keys
 	m.mu.RUnlock()
-	if !state.loaded || time.Since(state.readAt) > AuthorityStaleAfter {
-		return access.Authority{}, ErrStaleAuthority
+	if !loaded || time.Since(readAt) > AuthorityStaleAfter {
+		return nil, ErrStaleAuthority
 	}
 	if !strings.HasPrefix(secret, "olp_") {
-		return m.authenticateWorkload(secret, state)
+		return m.authenticateWorkload(secret)
 	}
 	parts := strings.Split(secret, "_")
 	if len(parts) != 3 || parts[0] != "olp" {
-		return access.Authority{}, ErrInvalidKey
+		return nil, ErrInvalidKey
 	}
-	record, ok := state.keys[parts[1]]
+	record, ok := keys[parts[1]]
 	if !ok || record.authority.WorkloadIssuerID != nil || record.expiresAt != nil && !time.Now().Before(*record.expiresAt) || !hmac.Equal(record.digest, m.auth.Digest(secrets.APIKeyDigest, secret)) {
-		return access.Authority{}, ErrInvalidKey
+		return nil, ErrInvalidKey
 	}
-	return record.authority, nil
+	return &record.authority, nil
 }
 
 // Authority reports the last authority read for health output.
@@ -607,7 +610,7 @@ func (m *Manager) loadKeyOverlaps(ctx context.Context, tx pgx.Tx, state *authori
 		return err
 	}
 	defer rows.Close()
-	var byID map[string]keyRecord
+	var byID map[string]*keyRecord
 	for rows.Next() {
 		var id, lookup string
 		var digest []byte
@@ -616,15 +619,16 @@ func (m *Manager) loadKeyOverlaps(ctx context.Context, tx pgx.Tx, state *authori
 			return err
 		}
 		if byID == nil {
-			byID = make(map[string]keyRecord, len(state.keys))
+			byID = make(map[string]*keyRecord, len(state.keys))
 			for _, r := range state.keys {
 				byID[r.authority.ID] = r
 			}
 		}
 		if record, ok := byID[id]; ok {
-			record.digest = digest
-			record.expiresAt = &until
-			state.keys[lookup] = record
+			overlap := *record
+			overlap.digest = digest
+			overlap.expiresAt = &until
+			state.keys[lookup] = &overlap
 		}
 	}
 	return rows.Err()

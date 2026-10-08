@@ -63,17 +63,17 @@ func (f *fakeRuntime) RoutingInputs() *usage.RoutingInputs {
 	return f.inputs
 }
 
-func (f *fakeRuntime) Authenticate(secret string) (access.Authority, error) {
+func (f *fakeRuntime) Authenticate(secret string) (*access.Authority, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.stale {
-		return access.Authority{}, runtime.ErrStaleAuthority
+		return nil, runtime.ErrStaleAuthority
 	}
 	a, ok := f.keys[secret]
 	if !ok {
-		return access.Authority{}, runtime.ErrInvalidKey
+		return nil, runtime.ErrInvalidKey
 	}
-	return a, nil
+	return &a, nil
 }
 
 func (f *fakeRuntime) Eligibility(id string) runtime.Eligibility {
