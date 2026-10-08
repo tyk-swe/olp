@@ -580,6 +580,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		settled := geminiLiveSettlement(x)
 		s.settlePinHold(r.Context(), x, p.hold, settled)
+		x.recordCost()
 		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
 	}()
 	if x.strict() {
@@ -589,6 +590,10 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if e := s.reserveState(ctx, x, authority, realtimeSession); e != nil {
+		fail(e)
+		return
+	}
+	if e := s.reserveSessionCost(ctx, x, authority, p.attempt, realtimeSession); e != nil {
 		fail(e)
 		return
 	}

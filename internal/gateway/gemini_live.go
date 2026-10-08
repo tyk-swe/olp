@@ -195,6 +195,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 			s.settlePinHold(r.Context(), x, p.hold, settled)
 		}
 		s.settleCaps(r.Context(), x)
+		x.recordCost()
 		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
 	}()
 	p, e = s.selectPinSurface(ctx, x, &route, "realtime", "gemini", "realtime", func(provider *runtime.Provider, model string) bool {
@@ -202,6 +203,11 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	})
 	if e != nil {
 		client.Close(websocket.StatusPolicyViolation, "provider unavailable")
+		x.failure, status = e, e.Status
+		return
+	}
+	if e := s.reserveSessionCost(ctx, x, x.authority, p.attempt, geminiLiveSession); e != nil {
+		client.Close(websocket.StatusPolicyViolation, "admission refused")
 		x.failure, status = e, e.Status
 		return
 	}

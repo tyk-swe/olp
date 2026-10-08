@@ -97,9 +97,24 @@ func (s *Server) reserveFallbackCost(ctx context.Context, x *execution) *Error {
 		return nil
 	}
 	deadline, _ := ctx.Deadline()
+	return s.growCost(ctx, x.lease, bound.String(), x.request.accountingID(), max(time.Until(deadline), time.Second))
+}
+
+// reserveSessionCost holds the price of a realtime session's selected attempt.
+// A session admits apart from choosing its target, so the hold follows the
+// selection, before the provider is dialled.
+func (s *Server) reserveSessionCost(ctx context.Context, x *execution, authority access.Authority, attempt runtime.Attempt, ttl time.Duration) *Error {
+	hold := x.attemptCostReservation(authority, attempt)
+	if x.lease == nil || hold.amount == "" {
+		return nil
+	}
+	return s.growCost(ctx, x.lease, hold.amount, hold.requestID, ttl)
+}
+
+func (s *Server) growCost(ctx context.Context, lease *limits.Lease, amount, requestID string, ttl time.Duration) *Error {
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
-	err := x.lease.GrowCost(decision, bound.String(), x.request.accountingID(), max(time.Until(deadline), time.Second))
+	err := lease.GrowCost(decision, amount, requestID, ttl)
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 		s.Admission.recordRejection(exceeded.Dimension)
 		return rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
@@ -229,8 +244,14 @@ func (s *Server) settleAdmission(ctx context.Context, x *execution) {
 		// total the tokens it would have settled.
 		return
 	}
+	x.recordCost()
+	settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
+}
+
+// recordCost gives a lease that holds a cost estimate what the request cost, for
+// settlement to replace the estimate with.
+func (x *execution) recordCost() {
 	if x.dispatched && x.lease.HasCostReservation() {
 		x.lease.SetActualCost(x.settledCost().String())
 	}
-	settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
 }

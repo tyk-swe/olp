@@ -282,6 +282,14 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 		return access.Reply{}, access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
 	}
 	defer s.release(r.Context())
+	// Playground calls are charged to the route's project and installation, so
+	// they hold against those caps as probes and shadows do.
+	defer s.settleAdmission(r.Context(), x)
+	if e := s.reserveSystemBudgets(r.Context(), x); e != nil {
+		x.failure = e
+		s.finish(x, nil, e.Status)
+		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
+	}
 	out := s.execute(r.Context(), x)
 	if out.err != nil {
 		s.finish(x, out, out.err.Status)
