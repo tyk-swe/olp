@@ -83,7 +83,12 @@ func (s *Server) CodeWrite(r *http.Request, table, resource, project string, inp
 	return Commit(r, tx, result)
 }
 
-func (s *Server) CodeList(r *http.Request, p Principal, selectSQL string) (Reply, error) {
+// CodeMatch matches a listing's rows to a query field by SQL other than its
+// equality with the field of x: a condition on the field's value, written
+// $%[1]d.
+type CodeMatch struct{ Field, SQL string }
+
+func (s *Server) CodeList(r *http.Request, p Principal, selectSQL string, matches ...CodeMatch) (Reply, error) {
 	page, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -107,7 +112,11 @@ func (s *Server) CodeList(r *http.Request, p Principal, selectSQL string) (Reply
 				return Reply{}, err
 			}
 			args = append(args, id)
-			where += fmt.Sprintf(" AND to_jsonb(x)->>'%s'=$%d", field, len(args))
+			condition := fmt.Sprintf("to_jsonb(x)->>'%s'=$%d", field, len(args))
+			if i := slices.IndexFunc(matches, func(m CodeMatch) bool { return m.Field == field }); i >= 0 {
+				condition = fmt.Sprintf(matches[i].SQL, len(args))
+			}
+			where += " AND " + condition
 		}
 	}
 	rows, err := s.Pool.Query(r.Context(), selectSQL+where+` ORDER BY x.id DESC LIMIT $5`, args...)

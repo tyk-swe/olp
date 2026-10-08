@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -355,6 +356,13 @@ func TestCodeFoundationRepublishedFamiliesRefuseCollidingPins(t *testing.T) {
 	}
 	if strings.Join(models, " ") != "glm-5.3 minimax-m3 gpt-5.5" {
 		t.Fatalf("binding pins: %v", models)
+	}
+	// Accounts after the tree's first serve it only through pins.
+	for _, account := range []string{glm, minimax, gpt, f.account} {
+		items := h.want(owner, "GET", "/api/v1/code/bindings?project_id="+f.project+"&account_id="+account, nil, nil, 200)["items"].([]any)
+		if found := slices.ContainsFunc(items, func(item any) bool { return item.(map[string]any)["root_id"] == root }); found != (account != f.account) {
+			t.Fatalf("bindings of account %s: %v", account, items)
+		}
 	}
 }
 

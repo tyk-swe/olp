@@ -59,7 +59,10 @@ pool, publish a route with both models, and generate the OpenCode configuration
 with `model=glm-5.3` and `plan_model=gpt-5.5`. Claude Code can plan the same way
 with MiniMax or Qwen, but not with GPT: no subscription serves GPT on Messages.
 When several accounts list a model, the conversation's own accounts come first;
-see [Conversations and authority](#conversations-and-authority).
+see [Conversations and authority](#conversations-and-authority). A conversation
+uses one account of each adapter, so the planning and background models must be
+ones it reaches with the main model whichever account it pins first: two OpenCode
+Go accounts listing different models cannot serve one conversation.
 
 Every request carries the conversation so far, so each subscription a
 conversation mixes receives the turns the others produced. No live vendor is
@@ -128,6 +131,7 @@ activation checks.
 
 Lists support `project_id`, `cursor` and `limit`; diagnostics additionally support
 the applicable `route_id`, `api_key_id`, `account_id` and `binding_id` filters.
+A binding matches `account_id` through its first account or any of its tree's pins.
 Use collection results' ETags when updating resources. The API and console must
 ship together; a backend-only deployment does not meet the complete product contract.
 

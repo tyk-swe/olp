@@ -14,7 +14,9 @@ func (m *Management) registerCodeMode(mux *http.ServeMux) {
 
 func (m *Management) codeBindings(r *http.Request, p access.Principal) (access.Reply, error) {
 	return m.Access.CodeList(r, p, `SELECT to_jsonb(x)||jsonb_build_object('retired_at',COALESCE(x.retired_at,root.retired_at),'pins',`+codePinsJSON("x.root_id")+`)
-		FROM olp.code_bindings x JOIN olp.code_bindings root ON root.id=x.root_id`)
+		FROM olp.code_bindings x JOIN olp.code_bindings root ON root.id=x.root_id`,
+		// A tree's later accounts serve it only through its model pins.
+		access.CodeMatch{Field: "account_id", SQL: `(x.account_id=$%[1]d::uuid OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=x.root_id AND p.account_id=$%[1]d::uuid))`})
 }
 
 // codePinsJSON is the JSON array of a conversation tree's pins, oldest first.

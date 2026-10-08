@@ -70,20 +70,84 @@ func (s *Server) CodeClientConfiguration(r *http.Request, p access.Principal) (a
 	return access.Detail(config, route.ETag), nil
 }
 
-// Offers maps each model of a route to the adapters whose accounts serve it,
-// in table order.
-type Offers map[string][]codemode.Adapter
+// Offers is what the accounts a route's requests can reach serve.
+type Offers []Offer
+
+// Offer is the adapter and models of one or more accounts.
+type Offer struct {
+	Adapter codemode.Adapter
+	Models  []string
+}
+
+// adapters returns the adapters whose accounts serve model, in table order.
+func (o Offers) adapters(model string) []codemode.Adapter {
+	var adapters []codemode.Adapter
+	for _, offer := range o {
+		if slices.Contains(offer.Models, model) && !slices.Contains(adapters, offer.Adapter) {
+			adapters = append(adapters, offer.Adapter)
+		}
+	}
+	slices.SortFunc(adapters, codeadapter.Compare)
+	return adapters
+}
+
+// reaches reports whether one conversation reaches every model, whatever order
+// it first uses them in and whichever account admission pins for each. The
+// conversation's accounts serve the models they offer; another account joins
+// it only with an adapter it does not use yet.
+func (o Offers) reaches(client string, models []string) bool {
+	// Accounts with one adapter serving the same of these models are alike.
+	var alike Offers
+	for _, offer := range o {
+		vendor, _ := codeadapter.Lookup(offer.Adapter)
+		kind := Offer{Adapter: offer.Adapter}
+		for _, model := range models {
+			if slices.Contains(offer.Models, model) && vendor.Reaches(client, model) {
+				kind.Models = append(kind.Models, model)
+			}
+		}
+		if len(kind.Models) != 0 && !slices.ContainsFunc(alike, func(a Offer) bool { return a.Adapter == kind.Adapter && slices.Equal(a.Models, kind.Models) }) {
+			alike = append(alike, kind)
+		}
+	}
+	return alike.joins(nil, models)
+}
+
+// joins reports whether a conversation using tree reaches every model.
+func (o Offers) joins(tree Offers, models []string) bool {
+	for i, model := range models {
+		rest := slices.Concat(models[:i], models[i+1:])
+		if slices.ContainsFunc(tree, func(a Offer) bool { return slices.Contains(a.Models, model) }) {
+			if !o.joins(tree, rest) {
+				return false
+			}
+			continue
+		}
+		joined := false
+		for _, offer := range o {
+			if slices.Contains(offer.Models, model) && !slices.ContainsFunc(tree, func(a Offer) bool { return a.Adapter == offer.Adapter }) {
+				if !o.joins(append(slices.Clone(tree), offer), rest) {
+					return false
+				}
+				joined = true
+			}
+		}
+		if !joined {
+			return false
+		}
+	}
+	return true
+}
 
 // codeOffers reads the offers of a revision's pool accounts whose providers
 // it froze, the accounts its requests can reach. An account offers its models
 // only while it is eligible to serve them — the same permanent predicates
 // codeAccount applies; transient availability is a dispatch concern.
 func (s *Server) codeOffers(ctx context.Context, revision string) (Offers, error) {
-	rows, err := s.Access.Pool.Query(ctx, `SELECT DISTINCT m.model,`+codeadapter.SQL("(v.connections->(a.provider_id::text))")+`
+	rows, err := s.Access.Pool.Query(ctx, `SELECT DISTINCT a.models,`+codeadapter.SQL("(v.connections->(a.provider_id::text))")+`
 		FROM olp.code_route_revisions v JOIN olp.code_pool_accounts pa ON pa.pool_id=(v.document->>'pool_id')::uuid
 		JOIN olp.code_accounts a ON a.id=pa.account_id
 		JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
-		CROSS JOIN jsonb_array_elements_text(a.models) m(model)
 		WHERE v.id=$1 AND v.connections ? a.provider_id::text
 		AND a.project_id=(v.document->>'project_id')::uuid AND a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id
 		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())`, revision)
@@ -91,19 +155,16 @@ func (s *Server) codeOffers(ctx context.Context, revision string) (Offers, error
 		return nil, err
 	}
 	defer rows.Close()
-	offers := Offers{}
+	var offers Offers
 	for rows.Next() {
-		var model string
+		var models []string
 		var adapter *string
-		if err = rows.Scan(&model, &adapter); err != nil {
+		if err = rows.Scan(&models, &adapter); err != nil {
 			return nil, err
 		}
 		if adapter != nil {
-			offers[model] = append(offers[model], codemode.Adapter(*adapter))
+			offers = append(offers, Offer{Adapter: codemode.Adapter(*adapter), Models: models})
 		}
-	}
-	for _, adapters := range offers {
-		slices.SortFunc(adapters, codeadapter.Compare)
 	}
 	return offers, rows.Err()
 }
@@ -120,7 +181,8 @@ type ClientRequest struct {
 // gateway origin and prefix. A client's native models are the route's models
 // an adapter offers on a protocol the client speaks, so one configuration can
 // draw on several subscriptions: each request reaches an account serving its
-// model.
+// model. Its planning and background models are those one conversation reaches
+// with the main model, which uses one account of each adapter.
 func ClientConfiguration(route codemode.Route, offers Offers, in ClientRequest) (codemode.ClientConfiguration, error) {
 	var out codemode.ClientConfiguration
 	if !route.Enabled || route.RevisionID == "" || !access.RouteSlug.MatchString(route.Slug) {
@@ -131,7 +193,7 @@ func ClientConfiguration(route codemode.Route, offers Offers, in ClientRequest) 
 	}
 	var supported []string
 	for _, model := range route.Models {
-		for _, adapter := range offers[model] {
+		for _, adapter := range offers.adapters(model) {
 			vendor, _ := codeadapter.Lookup(adapter)
 			for _, client := range vendor.Clients {
 				if vendor.Reaches(client, model) && !slices.Contains(supported, client) {
@@ -154,7 +216,7 @@ func ClientConfiguration(route codemode.Route, offers Offers, in ClientRequest) 
 	var native []string
 	var adapters []codemode.Adapter
 	for _, model := range route.Models {
-		for _, adapter := range offers[model] {
+		for _, adapter := range offers.adapters(model) {
 			if vendor, _ := codeadapter.Lookup(adapter); vendor.Reaches(client, model) {
 				if !slices.Contains(native, model) {
 					native = append(native, model)
@@ -177,6 +239,18 @@ func ClientConfiguration(route codemode.Route, offers Offers, in ClientRequest) 
 	small, err := companionModel(client, "small_model", "background", in.SmallModel, model, native)
 	if err != nil {
 		return out, err
+	}
+	selected := []string{model}
+	for _, companion := range []struct {
+		field string
+		model *string
+	}{{"plan_model", plan}, {"small_model", small}} {
+		if companion.model == nil || slices.Contains(selected, *companion.model) {
+			continue
+		}
+		if selected = append(selected, *companion.model); !offers.reaches(client, selected) {
+			return out, access.Invalid(companion.field, "A conversation uses one account of each subscription, so it cannot reach this model alongside the others selected.")
+		}
 	}
 	base, err := url.Parse(in.GatewayURL)
 	if err != nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || base.Opaque != "" {
@@ -241,11 +315,7 @@ func CodexClientConfiguration(route codemode.Route, gatewayURL, model string) (c
 
 // codexOffers offers every model by Codex.
 func codexOffers(models []string) Offers {
-	offers := Offers{}
-	for _, model := range models {
-		offers[model] = []codemode.Adapter{codemode.AdapterCodex}
-	}
-	return offers
+	return Offers{{Adapter: codemode.AdapterCodex, Models: models}}
 }
 
 // conjoin lists names in prose: "A", "A and B", "A, B and C".
@@ -326,7 +396,7 @@ func openCodeConfiguration(adapters []codemode.Adapter, offers Offers, native []
 	whitelists := map[codemode.Adapter][]string{}
 	qualified := map[string]string{}
 	for _, m := range native {
-		for _, adapter := range offers[m] {
+		for _, adapter := range offers.adapters(m) {
 			if provider, ok := openCodeProviders[adapter]; ok {
 				whitelists[adapter] = append(whitelists[adapter], m)
 				qualified[m] = provider + "/" + m

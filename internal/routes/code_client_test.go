@@ -175,9 +175,9 @@ func TestClientConfigurationRefusesUnsupportedSelections(t *testing.T) {
 func TestMixedRouteConfigurationsDrawEachModelFromItsSubscription(t *testing.T) {
 	route := codemode.Route{Slug: "team-mix", Enabled: true, RevisionID: "published", Models: []string{"glm-5.3", "gpt-5.5", "minimax-m3"}}
 	offers := Offers{
-		"glm-5.3":    {codemode.AdapterZAICoding},
-		"gpt-5.5":    {codemode.AdapterCodex, codemode.AdapterOpenCodeGo},
-		"minimax-m3": {codemode.AdapterOpenCodeGo},
+		{Adapter: codemode.AdapterOpenCodeGo, Models: []string{"gpt-5.5", "minimax-m3"}},
+		{Adapter: codemode.AdapterZAICoding, Models: []string{"glm-5.3"}},
+		{Adapter: codemode.AdapterCodex, Models: []string{"gpt-5.5"}},
 	}
 	claude, err := ClientConfiguration(route, offers, ClientRequest{GatewayURL: "https://gateway.example", PlanModel: "minimax-m3"})
 	if err != nil || claude.Client != "claude-code" || !reflect.DeepEqual(claude.SupportedClients, []string{"claude-code", "opencode", "codex"}) ||
@@ -266,9 +266,47 @@ export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
 // offer is the offers of a route whose accounts all belong to one adapter.
 func offer(adapter codemode.Adapter, models ...string) Offers {
-	offers := Offers{}
-	for _, model := range models {
-		offers[model] = []codemode.Adapter{adapter}
+	return Offers{{Adapter: adapter, Models: models}}
+}
+
+func TestConfigurationsSelectOnlyModelsOneConversationReaches(t *testing.T) {
+	route := codemode.Route{Slug: "team-mix", Enabled: true, RevisionID: "published", Models: []string{"glm-5.3", "kimi-k3", "minimax-m3", "qwen-4"}}
+	// Two OpenCode Go accounts split their models, and a conversation uses
+	// only one of them.
+	offers := Offers{
+		{Adapter: codemode.AdapterOpenCodeGo, Models: []string{"kimi-k3", "minimax-m3"}},
+		{Adapter: codemode.AdapterOpenCodeGo, Models: []string{"qwen-4"}},
+		{Adapter: codemode.AdapterZAICoding, Models: []string{"glm-5.3"}},
 	}
-	return offers
+	refused := func(plan, small string) string {
+		_, err := ClientConfiguration(route, offers, ClientRequest{GatewayURL: "https://gateway.example", Client: "opencode", Model: "minimax-m3", PlanModel: plan, SmallModel: small})
+		if err == nil {
+			return ""
+		}
+		if problem, ok := errors.AsType[*access.Problem](err); ok {
+			return problem.Field
+		}
+		t.Fatal(err)
+		return ""
+	}
+	for _, c := range []struct{ plan, small, refused string }{
+		{"kimi-k3", "glm-5.3", ""},
+		{"qwen-4", "", "plan_model"},
+		{"", "qwen-4", "small_model"},
+		{"glm-5.3", "qwen-4", "small_model"},
+	} {
+		if got := refused(c.plan, c.small); got != c.refused {
+			t.Fatalf("plan %q small %q refused %q; want %q", c.plan, c.small, got, c.refused)
+		}
+	}
+	// Admission may still pin the other OpenCode Go account for qwen-4 first
+	// when Z.ai also serves it, but not once Z.ai serves both models.
+	offers[2].Models = append(offers[2].Models, "qwen-4")
+	if got := refused("qwen-4", ""); got != "plan_model" {
+		t.Fatalf("qwen-4 beside Z.ai refused %q", got)
+	}
+	offers[2].Models = append(offers[2].Models, "minimax-m3")
+	if got := refused("qwen-4", ""); got != "" {
+		t.Fatalf("qwen-4 with Z.ai serving both refused %q", got)
+	}
 }
