@@ -384,6 +384,24 @@ func TestSAMLRecentProofUnlinkAndOwnerProtection(t *testing.T) {
 	}
 }
 
+func TestSAMLManagedAccountsKeepTheirLastSAMLIdentity(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	f := newSAMLFixture(t)
+	f.configure(t, h, owner)
+	worker := &browser{}
+	req, state := samlBegin(t, h, worker, "/api/v1/saml/login", map[string]any{})
+	h.want(worker, "GET", samlReceive(t, h, state, f.response(t, req, "managed-worker", "saml@example.com", []string{"developers"}, nil), 303), nil, nil, 303)
+	// A password does not free a SAML-managed account from the IdP's authority.
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.users SET password_hash=(SELECT password_hash FROM olp.users WHERE email='owner@example.com') WHERE email='saml@example.com'"); err != nil {
+		t.Fatal(err)
+	}
+	identity := h.want(worker, "GET", "/api/v1/profile/saml-identities", nil, nil, 200)["items"].([]any)[0].(map[string]any)["id"].(string)
+	req, state = samlBegin(t, h, worker, "/api/v1/profile/saml/reauthenticate", map[string]any{"purpose": "saml_unlink", "resource_id": identity})
+	h.want(worker, "GET", samlReceive(t, h, state, f.response(t, req, "managed-worker", "saml@example.com", []string{"developers"}, nil), 303), nil, nil, 303)
+	h.want(worker, "DELETE", "/api/v1/profile/saml-identities/"+identity, nil, nil, 409)
+}
+
 func TestLinkedSAMLDoesNotReplaceEnrolledMFA(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()

@@ -349,6 +349,10 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 			if e = record.authority.BindRouteGroups(byProject[*record.authority.ProjectID]); e != nil {
 				return fmt.Errorf("authority route groups: %w", e)
 			}
+			// A revoked key never admits, and its template may since have gone.
+			if record.authority.RevokedAt != nil {
+				continue
+			}
 			if e = record.authority.BindLimitTemplates(templatesByProject[*record.authority.ProjectID]); e != nil {
 				return e
 			}

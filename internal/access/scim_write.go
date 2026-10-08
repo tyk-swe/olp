@@ -314,7 +314,24 @@ func (s *Server) writeSCIMUser(r *http.Request, tx pgx.Tx, id string, d scim.Doc
 		var existing, management string
 		var deleted bool
 		var oldExternal *string
-		e := tx.QueryRow(r.Context(), "SELECT u.id::text,u.role_management,COALESCE(su.deleted_at IS NOT NULL,false),su.document->>'externalId' FROM olp.users u LEFT JOIN olp.scim_users su ON su.user_id=u.id WHERE u.email=$1 FOR UPDATE OF u", address).Scan(&existing, &management, &deleted, &oldExternal)
+		e := pgx.ErrNoRows
+		if external != "" {
+			// The directory may re-enroll a deleted identity under a new userName,
+			// so its externalId finds it first.
+			e = tx.QueryRow(r.Context(), "SELECT u.id::text,u.role_management,su.deleted_at IS NOT NULL,su.document->>'externalId' FROM olp.scim_users su JOIN olp.users u ON u.id=su.user_id WHERE su.document->>'externalId'=$1 FOR UPDATE OF u", external).Scan(&existing, &management, &deleted, &oldExternal)
+			if e == nil {
+				var taken bool
+				if e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.users WHERE email=$1 AND id<>$2)", address, existing).Scan(&taken); e != nil {
+					return "", e
+				}
+				if taken {
+					return "", scim.Fail(409, "uniqueness", "Another account already uses this userName.")
+				}
+			}
+		}
+		if errors.Is(e, pgx.ErrNoRows) {
+			e = tx.QueryRow(r.Context(), "SELECT u.id::text,u.role_management,COALESCE(su.deleted_at IS NOT NULL,false),su.document->>'externalId' FROM olp.users u LEFT JOIN olp.scim_users su ON su.user_id=u.id WHERE u.email=$1 FOR UPDATE OF u", address).Scan(&existing, &management, &deleted, &oldExternal)
+		}
 		if e == nil {
 			old := ""
 			if oldExternal != nil {

@@ -253,6 +253,7 @@
       <tbody>
         {#each keys.data?.items ?? [] as key (key.id)}
           {@const budget = budgetState(key.budget)}
+          {@const rates = key.effective_limits ?? key}
           {@const expired = isApiKeyExpired(key)}
           {@const usable = isApiKeyUsable(key)}
           <tr>
@@ -304,12 +305,12 @@
             </td>
             <td
               ><small
-                >{key.requests_per_minute
-                  ? `${key.requests_per_minute} RPM`
-                  : 'unlimited RPM'}<br />{key.tokens_per_minute
-                  ? `${key.tokens_per_minute} TPM`
-                  : 'unlimited TPM'} · {key.max_concurrency
-                  ? `${key.max_concurrency} concurrent`
+                >{rates.requests_per_minute
+                  ? `${rates.requests_per_minute} RPM`
+                  : 'unlimited RPM'}<br />{rates.tokens_per_minute
+                  ? `${rates.tokens_per_minute} TPM`
+                  : 'unlimited TPM'} · {rates.max_concurrency
+                  ? `${rates.max_concurrency} concurrent`
                   : 'unlimited concurrency'}</small
               ></td
             >

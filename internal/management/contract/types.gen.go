@@ -2966,9 +2966,12 @@ type ApiKeyDetailResponse struct {
 	CreatedAt     time.Time                             `json:"created_at"`
 
 	// CreatedBy The operator who issued this installation-scoped key.
-	CreatedBy      openapi_types.UUID               `json:"created_by"`
-	CreatedByEmail string                           `json:"created_by_email"`
-	EndUserPolicy  nullable.Nullable[EndUserPolicy] `json:"end_user_policy,omitempty"`
+	CreatedBy      openapi_types.UUID `json:"created_by"`
+	CreatedByEmail string             `json:"created_by_email"`
+
+	// EffectiveLimits Rate and cost limits the gateway enforces, after the key's limit template fills dimensions the key leaves unset. Edit the key's own fields; present these.
+	EffectiveLimits *EndUserLimits                   `json:"effective_limits,omitempty"`
+	EndUserPolicy   nullable.Nullable[EndUserPolicy] `json:"end_user_policy,omitempty"`
 
 	// EndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
 	EndUserSource nullable.Nullable[ApiKeyDetailResponseEndUserSource] `json:"end_user_source,omitempty"`

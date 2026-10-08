@@ -390,6 +390,10 @@
               "null"
             ],
             "description": "Present for a digest-only workload principal. Its permissions belong to the issuer mapping and it has no static secret."
+          },
+          "effective_limits": {
+            "$ref": "#/components/schemas/EndUserLimits",
+            "description": "Rate and cost limits the gateway enforces, after the key's limit template fills dimensions the key leaves unset. Edit the key's own fields; present these."
           }
         },
         "required": [

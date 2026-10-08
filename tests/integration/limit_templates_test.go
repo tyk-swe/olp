@@ -3,10 +3,12 @@
 package integration_test
 
 import (
-	"github.com/tyk-swe/olp/internal/gateway"
 	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/gateway"
 )
 
 func TestLimitTemplatesPropagateToKeysUsersAndGroups(t *testing.T) {
@@ -65,6 +67,21 @@ func TestLimitTemplatesPropagateToKeysUsersAndGroups(t *testing.T) {
 	replica.refresh()
 	call(replica, a, "", 200)
 	call(h, a, "", 429)
+	// The inventory reports the template's rate for a key that leaves it unset.
+	listedB := false
+	for _, item := range h.want(owner, "GET", "/api/v1/api-keys", nil, nil, 200)["items"].([]any) {
+		listed := item.(map[string]any)
+		if listed["name"] != "key-b" {
+			continue
+		}
+		if listed["requests_per_minute"] != nil || listed["effective_limits"].(map[string]any)["requests_per_minute"] != float64(3) {
+			t.Fatalf("templated key reported rate %v, effective %v", listed["requests_per_minute"], listed["effective_limits"])
+		}
+		listedB = true
+	}
+	if !listedB {
+		t.Fatal("key-b is missing from the inventory")
+	}
 	identified := key("identified", map[string]any{"end_user_source": "native", "end_user_policy": map[string]any{"limit_template": "customer"}})
 	call(h, identified, "alice", 200)
 	call(replica, identified, "alice", 429)
@@ -85,6 +102,17 @@ func TestLimitTemplatesPropagateToKeysUsersAndGroups(t *testing.T) {
 	}
 	delete(templates, "key")
 	put(409)
+	// Revoked keys no longer hold their template, and the authority still loads without it.
+	for _, item := range h.want(owner, "GET", "/api/v1/api-keys", nil, nil, 200)["items"].([]any) {
+		listed := item.(map[string]any)
+		if listed["limit_template"] != "key" {
+			continue
+		}
+		keyPath := "/api/v1/api-keys/" + listed["id"].(string)
+		h.want(owner, "POST", keyPath+"/revoke", nil, withMatch(h.want(owner, "GET", keyPath, nil, nil, 200), idem(uuid.NewString())), 200)
+	}
+	put(200)
+	h.refresh()
 	// Unknown and cross-project references cannot be saved.
 	h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Bad template", "scopes": []string{"inference"}, "allowed_routes": []string{}, "limit_template": "key"}, idem("unassigned-template"), 422)
 }

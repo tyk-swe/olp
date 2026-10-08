@@ -130,6 +130,16 @@ func TestSCIMUsersGroupsAndInheritedGrants(t *testing.T) {
 	if restored["id"] != uid {
 		t.Fatal("re-enrollment changed the identity")
 	}
+	// The externalId also restores an identity whose userName changed meanwhile,
+	// but not onto an address another account holds.
+	scimCall(t, h, token, "DELETE", upath, nil, "", 204)
+	renamed := scimUser("alice")
+	renamed["userName"] = "owner@example.com"
+	scimCall(t, h, token, "POST", "/scim/v2/Users", renamed, "", 409)
+	renamed["userName"] = "alice.renamed@example.com"
+	if restored = scimCall(t, h, token, "POST", "/scim/v2/Users", renamed, "", 201); restored["id"] != uid || restored["userName"] != "alice.renamed@example.com" {
+		t.Fatalf("renamed re-enrollment: %v", restored)
+	}
 	// A local owner takeover cannot be undone through SCIM reconciliation.
 	local := h.want(owner, "GET", "/api/v1/users/"+uid, nil, nil, 200)
 	h.want(owner, "PATCH", "/api/v1/users/"+uid, map[string]any{"role": "developer"}, etagHeader(local), 200)

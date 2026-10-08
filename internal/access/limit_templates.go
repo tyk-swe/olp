@@ -194,14 +194,14 @@ func endUserTemplate(p *EndUserPolicy) *string {
 	return p.LimitTemplate
 }
 
-// ValidateTemplateReferences prevents removing templates still used by local
+// ValidateTemplateReferences prevents removing templates still used by live local
 // keys/groups, enabled workload mappings or the project policy, including during
 // configuration promotion. Workload principals derive limits from their issuer.
 func ValidateTemplateReferences(ctx context.Context, q Queryer, project string, t LimitTemplates) error {
 	var names []string
 	err := q.QueryRow(ctx, `SELECT ARRAY(SELECT DISTINCT name FROM (
- SELECT policy->>'limit_template' name FROM olp.api_keys WHERE project_id=$1 AND workload_issuer_id IS NULL
- UNION ALL SELECT policy->'end_user_policy'->>'limit_template' FROM olp.api_keys WHERE project_id=$1 AND workload_issuer_id IS NULL
+ SELECT policy->>'limit_template' name FROM olp.api_keys WHERE project_id=$1 AND workload_issuer_id IS NULL AND revoked_at IS NULL
+ UNION ALL SELECT policy->'end_user_policy'->>'limit_template' FROM olp.api_keys WHERE project_id=$1 AND workload_issuer_id IS NULL AND revoked_at IS NULL
  UNION ALL SELECT limit_template FROM olp.budget_groups WHERE project_id=$1
  UNION ALL SELECT end_user_policy->>'limit_template' FROM olp.projects WHERE id=$1
  UNION ALL SELECT m->>'limit_template' FROM olp.workload_issuers i CROSS JOIN LATERAL jsonb_array_elements(i.document->'mappings') m WHERE (i.document->>'enabled')::boolean AND m->>'project_id'=$1::text
