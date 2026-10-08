@@ -134,6 +134,56 @@ func TestCodeRouteClientConfigurationFollowsFrozenSubscriptions(t *testing.T) {
 	}
 }
 
+// Generated configuration offers only what requests can reach: an account
+// dispatch would refuse — disabled, its provider disabled, its credential
+// revoked, or its grant lapsed or expired — stops advertising its models and
+// client, and the route reports unserved once no eligible account remains.
+func TestCodeRouteClientConfigurationSkipsIneligibleAccounts(t *testing.T) {
+	f := newCodeFixture(t)
+	path := "/api/v1/code/routes/" + f.route.ID + "/client-config?gateway_url=https://gateway.example&client=opencode"
+	// Mix two families on one route, so each mutation leaves one serving.
+	provider2, credential2 := access.NewID(), access.NewID()
+	f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{profile_id}','"zai-coding-plan"') WHERE id=$1`, f.provider)
+	f.exec(t, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,'Second coding subscription','plugin','draft','{"kind":"plugin","auth_mode":"grant","endpoint":"https://fixture.invalid","profile_id":"opencode-go"}',$2,$3,$4,$5)`, provider2, access.NewID(), access.NewID(), f.user, f.project)
+	f.exec(t, `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts) VALUES($1,$2,1,'fixture-digest','fixture-principal-2','{}')`, credential2, provider2)
+	f.exec(t, `INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, credential2)
+	account2 := f.h.want(f.owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": provider2, "credential_id": credential2, "name": "Second subscription", "enabled": true, "models": []string{"other-model"}}, idem("account-2"), 201)["id"].(string)
+	f.exec(t, `INSERT INTO olp.code_pool_accounts(pool_id,account_id) VALUES($1,$2)`, f.pool, account2)
+	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": []string{"native-model", "other-model"}, "enabled": true}, map[string]string{"If-Match": `"` + f.route.ETag + `"`}, 200)
+	f.route = codePublicDecode[codemode.Route](t, f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(draft, idem("mixed-publish")), 200))
+	want := func(t *testing.T, models, adapters string) {
+		t.Helper()
+		config := f.h.want(f.owner, "GET", path, nil, nil, 200)
+		if fmt.Sprint(config["native_models"]) != models || fmt.Sprint(config["adapters"]) != adapters {
+			t.Fatalf("configuration = %v/%v, want %v/%v", config["native_models"], config["adapters"], models, adapters)
+		}
+	}
+	want(t, "[native-model other-model]", "[opencode_go zai_coding]")
+	for _, c := range []struct {
+		name, id, fail, fix string
+	}{
+		{"disabled account", f.account, `UPDATE olp.code_accounts SET enabled=false WHERE id=$1`, `UPDATE olp.code_accounts SET enabled=true WHERE id=$1`},
+		{"disabled provider", f.provider, `UPDATE olp.providers SET state='disabled' WHERE id=$1`, `UPDATE olp.providers SET state='draft' WHERE id=$1`},
+		{"lapsed grant", f.credential, `UPDATE olp.provider_grants SET lapsed_at=now() WHERE credential_id=$1`, `UPDATE olp.provider_grants SET lapsed_at=NULL WHERE credential_id=$1`},
+		{"expired grant", f.credential, `UPDATE olp.provider_grants SET expires_at=now()-interval '1 hour' WHERE credential_id=$1`, `UPDATE olp.provider_grants SET expires_at=NULL WHERE credential_id=$1`},
+		// Revocation is terminal: no fix restores the account.
+		{"revoked credential", f.credential, `UPDATE olp.provider_credentials SET revoked_at=now() WHERE id=$1`, ``},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f.exec(t, c.fail, c.id)
+			want(t, "[other-model]", "[opencode_go]")
+			if c.fix != "" {
+				f.exec(t, c.fix, c.id)
+				want(t, "[native-model other-model]", "[opencode_go zai_coding]")
+			}
+		})
+	}
+	f.exec(t, `UPDATE olp.code_accounts SET enabled=false WHERE id IN ($1,$2)`, f.account, account2)
+	if problem := f.h.want(f.owner, "GET", path, nil, nil, 409); problem["type"] != "https://openllmproxy.dev/problems/code_route_unserved" {
+		t.Fatalf("unserved route: %v", problem)
+	}
+}
+
 func TestCodeRouteSlugsReservedAcrossDraftsAndPublication(t *testing.T) {
 	f := newCodeFixture(t)
 	f.exec(t, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name) VALUES($1,$2,$3,'Fixture model')`, access.NewID(), f.provider, vendorModel)

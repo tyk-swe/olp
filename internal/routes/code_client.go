@@ -75,12 +75,18 @@ func (s *Server) CodeClientConfiguration(r *http.Request, p access.Principal) (a
 type Offers map[string][]codemode.Adapter
 
 // codeOffers reads the offers of a revision's pool accounts whose providers
-// it froze, the accounts its requests can reach.
+// it froze, the accounts its requests can reach. An account offers its models
+// only while it is eligible to serve them — the same permanent predicates
+// codeAccount applies; transient availability is a dispatch concern.
 func (s *Server) codeOffers(ctx context.Context, revision string) (Offers, error) {
 	rows, err := s.Access.Pool.Query(ctx, `SELECT DISTINCT m.model,`+codeadapter.SQL("(v.connections->(a.provider_id::text))")+`
 		FROM olp.code_route_revisions v JOIN olp.code_pool_accounts pa ON pa.pool_id=(v.document->>'pool_id')::uuid
-		JOIN olp.code_accounts a ON a.id=pa.account_id CROSS JOIN jsonb_array_elements_text(a.models) m(model)
-		WHERE v.id=$1 AND v.connections ? a.provider_id::text`, revision)
+		JOIN olp.code_accounts a ON a.id=pa.account_id
+		JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
+		CROSS JOIN jsonb_array_elements_text(a.models) m(model)
+		WHERE v.id=$1 AND v.connections ? a.provider_id::text
+		AND a.project_id=(v.document->>'project_id')::uuid AND a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id
+		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())`, revision)
 	if err != nil {
 		return nil, err
 	}
