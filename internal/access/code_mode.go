@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 )
 
@@ -84,7 +83,12 @@ func (s *Server) CodeWrite(r *http.Request, table, resource, project string, inp
 	return Commit(r, tx, result)
 }
 
-func (s *Server) CodeList(r *http.Request, p Principal, selectSQL string) (Reply, error) {
+// CodeMatch matches a listing's rows to a query field by SQL other than its
+// equality with the field of x: a condition on the field's value, written
+// $%[1]d.
+type CodeMatch struct{ Field, SQL string }
+
+func (s *Server) CodeList(r *http.Request, p Principal, selectSQL string, matches ...CodeMatch) (Reply, error) {
 	page, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -108,7 +112,11 @@ func (s *Server) CodeList(r *http.Request, p Principal, selectSQL string) (Reply
 				return Reply{}, err
 			}
 			args = append(args, id)
-			where += fmt.Sprintf(" AND to_jsonb(x)->>'%s'=$%d", field, len(args))
+			condition := fmt.Sprintf("to_jsonb(x)->>'%s'=$%d", field, len(args))
+			if i := slices.IndexFunc(matches, func(m CodeMatch) bool { return m.Field == field }); i >= 0 {
+				condition = fmt.Sprintf(matches[i].SQL, len(args))
+			}
+			where += " AND " + condition
 		}
 	}
 	rows, err := s.Pool.Query(r.Context(), selectSQL+where+` ORDER BY x.id DESC LIMIT $5`, args...)
@@ -188,15 +196,6 @@ func (s *Server) writeCodePool(r *http.Request, _ Principal) (Reply, error) {
 			if err := codeScoped(r.Context(), tx, "code_accounts", account, in.ProjectID); err != nil {
 				return nil, err
 			}
-		}
-		// A route serves one adapter's clients, so its pool holds one family.
-		var adapters int
-		if err := tx.QueryRow(r.Context(), `SELECT count(DISTINCT `+codeadapter.SQL("p.configuration")+`) FROM olp.code_accounts a JOIN olp.providers p ON p.id=a.provider_id
-			WHERE a.id=ANY($1::uuid[])`, in.AccountIDs).Scan(&adapters); err != nil {
-			return nil, err
-		}
-		if adapters > 1 {
-			return nil, Invalid("account_ids", codeadapter.ErrMixed.Error())
 		}
 		for _, key := range in.APIKeyIDs {
 			if err := codeScoped(r.Context(), tx, "api_keys", key, in.ProjectID); err != nil {

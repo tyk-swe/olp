@@ -11,7 +11,7 @@ import (
 
 func TestCodeAccountRecoveryRetainsPinAndHonorsAllowanceReset(t *testing.T) {
 	f := newCodeFixture(t)
-	root, err := f.store.BindConnection(t.Context(), f.route, f.key, codemode.Identity{Conversation: "recover"}, "")
+	root, err := f.store.BindConnection(t.Context(), f.route, f.key, codemode.Identity{Conversation: "recover"}, "", []string{f.provider})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestCodeAccountRecoveryRetainsPinAndHonorsAllowanceReset(t *testing.T) {
 
 func TestCodeAccountEligibilityReflectsProviderState(t *testing.T) {
 	f := newCodeFixture(t)
-	root, err := f.store.BindConnection(t.Context(), f.route, f.key, codemode.Identity{Conversation: "provider-state"}, "")
+	root, err := f.store.BindConnection(t.Context(), f.route, f.key, codemode.Identity{Conversation: "provider-state"}, "", []string{f.provider})
 	if err != nil {
 		t.Fatal(err)
 	}

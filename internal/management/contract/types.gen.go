@@ -369,21 +369,21 @@ func (e CodeAttemptState) Valid() bool {
 	}
 }
 
-// Defines values for CodeClientConfigurationAdapter.
+// Defines values for CodeClientConfigurationAdapters.
 const (
-	CodeClientConfigurationAdapterCodex      CodeClientConfigurationAdapter = "codex"
-	CodeClientConfigurationAdapterOpencodeGo CodeClientConfigurationAdapter = "opencode_go"
-	CodeClientConfigurationAdapterZaiCoding  CodeClientConfigurationAdapter = "zai_coding"
+	CodeClientConfigurationAdaptersCodex      CodeClientConfigurationAdapters = "codex"
+	CodeClientConfigurationAdaptersOpencodeGo CodeClientConfigurationAdapters = "opencode_go"
+	CodeClientConfigurationAdaptersZaiCoding  CodeClientConfigurationAdapters = "zai_coding"
 )
 
-// Valid indicates whether the value is a known member of the CodeClientConfigurationAdapter enum.
-func (e CodeClientConfigurationAdapter) Valid() bool {
+// Valid indicates whether the value is a known member of the CodeClientConfigurationAdapters enum.
+func (e CodeClientConfigurationAdapters) Valid() bool {
 	switch e {
-	case CodeClientConfigurationAdapterCodex:
+	case CodeClientConfigurationAdaptersCodex:
 		return true
-	case CodeClientConfigurationAdapterOpencodeGo:
+	case CodeClientConfigurationAdaptersOpencodeGo:
 		return true
-	case CodeClientConfigurationAdapterZaiCoding:
+	case CodeClientConfigurationAdaptersZaiCoding:
 		return true
 	default:
 		return false
@@ -489,21 +489,21 @@ func (e CodePoolWriteKind) Valid() bool {
 	}
 }
 
-// Defines values for CodeRouteAdapter.
+// Defines values for CodeRouteAdapters.
 const (
-	CodeRouteAdapterCodex      CodeRouteAdapter = "codex"
-	CodeRouteAdapterOpencodeGo CodeRouteAdapter = "opencode_go"
-	CodeRouteAdapterZaiCoding  CodeRouteAdapter = "zai_coding"
+	CodeRouteAdaptersCodex      CodeRouteAdapters = "codex"
+	CodeRouteAdaptersOpencodeGo CodeRouteAdapters = "opencode_go"
+	CodeRouteAdaptersZaiCoding  CodeRouteAdapters = "zai_coding"
 )
 
-// Valid indicates whether the value is a known member of the CodeRouteAdapter enum.
-func (e CodeRouteAdapter) Valid() bool {
+// Valid indicates whether the value is a known member of the CodeRouteAdapters enum.
+func (e CodeRouteAdapters) Valid() bool {
 	switch e {
-	case CodeRouteAdapterCodex:
+	case CodeRouteAdaptersCodex:
 		return true
-	case CodeRouteAdapterOpencodeGo:
+	case CodeRouteAdaptersOpencodeGo:
 		return true
-	case CodeRouteAdapterZaiCoding:
+	case CodeRouteAdaptersZaiCoding:
 		return true
 	default:
 		return false
@@ -2453,7 +2453,7 @@ type ClassifierPredicate struct {
 
 // CodeAccount defines model for CodeAccount.
 type CodeAccount struct {
-	// Adapter The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool holds accounts of one adapter.
+	// Adapter The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 	Adapter      nullable.Nullable[CodeAccountAdapter] `json:"adapter"`
 	Allowance    nullable.Nullable[CodeAllowance]      `json:"allowance"`
 	CredentialId openapi_types.UUID                    `json:"credential_id"`
@@ -2470,7 +2470,7 @@ type CodeAccount struct {
 	ProviderId   openapi_types.UUID                    `json:"provider_id"`
 }
 
-// CodeAccountAdapter The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool holds accounts of one adapter.
+// CodeAccountAdapter The subscription family of the account's provider profile: Codex, OpenCode Go or GLM Coding Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 type CodeAccountAdapter string
 
 // CodeAccountGrantState defines model for CodeAccount.GrantState.
@@ -2578,7 +2578,7 @@ type CodeAttemptList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
-// CodeBinding Persistent per-key conversation tree identity. Retiring any member retires the whole tree; retirement never permits re-binding to another account.
+// CodeBinding Persistent per-key conversation tree identity. Retiring any member retires the whole tree; retirement never permits re-binding to another account. Account and principal are the tree's first account, which later models prefer; pins name the account each model is served from.
 type CodeBinding struct {
 	AccountId    openapi_types.UUID                    `json:"account_id"`
 	ApiKeyId     openapi_types.UUID                    `json:"api_key_id"`
@@ -2586,11 +2586,14 @@ type CodeBinding struct {
 	CreatedAt    time.Time                             `json:"created_at"`
 	Id           openapi_types.UUID                    `json:"id"`
 	ParentId     nullable.Nullable[openapi_types.UUID] `json:"parent_id"`
-	Principal    string                                `json:"principal"`
-	ProjectId    openapi_types.UUID                    `json:"project_id"`
-	RetiredAt    nullable.Nullable[time.Time]          `json:"retired_at"`
-	RootId       openapi_types.UUID                    `json:"root_id"`
-	RouteId      openapi_types.UUID                    `json:"route_id"`
+
+	// Pins The tree's pins, oldest first. A tree's first admission of a model pins an account to it, and the pin never moves.
+	Pins      []CodePin                    `json:"pins"`
+	Principal string                       `json:"principal"`
+	ProjectId openapi_types.UUID           `json:"project_id"`
+	RetiredAt nullable.Nullable[time.Time] `json:"retired_at"`
+	RootId    openapi_types.UUID           `json:"root_id"`
+	RouteId   openapi_types.UUID           `json:"route_id"`
 }
 
 // CodeBindingList defines model for CodeBindingList.
@@ -2629,8 +2632,9 @@ type CodeBudgetWrite struct {
 
 // CodeClientConfiguration defines model for CodeClientConfiguration.
 type CodeClientConfiguration struct {
-	Adapter CodeClientConfigurationAdapter `json:"adapter"`
-	BaseUrl string                         `json:"base_url"`
+	// Adapters The subscription families whose accounts serve the client's native models, in display order. A mixed route's configuration draws each model from its own family.
+	Adapters []CodeClientConfigurationAdapters `json:"adapters"`
+	BaseUrl  string                            `json:"base_url"`
 
 	// Client The client the configuration is for.
 	Client        CodeClientConfigurationClient `json:"client"`
@@ -2644,20 +2648,25 @@ type CodeClientConfiguration struct {
 	Format CodeClientConfigurationFormat `json:"format"`
 
 	// Model The native model the client uses for its main conversation.
-	Model             string   `json:"model"`
-	NativeModels      []string `json:"native_models"`
-	QualificationGaps []string `json:"qualification_gaps"`
-	RouteSlug         string   `json:"route_slug"`
+	Model string `json:"model"`
+
+	// NativeModels The route's models an adapter supporting the client serves, in route order.
+	NativeModels []string `json:"native_models"`
+
+	// PlanModel The native model for planning: Claude Code's plan mode through opusplan and OpenCode's plan agent. It equals model unless another was chosen. Null for Codex.
+	PlanModel         nullable.Nullable[string] `json:"plan_model"`
+	QualificationGaps []string                  `json:"qualification_gaps"`
+	RouteSlug         string                    `json:"route_slug"`
 
 	// SmallModel The native model for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.
 	SmallModel nullable.Nullable[string] `json:"small_model"`
 
-	// SupportedClients The clients this route's adapter has configurations for; the first is the default.
+	// SupportedClients The clients the route's adapters have configurations for; the first, a client of the first model's adapter, is the default.
 	SupportedClients []CodeClientConfigurationSupportedClients `json:"supported_clients"`
 }
 
-// CodeClientConfigurationAdapter defines model for CodeClientConfiguration.Adapter.
-type CodeClientConfigurationAdapter string
+// CodeClientConfigurationAdapters defines model for CodeClientConfiguration.Adapters.
+type CodeClientConfigurationAdapters string
 
 // CodeClientConfigurationClient The client the configuration is for.
 type CodeClientConfigurationClient string
@@ -2680,6 +2689,14 @@ type CodeCredits struct {
 	HasCredits bool                      `json:"has_credits"`
 	ObservedAt time.Time                 `json:"observed_at"`
 	Unlimited  bool                      `json:"unlimited"`
+}
+
+// CodePin The account a conversation tree serves one model from.
+type CodePin struct {
+	AccountId openapi_types.UUID `json:"account_id"`
+	CreatedAt time.Time          `json:"created_at"`
+	Model     string             `json:"model"`
+	Principal string             `json:"principal"`
 }
 
 // CodePool defines model for CodePool.
@@ -2748,8 +2765,8 @@ type CodeRevisionList struct {
 
 // CodeRoute Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
 type CodeRoute struct {
-	// Adapter The adapter the latest published revision serves, derived from the provider connections it froze. It selects the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan serves `v1/messages` and `v1/chat/completions`. Absent before publication or when the revision's accounts name no adapter.
-	Adapter     *CodeRouteAdapter            `json:"adapter,omitempty"`
+	// Adapters The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan serves `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.
+	Adapters    []CodeRouteAdapters          `json:"adapters"`
 	Enabled     bool                         `json:"enabled"`
 	Etag        openapi_types.UUID           `json:"etag"`
 	Id          openapi_types.UUID           `json:"id"`
@@ -2762,8 +2779,8 @@ type CodeRoute struct {
 	Slug        string                       `json:"slug"`
 }
 
-// CodeRouteAdapter The adapter the latest published revision serves, derived from the provider connections it froze. It selects the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan serves `v1/messages` and `v1/chat/completions`. Absent before publication or when the revision's accounts name no adapter.
-type CodeRouteAdapter string
+// CodeRouteAdapters defines model for CodeRoute.Adapters.
+type CodeRouteAdapters string
 
 // CodeRouteList defines model for CodeRouteList.
 type CodeRouteList struct {
@@ -7007,11 +7024,14 @@ type ReplaceCodeRouteParams struct {
 type GetCodeClientConfigurationParams struct {
 	GatewayUrl string `form:"gateway_url" json:"gateway_url"`
 
-	// Model The native model for the main conversation; defaults to the route's first model.
+	// Model The native model for the main conversation; defaults to the first route model the client can use.
 	Model *string `form:"model,omitempty" json:"model,omitempty"`
 
-	// Client The client to configure; defaults to the first of the adapter's supported clients.
+	// Client The client to configure; defaults to the first of the route's supported clients.
 	Client *GetCodeClientConfigurationParamsClient `form:"client,omitempty" json:"client,omitempty"`
+
+	// PlanModel The native model for planning; defaults to model. Codex takes none.
+	PlanModel *string `form:"plan_model,omitempty" json:"plan_model,omitempty"`
 
 	// SmallModel The native model for background requests; defaults to model. Codex takes none.
 	SmallModel *string `form:"small_model,omitempty" json:"small_model,omitempty"`

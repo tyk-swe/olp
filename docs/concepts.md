@@ -163,11 +163,14 @@ policy rather than bypassing it.
 
 A code route selects its pool through `/code/{slug}` while the request keeps a
 native model name. Personal pools restrict keys to their owner's issuer;
-shared pools require explicit key assignments. The first generation atomically
-pins a whole conversation tree to one account. Children, resumes, compaction and
-reconnects retain that account across replicas and restarts. Revocation,
-retirement or an unavailable account refuses the conversation rather than
-switching it. Refresh may replace credentials for the same observed principal.
+shared pools require explicit key assignments. A pool may mix subscriptions, so
+one conversation can use models from several of them. The first generation of
+each model atomically pins it, for the whole conversation tree, to one account
+that lists the model and serves the client's protocol; a tree holds at most one
+account of each subscription. Children, resumes,
+compaction and reconnects retain each model's account across replicas and
+restarts. Revocation, retirement or an unavailable account refuses the model
+rather than switching it. Refresh may replace credentials for the same observed principal.
 
 Each generation, including messages on an existing WebSocket, requires current
 authority. Code mode never replays inference and never uses synthetic inference

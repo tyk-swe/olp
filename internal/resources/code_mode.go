@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/limits"
 )
@@ -53,9 +54,12 @@ func (s *CodeStore) ObserveAllowance(ctx context.Context, account string, allowa
 }
 
 type CodeAdmission struct {
-	Route            codemode.Route
-	APIKeyID         string
-	Operation        codemode.Operation
+	Route     codemode.Route
+	APIKeyID  string
+	Operation codemode.Operation
+	// Providers are the route revision's provider connections whose adapter
+	// serves the request's path; only their accounts serve it.
+	Providers        []string
 	Bound            *codemode.TokenBound
 	PreviousResponse string
 }
@@ -63,6 +67,7 @@ type CodeAdmission struct {
 type CodePermit struct {
 	Authority access.Authority
 	Binding   codemode.Binding
+	Pin       codemode.Pin
 	Account   codemode.Account
 	Attempt   codemode.Attempt
 }
@@ -81,8 +86,9 @@ func (s *CodeStore) Admit(ctx context.Context, in CodeAdmission) (CodePermit, er
 	return s.admit(ctx, in, false)
 }
 
-// BindConnection pins a WebSocket connection without authorizing inference.
-func (s *CodeStore) BindConnection(ctx context.Context, route codemode.Route, key string, identity codemode.Identity, model string) (CodePermit, error) {
+// BindConnection pins a WebSocket connection to an account of providers
+// without authorizing inference.
+func (s *CodeStore) BindConnection(ctx context.Context, route codemode.Route, key string, identity codemode.Identity, model string, providers []string) (CodePermit, error) {
 	if len(route.Models) == 0 {
 		return CodePermit{}, codemode.Refuse(403, "code_model_denied")
 	}
@@ -91,7 +97,7 @@ func (s *CodeStore) BindConnection(ctx context.Context, route codemode.Route, ke
 		model = route.Models[0]
 		operation = "connect"
 	}
-	return s.admit(ctx, CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: operation, Model: model, Identity: identity}}, true)
+	return s.admit(ctx, CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: operation, Model: model, Identity: identity}, Providers: providers}, true)
 }
 
 func (s *CodeStore) admit(ctx context.Context, in CodeAdmission, connection bool) (CodePermit, error) {
@@ -146,11 +152,29 @@ func (s *CodeStore) admit(ctx context.Context, in CodeAdmission, connection bool
 	if in.PreviousResponse != "" && reference.RootID != out.Binding.RootID {
 		return out, codemode.Refuse(409, "code_parent_conflict")
 	}
-	out.Account, err = codeAccount(ctx, tx, in, out.Binding.AccountID)
+	pins, err := codePins(ctx, tx, out.Binding.RootID)
 	if err != nil {
 		return out, err
 	}
-	if out.Account.Principal != out.Binding.Principal {
+	switch pinned := slices.IndexFunc(pins, func(p codemode.Pin) bool { return p.Model == in.Operation.Model }); {
+	case pinned >= 0:
+		// A republish can give two of the tree's accounts one adapter, so
+		// the pinned account is checked against the earlier ones.
+		out.Pin = pins[pinned]
+		tree, _ := codeTree(out.Binding, pins)
+		out.Account, err = codeAccount(ctx, tx, in, out.Pin.AccountID, out.Binding.RootID, tree)
+	case connection:
+		// A connection serves on the tree's own account until its model is
+		// pinned; each generation it carries admits its own model.
+		out.Pin = codemode.Pin{AccountID: out.Binding.AccountID, Principal: out.Binding.Principal}
+		out.Account, err = codeAccount(ctx, tx, in, out.Pin.AccountID, "", nil)
+	default:
+		out.Pin, out.Account, err = codePin(ctx, tx, in, out.Binding, pins)
+	}
+	if err != nil {
+		return out, err
+	}
+	if out.Account.Principal != out.Pin.Principal {
 		return out, codemode.Refuse(403, "code_principal_changed")
 	}
 	if connection {
@@ -252,7 +276,7 @@ func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (code
 		b.AccountID = parent.AccountID
 		b.Principal = parent.Principal
 	} else {
-		account, err := codeAccount(ctx, tx, in, "")
+		account, err := codeAccount(ctx, tx, in, "", "", nil)
 		if err != nil {
 			if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && in.Operation.Name == "connect" && len(in.Route.Models) > 1 {
 				return b, codemode.Refuse(400, "code_connection_model_required")
@@ -284,12 +308,67 @@ func liveCodeTree(ctx context.Context, tx pgx.Tx, b codemode.Binding) error {
 	return nil
 }
 
+// codePins returns the pins of a conversation tree in the order it made them.
+func codePins(ctx context.Context, tx pgx.Tx, root string) ([]codemode.Pin, error) {
+	rows, err := tx.Query(ctx, `SELECT model,account_id::text,principal,created_at FROM olp.code_pins WHERE root_id=$1 ORDER BY seq`, root)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (codemode.Pin, error) {
+		var p codemode.Pin
+		err := row.Scan(&p.Model, &p.AccountID, &p.Principal, &p.CreatedAt)
+		return p, err
+	})
+}
+
+// codeTree lists a conversation tree's accounts, its own first and then its
+// pins' in the order it made them, with the principal each serves it as.
+func codeTree(b codemode.Binding, pins []codemode.Pin) ([]string, map[string]string) {
+	tree := []string{b.AccountID}
+	principals := map[string]string{b.AccountID: b.Principal}
+	for _, p := range pins {
+		if _, ok := principals[p.AccountID]; !ok {
+			tree = append(tree, p.AccountID)
+			principals[p.AccountID] = p.Principal
+		}
+	}
+	return tree, principals
+}
+
+// codePin pins an admission's model, which the binding's tree has not served
+// yet, to the account that serves it. A tree keeps one account of each
+// adapter, so the model goes to the tree's own account when that serves it,
+// else to another account the tree uses, else to the first available account
+// of an adapter the tree does not use yet. Nothing fails over: a tree account
+// that cools refuses a new model it serves as it refuses its pinned ones.
+func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Binding, pins []codemode.Pin) (codemode.Pin, codemode.Account, error) {
+	tree, principals := codeTree(b, pins)
+	account, err := codeAccount(ctx, tx, in, "", b.RootID, tree)
+	if err != nil {
+		return codemode.Pin{}, account, err
+	}
+	pin := codemode.Pin{Model: in.Operation.Model, AccountID: account.ID, Principal: account.Principal}
+	if principal, ok := principals[account.ID]; ok {
+		pin.Principal = principal
+	}
+	err = tx.QueryRow(ctx, `INSERT INTO olp.code_pins(root_id,model,account_id,principal,adapter)
+		SELECT $1,$2,$3,$4,`+codeadapter.SQL("v.connections->($5::text)")+` FROM olp.code_route_revisions v WHERE v.id=$6 RETURNING created_at`,
+		b.RootID, pin.Model, pin.AccountID, pin.Principal, account.ProviderID, in.Route.RevisionID).Scan(&pin.CreatedAt)
+	return pin, account, err
+}
+
 // codeAccount selects the pool account that serves an admission: an eligible
-// one whose provider connection the route's revision froze, so it is one of
-// the revision's adapter and the gateway can reach it.
-func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id string) (codemode.Account, error) {
+// one of the admission's providers, so its adapter serves the request's path
+// and the gateway can reach it. It is the account id when given, else the
+// first of tree that serves the model, else the first available account of an
+// adapter no account of tree has. An account of tree serves only while no
+// earlier one has its adapter, now or as the root's pins recorded it, since a
+// republish can change or drop an account's connection; a selected account
+// that is unavailable refuses the admission.
+func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root string, tree []string) (codemode.Account, error) {
 	var a codemode.Account
 	var models, allowance []byte
+	var available bool
 	required := []string{in.Operation.Model}
 	if in.Operation.Name == "connect" {
 		required = in.Route.Models
@@ -301,14 +380,20 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id string) (c
 	if err != nil {
 		return a, err
 	}
-	err = tx.QueryRow(ctx, `SELECT a.id::text,a.project_id::text,a.provider_id::text,a.credential_id::text,a.principal,a.models,a.name,a.enabled,a.etag::text,a.health,a.allowance
+	err = tx.QueryRow(ctx, `SELECT a.id::text,a.project_id::text,a.provider_id::text,a.credential_id::text,a.principal,a.models,a.name,a.enabled,a.etag::text,a.health,a.allowance,olp.code_account_available(a)
 		FROM olp.code_accounts a JOIN olp.code_pool_accounts pa ON pa.account_id=a.id
 		JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
+		JOIN olp.code_route_revisions v ON v.id=$7 CROSS JOIN LATERAL (SELECT `+codeadapter.SQL("v.connections->(a.provider_id::text)")+` adapter) f
 		WHERE pa.pool_id=$1 AND a.project_id=$2 AND a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id
 		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
-		AND a.models @> $3::jsonb AND ($4='' OR a.id::text=$4) AND olp.code_account_available(a)
-		AND EXISTS(SELECT 1 FROM olp.code_route_revisions v WHERE v.id=$5 AND v.connections ? a.provider_id::text) ORDER BY a.id LIMIT 1`, in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Route.RevisionID).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &models, &a.Name, &a.Enabled, &a.ETag, &a.Health, &allowance)
-	if errors.Is(err, pgx.ErrNoRows) {
+		AND a.models @> $3::jsonb AND ($4='' OR a.id::text=$4) AND a.provider_id::text=ANY($5::text[])
+		AND NOT EXISTS(SELECT 1 FROM olp.code_accounts t WHERE t.id::text=ANY($6::text[])
+			AND coalesce(array_position($6::text[],t.id::text)<array_position($6::text[],a.id::text),true)
+			AND (`+codeadapter.SQL("v.connections->(t.provider_id::text)")+` IS NOT DISTINCT FROM f.adapter
+				OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=nullif($8,'')::uuid AND p.account_id=t.id AND p.adapter IS NOT DISTINCT FROM f.adapter)))
+		ORDER BY array_position($6::text[],a.id::text) NULLS LAST,olp.code_account_available(a) DESC,a.id LIMIT 1`,
+		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &models, &a.Name, &a.Enabled, &a.ETag, &a.Health, &allowance, &available)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !available {
 		return a, codemode.Refuse(503, "code_account_unavailable")
 	}
 	if err != nil {
