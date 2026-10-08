@@ -353,8 +353,9 @@
                           .effective_limits?.[field]}</small
                       >{/if}{/each}</td
                 ><td>{group.project_name ?? 'Installation-wide'}</td><td
-                  >{formatBudget(group.budget.daily.accrued)} / {group.budget
-                    .daily.limit === null
+                  >{formatBudget(group.budget.daily.accrued)} / {currentBudgetLimit(
+                    group.budget.daily
+                  ) === null
                     ? 'No limit'
                     : formatBudget(currentBudgetLimit(group.budget.daily))}<br
                   /><small
@@ -371,8 +372,9 @@
                       >resets {formatDate(group.budget.weekly.reset_at)}</small
                     >{:else}—{/if}</td
                 ><td
-                  >{formatBudget(group.budget.monthly.accrued)} / {group.budget
-                    .monthly.limit === null
+                  >{formatBudget(group.budget.monthly.accrued)} / {currentBudgetLimit(
+                    group.budget.monthly
+                  ) === null
                     ? 'No limit'
                     : formatBudget(currentBudgetLimit(group.budget.monthly))}<br
                   /><small

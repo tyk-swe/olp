@@ -1,5 +1,5 @@
 import { apiClient } from '$lib/api/client';
-import { unwrap } from '$lib/api/http';
+import { ensureOk, unwrap } from '$lib/api/http';
 import type { components } from '$lib/api/schema';
 type Schemas = components['schemas'];
 export type BudgetIncrease = Schemas['BudgetIncrease'];
@@ -24,7 +24,7 @@ export async function createIncrease(
   );
 }
 export async function revokeIncrease(item: BudgetIncrease) {
-  unwrap(
+  ensureOk(
     await apiClient.DELETE('/api/v1/budget-increases/{increase_id}', {
       params: {
         path: { increase_id: item.id },

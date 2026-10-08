@@ -159,7 +159,7 @@
     if (
       !formError &&
       groupNames(form.allowedRouteGroups).length &&
-      !form.projectId
+      !formProject
     )
       formError = 'Route groups require a project-scoped key.';
     if (form.endUserPolicy.enabled && !form.endUserSource)
@@ -167,7 +167,7 @@
         'Choose an identifier source before enabling end-user limits.';
     if (
       form.limitTemplate &&
-      (!form.projectId ||
+      (!formProject ||
         !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(form.limitTemplate.trim()))
     )
       formError = 'Choose a project and a valid limit template name.';

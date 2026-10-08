@@ -1,6 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { apiClient } from '$lib/api/client';
-import { listIncreases } from '$lib/features/access/budget-increases/api';
+import {
+  listIncreases,
+  revokeIncrease
+} from '$lib/features/access/budget-increases/api';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -18,4 +21,14 @@ it('sends the next page token as the cursor', async () => {
       params: { query: { cursor: 'c2', limit: 50 } }
     })
   );
+});
+
+it('accepts a bodyless revocation', async () => {
+  vi.spyOn(apiClient, 'DELETE').mockResolvedValue({
+    data: undefined,
+    response: new Response(null, { status: 204 })
+  } as never);
+  await expect(
+    revokeIncrease({ id: 'i1', etag: 'e1' } as never)
+  ).resolves.toBeUndefined();
 });

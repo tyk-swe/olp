@@ -23,6 +23,10 @@
   const canInstall = $derived(
     access.allows('PUT /api/v1/budgets/installation')
   );
+  // The server also requires the caller to manage the named organization.
+  const canOrganize = $derived(
+    access.allows('PATCH /api/v1/organizations/{organization_id}')
+  );
   let kind = $state<IncreaseInput['target']['kind']>('api_key');
   let resourceId = $state('');
   let route = $state('');
@@ -139,7 +143,9 @@
             bind:value={kind}
             >{#each kinds as option (option.value)}<option value={option.value}
                 >{option.label}</option
-              >{/each}{#if canInstall}<option value="installation"
+              >{/each}{#if canOrganize}<option value="organization"
+                >Organization</option
+              >{/if}{#if canInstall}<option value="installation"
                 >Installation</option
               >{/if}</select
           >
@@ -148,11 +154,13 @@
             <label for="increase-resource"
               >{kind === 'budget_group'
                 ? 'Budget group'
-                : kind === 'project' ||
-                    kind === 'project_end_user' ||
-                    kind === 'attribution'
-                  ? 'Project'
-                  : 'API key'} ID</label
+                : kind === 'organization'
+                  ? 'Organization'
+                  : kind === 'project' ||
+                      kind === 'project_end_user' ||
+                      kind === 'attribution'
+                    ? 'Project'
+                    : 'API key'} ID</label
             ><input
               id="increase-resource"
               bind:value={resourceId}

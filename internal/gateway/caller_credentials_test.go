@@ -3,9 +3,12 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -134,5 +137,27 @@ func TestCallerCredentialIsRemovedBeforeSemanticOrRetainedProcessing(t *testing.
 	}
 	if semantic.Get("Anthropic-Version") != "2023-06-01" {
 		t.Fatal("lost provider semantic header")
+	}
+}
+
+// A video list polls its jobs concurrently; the credential still serves only
+// the first target that binds it.
+func TestCallerCredentialBindsOneTargetUnderConcurrency(t *testing.T) {
+	c := &callerCredential{secret: []byte("caller-secret")}
+	var bound atomic.Int32
+	var wg sync.WaitGroup
+	for i := range 16 {
+		wg.Go(func() {
+			if c.bind(fmt.Sprint("provider\x00model-", i%4)) {
+				bound.Add(1)
+			}
+		})
+	}
+	wg.Wait()
+	if winners := bound.Load(); winners != 4 {
+		t.Fatalf("bound %d calls, want the 4 that named the first target", winners)
+	}
+	if !c.boundElsewhere("provider\x00other") || c.boundElsewhere(c.target) {
+		t.Fatal("the bound target is not the only one the credential serves")
 	}
 }
