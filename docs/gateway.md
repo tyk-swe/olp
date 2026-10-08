@@ -647,10 +647,15 @@ protection for requests in flight. They live beside the balances, in `cost:pendi
 
 What is not reserved, and is judged on accrued spend alone: an attempt whose
 model has no price, or a price without a rate the request needs; any request
-while the gateway's price list is more than a minute old; and media, audio and
-video requests, realtime sessions, Gemini Live and Interactions, Bedrock invoke
-and stored-response lifecycle calls, whose cost is not known before they run. A
-background response is reserved while its creating request runs and released when
+while the gateway's price list is more than a minute old; and media and audio
+requests other than a video create, a video's retrieval, content and deletion,
+Bedrock invoke and stored-response lifecycle calls, whose cost is not known
+before they run. A video create, a realtime or Gemini Live session and a Gemini
+Interaction create run on one target, so each reserves that target's price once
+it is selected and before anything is dispatched: a video its requested seconds,
+four when it names none, and the others their input estimate plus the default
+4,096-token reply. A session holds only that first allowance; what its later turns
+spend counts when their usage arrives. A background response is reserved while its creating request runs and released when
 it returns; its spend counts when its final usage arrives. The reservation is
 therefore not an invoice cap. Overspend remains possible from token counts that
 are heuristic for a family without a public tokenizer, failover that bills more
