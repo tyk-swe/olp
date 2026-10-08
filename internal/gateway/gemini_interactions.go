@@ -136,6 +136,10 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		fail(e)
 		return
 	}
+	if e := x.checkBody(&route); e != nil {
+		fail(e)
+		return
+	}
 	if input.Store || input.Previous != "" || input.Background {
 		if !authority.Policy.AllowProviderState {
 			fail(invalidRequest("policy_conflict", "This API key does not allow provider-retained Interaction state.", nil))

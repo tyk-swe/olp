@@ -762,7 +762,7 @@ func (s *Server) oidcIdentities(r *http.Request, p Principal) (Reply, error) {
 		if usable[item["id"].(string)] {
 			remaining--
 		}
-		item["can_unlink"] = local && locallyManaged && localEnabled && !s.LocalLoginDisabled || remaining > 0 || len(samlUsable) > 0
+		item["can_unlink"] = remaining > 0 || locallyManaged && (local && localEnabled && !s.LocalLoginDisabled || len(samlUsable) > 0)
 	}
 	return OK(map[string]any{"items": items, "linking_available": enabled, "has_local_password": local, "oidc_reauthentication_available": len(usable) > 0}), nil
 }
@@ -802,9 +802,13 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error)
 		if err != nil {
 			return Reply{}, err
 		}
-		samlUsable, err := usableSAMLIdentities(r, tx, p)
-		if err != nil {
-			return Reply{}, err
+		// An OIDC-managed account answers to the IdP, so no other sign-in method
+		// may outlive the identity through which the IdP can revoke its role.
+		var samlUsable []string
+		if locallyManaged {
+			if samlUsable, err = usableSAMLIdentities(r, tx, p); err != nil {
+				return Reply{}, err
+			}
 		}
 		if len(usable) == 0 && len(samlUsable) == 0 {
 			return Reply{}, Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")

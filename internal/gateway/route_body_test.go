@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
@@ -132,5 +133,27 @@ func TestCodeBodyLimitsRefuseBeforeDurableAdmission(t *testing.T) {
 				t.Fatal("oversized code request admitted")
 			}
 		})
+	}
+}
+func TestRouteBodyLimitCoversGeminiInteractions(t *testing.T) {
+	for _, delta := range []int64{-1, 0} {
+		h := newHarness(t, Config{})
+		for id, p := range h.rt.release.Snapshot.Providers {
+			p.Kind, p.ProfileID, p.ProfileRevision, p.Endpoint = "gemini", "gemini-interactions", connectors.ProfileRevision, h.upstream.URL+"/v1beta"
+			p.Capabilities = append(p.Capabilities, runtime.Capability{Model: p.Capabilities[0].Model, Operation: "generation", Surface: "gemini", Mode: "unary"})
+			h.rt.release.Snapshot.Providers[id] = p
+		}
+		h.mock.set("v1beta", status(200, `{"id":"int_1","status":"completed","outputs":[]}`))
+		body := `{"model":"` + routeSlug + `","input":"` + strings.Repeat("x", 1024) + `","store":false}`
+		routeBodyLimit(t, h.rt, routeSlug, int64(len(body))+delta)
+		response := h.do(t.Context(), http.MethodPost, "/gemini/v1beta/interactions", "", []byte(body), map[string]string{"x-goog-api-key": fullKey})
+		data, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if tooLarge := response.StatusCode == http.StatusRequestEntityTooLarge; tooLarge != (delta < 0) {
+			t.Fatalf("limit %+d: status=%d: %s", delta, response.StatusCode, data)
+		}
+		if dispatched := h.mock.count("v1beta") != 0; dispatched != (delta >= 0) {
+			t.Fatalf("limit %+d: dispatched=%v", delta, dispatched)
+		}
 	}
 }

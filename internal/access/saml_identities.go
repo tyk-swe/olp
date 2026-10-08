@@ -103,12 +103,16 @@ func (s *Server) unlinkSAML(r *http.Request, p Principal) (Reply, error) {
 	if err = tx.QueryRow(r.Context(), "SELECT role_management FROM olp.users WHERE id=$1", p.ID).Scan(&management); err != nil {
 		return Reply{}, err
 	}
-	// A SAML-managed account answers to the IdP, so its password is no fallback
-	// that would let it keep a mapped role once the IdP can no longer revoke it.
+	// A SAML-managed account answers to the IdP, so neither its password nor an
+	// OIDC identity is a fallback that would let it keep a mapped role once the
+	// IdP can no longer revoke it.
 	if !local || management == "saml" {
-		usable, e := usableOIDCIdentities(r, tx, p, management != "oidc")
-		if e != nil {
-			return Reply{}, e
+		var usable map[string]bool
+		if management != "saml" {
+			var e error
+			if usable, e = usableOIDCIdentities(r, tx, p, management != "oidc"); e != nil {
+				return Reply{}, e
+			}
 		}
 		if len(usable) == 0 {
 			c, e := loadSAML(r, tx)
