@@ -5,6 +5,8 @@ package integration_test
 import (
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestOrganizationsDelegateProjectsWithoutChangingInstallationRoles(t *testing.T) {
@@ -19,6 +21,7 @@ func TestOrganizationsDelegateProjectsWithoutChangingInstallationRoles(t *testin
 	h.want(owner, "PATCH", "/api/v1/users/"+uid, map[string]any{"access_scope": "assigned"}, etagHeader(u), 200)
 	h.want(manager, "POST", "/api/v1/sessions", map[string]any{"email": "org-manager@example.com", "password": accessPassword}, nil, 201)
 	h.want(manager, "GET", base, nil, nil, 404)
+	h.want(owner, "PUT", base+"/members/"+uuid.NewString(), map[string]any{"role": "manager"}, etagHeader(org), 404)
 	h.want(owner, "PUT", base+"/members/"+uid, map[string]any{"role": "manager"}, etagHeader(org), 204)
 	project := h.want(manager, "POST", base+"/projects", map[string]any{"name": "North team"}, idem("project"), 201)
 	pid := project["id"].(string)

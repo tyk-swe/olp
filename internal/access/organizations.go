@@ -254,6 +254,13 @@ func (s *Server) writeOrganizationMember(r *http.Request, remove bool) (Reply, e
 			return Reply{}, notFound
 		}
 	} else {
+		var exists bool
+		if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.users WHERE id=$1)", user).Scan(&exists); err != nil {
+			return Reply{}, err
+		}
+		if !exists {
+			return Reply{}, notFound
+		}
 		if _, err = tx.Exec(r.Context(), `INSERT INTO olp.organization_members(organization_id,user_id,role,added_by) VALUES($1,$2,$3,$4) ON CONFLICT(organization_id,user_id) DO UPDATE SET role=excluded.role`, id, user, in.Role, p.UserID()); err != nil {
 			return Reply{}, err
 		}

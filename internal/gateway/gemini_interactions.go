@@ -196,6 +196,12 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	// Admission ran before the target was known, so the cost hold follows the
+	// target's selection, before anything is dispatched.
+	if e = s.reserveFallbackCost(ctx, x); e != nil {
+		fail(e)
+		return
+	}
 	endpoint, err := p.provider.Connector().InteractionsURL("", "")
 	if err != nil {
 		fail(serverError(http.StatusBadGateway, "upstream_error", "The Interactions profile cannot address this model."))

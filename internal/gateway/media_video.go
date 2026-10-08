@@ -80,7 +80,8 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := x.routeContext(r.Context())
 	defer cancel()
 	var e *Error
-	if x.lease, e = s.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, overall, x.limitRoute()); e != nil {
+	admitted := x.admissionAuthority(authority)
+	if x.lease, e = s.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), x.estimate, overall, x.attemptCostReservation(authority, attempt), x.limitRoute()); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}

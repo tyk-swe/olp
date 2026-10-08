@@ -36,6 +36,20 @@ func costBudgeted(authority access.Authority) bool {
 			(authority.BudgetGroupDailyCostLimit != nil || authority.BudgetGroupMonthlyCostLimit != nil || authority.BudgetGroupWeeklyCostLimit != nil)
 }
 
+// attemptCostReservation holds the price of the one attempt a request runs on,
+// such as a video create, which never fails over because a second target would
+// mint a second job.
+func (x *execution) attemptCostReservation(authority access.Authority, attempt runtime.Attempt) costReservation {
+	if !costBudgeted(x.admissionAuthority(authority)) {
+		return costReservation{}
+	}
+	bound := x.attemptCostBound(attempt)
+	if bound.IsZero() {
+		return costReservation{}
+	}
+	return costReservation{amount: bound.String(), requestID: x.request.accountingID()}
+}
+
 // costReservation prices the request for admission: the most it could cost
 // across the attempts it may dispatch, from the price list the gateway holds,
 // which is the revision accounting will pin it to. Settlement bills every

@@ -99,6 +99,9 @@
           newName.trim(),
           crypto.randomUUID()
         );
+        // Refresh first, or the selection effect sees a list without the new
+        // organization and moves the selection back to the first one.
+        await client.invalidateQueries({ queryKey: root });
         selected = o.id;
         newName = '';
       });
@@ -234,6 +237,9 @@
               projectName.trim(),
               crypto.randomUUID()
             );
+            await client.invalidateQueries({
+              queryKey: [...root, selected, 'projects']
+            });
             projectName = '';
             projectId = p.id;
           });

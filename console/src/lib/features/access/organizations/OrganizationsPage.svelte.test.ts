@@ -4,11 +4,20 @@ import { QueryClient } from '@tanstack/svelte-query';
 import { expect, it, vi } from 'vitest';
 import OrganizationProbe from './test/OrganizationProbe.svelte';
 import { createOrganizationProject } from './api';
-const state = vi.hoisted(() => ({ role: 'viewer' }));
+const state = vi.hoisted(() => ({
+  role: 'viewer',
+  owner: false,
+  created: false
+}));
 vi.mock('./api', () => ({
   listOrganizations: vi.fn(async () => [
-    { id: 'org', name: 'Division', etag: 'etag' }
+    { id: 'org', name: 'Division', etag: 'etag' },
+    ...(state.created ? [{ id: 'new-org', name: 'Branch', etag: 'etag' }] : [])
   ]),
+  createOrganization: vi.fn(async () => {
+    state.created = true;
+    return { id: 'new-org', name: 'Branch', etag: 'etag' };
+  }),
   organizationMembers: vi.fn(async () => [
     {
       user_id: 'user',
@@ -24,7 +33,8 @@ vi.mock('./api', () => ({
 vi.mock('../session/useRole.svelte', () => ({
   useRole: () => ({
     user: { id: 'user' },
-    allows: (route: string) => route !== 'POST /api/v1/organizations'
+    allows: (route: string) =>
+      state.owner || route !== 'POST /api/v1/organizations'
   })
 }));
 vi.mock('../budgets/api', () => ({
@@ -95,3 +105,43 @@ it.each(['viewer', 'manager'])(
     }
   }
 );
+
+it('selects the organization it just created', async () => {
+  state.owner = true;
+  state.created = false;
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const target = document.createElement('div');
+  document.body.append(target);
+  const component = mount(OrganizationProbe, { target, props: { client } });
+  try {
+    flushSync();
+    await vi.waitFor(() => expect(target.textContent).toContain('Division'));
+    const label = Array.from(target.querySelectorAll('label')).find((l) =>
+      l.textContent?.includes('New organization name')
+    )!;
+    const input = label.querySelector('input')!;
+    input.value = 'Branch';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    input
+      .closest('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(target.querySelector('[role="status"]')?.textContent).toBe(
+        'Saved.'
+      )
+    );
+    flushSync();
+    const select = Array.from(target.querySelectorAll('label'))
+      .find((l) => l.textContent?.startsWith('Organization'))!
+      .querySelector('select')!;
+    expect(select.value).toBe('new-org');
+  } finally {
+    await unmount(component);
+    client.clear();
+    target.remove();
+    state.owner = false;
+  }
+});
