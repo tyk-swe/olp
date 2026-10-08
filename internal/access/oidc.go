@@ -575,7 +575,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 			if _, err = tx.Exec(r.Context(), "INSERT INTO olp.oidc_identities(id,user_id,issuer,subject,email_at_link,role_claims,last_login_at) VALUES($1,$2,$3,$4,$5,$6,now())", identityID, p.ID, c.Issuer, verified.Subject, address, roleClaims); err != nil {
 				return Reply{}, err
 			}
-			rotated, err := s.changeSignInMethod(r, tx, p.ID)
+			rotated, err := s.changeSignInMethod(r, tx, p.ID, sessionAuth{Method: "oidc"})
 			if err != nil {
 				return Reply{}, err
 			}
@@ -816,7 +816,13 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error)
 	if err = Audit(r.Context(), tx, r, p.Actor(), "oidc.unlink", "oidc_identity", id, "success"); err != nil {
 		return Reply{}, err
 	}
-	rotated, err := s.changeSignInMethod(r, tx, p.ID)
+	// Removing an identity is no sign-in, so the rotated session keeps the
+	// method and MFA state of the session that asked.
+	strength, err := sessionStrength(r, tx, p.SessionID)
+	if err != nil {
+		return Reply{}, err
+	}
+	rotated, err := s.changeSignInMethod(r, tx, p.ID, strength)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -824,7 +830,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error)
 	return Commit(r, tx, rotated)
 }
 
-func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string) (Reply, error) {
+func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string, strength sessionAuth) (Reply, error) {
 	if _, err := tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", userID, NewID()); err != nil {
 		return Reply{}, err
 	}
@@ -834,7 +840,7 @@ func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string) (
 	if err := Audit(r.Context(), tx, r, UserActor(userID), "user.authentication_method_change", "user", userID, "success"); err != nil {
 		return Reply{}, err
 	}
-	return s.newSession(r, tx, userID, sessionAuth{Method: "oidc"})
+	return s.newSession(r, tx, userID, strength)
 }
 
 // Only called after signature, claims, flow and configuration verification.

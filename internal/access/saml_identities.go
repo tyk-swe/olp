@@ -144,10 +144,16 @@ func (s *Server) unlinkSAML(r *http.Request, p Principal) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET etag=$2,updated_at=now() WHERE id=$1", p.ID, NewID()); err != nil {
 		return Reply{}, err
 	}
+	// Removing an identity is no sign-in, so the rotated session keeps the
+	// method and MFA state of the session that asked.
+	strength, err := sessionStrength(r, tx, p.SessionID)
+	if err != nil {
+		return Reply{}, err
+	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", p.ID); err != nil {
 		return Reply{}, err
 	}
-	session, err := s.newSession(r, tx, p.ID, sessionAuth{Method: "saml"})
+	session, err := s.newSession(r, tx, p.ID, strength)
 	if err != nil {
 		return Reply{}, err
 	}

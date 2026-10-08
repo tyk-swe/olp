@@ -25,6 +25,14 @@ type sessionAuth struct {
 	MFA    bool
 }
 
+// sessionStrength reads how a session was authenticated, which a session
+// rotated without a fresh sign-in keeps.
+func sessionStrength(r *http.Request, q Queryer, sessionID string) (sessionAuth, error) {
+	var strength sessionAuth
+	err := q.QueryRow(r.Context(), "SELECT auth_method,mfa_verified FROM olp.sessions WHERE id=$1", sessionID).Scan(&strength.Method, &strength.MFA)
+	return strength, err
+}
+
 func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string, auth ...sessionAuth) (Reply, error) {
 	strength := sessionAuth{Method: "local"}
 	if len(auth) > 0 {
@@ -341,8 +349,8 @@ func (s *Server) writePassword(r *http.Request, p Principal, enroll bool) (Reply
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET password_hash=$1,etag=$2,updated_at=now() WHERE id=$3", hash, NewID(), p.ID); err != nil {
 		return Reply{}, err
 	}
-	var strength sessionAuth
-	if err = tx.QueryRow(r.Context(), "SELECT auth_method,mfa_verified FROM olp.sessions WHERE id=$1", p.SessionID).Scan(&strength.Method, &strength.MFA); err != nil {
+	strength, err := sessionStrength(r, tx, p.SessionID)
+	if err != nil {
 		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", p.ID); err != nil {

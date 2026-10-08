@@ -1,5 +1,5 @@
 import { apiClient } from '$lib/api/client';
-import { unwrap } from '$lib/api/http';
+import { ensureOk, unwrap } from '$lib/api/http';
 import type { components } from '$lib/api/schema';
 export type Organization = components['schemas']['Organization'];
 export async function listOrganizations(signal?: AbortSignal) {
@@ -57,7 +57,7 @@ export async function putOrganizationMember(
   role: 'manager' | 'viewer',
   etag: string
 ) {
-  return unwrap(
+  ensureOk(
     await apiClient.PUT(
       '/api/v1/organizations/{organization_id}/members/{user_id}',
       {
@@ -75,7 +75,7 @@ export async function removeOrganizationMember(
   user_id: string,
   etag: string
 ) {
-  return unwrap(
+  ensureOk(
     await apiClient.DELETE(
       '/api/v1/organizations/{organization_id}/members/{user_id}',
       {
@@ -158,7 +158,7 @@ export async function removeProjectMember(
   user_id: string,
   etag: string
 ) {
-  return unwrap(
+  ensureOk(
     await apiClient.DELETE(
       '/api/v1/organizations/{organization_id}/projects/{project_id}/members/{user_id}',
       {

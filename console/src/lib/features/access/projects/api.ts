@@ -134,7 +134,10 @@ export async function putProjectEndUserPolicy(
 ): Promise<ProjectEndUserPolicy> {
   return unwrap(
     await apiClient.PUT('/api/v1/projects/{project_id}/end-user-policy', {
-      params: { path: { project_id: projectId }, header: { 'If-Match': etag } },
+      params: {
+        path: { project_id: projectId },
+        header: { 'If-Match': `"${etag}"` }
+      },
       body: { policy }
     })
   );
@@ -159,7 +162,10 @@ export async function putProjectAttributionPolicy(
 ): Promise<ProjectAttributionPolicy> {
   return unwrap(
     await apiClient.PUT('/api/v1/projects/{project_id}/attribution-policy', {
-      params: { path: { project_id: projectId }, header: { 'If-Match': etag } },
+      params: {
+        path: { project_id: projectId },
+        header: { 'If-Match': `"${etag}"` }
+      },
       body: { policy }
     })
   );
@@ -184,7 +190,10 @@ export async function putProjectRouteGroups(
 ): Promise<ProjectRouteGroups> {
   return unwrap(
     await apiClient.PUT('/api/v1/projects/{project_id}/route-groups', {
-      params: { path: { project_id: projectId }, header: { 'If-Match': etag } },
+      params: {
+        path: { project_id: projectId },
+        header: { 'If-Match': `"${etag}"` }
+      },
       body: { groups }
     })
   );
@@ -209,7 +218,10 @@ export async function putProjectLimitTemplates(
 ): Promise<ProjectLimitTemplates> {
   return unwrap(
     await apiClient.PUT('/api/v1/projects/{project_id}/limit-templates', {
-      params: { path: { project_id: projectId }, header: { 'If-Match': etag } },
+      params: {
+        path: { project_id: projectId },
+        header: { 'If-Match': `"${etag}"` }
+      },
       body: { templates }
     })
   );
@@ -234,7 +246,10 @@ export async function putProjectAttributionBudgets(
 ): Promise<ProjectAttributionBudgets> {
   return unwrap(
     await apiClient.PUT('/api/v1/projects/{project_id}/attribution-budgets', {
-      params: { path: { project_id: projectId }, header: { 'If-Match': etag } },
+      params: {
+        path: { project_id: projectId },
+        header: { 'If-Match': `"${etag}"` }
+      },
       body: { budgets }
     })
   );

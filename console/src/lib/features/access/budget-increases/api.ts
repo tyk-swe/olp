@@ -4,10 +4,10 @@ import type { components } from '$lib/api/schema';
 type Schemas = components['schemas'];
 export type BudgetIncrease = Schemas['BudgetIncrease'];
 export type IncreaseInput = Schemas['CreateBudgetIncreaseRequest'];
-export async function listIncreases(before?: string, signal?: AbortSignal) {
+export async function listIncreases(cursor?: string, signal?: AbortSignal) {
   return unwrap(
     await apiClient.GET('/api/v1/budget-increases', {
-      params: { query: { before, limit: 50 } },
+      params: { query: { cursor, limit: 50 } },
       signal
     })
   );
