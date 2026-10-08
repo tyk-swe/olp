@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
 )
@@ -168,5 +169,47 @@ func TestAggregateProjectAndInstallationCapsBothApply(t *testing.T) {
 	pending, err := limiter.Reserved(t.Context(), limits.AggregateBudgetID("installation", id))
 	if err != nil || pending != "0" {
 		t.Fatalf("leaked installation reservation: %s %v", pending, err)
+	}
+}
+
+func TestConfigurationPlacingAProjectInAnOrganizationCountsItsSpend(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	f := &repFixture{t: t, h: h, pool: h.Pool}
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Spent vendor", "model": vendorModel, "credential": vendorSecret,
+		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": newVendor(t).URL + "/v1"},
+	}, idem("provider"), 201)
+	project := h.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "Moving team"}, idem("project"), 201)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "moving key", "scopes": []string{"inference"}, "project_id": project["id"]}, idem("key"), 201)
+	observed := time.Now().UTC()
+	requestID := access.NewID()
+	f.anchor(requestID, observed)
+	f.exec(`INSERT INTO olp.attempt_usage_facts (attempt_id, event_id, request_id, request_started_at,
+	        attempt_ordinal, api_key_id, provider_id, route_slug, upstream_model, operation, surface,
+	        observed_at, charge_status, usage_observed, usage_complete, input_tokens, output_tokens,
+	        unpriced, estimated_cost, request_counted, provider_request_counted, model_request_counted,
+	        target_request_counted, request_unpriced_counted, provider_unpriced_counted,
+	        model_unpriced_counted, target_unpriced_counted, request_incomplete_counted,
+	        provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted)
+	    VALUES ($1, $2, $3, $4, 1, $5, $6, 'alpha', 'm1', 'generation', 'openai',
+	        $4, 'billable', true, true, 10, 5, false, 3, true, true, true, true,
+	        false, false, false, false, false, false, false, false)`,
+		access.NewID(), access.NewID(), requestID, observed, key["id"], provider["id"])
+	org := h.want(owner, "POST", "/api/v1/organizations", map[string]any{"name": "Receiving org"}, idem("org"), 201)
+	path := "/api/v1/organizations/" + org["id"].(string) + "/budget"
+	h.want(owner, "PUT", path, map[string]any{"policy": map[string]any{"daily_cost_limit": "10"}}, etagHeader(h.want(owner, "GET", path, nil, nil, 200)), 200)
+	document := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	for _, entry := range document["projects"].([]any) {
+		if entry := entry.(map[string]any); entry["name"] == "Moving team" {
+			entry["organization"] = "Receiving org"
+		}
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("apply"), 200)
+	// The organization's balance counts the project's earlier spend as soon as
+	// the move publishes, rather than after the next reconciliation pass.
+	var accrued string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT accrued::text FROM olp.aggregate_cost_windows WHERE account_id=$1 AND window_kind='day'`, limits.AggregateBudgetID("organization", org["id"].(string))).Scan(&accrued); err != nil || accrued != "3.000000000000" {
+		t.Fatalf("organization spend = %q %v", accrued, err)
 	}
 }

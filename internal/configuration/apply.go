@@ -62,7 +62,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			}
 			projectIDs[key] = id
 		}
-		if err := applyProjectOrganization(ctx, tx, p, id, project.Organization); err != nil {
+		if err := s.applyProjectOrganization(ctx, tx, p, id, project.Organization); err != nil {
 			return err
 		}
 		var current *access.EndUserPolicy

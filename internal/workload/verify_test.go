@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -200,5 +201,56 @@ func TestCachedKeysDoNotWaitForAnUnknownKeyFetch(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatalf("a cached key waited on another fetch at %v", at)
 		}
+	}
+}
+
+func TestCachedKeysRefreshWithoutWaitingOnTheIssuer(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	var calls atomic.Int64
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) > 1 {
+			<-release
+		}
+		json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: pub, KeyID: "known", Algorithm: "EdDSA"}}})
+	}))
+	defer server.Close()
+	// A failed check must not leave the stalled fetch blocking the server's shutdown.
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	cache := NewCache(server.Client())
+	now := time.Now()
+	ctx := context.Background()
+	if _, e := cache.Keys(ctx, "issuer", server.URL, "known", now); e != nil {
+		t.Fatal(e)
+	}
+	// The caller that starts a due refresh answers from the cache while the
+	// issuer stalls, and the refresh still lands once the issuer answers.
+	done := make(chan error, 1)
+	go func() {
+		_, e := cache.Keys(ctx, "issuer", server.URL, "known", now.Add(2*time.Minute))
+		done <- e
+	}()
+	select {
+	case e := <-done:
+		if e != nil {
+			t.Fatal(e)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("a cached key waited on its own refresh")
+	}
+	for calls.Load() < 2 {
+		time.Sleep(time.Millisecond)
+	}
+	unblock()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, e := cache.Keys(ctx, "issuer", server.URL, "known", now.Add(6*time.Minute)); e == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the background refresh never landed")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

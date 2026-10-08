@@ -2,6 +2,7 @@ package limits
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -133,6 +134,18 @@ accounts AS (
  (SELECT weekly_id FROM budget_calendar),MAX(accrued) FILTER(WHERE window_kind='week')::text
  , (SELECT daily_start FROM budget_calendar), (SELECT daily_end FROM budget_calendar), (SELECT monthly_start FROM budget_calendar), (SELECT monthly_end FROM budget_calendar), (SELECT weekly_start FROM budget_calendar), (SELECT weekly_end FROM budget_calendar)
 FROM reconciled GROUP BY account_id ORDER BY account_id`
+
+// ReconcileAggregateBudget recomputes one aggregate account's current spend
+// from the usage history tx sees, including a project tx has just placed under
+// it, so the balance can be installed before the change publishes. It reports
+// false when the subject keeps no account.
+func ReconcileAggregateBudget(ctx context.Context, tx pgx.Tx, level, subject string, at time.Time) (CostSnapshot, bool, error) {
+	snapshot, err := scanSnapshot(tx.QueryRow(ctx, aggregateSnapshotsSQL, at, AggregateBudgetID(level, subject)))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CostSnapshot{}, false, nil
+	}
+	return snapshot, err == nil, err
+}
 
 func aggregateSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time) ([]CostSnapshot, error) {
 	rows, err := conn.Query(ctx, aggregateSnapshotsSQL, now, nil)

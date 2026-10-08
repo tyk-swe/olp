@@ -89,6 +89,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	// its catch-all, which answers everything no surface claims.
 	(&usage.Server{Access: m.Access, VendorKind: providers.VendorKind, Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: signing.Trusted()}).Register(mux)
 	(&configuration.Server{
+		Limiter:                m.Limiter,
 		Access:                 m.Access,
 		Egress:                 m.Egress,
 		Unconfined:             m.Unconfined,

@@ -73,18 +73,21 @@ func (c *Cache) Keys(ctx context.Context, id, url, kid string, now time.Time) (m
 		return keys, nil
 	}
 	if now.Sub(attempted) >= 15*time.Second {
-		// A caller whose key is cached and usable never waits on another's fetch,
-		// so a token naming an unknown key cannot stall the issuer's known ones.
+		// A caller whose key is cached and usable never waits on a fetch, its
+		// own or another's: it answers from the cache while at most one refresh
+		// runs apart from any request, so a stalled issuer delays no token.
 		if known && now.Sub(fetched) < 5*time.Minute {
 			if entry.fetching.TryLock() {
-				entry.refresh(ctx, c.client, url, now)
-				entry.fetching.Unlock()
+				go func() {
+					defer entry.fetching.Unlock()
+					entry.refresh(context.WithoutCancel(ctx), c.client, url, now)
+				}()
 			}
-		} else {
-			entry.fetching.Lock()
-			entry.refresh(ctx, c.client, url, now)
-			entry.fetching.Unlock()
+			return keys, nil
 		}
+		entry.fetching.Lock()
+		entry.refresh(ctx, c.client, url, now)
+		entry.fetching.Unlock()
 	}
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
