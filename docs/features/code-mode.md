@@ -279,7 +279,9 @@ account, or else another account the tree already uses, when it lists the model
 and serves the request's path; otherwise it takes the first available eligible
 account of a family the tree does not use yet. Another account of a family the
 tree already uses never joins it, which keeps a vendor's conversation state on
-one account. Concurrent first turns on different replicas must resolve to
+one account. When a republish puts two of a tree's accounts in one family, the
+account the tree used first keeps serving and the other refuses its pinned
+models. Concurrent first turns on different replicas must resolve to
 the same binding and pins. Resumes, reconnects, children, compaction and client
 retries keep each model's pinned account. A child with an unresolved parent is
 refused instead of receiving a new account. Bindings list their tree's pins.

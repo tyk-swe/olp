@@ -292,6 +292,49 @@ func TestCodeFoundationFrozenFamiliesSurviveProviderDrafts(t *testing.T) {
 	}
 }
 
+// Bindings and their pins outlive a republish, which can give two accounts a
+// tree pins one subscription family. The tree's earlier account keeps the
+// family and the later one refuses its pinned model, so the vendor's
+// conversation state stays on one account.
+func TestCodeFoundationRepublishedFamiliesRefuseCollidingPins(t *testing.T) {
+	f := newCodeFixture(t)
+	h, owner := f.h, f.owner
+	f.exec(t, `UPDATE olp.api_keys SET policy=jsonb_set(policy,'{allowed_routes}','["coding","mixed"]') WHERE id=$1`, f.key)
+	add := func(name, profile string, models []string) (provider, account string) {
+		provider = access.NewID()
+		f.exec(t, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,'plugin','draft',$3,$4,$5,$6,$7)`,
+			provider, name, `{"kind":"plugin","auth_mode":"grant","profile_id":"`+profile+`"}`, access.NewID(), access.NewID(), f.user, f.project)
+		credential := access.NewID()
+		f.exec(t, `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts) VALUES($1,$2,1,'fixture-digest',$3,'{}')`, credential, provider, "principal-"+profile)
+		f.exec(t, `INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, credential)
+		record := h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": name, "enabled": true, "models": models}, idem("account-"+profile), 201)
+		return provider, record["id"].(string)
+	}
+	zai, glm := add("ZAI plan", codeplans.ZAIProfile, []string{"glm-5.3"})
+	opencodego, minimax := add("OpenCode Go", codeplans.OpenCodeGoProfile, []string{"minimax-m3"})
+	pool := h.want(owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": f.project, "name": "Mixed pool", "kind": "shared", "owner_user_id": nil, "account_ids": []string{glm, minimax}, "api_key_ids": []string{f.key}}, idem("mixed-pool"), 201)
+	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": f.project, "slug": "mixed", "pool_id": pool["id"], "models": []string{"glm-5.3", "minimax-m3"}, "enabled": true}, idem("mixed-route"), 201)
+	published := h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(draft, idem("mixed-publish")), 200)
+	admit := func(model string) (resources.CodePermit, error) {
+		route := codePublicDecode[codemode.Route](t, published)
+		return f.store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: []string{zai, opencodego}, Operation: codemode.Operation{Name: "messages.create", Model: model, Identity: codemode.Identity{Conversation: "c1"}}})
+	}
+	for model, account := range map[string]string{"glm-5.3": glm, "minimax-m3": minimax} {
+		if permit, err := admit(model); err != nil || permit.Account.ID != account {
+			t.Fatalf("%s pin: %v %v", model, permit.Account.ID, err)
+		}
+	}
+	// The Z.ai provider becomes OpenCode Go, so the republished route freezes
+	// both of the tree's accounts into one family.
+	f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{profile_id}',to_jsonb($2::text)) WHERE id=$1`, zai, codeplans.OpenCodeGoProfile)
+	published = h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(published, idem("mixed-republish")), 200)
+	if permit, err := admit("glm-5.3"); err != nil || permit.Account.ID != glm {
+		t.Fatalf("tree's first account after republish: %v %v", permit.Account.ID, err)
+	}
+	_, err := admit("minimax-m3")
+	codeRefusal(t, err, "code_account_unavailable")
+}
+
 func TestCodeFoundationTokenReservationsAcrossReplicas(t *testing.T) {
 	f := newCodeFixture(t)
 	budget := f.h.want(f.owner, "POST", "/api/v1/code/budgets", map[string]any{"project_id": f.project, "route_id": f.route.ID, "api_key_id": nil, "daily_tokens": 100, "monthly_tokens": 1000, "enabled": true}, idem("budget"), 201)

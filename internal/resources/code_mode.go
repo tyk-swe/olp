@@ -158,8 +158,11 @@ func (s *CodeStore) admit(ctx context.Context, in CodeAdmission, connection bool
 	}
 	switch pinned := slices.IndexFunc(pins, func(p codemode.Pin) bool { return p.Model == in.Operation.Model }); {
 	case pinned >= 0:
+		// A republish can give two of the tree's accounts one adapter, so
+		// the pinned account is checked against the earlier ones.
 		out.Pin = pins[pinned]
-		out.Account, err = codeAccount(ctx, tx, in, out.Pin.AccountID, nil)
+		tree, _ := codeTree(out.Binding, pins)
+		out.Account, err = codeAccount(ctx, tx, in, out.Pin.AccountID, tree)
 	case connection:
 		// A connection serves on the tree's own account until its model is
 		// pinned; each generation it carries admits its own model.
@@ -318,13 +321,9 @@ func codePins(ctx context.Context, tx pgx.Tx, root string) ([]codemode.Pin, erro
 	})
 }
 
-// codePin pins an admission's model, which the binding's tree has not served
-// yet, to the account that serves it. A tree keeps one account of each
-// adapter, so the model goes to the tree's own account when that serves it,
-// else to another account the tree uses, else to the first available account
-// of an adapter the tree does not use yet. Nothing fails over: a tree account
-// that cools refuses a new model it serves as it refuses its pinned ones.
-func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Binding, pins []codemode.Pin) (codemode.Pin, codemode.Account, error) {
+// codeTree lists a conversation tree's accounts, its own first and then its
+// pins' in the order it made them, with the principal each serves it as.
+func codeTree(b codemode.Binding, pins []codemode.Pin) ([]string, map[string]string) {
 	tree := []string{b.AccountID}
 	principals := map[string]string{b.AccountID: b.Principal}
 	for _, p := range pins {
@@ -333,6 +332,17 @@ func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Bindin
 			principals[p.AccountID] = p.Principal
 		}
 	}
+	return tree, principals
+}
+
+// codePin pins an admission's model, which the binding's tree has not served
+// yet, to the account that serves it. A tree keeps one account of each
+// adapter, so the model goes to the tree's own account when that serves it,
+// else to another account the tree uses, else to the first available account
+// of an adapter the tree does not use yet. Nothing fails over: a tree account
+// that cools refuses a new model it serves as it refuses its pinned ones.
+func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Binding, pins []codemode.Pin) (codemode.Pin, codemode.Account, error) {
+	tree, principals := codeTree(b, pins)
 	account, err := codeAccount(ctx, tx, in, "", tree)
 	if err != nil {
 		return codemode.Pin{}, account, err
@@ -350,8 +360,9 @@ func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Bindin
 // one of the admission's providers, so its adapter serves the request's path
 // and the gateway can reach it. It is the account id when given, else the
 // first of tree that serves the model, else the first available account of an
-// adapter no account of tree has; a selected account that is unavailable
-// refuses the admission.
+// adapter no account of tree has. An account of tree serves only while no
+// earlier one has its adapter, which a republish can change; a selected
+// account that is unavailable refuses the admission.
 func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id string, tree []string) (codemode.Account, error) {
 	var a codemode.Account
 	var models, allowance []byte
@@ -374,8 +385,9 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id string, tr
 		WHERE pa.pool_id=$1 AND a.project_id=$2 AND a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id
 		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
 		AND a.models @> $3::jsonb AND ($4='' OR a.id::text=$4) AND a.provider_id::text=ANY($5::text[])
-		AND (a.id::text=ANY($6::text[]) OR NOT EXISTS(SELECT 1 FROM olp.code_accounts t
-			WHERE t.id::text=ANY($6::text[]) AND `+codeadapter.SQL("v.connections->(t.provider_id::text)")+` IS NOT DISTINCT FROM `+codeadapter.SQL("v.connections->(a.provider_id::text)")+`))
+		AND NOT EXISTS(SELECT 1 FROM olp.code_accounts t WHERE t.id::text=ANY($6::text[])
+			AND coalesce(array_position($6::text[],t.id::text)<array_position($6::text[],a.id::text),true)
+			AND `+codeadapter.SQL("v.connections->(t.provider_id::text)")+` IS NOT DISTINCT FROM `+codeadapter.SQL("v.connections->(a.provider_id::text)")+`)
 		ORDER BY array_position($6::text[],a.id::text) NULLS LAST,olp.code_account_available(a) DESC,a.id LIMIT 1`,
 		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &models, &a.Name, &a.Enabled, &a.ETag, &a.Health, &allowance, &available)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !available {
