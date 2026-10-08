@@ -137,6 +137,34 @@ func TestSCIMUsersGroupsAndInheritedGrants(t *testing.T) {
 	scimCall(t, h, token, "DELETE", gpath, nil, "", 204)
 }
 
+func TestSCIMKeepsAProjectManager(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	token := scimToken(h, owner, []string{"access"})
+	uid := scimCall(t, h, token, "POST", "/scim/v2/Users", scimUser("manager"), "", 201)["id"].(string)
+	upath := "/scim/v2/Users/" + uid
+	project := h.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "SCIM managed"}, idem("scim-managed-project"), 201)["id"].(string)
+	group := scimCall(t, h, token, "POST", "/scim/v2/Groups", map[string]any{"schemas": []string{scim.GroupSchema}, "displayName": "Managers", "members": []any{map[string]any{"value": uid}}, scim.GroupExtension: map[string]any{"role": "developer", "projects": []any{map[string]any{"value": project, "role": "manager"}}}}, "", 201)
+	gpath := "/scim/v2/Groups/" + group["id"].(string)
+	// The SCIM grant satisfies the console's rule, so the direct manager leaves.
+	ownerID := h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)["id"].(string)
+	h.want(owner, "DELETE", "/api/v1/projects/"+project+"/members/"+ownerID, nil, projectEtag(h, owner, project), 204)
+
+	scimCall(t, h, token, "PATCH", gpath, scimPatch(map[string]any{"op": "remove", "path": `members[value eq "` + uid + `"]`}), "", 409)
+	scimCall(t, h, token, "PATCH", gpath, scimPatch(map[string]any{"op": "replace", "path": scim.GroupExtension + ":projects", "value": []any{map[string]any{"value": project, "role": "viewer"}}}), "", 409)
+	scimCall(t, h, token, "DELETE", gpath, nil, "", 409)
+	scimCall(t, h, token, "DELETE", upath, nil, "", 409)
+	var managers int
+	if e := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.effective_project_members WHERE project_id=$1 AND role='manager'", project).Scan(&managers); e != nil || managers != 1 {
+		t.Fatalf("managers=%d err=%v", managers, e)
+	}
+
+	// Another delegated manager lets the directory withdraw its grant.
+	p := h.want(owner, "GET", "/api/v1/projects/"+project, nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/projects/"+project+"/members/"+ownerID, map[string]any{"role": "manager"}, etagHeader(p), 200)
+	scimCall(t, h, token, "DELETE", gpath, nil, "", 204)
+}
+
 func TestSCIMMappingsPromoteWithoutIdentitiesOrMemberships(t *testing.T) {
 	source := newAccessHarness(t)
 	owner := source.owner()

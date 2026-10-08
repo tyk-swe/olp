@@ -63,6 +63,10 @@ func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (Reply, err
 			return Reply{}, err
 		}
 	}
+	managed, err := scimManagedProjects(r, tx)
+	if err != nil {
+		return Reply{}, err
+	}
 	var affected []string
 	kind := "user"
 	if group {
@@ -76,6 +80,9 @@ func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (Reply, err
 		return Reply{}, err
 	}
 	if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
+		return Reply{}, err
+	}
+	if err = keepSCIMManagers(r, tx, managed); err != nil {
 		return Reply{}, err
 	}
 	if err = s.usableOwner(r, tx); err != nil {
@@ -103,6 +110,30 @@ func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (Reply, err
 		}
 	}
 	return Commit(r, tx, reply)
+}
+
+// scimManagedProjects lists the managed projects that a directory change could
+// leave without a manager, because a SCIM group grants their management.
+func scimManagedProjects(r *http.Request, tx pgx.Tx) ([]string, error) {
+	var ids []string
+	err := tx.QueryRow(r.Context(), "SELECT COALESCE(array_agg(DISTINCT project_id::text),'{}'::text[]) FROM olp.effective_project_members WHERE role='manager' AND project_id IN (SELECT project_id FROM olp.scim_group_projects WHERE role='manager')").Scan(&ids)
+	return ids, err
+}
+
+// keepSCIMManagers applies the console's last-manager rule to a directory
+// change: a project it managed through SCIM must keep a delegated manager.
+func keepSCIMManagers(r *http.Request, tx pgx.Tx, projects []string) error {
+	if len(projects) == 0 {
+		return nil
+	}
+	var orphaned bool
+	if err := tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.projects p WHERE p.id=ANY($1::uuid[]) AND NOT EXISTS(SELECT 1 FROM olp.effective_project_members m WHERE m.project_id=p.id AND m.role='manager'))", projects).Scan(&orphaned); err != nil {
+		return err
+	}
+	if orphaned {
+		return scim.Fail(409, "", "Keep at least one project manager.")
+	}
+	return nil
 }
 
 func boundedSCIMText(v any, max int, required bool) (string, error) {
