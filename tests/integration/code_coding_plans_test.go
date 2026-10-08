@@ -161,16 +161,21 @@ func newCodingPlanFixture(t *testing.T, plugin, profile string, keys ...string) 
 	f.digest = installPlugin(t, h, owner, testutil.BuildPlugin(t, "./plugins/"+plugin))
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Code key", "project_id": f.project, "scopes": []string{"inference"}, "allowed_routes": []string{"qualification"}}, idem("code-key"), 201)
 	f.keyID, f.key = key["id"].(string), key["secret"].(string)
+	// OpenCode Go serves GPT models only on Responses.
+	models := []string{"glm-5.3", "minimax-m3"}
+	if profile == codeplans.OpenCodeGoProfile {
+		models = append(models, "gpt-5.5")
+	}
 	for i, vendorKey := range keys {
 		provider := f.provider(t, fmt.Sprintf("Coding plan %d", i), profile)
 		f.providers = append(f.providers, provider)
 		credential := f.enroll(t, provider, vendorKey)
 		f.accounts = append(f.accounts, h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{
-			"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": "Controlled fixture only", "enabled": true, "models": []string{"glm-5.3", "minimax-m3"},
+			"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": "Controlled fixture only", "enabled": true, "models": models,
 		}, idem(fmt.Sprintf("code-account-%d", i)), 201))
 	}
 	f.pool = h.want(owner, "POST", "/api/v1/code/pools", f.poolInput(f.accounts...), idem("code-pool"), 201)
-	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": []string{"glm-5.3", "minimax-m3"}, "enabled": true}, idem("code-route"), 201)
+	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": models, "enabled": true}, idem("code-route"), 201)
 	f.route = h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(draft, idem("code-publish")), 200)
 	if n := len(f.peer.received()); n != 0 {
 		t.Fatalf("enrollment and publication sent %d upstream requests", n)
@@ -196,14 +201,14 @@ func (f *codingPlanFixture) mix(t *testing.T, key string) (glm, other map[string
 	f.digest = installPlugin(t, h, owner, testutil.BuildPlugin(t, "./plugins/opencode-go"))
 	provider := f.provider(t, "OpenCode Go", codeplans.OpenCodeGoProfile)
 	credential := f.enroll(t, provider, key)
-	other = h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": "Other plan", "enabled": true, "models": []string{"minimax-m3", "kimi-k3"}}, idem("other-account"), 201)
+	other = h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": "Other plan", "enabled": true, "models": []string{"minimax-m3", "kimi-k3", "gpt-5.5"}}, idem("other-account"), 201)
 	if other["adapter"] != "opencode_go" {
 		t.Fatalf("account adapter: %v", other)
 	}
 	f.providers, f.accounts = append(f.providers, provider), []map[string]any{glm, other}
 	f.pool = h.want(owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), f.poolInput(glm, other), etagHeader(f.pool), 200)
 	id := f.route["id"].(string)
-	draft := h.want(owner, "PUT", "/api/v1/code/routes/"+id, map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": []string{"glm-5.3", "minimax-m3", "kimi-k3"}, "enabled": true}, etagHeader(f.route), 200)
+	draft := h.want(owner, "PUT", "/api/v1/code/routes/"+id, map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": []string{"glm-5.3", "minimax-m3", "kimi-k3", "gpt-5.5"}, "enabled": true}, etagHeader(f.route), 200)
 	f.route = h.want(owner, "POST", "/api/v1/code/routes/"+id+"/publish", nil, withMatch(draft, idem("mixed-publish")), 200)
 	h.refresh()
 	return glm, other
@@ -359,7 +364,7 @@ func TestCodeCodingPlanForwardsClientTrafficWithTheAccountsKey(t *testing.T) {
 	opencode := http.Header{"Authorization": {""}, "X-Opencode-Session-Id": {"ses_root"}, "User-Agent": {"opencode/1.18.34"}}
 	messages := `{"model":"minimax-m3","max_tokens":256,"stream":true,"messages":[{"role":"user","content":"CONTROLLED_PRIVATE_PROMPT"}]}`
 	chat := `{"model":"glm-5.3","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"CONTROLLED_PRIVATE_PROMPT"}]}`
-	responses := `{"model":"glm-5.3","stream":true,"store":false,"input":"CONTROLLED_PRIVATE_PROMPT"}`
+	responses := `{"model":"gpt-5.5","stream":true,"store":false,"input":"CONTROLLED_PRIVATE_PROMPT"}`
 	for _, test := range []struct {
 		plugin, profile, host string
 		calls                 []call
@@ -562,7 +567,7 @@ func TestCodeCodingPlanRoutesServeEachModelFromItsSubscription(t *testing.T) {
 		{"v1/messages", claude, "minimax-m3", "opencode.ai", "/zen/go/v1/messages", "X-Api-Key", goKey},
 		{"v1/messages", child, "minimax-m3", "opencode.ai", "/zen/go/v1/messages", "X-Api-Key", goKey},
 		{"v1/chat/completions", opencode, "kimi-k3", "opencode.ai", "/zen/go/v1/chat/completions", "Authorization", "Bearer " + goKey},
-		{"v1/responses", opencode, "kimi-k3", "opencode.ai", "/zen/go/v1/responses", "Authorization", "Bearer " + goKey},
+		{"v1/responses", opencode, "gpt-5.5", "opencode.ai", "/zen/go/v1/responses", "Authorization", "Bearer " + goKey},
 	} {
 		if response, got := f.post(t, c.path, c.header, fmt.Sprintf(bodies[c.path], c.model)); response.StatusCode != 200 {
 			t.Fatalf("%s %s: %d %s", c.path, c.model, response.StatusCode, got)
@@ -572,9 +577,9 @@ func TestCodeCodingPlanRoutesServeEachModelFromItsSubscription(t *testing.T) {
 			t.Fatalf("%s %s reached the upstream as %s%s %v", c.path, c.model, sent.Host, sent.Path, sent.Header)
 		}
 	}
-	// A path no account serving the model can take, and a path no adapter of
-	// the route serves, refuse before dispatch.
-	if response, got := f.post(t, "v1/responses", session("X-Opencode-Session-Id", "ses_glm"), fmt.Sprintf(bodies["v1/responses"], "glm-5.3")); response.StatusCode != 503 || !bytes.Contains(got, []byte("code_account_unavailable")) {
+	// A path no adapter serves the model on, and a path no adapter of the
+	// route serves, refuse before dispatch.
+	if response, got := f.post(t, "v1/responses", session("X-Opencode-Session-Id", "ses_glm"), fmt.Sprintf(bodies["v1/responses"], "glm-5.3")); response.StatusCode != 400 || !bytes.Contains(got, []byte("code_operation_unsupported")) {
 		t.Fatalf("GLM on Responses: %d %s", response.StatusCode, got)
 	}
 	if response, _ := f.post(t, "responses", claude, fmt.Sprintf(bodies["v1/responses"], "kimi-k3")); response.StatusCode != 400 {

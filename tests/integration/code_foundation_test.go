@@ -332,7 +332,7 @@ func TestCodeFoundationRepublishedFamiliesRefuseCollidingPins(t *testing.T) {
 	}
 	// A pin whose transaction started first can be inserted last, so its
 	// creation time precedes the pin made before it.
-	f.exec(t, `INSERT INTO olp.code_pins(root_id,model,account_id,principal,created_at) SELECT root_id,'gpt-5.5',$2,$3,created_at-interval '1 second' FROM olp.code_pins WHERE root_id=$1 AND model='minimax-m3'`,
+	f.exec(t, `INSERT INTO olp.code_pins(root_id,model,account_id,principal,adapter,created_at) SELECT root_id,'gpt-5.5',$2,$3,'codex',created_at-interval '1 second' FROM olp.code_pins WHERE root_id=$1 AND model='minimax-m3'`,
 		root, gpt, "principal-"+codexauth.ProfileID)
 	// The Codex provider becomes OpenCode Go, so the republished route freezes
 	// two of the tree's accounts into one family. The one the tree pinned first
@@ -363,6 +363,48 @@ func TestCodeFoundationRepublishedFamiliesRefuseCollidingPins(t *testing.T) {
 		if found := slices.ContainsFunc(items, func(item any) bool { return item.(map[string]any)["root_id"] == root }); found != (account != f.account) {
 			t.Fatalf("bindings of account %s: %v", account, items)
 		}
+	}
+}
+
+// A republish can drop the provider of an account a tree pins, which then
+// has no family in the revision. The tree keeps the family its pin recorded,
+// so another account of that family still cannot join it.
+func TestCodeFoundationTreesKeepTheFamiliesOfDroppedAccounts(t *testing.T) {
+	f := newCodeFixture(t)
+	h, owner := f.h, f.owner
+	f.exec(t, `UPDATE olp.api_keys SET policy=jsonb_set(policy,'{allowed_routes}','["coding","mixed"]') WHERE id=$1`, f.key)
+	add := func(name string) (provider, account string) {
+		provider = access.NewID()
+		f.exec(t, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,'plugin','draft',$3,$4,$5,$6,$7)`,
+			provider, name, `{"kind":"plugin","auth_mode":"grant","profile_id":"`+codeplans.ZAIProfile+`"}`, access.NewID(), access.NewID(), f.user, f.project)
+		credential := access.NewID()
+		f.exec(t, `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts) VALUES($1,$2,1,'fixture-digest',$3,'{}')`, credential, provider, "principal-"+name)
+		f.exec(t, `INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, credential)
+		record := h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": name, "enabled": true, "models": []string{"glm-5.3", "glm-4.7"}}, idem("account-"+name), 201)
+		return provider, record["id"].(string)
+	}
+	dropped, first := add("First plan")
+	replacement, second := add("Second plan")
+	pool := map[string]any{"project_id": f.project, "name": "Mixed pool", "kind": "shared", "owner_user_id": nil, "account_ids": []string{first}, "api_key_ids": []string{f.key}}
+	created := h.want(owner, "POST", "/api/v1/code/pools", pool, idem("mixed-pool"), 201)
+	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": f.project, "slug": "mixed", "pool_id": created["id"], "models": []string{"glm-5.3", "glm-4.7"}, "enabled": true}, idem("mixed-route"), 201)
+	published := h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(draft, idem("mixed-publish")), 200)
+	admit := func(conversation, model string, providers ...string) (resources.CodePermit, error) {
+		route := codePublicDecode[codemode.Route](t, published)
+		return f.store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: providers, Operation: codemode.Operation{Name: "messages.create", Model: model, Identity: codemode.Identity{Conversation: conversation}}})
+	}
+	if permit, err := admit("c1", "glm-5.3", dropped); err != nil || permit.Account.ID != first {
+		t.Fatalf("first pin: %v %v", permit.Account.ID, err)
+	}
+	pool["account_ids"] = []string{second}
+	h.want(owner, "PUT", "/api/v1/code/pools/"+created["id"].(string), pool, etagHeader(created), 200)
+	published = h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(published, idem("mixed-republish")), 200)
+	for _, model := range []string{"glm-5.3", "glm-4.7"} {
+		_, err := admit("c1", model, replacement)
+		codeRefusal(t, err, "code_account_unavailable")
+	}
+	if permit, err := admit("c2", "glm-4.7", replacement); err != nil || permit.Account.ID != second {
+		t.Fatalf("a new tree's pin: %v %v", permit.Account.ID, err)
 	}
 }
 

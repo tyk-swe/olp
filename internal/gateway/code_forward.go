@@ -206,7 +206,8 @@ type codeAttempt struct {
 }
 
 // prepareCode admits a request on a client path to an account whose adapter
-// serves the path, and authorizes it with that adapter's credential.
+// serves the path for the request's model, and authorizes it with that
+// adapter's credential.
 func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, path string, protocol codemode.Protocol) (*codeAttempt, error) {
 	authority, failure := s.authenticate(r, "inference")
 	if failure != nil {
@@ -215,13 +216,17 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
 		return nil, codemode.Refuse(403, "code_permission_denied")
 	}
+	providers := release.Snapshot.CodeModelProviders(route, path, protocol, observation.Operation.Model)
+	if len(providers) == 0 {
+		return nil, codemode.Refuse(400, "code_operation_unsupported")
+	}
 	lease, failure := s.Admission.ReserveCodeRate(r.Context(), authority, observation.Estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 	}
 	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{
 		Route: route, APIKeyID: authority.ID, Operation: observation.Operation,
-		Providers: release.Snapshot.CodeProviders(route, path), PreviousResponse: observation.PreviousResponse,
+		Providers: providers, PreviousResponse: observation.PreviousResponse,
 	})
 	if err != nil {
 		settleKey(r.Context(), lease, false, nil, s.log)

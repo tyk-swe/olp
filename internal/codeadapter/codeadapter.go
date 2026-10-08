@@ -148,12 +148,15 @@ func (v Vendor) Supports(client string) bool { return slices.Contains(v.Clients,
 // model through the adapter: the client speaks a protocol the adapter serves
 // the model on.
 func (v Vendor) Reaches(client, model string) bool {
-	return v.Supports(client) && slices.ContainsFunc(clientProtocols[client], func(p codemode.Protocol) bool {
-		if v.Endpoint != nil {
-			return v.Endpoint(model) == p
-		}
-		return v.Serves(p)
-	})
+	return v.Supports(client) && slices.ContainsFunc(clientProtocols[client], func(p codemode.Protocol) bool { return v.ServesModel(p, model) })
+}
+
+// ServesModel reports whether the adapter serves a model on a protocol.
+func (v Vendor) ServesModel(p codemode.Protocol, model string) bool {
+	if v.Endpoint != nil {
+		return v.Endpoint(model) == p
+	}
+	return v.Serves(p)
 }
 
 // Address returns a profile's hosting address, the upstream base its

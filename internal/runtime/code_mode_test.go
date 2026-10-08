@@ -62,6 +62,26 @@ func TestCodeAdaptersAndProvidersDeriveFromTheRevisionsFrozenConnections(t *test
 			if got := snapshot.CodeProviders(codemode.Route{RevisionID: "zai"}, "v1/messages"); !slices.Equal(got, []string{"p3", "p4"}) {
 				t.Fatalf("zai providers %q", got)
 			}
+			for _, test := range []struct {
+				path     string
+				protocol codemode.Protocol
+				model    string
+				want     []string
+			}{
+				{"v1/messages", codemode.ProtocolMessages, "minimax-m3", []string{"p5", "p7"}},
+				{"v1/messages", codemode.ProtocolMessages, "glm-5.3", []string{"p7"}},
+				{"v1/chat/completions", codemode.ProtocolChat, "glm-5.3", []string{"p5", "p7"}},
+				{"v1/responses", codemode.ProtocolResponses, "gpt-5.5", []string{"p5"}},
+				{"v1/responses", codemode.ProtocolResponses, "glm-5.3", nil},
+				{"responses", codemode.ProtocolResponses, "glm-5.3", []string{"p6"}},
+			} {
+				if got := snapshot.CodeModelProviders(codemode.Route{RevisionID: "mixed"}, test.path, test.protocol, test.model); !slices.Equal(got, test.want) {
+					t.Fatalf("%s %s: %q, want %q", test.path, test.model, got, test.want)
+				}
+			}
+			if got := snapshot.CodeProviders(codemode.Route{RevisionID: "mixed"}, "v1/messages"); !slices.Equal(got, []string{"p5", "p7"}) {
+				t.Fatalf("model filtering changed the shared providers: %q", got)
+			}
 		})
 	}
 }

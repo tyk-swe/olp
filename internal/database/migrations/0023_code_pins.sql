@@ -5,13 +5,16 @@
 -- binding names its first account, which later models prefer when it serves
 -- them. seq orders a tree's pins as it made them: it is drawn as the row is
 -- inserted under the admission lock, while created_at is its transaction's
--- start.
+-- start. adapter is the family the pin's account served the model as, NULL
+-- when no adapter accepted its connection, which the tree keeps after a
+-- republish drops the account's connection or moves it to another family.
 CREATE TABLE olp.code_pins (
     seq bigint GENERATED ALWAYS AS IDENTITY,
     root_id uuid NOT NULL REFERENCES olp.code_bindings,
     model text NOT NULL CHECK (octet_length(model) BETWEEN 1 AND 200),
     account_id uuid NOT NULL REFERENCES olp.code_accounts,
     principal text NOT NULL,
+    adapter text,
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY(root_id,model)
 );

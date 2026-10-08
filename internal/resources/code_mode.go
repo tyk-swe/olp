@@ -162,12 +162,12 @@ func (s *CodeStore) admit(ctx context.Context, in CodeAdmission, connection bool
 		// the pinned account is checked against the earlier ones.
 		out.Pin = pins[pinned]
 		tree, _ := codeTree(out.Binding, pins)
-		out.Account, err = codeAccount(ctx, tx, in, out.Pin.AccountID, tree)
+		out.Account, err = codeAccount(ctx, tx, in, out.Pin.AccountID, out.Binding.RootID, tree)
 	case connection:
 		// A connection serves on the tree's own account until its model is
 		// pinned; each generation it carries admits its own model.
 		out.Pin = codemode.Pin{AccountID: out.Binding.AccountID, Principal: out.Binding.Principal}
-		out.Account, err = codeAccount(ctx, tx, in, out.Pin.AccountID, nil)
+		out.Account, err = codeAccount(ctx, tx, in, out.Pin.AccountID, "", nil)
 	default:
 		out.Pin, out.Account, err = codePin(ctx, tx, in, out.Binding, pins)
 	}
@@ -276,7 +276,7 @@ func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (code
 		b.AccountID = parent.AccountID
 		b.Principal = parent.Principal
 	} else {
-		account, err := codeAccount(ctx, tx, in, "", nil)
+		account, err := codeAccount(ctx, tx, in, "", "", nil)
 		if err != nil {
 			if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && in.Operation.Name == "connect" && len(in.Route.Models) > 1 {
 				return b, codemode.Refuse(400, "code_connection_model_required")
@@ -343,7 +343,7 @@ func codeTree(b codemode.Binding, pins []codemode.Pin) ([]string, map[string]str
 // that cools refuses a new model it serves as it refuses its pinned ones.
 func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Binding, pins []codemode.Pin) (codemode.Pin, codemode.Account, error) {
 	tree, principals := codeTree(b, pins)
-	account, err := codeAccount(ctx, tx, in, "", tree)
+	account, err := codeAccount(ctx, tx, in, "", b.RootID, tree)
 	if err != nil {
 		return codemode.Pin{}, account, err
 	}
@@ -351,8 +351,9 @@ func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Bindin
 	if principal, ok := principals[account.ID]; ok {
 		pin.Principal = principal
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO olp.code_pins(root_id,model,account_id,principal) VALUES($1,$2,$3,$4) RETURNING created_at`,
-		b.RootID, pin.Model, pin.AccountID, pin.Principal).Scan(&pin.CreatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO olp.code_pins(root_id,model,account_id,principal,adapter)
+		SELECT $1,$2,$3,$4,`+codeadapter.SQL("v.connections->($5::text)")+` FROM olp.code_route_revisions v WHERE v.id=$6 RETURNING created_at`,
+		b.RootID, pin.Model, pin.AccountID, pin.Principal, account.ProviderID, in.Route.RevisionID).Scan(&pin.CreatedAt)
 	return pin, account, err
 }
 
@@ -361,9 +362,10 @@ func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Bindin
 // and the gateway can reach it. It is the account id when given, else the
 // first of tree that serves the model, else the first available account of an
 // adapter no account of tree has. An account of tree serves only while no
-// earlier one has its adapter, which a republish can change; a selected
-// account that is unavailable refuses the admission.
-func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id string, tree []string) (codemode.Account, error) {
+// earlier one has its adapter, now or as the root's pins recorded it, since a
+// republish can change or drop an account's connection; a selected account
+// that is unavailable refuses the admission.
+func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root string, tree []string) (codemode.Account, error) {
 	var a codemode.Account
 	var models, allowance []byte
 	var available bool
@@ -381,15 +383,16 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id string, tr
 	err = tx.QueryRow(ctx, `SELECT a.id::text,a.project_id::text,a.provider_id::text,a.credential_id::text,a.principal,a.models,a.name,a.enabled,a.etag::text,a.health,a.allowance,olp.code_account_available(a)
 		FROM olp.code_accounts a JOIN olp.code_pool_accounts pa ON pa.account_id=a.id
 		JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
-		JOIN olp.code_route_revisions v ON v.id=$7
+		JOIN olp.code_route_revisions v ON v.id=$7 CROSS JOIN LATERAL (SELECT `+codeadapter.SQL("v.connections->(a.provider_id::text)")+` adapter) f
 		WHERE pa.pool_id=$1 AND a.project_id=$2 AND a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id
 		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
 		AND a.models @> $3::jsonb AND ($4='' OR a.id::text=$4) AND a.provider_id::text=ANY($5::text[])
 		AND NOT EXISTS(SELECT 1 FROM olp.code_accounts t WHERE t.id::text=ANY($6::text[])
 			AND coalesce(array_position($6::text[],t.id::text)<array_position($6::text[],a.id::text),true)
-			AND `+codeadapter.SQL("v.connections->(t.provider_id::text)")+` IS NOT DISTINCT FROM `+codeadapter.SQL("v.connections->(a.provider_id::text)")+`)
+			AND (`+codeadapter.SQL("v.connections->(t.provider_id::text)")+` IS NOT DISTINCT FROM f.adapter
+				OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=nullif($8,'')::uuid AND p.account_id=t.id AND p.adapter IS NOT DISTINCT FROM f.adapter)))
 		ORDER BY array_position($6::text[],a.id::text) NULLS LAST,olp.code_account_available(a) DESC,a.id LIMIT 1`,
-		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &models, &a.Name, &a.Enabled, &a.ETag, &a.Health, &allowance, &available)
+		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &models, &a.Name, &a.Enabled, &a.ETag, &a.Health, &allowance, &available)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !available {
 		return a, codemode.Refuse(503, "code_account_unavailable")
 	}

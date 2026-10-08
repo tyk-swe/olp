@@ -55,6 +55,9 @@ func (s *Snapshot) CodeConnection(route codemode.Route, providerID string) (Conf
 type codeRevision struct {
 	adapters  []codemode.Adapter
 	providers map[string][]string
+	// endpoints are the adapters of providers that serve each model on one
+	// protocol.
+	endpoints map[string]codeadapter.Vendor
 }
 
 // CodeAdapters returns the adapters of a published route's frozen
@@ -68,6 +71,21 @@ func (s *Snapshot) CodeAdapters(route codemode.Route) []codemode.Adapter {
 // slice is shared and must not be modified.
 func (s *Snapshot) CodeProviders(route codemode.Route, path string) []string {
 	return s.codeRevisions[route.RevisionID].providers[path]
+}
+
+// CodeModelProviders returns the providers of CodeProviders whose adapter
+// serves a model on the path's protocol: an adapter that serves each model on
+// one endpoint serves a path only for that endpoint's models.
+func (s *Snapshot) CodeModelProviders(route codemode.Route, path string, protocol codemode.Protocol, model string) []string {
+	revision := s.codeRevisions[route.RevisionID]
+	providers := revision.providers[path]
+	if len(revision.endpoints) == 0 {
+		return providers
+	}
+	return slices.DeleteFunc(slices.Clone(providers), func(provider string) bool {
+		vendor, ok := revision.endpoints[provider]
+		return ok && !vendor.ServesModel(protocol, model)
+	})
 }
 
 func (s *Snapshot) validateCodeMode() error {
@@ -99,6 +117,12 @@ func (s *Snapshot) validateCodeMode() error {
 		}
 		for path := range vendor.Paths {
 			revision.providers[path] = append(revision.providers[path], provider)
+		}
+		if vendor.Endpoint != nil {
+			if revision.endpoints == nil {
+				revision.endpoints = make(map[string]codeadapter.Vendor)
+			}
+			revision.endpoints[provider] = vendor
 		}
 		s.codeRevisions[id] = revision
 	}

@@ -42,9 +42,10 @@ speaks only Messages, so on OpenCode Go it works only with Messages models.
 
 A pool may hold accounts of several adapters, and a route may list the models
 of all of them. Each request reaches an account that lists its model and whose
-adapter serves the request's path, with that account's credential, at that
-subscription's upstream. A client can use every route model its own protocols
-reach. OLP never translates between protocols, so a model no subscription
+adapter serves the model on the request's path, with that account's credential,
+at that subscription's upstream; a model no adapter serves on the path is
+refused with `code_operation_unsupported` before any account is chosen. A
+client can use every route model its own protocols reach. OLP never translates between protocols, so a model no subscription
 serves on the client's protocol stays out of that client's configuration.
 
 | Client | Paths it uses | Models a mixed route can give it |
@@ -285,8 +286,9 @@ account of a family the tree does not use yet. Another account of a family the
 tree already uses never joins it, which keeps a vendor's conversation state on
 one account. When a republish puts two of a tree's accounts in one family, the
 account the tree used first keeps serving and the other refuses its pinned
-models. Concurrent first turns on different replicas must resolve to
-the same binding and pins. Resumes, reconnects, children, compaction and client
+models. Each pin records its account's family, so a family stays the tree's
+after a republish drops that account. Concurrent first turns on different
+replicas must resolve to the same binding and pins. Resumes, reconnects, children, compaction and client
 retries keep each model's pinned account. A child with an unresolved parent is
 refused instead of receiving a new account. Bindings list their tree's pins.
 

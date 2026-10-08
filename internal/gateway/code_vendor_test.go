@@ -57,7 +57,7 @@ func TestCodeMessagesForwardExactBytesWithTheAccountsCredential(t *testing.T) {
 	} {
 		t.Run(test.profile, func(t *testing.T) {
 			h, ledger, server := newCodeVendorHarness(t, test.profile)
-			body := []byte(`{"model":"native-model","max_tokens":64,"system":[{"type":"text","text":"x-anthropic-billing-header: kept"}],"messages":[{"role":"user","content":"SECRET PROMPT"}],"stream":true}`)
+			body := []byte(`{"model":"minimax-m3","max_tokens":64,"system":[{"type":"text","text":"x-anthropic-billing-header: kept"}],"messages":[{"role":"user","content":"SECRET PROMPT"}],"stream":true}`)
 			wire := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":10,\"cache_read_input_tokens\":4,\"output_tokens\":1}}}\n\n" +
 				"event: ping\ndata: {\"type\": \"ping\"}\n\n" +
 				"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"SECRET ANSWER\"}}\n\n" +
@@ -144,13 +144,13 @@ func TestCodeOpenCodeGoResponsesUseClientIdentityAndReferences(t *testing.T) {
 		_, _ = io.WriteString(w, "data: {\"type\":\"codex.rate_limits\",\"rate_limits\":{\"primary\":{\"used_percent\":100}}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n")
 	})
 	header := http.Header{"Authorization": {"Bearer " + fullKey}, "X-Opencode-Session-Id": {"ses_1"}}
-	if response, _ := codeVendorDo(t, server, http.MethodPost, "v1/responses", []byte(`{"model":"native-model","store":false}`), header); response.StatusCode != 200 {
+	if response, _ := codeVendorDo(t, server, http.MethodPost, "v1/responses", []byte(`{"model":"gpt-5.5","store":false}`), header); response.StatusCode != 200 {
 		t.Fatalf("status %d", response.StatusCode)
 	}
 	if u := ledger.wait(t); *u.Total != 3 {
 		t.Fatalf("usage %+v", u)
 	}
-	if response, _ := codeVendorDo(t, server, http.MethodPost, "v1/responses", []byte(`{"model":"native-model","previous_response_id":"resp_1"}`), header); response.StatusCode != 200 {
+	if response, _ := codeVendorDo(t, server, http.MethodPost, "v1/responses", []byte(`{"model":"gpt-5.5","previous_response_id":"resp_1"}`), header); response.StatusCode != 200 {
 		t.Fatalf("continuation status %d", response.StatusCode)
 	}
 	ledger.wait(t)
@@ -220,17 +220,19 @@ func TestCodeMixedRoutesDispatchEachPathToAnAccountOfItsAdapter(t *testing.T) {
 	})
 	for _, test := range []struct {
 		path      string
+		model     string
 		header    http.Header
 		providers []string
 		upstream  string
 		codex     bool
 	}{
-		{"responses", http.Header{"Authorization": {"Bearer " + fullKey}, "Session_id": {"root"}}, []string{"p-codex"}, "/a/responses", true},
-		{"v1/messages", http.Header{"X-Api-Key": {fullKey}, "X-Claude-Code-Session-Id": {"s1"}}, []string{"p-glm", "p-go"}, "/a/anthropic/v1/messages", false},
-		{"v1/chat/completions", http.Header{"Authorization": {"Bearer " + fullKey}, "X-Opencode-Session-Id": {"ses_a"}}, []string{"p-glm", "p-go"}, "/a/coding/paas/v4/chat/completions", false},
-		{"v1/responses", http.Header{"Authorization": {"Bearer " + fullKey}, "X-Opencode-Session-Id": {"ses_b"}}, []string{"p-go"}, "/a/responses", false},
+		{"responses", "native-model", http.Header{"Authorization": {"Bearer " + fullKey}, "Session_id": {"root"}}, []string{"p-codex"}, "/a/responses", true},
+		{"v1/messages", "minimax-m3", http.Header{"X-Api-Key": {fullKey}, "X-Claude-Code-Session-Id": {"s1"}}, []string{"p-glm", "p-go"}, "/a/anthropic/v1/messages", false},
+		{"v1/messages", "glm-5.3", http.Header{"X-Api-Key": {fullKey}, "X-Claude-Code-Session-Id": {"s2"}}, []string{"p-glm"}, "/a/anthropic/v1/messages", false},
+		{"v1/chat/completions", "glm-5.3", http.Header{"Authorization": {"Bearer " + fullKey}, "X-Opencode-Session-Id": {"ses_a"}}, []string{"p-glm", "p-go"}, "/a/coding/paas/v4/chat/completions", false},
+		{"v1/responses", "gpt-5.5", http.Header{"Authorization": {"Bearer " + fullKey}, "X-Opencode-Session-Id": {"ses_b"}}, []string{"p-go"}, "/a/responses", false},
 	} {
-		response, body := codeVendorDo(t, server, http.MethodPost, test.path, []byte(`{"model":"native-model"}`), test.header)
+		response, body := codeVendorDo(t, server, http.MethodPost, test.path, []byte(`{"model":"`+test.model+`"}`), test.header)
 		if response.StatusCode != 200 {
 			t.Fatalf("%s: %d %s", test.path, response.StatusCode, body)
 		}
@@ -243,10 +245,20 @@ func TestCodeMixedRoutesDispatchEachPathToAnAccountOfItsAdapter(t *testing.T) {
 			t.Fatalf("%s: upstream %s providers %v headers %v", test.path, got.path, providers, got.header)
 		}
 	}
-	response, _ := codeVendorDo(t, server, http.MethodPost, "v1/messages/count_tokens", []byte(`{}`), http.Header{"X-Api-Key": {fullKey}})
+	ledger.mu.Lock()
+	inputs := len(ledger.inputs)
+	ledger.mu.Unlock()
+	response, body := codeVendorDo(t, server, http.MethodPost, "v1/responses", []byte(`{"model":"glm-5.3"}`), http.Header{"Authorization": {"Bearer " + fullKey}, "X-Opencode-Session-Id": {"ses_c"}})
+	ledger.mu.Lock()
+	admitted := len(ledger.inputs) != inputs
+	ledger.mu.Unlock()
+	if response.StatusCode != 400 || !strings.Contains(string(body), "code_operation_unsupported") || admitted {
+		t.Fatalf("model no adapter serves on the path: %d %s admitted %v", response.StatusCode, body, admitted)
+	}
+	response, _ = codeVendorDo(t, server, http.MethodPost, "v1/messages/count_tokens", []byte(`{}`), http.Header{"X-Api-Key": {fullKey}})
 	ledger.mu.Lock()
 	defer ledger.mu.Unlock()
-	if response.StatusCode != 404 || len(ledger.refusals) != 0 {
+	if response.StatusCode != 404 || !slices.Equal(ledger.refusals, []string{"code_operation_unsupported"}) {
 		t.Fatalf("probe on a route serving Messages: %d refusals %v", response.StatusCode, ledger.refusals)
 	}
 }
