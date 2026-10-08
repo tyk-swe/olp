@@ -87,6 +87,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() {
 		s.settleCaps(ctx, x)
+		x.recordCost()
 		settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
 	}()
 
