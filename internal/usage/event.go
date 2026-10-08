@@ -22,18 +22,22 @@ const WireVersion = 1
 // Origins name whom a request was made for. A caller request is made for the
 // API key that sent it. The gateway makes the others on its own account:
 // shadow mirrors of caller traffic, classifier calls of request selectors and
-// health probes. Shadow and probe requests belong to the installation and
-// carry no API key; a classifier call is made for, and charged to, the key
-// whose request it routes.
+// health probes, and a console member makes Playground calls. Shadow, probe
+// and Playground requests belong to the installation and carry no API key; a
+// classifier call is made for, and charged to, the key whose request it
+// routes.
 const (
 	OriginCaller     = "caller"
 	OriginShadow     = "shadow"
 	OriginClassifier = "classifier"
 	OriginProbe      = "probe"
+	OriginPlayground = "playground"
 )
 
 // Keyless reports whether requests of an origin carry no API key.
-func Keyless(origin string) bool { return origin == OriginShadow || origin == OriginProbe }
+func Keyless(origin string) bool {
+	return origin == OriginShadow || origin == OriginProbe || origin == OriginPlayground
+}
 
 // Event is one request's content-free metadata. Every optional field is
 // serialized explicitly, so a reader can tell "absent" from "not yet known".
@@ -397,7 +401,7 @@ var knownSurfaces = map[string]struct{}{
 	"openai": {}, "anthropic": {}, "gemini": {}, "bedrock": {}, "native": {}, "unknown": {},
 }
 
-var knownOrigins = map[string]struct{}{OriginCaller: {}, OriginShadow: {}, OriginClassifier: {}, OriginProbe: {}}
+var knownOrigins = map[string]struct{}{OriginCaller: {}, OriginShadow: {}, OriginClassifier: {}, OriginProbe: {}, OriginPlayground: {}}
 
 func (w wireEvent) decode() (*Event, error) {
 	event := &Event{Version: WireVersion}

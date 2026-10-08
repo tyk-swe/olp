@@ -15684,12 +15684,13 @@
         "type": "object"
       },
       "RequestOrigin": {
-        "description": "caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. Shadow and probe requests belong to the installation and carry no key.",
+        "description": "caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.",
         "enum": [
           "caller",
           "shadow",
           "classifier",
-          "probe"
+          "probe",
+          "playground"
         ],
         "type": "string"
       },

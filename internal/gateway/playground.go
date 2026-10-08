@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/telemetry"
+	"github.com/tyk-swe/olp/internal/usage"
 	"slices"
 )
 
@@ -240,6 +241,7 @@ func (p *Playground) execution(r *http.Request, principal access.Principal, pars
 		preferences: preferences,
 		parsed:      parsed,
 		actor:       "playground",
+		origin:      usage.OriginPlayground,
 		userID:      principal.ID,
 		affinity:    []byte(principal.ID),
 	}

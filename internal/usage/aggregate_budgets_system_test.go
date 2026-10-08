@@ -61,10 +61,10 @@ func TestIntegrationAggregateBudgetsIncludeSystemWorkAndHistory(t *testing.T) {
 	if err = tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, origin := range []string{OriginCaller, OriginShadow, OriginProbe} {
+	for _, origin := range []string{OriginCaller, OriginShadow, OriginProbe, OriginPlayground} {
 		event := parityEvent(t, key, provider, at, cases)
 		event.Origin = origin
-		if origin != OriginProbe {
+		if origin != OriginProbe && origin != OriginPlayground {
 			event.Attribution = map[string]string{"team": "core"}
 		}
 		if Keyless(origin) {
@@ -95,9 +95,9 @@ func TestIntegrationAggregateBudgetsIncludeSystemWorkAndHistory(t *testing.T) {
 		if err = pool.QueryRow(t.Context(), "SELECT accrued::text FROM olp.aggregate_cost_windows WHERE account_id=$1 AND window_kind='day'", limits.AggregateBudgetID(level, subject)).Scan(&accrued); err != nil {
 			t.Fatal(err)
 		}
-		want := "10.000000000000"
+		want := "12.000000000000"
 		if level == "project" {
-			want = "8.000000000000"
+			want = "10.000000000000"
 		}
 		if accrued != want {
 			t.Fatalf("%s spend %s", level, accrued)
@@ -120,9 +120,9 @@ func TestIntegrationAggregateBudgetsIncludeSystemWorkAndHistory(t *testing.T) {
 			if e := pool.QueryRow(t.Context(), "SELECT accrued::text FROM olp.aggregate_cost_windows WHERE account_id=$1 AND window_kind='day'", ownerID).Scan(&amount); e != nil {
 				t.Fatal(e)
 			}
-			want := "10.000000000000"
+			want := "12.000000000000"
 			if level == "project" {
-				want = "8.000000000000"
+				want = "10.000000000000"
 			}
 			if amount != want {
 				t.Fatalf("%s historical spend %s, want %s", level, amount, want)
@@ -141,7 +141,7 @@ func TestIntegrationAggregateBudgetsIncludeSystemWorkAndHistory(t *testing.T) {
 	}
 	checkLabels()
 	var rolled, expired int
-	if err = pool.QueryRow(t.Context(), rollupSQL, at.Add(time.Hour), 100).Scan(&rolled, &expired); err != nil || expired != 5 {
+	if err = pool.QueryRow(t.Context(), rollupSQL, at.Add(time.Hour), 100).Scan(&rolled, &expired); err != nil || expired != 6 {
 		t.Fatalf("rollup %d/%d %v", rolled, expired, err)
 	}
 	if _, err = pool.Exec(t.Context(), "DELETE FROM olp.aggregate_cost_windows"); err != nil {
