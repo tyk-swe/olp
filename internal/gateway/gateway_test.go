@@ -134,21 +134,35 @@ func (c *capture) Terminal(e Envelope) { c.mu.Lock(); defer c.mu.Unlock(); c.env
 
 func (c *capture) last(t *testing.T) Envelope {
 	t.Helper()
+	envs := c.await(t, 1)
+	return envs[len(envs)-1]
+}
+
+// nth returns the nth terminal event. A test that sends several requests
+// names the one it checks, since the newest event recorded can still be an
+// earlier request's.
+func (c *capture) nth(t *testing.T, n int) Envelope {
+	t.Helper()
+	return c.await(t, n)[n-1]
+}
+
+func (c *capture) await(t *testing.T, n int) []Envelope {
+	t.Helper()
 	// Reading a known-length HTTP response can finish before the serving
 	// goroutine records its terminal event. Await that event explicitly.
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		c.mu.Lock()
-		if len(c.envs) != 0 {
-			event := c.envs[len(c.envs)-1]
+		if len(c.envs) >= n {
+			envs := slices.Clone(c.envs)
 			c.mu.Unlock()
-			return event
+			return envs
 		}
 		c.mu.Unlock()
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatal("no envelope emitted within one second")
-	return Envelope{}
+	t.Fatalf("envelope %d not emitted within one second", n)
+	return nil
 }
 
 // mock is the upstream: one handler per provider prefix, swappable per test.
