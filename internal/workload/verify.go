@@ -30,7 +30,9 @@ type Identity struct {
 
 // Parse locates a declared issuer only. No claim is trusted until Verify.
 func Parse(raw string) (Token, error) {
-	if len(raw) > MaxTokenBytes {
+	// Every other bearer secret reaches here too, so reject one that is not
+	// shaped like a JWT before allocating anything.
+	if len(raw) > MaxTokenBytes || strings.Count(raw, ".") != 2 {
 		return Token{}, ErrToken
 	}
 	parts := strings.Split(raw, ".")

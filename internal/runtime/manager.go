@@ -512,11 +512,11 @@ func (m *Manager) Authenticate(secret string) (*access.Authority, error) {
 	if !strings.HasPrefix(secret, "olp_") {
 		return m.authenticateWorkload(secret)
 	}
-	parts := strings.Split(secret, "_")
-	if len(parts) != 3 || parts[0] != "olp" {
+	lookup, rest, found := strings.Cut(secret[len("olp_"):], "_")
+	if !found || strings.Contains(rest, "_") {
 		return nil, ErrInvalidKey
 	}
-	record, ok := keys[parts[1]]
+	record, ok := keys[lookup]
 	if !ok || record.authority.WorkloadIssuerID != nil || record.expiresAt != nil && !time.Now().Before(*record.expiresAt) || !hmac.Equal(record.digest, m.auth.Digest(secrets.APIKeyDigest, secret)) {
 		return nil, ErrInvalidKey
 	}
