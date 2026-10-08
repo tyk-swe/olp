@@ -15,11 +15,14 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -175,6 +178,24 @@ func TestSAMLLoginMappingLinkingAndReplay(t *testing.T) {
 	}
 	h.want(b, "GET", next, nil, nil, 403)
 	samlReceive(t, h, state, raw, 403)
+	// Concurrent completions of one flow mint a single session.
+	racing := &browser{}
+	req, state = samlBegin(t, h, racing, "/api/v1/saml/login", map[string]any{})
+	next = samlReceive(t, h, state, f.response(t, req, "persistent-worker", "saml@example.com", []string{"developers"}, nil), 303)
+	var completed atomic.Int64
+	var wg sync.WaitGroup
+	for range 8 {
+		copied := &browser{Cookies: maps.Clone(racing.Cookies)}
+		wg.Go(func() {
+			if status, _, _ := h.request(copied, "GET", next, nil, nil); status == 303 {
+				completed.Add(1)
+			}
+		})
+	}
+	wg.Wait()
+	if completed.Load() != 1 {
+		t.Fatalf("%d completions of one SAML flow", completed.Load())
+	}
 	req, state = samlBegin(t, h, &browser{}, "/api/v1/saml/login", map[string]any{})
 	samlReceive(t, h, state, raw, 403)
 	// Email never links an existing owner without a recent authenticated flow.

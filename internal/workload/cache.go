@@ -19,7 +19,10 @@ type Cache struct {
 	issuers map[string]*keyCache
 }
 type keyCache struct {
+	// mu guards the fields below and is never held across a fetch; fetching
+	// lets one caller at a time fetch.
 	mu                 sync.Mutex
+	fetching           sync.Mutex
 	url                string
 	keys               map[string]jose.JSONWebKey
 	fetched, attempted time.Time
@@ -57,23 +60,58 @@ func (c *Cache) Keys(ctx context.Context, id, url, kid string, now time.Time) (m
 	}
 	c.mu.Unlock()
 	entry.mu.Lock()
-	defer entry.mu.Unlock()
 	if entry.url != url {
 		entry.url = url
 		entry.keys = nil
 		entry.fetched = time.Time{}
 		entry.attempted = time.Time{}
 	}
-	_, known := entry.keys[kid]
-	if (entry.keys == nil || !known || now.Sub(entry.fetched) >= time.Minute) && now.Sub(entry.attempted) >= 15*time.Second {
-		entry.attempted = now
-		if keys, e := Fetch(ctx, c.client, url); e == nil {
-			entry.keys = keys
-			entry.fetched = now
+	keys, fetched, attempted := entry.keys, entry.fetched, entry.attempted
+	entry.mu.Unlock()
+	_, known := keys[kid]
+	if known && now.Sub(fetched) < time.Minute {
+		return keys, nil
+	}
+	if now.Sub(attempted) >= 15*time.Second {
+		// A caller whose key is cached and usable never waits on another's fetch,
+		// so a token naming an unknown key cannot stall the issuer's known ones.
+		if known && now.Sub(fetched) < 5*time.Minute {
+			if entry.fetching.TryLock() {
+				entry.refresh(ctx, c.client, url, now)
+				entry.fetching.Unlock()
+			}
+		} else {
+			entry.fetching.Lock()
+			entry.refresh(ctx, c.client, url, now)
+			entry.fetching.Unlock()
 		}
 	}
-	if entry.keys == nil || now.Sub(entry.fetched) >= 5*time.Minute {
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if entry.url != url || entry.keys == nil || now.Sub(entry.fetched) >= 5*time.Minute {
 		return nil, ErrKeys
 	}
 	return entry.keys, nil
+}
+
+// refresh fetches the key set unless another caller attempted it while this
+// one waited. The caller holds fetching.
+func (e *keyCache) refresh(ctx context.Context, client *http.Client, url string, now time.Time) {
+	e.mu.Lock()
+	if e.url != url || now.Sub(e.attempted) < 15*time.Second {
+		e.mu.Unlock()
+		return
+	}
+	e.attempted = now
+	e.mu.Unlock()
+	keys, err := Fetch(ctx, client, url)
+	if err != nil {
+		return
+	}
+	e.mu.Lock()
+	if e.url == url {
+		e.keys = keys
+		e.fetched = now
+	}
+	e.mu.Unlock()
 }

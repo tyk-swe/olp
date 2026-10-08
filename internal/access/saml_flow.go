@@ -296,8 +296,14 @@ func (s *Server) completeSAML(r *http.Request) (Reply, error) {
 	if !c.Enabled || c.ETag != flow.ETag {
 		return Reply{}, Fail(403, "saml_flow_invalid", "The SAML configuration changed.")
 	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", flow.ID); err != nil {
+	// Concurrent completions can both read the flow, but only the one whose
+	// delete consumes it continues, so an assertion mints one session.
+	consumed, err := tx.Exec(r.Context(), "DELETE FROM olp.secrets WHERE id=$1", flow.ID)
+	if err != nil {
 		return Reply{}, err
+	}
+	if consumed.RowsAffected() != 1 {
+		return Reply{}, Fail(403, "saml_flow_invalid", "Start SAML sign-in again.")
 	}
 	response, err := s.acceptSAML(r, tx, c, flow)
 	if err != nil {

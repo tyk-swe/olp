@@ -161,3 +161,44 @@ func TestCachedKeyRotationAndBoundedOutage(t *testing.T) {
 		t.Fatal("stale keys survived indefinitely")
 	}
 }
+
+func TestCachedKeysDoNotWaitForAnUnknownKeyFetch(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	var calls atomic.Int64
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) > 1 {
+			<-release
+		}
+		json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: pub, KeyID: "known", Algorithm: "EdDSA"}}})
+	}))
+	defer server.Close()
+	defer close(release)
+	cache := NewCache(server.Client())
+	now := time.Now()
+	ctx := context.Background()
+	if _, e := cache.Keys(ctx, "issuer", server.URL, "known", now); e != nil {
+		t.Fatal(e)
+	}
+	// An unknown key holds a fetch open, and known keys still verify meanwhile,
+	// both before and after they are due for a refresh.
+	go cache.Keys(ctx, "issuer", server.URL, "unknown", now.Add(16*time.Second))
+	for calls.Load() < 2 {
+		time.Sleep(time.Millisecond)
+	}
+	for _, at := range []time.Duration{20 * time.Second, 2 * time.Minute} {
+		done := make(chan error, 1)
+		go func() {
+			_, e := cache.Keys(ctx, "issuer", server.URL, "known", now.Add(at))
+			done <- e
+		}()
+		select {
+		case e := <-done:
+			if e != nil {
+				t.Fatal(e)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("a cached key waited on another fetch at %v", at)
+		}
+	}
+}
