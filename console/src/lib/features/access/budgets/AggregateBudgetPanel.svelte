@@ -107,7 +107,7 @@
 </script>
 
 <section aria-label={title}>
-  <h3>{title}</h3>
+  <h2>{title}</h2>
   <p>
     Caps total inference spend, including shadow traffic and probes. Every
     applicable budget must allow a request. Subscription token allowances remain

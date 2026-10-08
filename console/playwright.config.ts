@@ -38,10 +38,14 @@ export default defineConfig({
     },
     {
       name: 'vite',
-      testMatch: [
-        '**/basics/{shell,vite-smoke}.spec.ts',
-        '**/access/mfa.spec.ts'
-      ],
+      testMatch: '**/basics/{shell,vite-smoke}.spec.ts',
+      use: { baseURL: 'http://localhost:4183' }
+    },
+    {
+      // Signing in completes setup, which the Vite smoke test walks itself.
+      name: 'vite-mfa',
+      testMatch: '**/access/mfa.spec.ts',
+      dependencies: ['vite'],
       use: { baseURL: 'http://localhost:4183' }
     }
   ],
