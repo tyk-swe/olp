@@ -47,9 +47,16 @@ func New(t testing.TB, baseURL, key string, websocket bool) *Client {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := os.RemoveAll(home); err != nil {
-			t.Error(err)
+		// Codex can still be cloning its plugin catalogue into the home when a
+		// command returns, so removal retries while that clone settles.
+		var err error
+		for range 50 {
+			if err = os.RemoveAll(home); err == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
+		t.Error(err)
 	})
 	c := &Client{Binary: binary, Home: home, Work: t.TempDir(), Key: key}
 	config := fmt.Sprintf(`model = %q
