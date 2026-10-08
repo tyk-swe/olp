@@ -47,6 +47,9 @@ type Vendor struct {
 	// codeplans.Principal, rather than a refreshed OAuth grant.
 	KeyGrant  bool
 	Protocols []codemode.Protocol
+	// Endpoint, when set, is the one protocol the adapter serves a model on;
+	// otherwise each of Protocols serves every model.
+	Endpoint func(model string) codemode.Protocol
 	// Paths maps each client path under a route to the upstream path that
 	// extends the profile's hosting address.
 	Paths map[string]string
@@ -66,9 +69,9 @@ var vendors = []Vendor{
 	},
 	{
 		Adapter: codemode.AdapterOpenCodeGo, Name: "OpenCode Go", Profiles: []string{codeplans.OpenCodeGoProfile}, Manifest: codeplans.OpenCodeGoManifest, KeyGrant: true,
-		Protocols: []codemode.Protocol{codemode.ProtocolChat, codemode.ProtocolMessages, codemode.ProtocolResponses},
-		Paths:     map[string]string{"v1/chat/completions": "chat/completions", "v1/messages": "messages", "v1/responses": "responses"},
-		Clients:   []string{ClientOpenCode, ClientClaudeCode},
+		Protocols: []codemode.Protocol{codemode.ProtocolChat, codemode.ProtocolMessages, codemode.ProtocolResponses}, Endpoint: openCodeGoEndpoint,
+		Paths:   map[string]string{"v1/chat/completions": "chat/completions", "v1/messages": "messages", "v1/responses": "responses"},
+		Clients: []string{ClientOpenCode, ClientClaudeCode},
 	},
 	{
 		Adapter: codemode.AdapterZAICoding, Name: "GLM Coding Plan", Profiles: []string{codeplans.ZAIProfile, codeplans.BigModelProfile}, Manifest: codeplans.ZAIManifest, KeyGrant: true,
@@ -76,6 +79,26 @@ var vendors = []Vendor{
 		Paths:     map[string]string{"v1/messages": "anthropic/v1/messages", "v1/chat/completions": "coding/paas/v4/chat/completions"},
 		Clients:   []string{ClientClaudeCode, ClientOpenCode},
 	},
+}
+
+// clientProtocols lists the protocols each client speaks.
+var clientProtocols = map[string][]codemode.Protocol{
+	ClientCodex:      {codemode.ProtocolResponses},
+	ClientClaudeCode: {codemode.ProtocolMessages},
+	ClientOpenCode:   {codemode.ProtocolChat, codemode.ProtocolMessages, codemode.ProtocolResponses},
+}
+
+// openCodeGoEndpoint is the protocol OpenCode Go serves a model on: Messages
+// for MiniMax and Qwen, Responses for GPT and Grok, and Chat Completions for
+// the rest.
+func openCodeGoEndpoint(model string) codemode.Protocol {
+	switch model = strings.ToLower(model); {
+	case strings.HasPrefix(model, "minimax"), strings.HasPrefix(model, "qwen"):
+		return codemode.ProtocolMessages
+	case strings.HasPrefix(model, "gpt"), strings.HasPrefix(model, "grok"):
+		return codemode.ProtocolResponses
+	}
+	return codemode.ProtocolChat
 }
 
 // Lookup returns an adapter's row.
@@ -120,6 +143,18 @@ func (v Vendor) Serves(p codemode.Protocol) bool { return slices.Contains(v.Prot
 
 // Supports reports whether OLP generates configuration for a client.
 func (v Vendor) Supports(client string) bool { return slices.Contains(v.Clients, client) }
+
+// Reaches reports whether a client OLP generates configuration for reaches a
+// model through the adapter: the client speaks a protocol the adapter serves
+// the model on.
+func (v Vendor) Reaches(client, model string) bool {
+	return v.Supports(client) && slices.ContainsFunc(clientProtocols[client], func(p codemode.Protocol) bool {
+		if v.Endpoint != nil {
+			return v.Endpoint(model) == p
+		}
+		return v.Serves(p)
+	})
+}
 
 // Address returns a profile's hosting address, the upstream base its
 // requests' paths extend.

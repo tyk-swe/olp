@@ -89,3 +89,28 @@ func TestCredentialHeaderFollowsTheNativeClient(t *testing.T) {
 		}
 	}
 }
+
+func TestClientsReachOnlyModelsServedOnTheirProtocols(t *testing.T) {
+	for _, test := range []struct {
+		adapter       codemode.Adapter
+		client, model string
+		want          bool
+	}{
+		{codemode.AdapterOpenCodeGo, ClientClaudeCode, "minimax-m3", true},
+		{codemode.AdapterOpenCodeGo, ClientClaudeCode, "Qwen3.6-Plus", true},
+		{codemode.AdapterOpenCodeGo, ClientClaudeCode, "gpt-5.5", false},
+		{codemode.AdapterOpenCodeGo, ClientClaudeCode, "kimi-k3", false},
+		{codemode.AdapterOpenCodeGo, ClientOpenCode, "gpt-5.5", true},
+		{codemode.AdapterOpenCodeGo, ClientOpenCode, "kimi-k3", true},
+		{codemode.AdapterOpenCodeGo, ClientCodex, "gpt-5.5", false},
+		{codemode.AdapterZAICoding, ClientClaudeCode, "glm-5.3", true},
+		{codemode.AdapterZAICoding, ClientOpenCode, "glm-5.3", true},
+		{codemode.AdapterCodex, ClientCodex, "gpt-5.5", true},
+		{codemode.AdapterCodex, ClientClaudeCode, "gpt-5.5", false},
+	} {
+		v, _ := Lookup(test.adapter)
+		if got := v.Reaches(test.client, test.model); got != test.want {
+			t.Fatalf("%s %s %s: %v", test.adapter, test.client, test.model, got)
+		}
+	}
+}

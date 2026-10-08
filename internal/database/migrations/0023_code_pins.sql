@@ -3,8 +3,11 @@
 -- admission of each model pins the account that serves it for the tree's
 -- lifetime, and a tree holds at most one account of each family. A tree's
 -- binding names its first account, which later models prefer when it serves
--- them.
+-- them. seq orders a tree's pins as it made them: it is drawn as the row is
+-- inserted under the admission lock, while created_at is its transaction's
+-- start.
 CREATE TABLE olp.code_pins (
+    seq bigint GENERATED ALWAYS AS IDENTITY,
     root_id uuid NOT NULL REFERENCES olp.code_bindings,
     model text NOT NULL CHECK (octet_length(model) BETWEEN 1 AND 200),
     account_id uuid NOT NULL REFERENCES olp.code_accounts,

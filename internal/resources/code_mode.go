@@ -310,7 +310,7 @@ func liveCodeTree(ctx context.Context, tx pgx.Tx, b codemode.Binding) error {
 
 // codePins returns the pins of a conversation tree in the order it made them.
 func codePins(ctx context.Context, tx pgx.Tx, root string) ([]codemode.Pin, error) {
-	rows, err := tx.Query(ctx, `SELECT model,account_id::text,principal,created_at FROM olp.code_pins WHERE root_id=$1 ORDER BY created_at,model`, root)
+	rows, err := tx.Query(ctx, `SELECT model,account_id::text,principal,created_at FROM olp.code_pins WHERE root_id=$1 ORDER BY seq`, root)
 	if err != nil {
 		return nil, err
 	}

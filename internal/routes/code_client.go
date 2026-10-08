@@ -118,8 +118,9 @@ type ClientRequest struct {
 // ClientConfiguration generates a client's configuration for a published
 // route, never its mutable draft. GatewayURL is the operator-configured public
 // gateway origin and prefix. A client's native models are the route's models
-// an adapter supporting it offers, so one configuration can draw on several
-// subscriptions: each request reaches an account serving its model.
+// an adapter offers on a protocol the client speaks, so one configuration can
+// draw on several subscriptions: each request reaches an account serving its
+// model.
 func ClientConfiguration(route codemode.Route, offers Offers, in ClientRequest) (codemode.ClientConfiguration, error) {
 	var out codemode.ClientConfiguration
 	if !route.Enabled || route.RevisionID == "" || !access.RouteSlug.MatchString(route.Slug) {
@@ -133,7 +134,7 @@ func ClientConfiguration(route codemode.Route, offers Offers, in ClientRequest) 
 		for _, adapter := range offers[model] {
 			vendor, _ := codeadapter.Lookup(adapter)
 			for _, client := range vendor.Clients {
-				if !slices.Contains(supported, client) {
+				if vendor.Reaches(client, model) && !slices.Contains(supported, client) {
 					supported = append(supported, client)
 				}
 			}
@@ -154,7 +155,7 @@ func ClientConfiguration(route codemode.Route, offers Offers, in ClientRequest) 
 	var adapters []codemode.Adapter
 	for _, model := range route.Models {
 		for _, adapter := range offers[model] {
-			if vendor, _ := codeadapter.Lookup(adapter); vendor.Supports(client) {
+			if vendor, _ := codeadapter.Lookup(adapter); vendor.Reaches(client, model) {
 				if !slices.Contains(native, model) {
 					native = append(native, model)
 				}
@@ -392,7 +393,7 @@ func qualificationGaps(adapters []codemode.Adapter, client string) []string {
 			"Server tools such as web search and web fetch, and claude.ai login features, are outside code mode.",
 			"Each generation is limited to ten minutes; raising API_TIMEOUT_MS cannot extend it.")
 		if slices.Contains(adapters, codemode.AdapterOpenCodeGo) {
-			gaps = append(gaps, "OpenCode Go serves Anthropic Messages only for some models, such as MiniMax and Qwen; choose one of those for Claude Code.")
+			gaps = append(gaps, "OpenCode Go serves Anthropic Messages only for some models, such as MiniMax and Qwen, so Claude Code is offered only those.")
 		}
 	case codeadapter.ClientOpenCode:
 		gaps = append(gaps,

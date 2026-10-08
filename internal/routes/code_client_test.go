@@ -138,6 +138,7 @@ func TestClientConfigurationRefusesUnsupportedSelections(t *testing.T) {
 	}{
 		{codemode.AdapterZAICoding, ClientRequest{Client: "codex"}, "client"},
 		{codemode.AdapterCodex, ClientRequest{Client: "claude-code"}, "client"},
+		{codemode.AdapterOpenCodeGo, ClientRequest{Client: "claude-code"}, "client"},
 		{codemode.AdapterOpenCodeGo, ClientRequest{Client: "cline"}, "client"},
 		{codemode.AdapterCodex, ClientRequest{SmallModel: "glm-5.3"}, "small_model"},
 		{codemode.AdapterCodex, ClientRequest{PlanModel: "glm-5.3"}, "plan_model"},
@@ -154,6 +155,7 @@ func TestClientConfigurationRefusesUnsupportedSelections(t *testing.T) {
 	if _, err := ClientConfiguration(route, offer("unknown", route.Models...), ClientRequest{GatewayURL: "https://gateway.example"}); err == nil {
 		t.Fatal("unknown adapter generated configuration")
 	}
+	route.Models = []string{"glm-5.3", "minimax-m3"}
 	for _, adapter := range []codemode.Adapter{codemode.AdapterCodex, codemode.AdapterOpenCodeGo, codemode.AdapterZAICoding} {
 		v, _ := codeadapter.Lookup(adapter)
 		for _, client := range v.Clients {
@@ -179,8 +181,14 @@ func TestMixedRouteConfigurationsDrawEachModelFromItsSubscription(t *testing.T) 
 	}
 	claude, err := ClientConfiguration(route, offers, ClientRequest{GatewayURL: "https://gateway.example", PlanModel: "minimax-m3"})
 	if err != nil || claude.Client != "claude-code" || !reflect.DeepEqual(claude.SupportedClients, []string{"claude-code", "opencode", "codex"}) ||
-		!reflect.DeepEqual(claude.Adapters, []codemode.Adapter{codemode.AdapterOpenCodeGo, codemode.AdapterZAICoding}) || !reflect.DeepEqual(claude.NativeModels, route.Models) {
+		!reflect.DeepEqual(claude.Adapters, []codemode.Adapter{codemode.AdapterOpenCodeGo, codemode.AdapterZAICoding}) || !reflect.DeepEqual(claude.NativeModels, []string{"glm-5.3", "minimax-m3"}) {
 		t.Fatalf("Claude Code configuration: %+v %v", claude, err)
+	}
+	// No subscription serves GPT on Messages, so Claude Code cannot plan with it.
+	if _, err := ClientConfiguration(route, offers, ClientRequest{GatewayURL: "https://gateway.example", PlanModel: "gpt-5.5"}); err == nil {
+		t.Fatal("Claude Code planned with a Responses model")
+	} else if problem, ok := errors.AsType[*access.Problem](err); !ok || problem.Field != "plan_model" {
+		t.Fatalf("Claude Code GPT plan: %v", err)
 	}
 	if want := `# Claude Code 2.1.286 for OLP code-mode route team-mix (OpenCode Go and GLM Coding Plan).
 # Source this file in a POSIX shell, such as bash or zsh, before starting claude.
