@@ -108,19 +108,20 @@ func (a Allowance) Validate() error {
 // published route. Configuration is text in Format, saved as File, or sourced
 // in a shell when File is nil. It never contains an OLP key.
 type ClientConfiguration struct {
-	RouteSlug         string   `json:"route_slug"`
-	BaseURL           string   `json:"base_url"`
-	NativeModels      []string `json:"native_models"`
-	Adapter           Adapter  `json:"adapter"`
-	Client            string   `json:"client"`
-	SupportedClients  []string `json:"supported_clients"`
-	ClientVersion     string   `json:"client_version"`
-	Model             string   `json:"model"`
-	SmallModel        *string  `json:"small_model"`
-	Format            string   `json:"format"`
-	File              *string  `json:"file"`
-	Configuration     string   `json:"configuration"`
-	QualificationGaps []string `json:"qualification_gaps"`
+	RouteSlug         string    `json:"route_slug"`
+	BaseURL           string    `json:"base_url"`
+	NativeModels      []string  `json:"native_models"`
+	Adapters          []Adapter `json:"adapters"`
+	Client            string    `json:"client"`
+	SupportedClients  []string  `json:"supported_clients"`
+	ClientVersion     string    `json:"client_version"`
+	Model             string    `json:"model"`
+	PlanModel         *string   `json:"plan_model"`
+	SmallModel        *string   `json:"small_model"`
+	Format            string    `json:"format"`
+	File              *string   `json:"file"`
+	Configuration     string    `json:"configuration"`
+	QualificationGaps []string  `json:"qualification_gaps"`
 }
 
 type Pool struct {
@@ -162,6 +163,15 @@ func (i Identity) Validate() error {
 		return Refuse(400, "code_identity_invalid")
 	}
 	return nil
+}
+
+// Pin is the account a conversation tree serves one model from. A tree's
+// first admission of a model pins it, and the pin never moves.
+type Pin struct {
+	Model     string    `json:"model"`
+	AccountID string    `json:"account_id"`
+	Principal string    `json:"principal"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Binding struct {

@@ -155,16 +155,18 @@ mode's classifier needs a real model.
 | OLP-key-only configuration | Generated Claude Code shell and OpenCode JSON run unmodified; decoy credentials overridden; no `auth.json` | Controlled only |
 | Claude Code on GLM Coding Plan and OpenCode Go | Tool loop (`Read`), subagent (`Agent`) bound beneath its session, `--continue`; every model variable on the route | Controlled only; OpenCode Go only for Messages models |
 | OpenCode on GLM Coding Plan and OpenCode Go | Tool loop (`read`), child session (`task`) bound beneath its parent, `--continue`; Chat Completions with `include_usage`, and Messages for OpenCode Go | Controlled only |
+| Mixed subscriptions | Claude Code plans in plan mode through `opusplan` on an OpenCode Go model and implements on a GLM model; OpenCode's plan agent and build agent do the same. Each model reaches its own host with its own account's key, and the session's tree pins one account per model and holds at most one account of each subscription. Raw forwarding sends each path and model of a mixed route to its subscription; a cooling pin refuses its model while the tree's other models stay served | Controlled scripted vendors only; no live vendor has accepted another vendor's history |
 | OpenCode Go Responses | Raw forwarding through `v1/responses`, client identity, `previous_response_id` reference; OpenCode's request shape captured | Controlled only; no real-client Responses journey |
-| Payload and header fidelity | Byte-identical bodies and SSE (with pings), forwarded `anthropic-*` and client headers, `?beta=true`, OLP key consumed from `Authorization` or `X-API-Key`, the adapter's single credential header placed | Controlled only |
+| Payload and header fidelity | Byte-identical bodies and SSE (with pings), forwarded `anthropic-*` and client headers, `?beta=true`, OLP key consumed from `Authorization` or `X-API-Key`, the serving account's adapter's single credential header placed | Controlled only |
 | Upstream placement | `api.z.ai` and `open.bigmodel.cn` paths for Messages and Chat; `opencode.ai/zen/go/v1` for all three; Anthropic-shaped refusals on Messages paths | Controlled fixed-host TLS peers |
 | Conversation trees | Claude Code session, agent and nested agent; OpenCode parent and child; unresolved parent, anonymous and ambiguous identity refused before dispatch | Controlled only |
 | No replay or failover | A 429 is relayed byte for byte, cools the account, and the retry refuses without dispatch or switching accounts | Controlled only |
-| Adapter management | Mixed pools and publications refused; route, revision and account `adapter`; client-config clients, formats and 422s | Controlled only |
-| Console | Client and model pickers, adapter badges, masked key enrollment, axe at desktop and 390px | Browser suite |
+| Adapter management | Mixed pools and publications accepted; account `adapter`, route and revision `adapters`, binding `pins`; client-config clients, native models per client, planning model, formats and 422s | Controlled only |
+| Console | Client, model and planning-model pickers, adapter badges, model pins, masked key enrollment, axe at desktop and 390px on a mixed route | Browser suite |
 | Real coding-plan account | No key supplied or used | Unqualified |
 
 Not qualified: Codex-path or WebSocket traffic on these adapters, which refuses;
+a live vendor accepting a conversation another vendor's model contributed to;
 `count_tokens`; Z.ai's MCP servers; vendor allowance windows; hard token
 budgets; agent teams; shells other than POSIX `sh`-compatible ones; Linux
 arm64 execution.
@@ -178,8 +180,9 @@ OLP_TEST_PULL_POLICY=missing ./scripts/integration.sh code
 ```
 
 `code` runs every `TestCode*` test, including `TestCodeCodingPlan*` and the
-real-client `TestCodeQualificationClaudeCodeJourneys` and
-`TestCodeQualificationOpenCodeJourneys`. `process` mode runs the journeys with
+real-client `TestCodeQualificationClaudeCodeJourneys`,
+`TestCodeQualificationOpenCodeJourneys` and
+`TestCodeQualificationMixedSubscriptionJourneys`. `process` mode runs the journeys with
 the other `TestCodeQualification` tests, given exported
 `OLP_CLAUDE_CODE_BINARY` and `OLP_OPENCODE_BINARY`.
 

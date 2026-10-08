@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -73,7 +76,7 @@ func (f *codeFixture) addKey(t *testing.T, id string) {
 	f.exec(t, `INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,policy,etag,project_id) VALUES($1::uuid,$1::text,'\x00','Fixture key',$2,'{"scopes":["inference"],"allowed_routes":["coding"]}',$3,$4)`, id, f.user, access.NewID(), f.project)
 }
 func (f *codeFixture) input(conversation, parent string, bound *codemode.TokenBound) resources.CodeAdmission {
-	return resources.CodeAdmission{Route: f.route, APIKeyID: f.key, Operation: codemode.Operation{Name: "responses.create", Model: "native-model", Identity: codemode.Identity{Conversation: conversation, Parent: parent}}, Bound: bound}
+	return resources.CodeAdmission{Route: f.route, APIKeyID: f.key, Providers: []string{f.provider}, Operation: codemode.Operation{Name: "responses.create", Model: "native-model", Identity: codemode.Identity{Conversation: conversation, Parent: parent}}, Bound: bound}
 }
 func codeRefusal(t *testing.T, err error, code string) {
 	t.Helper()
@@ -228,6 +231,185 @@ func TestCodeFoundationRotationAndLiveAuthority(t *testing.T) {
 	f.exec(t, `UPDATE olp.api_keys SET revoked_at=now() WHERE id=$1`, f.key)
 	_, err = f.store.Admit(t.Context(), f.input("fresh", "", nil))
 	codeRefusal(t, err, "code_permission_denied")
+}
+
+// A tree holds one account of each subscription family, which the frozen
+// connections of the route's revision identify. Editing a provider's draft
+// configuration after publication must not move that comparison: it could
+// reject a valid account of another frozen family or admit a second account
+// of a family the tree already pins.
+func TestCodeFoundationFrozenFamiliesSurviveProviderDrafts(t *testing.T) {
+	f := newCodeFixture(t)
+	h, owner := f.h, f.owner
+	f.exec(t, `UPDATE olp.api_keys SET policy=jsonb_set(policy,'{allowed_routes}','["coding","mixed"]') WHERE id=$1`, f.key)
+	// Two providers of the Z.ai family through different profiles, and one
+	// OpenCode Go provider, frozen into the mixed route's connections.
+	add := func(name, profile string, models []string) (provider string, account map[string]any) {
+		provider = access.NewID()
+		f.exec(t, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,'plugin','draft',$3,$4,$5,$6,$7)`,
+			provider, name, `{"kind":"plugin","auth_mode":"grant","profile_id":"`+profile+`"}`, access.NewID(), access.NewID(), f.user, f.project)
+		credential := access.NewID()
+		f.exec(t, `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts) VALUES($1,$2,1,'fixture-digest',$3,'{}')`, credential, provider, "principal-"+profile)
+		f.exec(t, `INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, credential)
+		account = h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": name, "enabled": true, "models": models}, idem("account-"+profile), 201)
+		return provider, account
+	}
+	zai, glm := add("ZAI plan", codeplans.ZAIProfile, []string{"glm-5.3"})
+	bigmodel, kimiB := add("BigModel plan", codeplans.BigModelProfile, []string{"minimax-m3"})
+	opencodego, kimiO := add("OpenCode Go", codeplans.OpenCodeGoProfile, []string{"minimax-m3"})
+	glmID, kimiBID, kimiOID := glm["id"].(string), kimiB["id"].(string), kimiO["id"].(string)
+	pool := h.want(owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": f.project, "name": "Mixed pool", "kind": "shared", "owner_user_id": nil, "account_ids": []string{glmID, kimiBID, kimiOID}, "api_key_ids": []string{f.key}}, idem("mixed-pool"), 201)
+	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": f.project, "slug": "mixed", "pool_id": pool["id"], "models": []string{"glm-5.3", "minimax-m3"}, "enabled": true}, idem("mixed-route"), 201)
+	published := h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(draft, idem("mixed-publish")), 200)
+	route := codePublicDecode[codemode.Route](t, published)
+	in := func(conversation, model string) resources.CodeAdmission {
+		return resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: []string{zai, bigmodel, opencodego}, Operation: codemode.Operation{Name: "messages.create", Model: model, Identity: codemode.Identity{Conversation: conversation}}}
+	}
+	edit := func(provider, profile string) {
+		f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{profile_id}',to_jsonb($2::text)) WHERE id=$1`, provider, profile)
+	}
+	permit, err := f.store.Admit(t.Context(), in("c1", "glm-5.3"))
+	if err != nil || permit.Account.ID != glmID {
+		t.Fatalf("GLM pin: %v %v", permit.Account.ID, err)
+	}
+	// The OpenCode provider's draft claims the Z.ai family: the tree must
+	// still admit its account, the only frozen family it does not pin yet.
+	edit(opencodego, codeplans.ZAIProfile)
+	permit, err = f.store.Admit(t.Context(), in("c1", "minimax-m3"))
+	if err != nil {
+		t.Fatal("frozen OpenCode Go family refused after a draft edit:", err)
+	}
+	if permit.Pin.Model != "minimax-m3" || permit.Account.ID != kimiOID {
+		t.Fatalf("minimax pinned %v, want the OpenCode Go account %v", permit.Account.ID, kimiOID)
+	}
+	// The BigModel provider's draft claims OpenCode Go: the tree must still
+	// refuse it as the Z.ai family it already pins, not admit a second one.
+	edit(bigmodel, codeplans.OpenCodeGoProfile)
+	permit, err = f.store.Admit(t.Context(), in("c2", "glm-5.3"))
+	if err != nil || permit.Account.ID != glmID {
+		t.Fatalf("second tree's GLM pin: %v %v", permit.Account.ID, err)
+	}
+	permit, err = f.store.Admit(t.Context(), in("c2", "minimax-m3"))
+	if err != nil {
+		t.Fatal("second tree's minimax refused:", err)
+	}
+	if permit.Account.ID != kimiOID {
+		t.Fatalf("second tree pinned %v, want %v: the BigModel account shares its frozen Z.ai family", permit.Account.ID, kimiOID)
+	}
+}
+
+// Bindings and their pins outlive a republish, which can give two accounts a
+// tree pins one subscription family. The tree's earlier account keeps the
+// family and the later one refuses its pinned model, so the vendor's
+// conversation state stays on one account.
+func TestCodeFoundationRepublishedFamiliesRefuseCollidingPins(t *testing.T) {
+	f := newCodeFixture(t)
+	h, owner := f.h, f.owner
+	f.exec(t, `UPDATE olp.api_keys SET policy=jsonb_set(policy,'{allowed_routes}','["coding","mixed"]') WHERE id=$1`, f.key)
+	add := func(name, profile string, models []string) (provider, account string) {
+		provider = access.NewID()
+		f.exec(t, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,'plugin','draft',$3,$4,$5,$6,$7)`,
+			provider, name, `{"kind":"plugin","auth_mode":"grant","profile_id":"`+profile+`"}`, access.NewID(), access.NewID(), f.user, f.project)
+		credential := access.NewID()
+		f.exec(t, `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts) VALUES($1,$2,1,'fixture-digest',$3,'{}')`, credential, provider, "principal-"+profile)
+		f.exec(t, `INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, credential)
+		record := h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": name, "enabled": true, "models": models}, idem("account-"+profile), 201)
+		return provider, record["id"].(string)
+	}
+	zai, glm := add("ZAI plan", codeplans.ZAIProfile, []string{"glm-5.3"})
+	opencodego, minimax := add("OpenCode Go", codeplans.OpenCodeGoProfile, []string{"minimax-m3"})
+	codex, gpt := add("Codex", codexauth.ProfileID, []string{"gpt-5.5"})
+	pool := h.want(owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": f.project, "name": "Mixed pool", "kind": "shared", "owner_user_id": nil, "account_ids": []string{glm, minimax, gpt}, "api_key_ids": []string{f.key}}, idem("mixed-pool"), 201)
+	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": f.project, "slug": "mixed", "pool_id": pool["id"], "models": []string{"glm-5.3", "minimax-m3", "gpt-5.5"}, "enabled": true}, idem("mixed-route"), 201)
+	published := h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(draft, idem("mixed-publish")), 200)
+	admit := func(model string) (resources.CodePermit, error) {
+		route := codePublicDecode[codemode.Route](t, published)
+		return f.store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: []string{zai, opencodego, codex}, Operation: codemode.Operation{Name: "messages.create", Model: model, Identity: codemode.Identity{Conversation: "c1"}}})
+	}
+	var root string
+	for _, pin := range [][2]string{{"glm-5.3", glm}, {"minimax-m3", minimax}} {
+		permit, err := admit(pin[0])
+		if err != nil || permit.Account.ID != pin[1] {
+			t.Fatalf("%s pin: %v %v", pin[0], permit.Account.ID, err)
+		}
+		root = permit.Binding.RootID
+	}
+	// A pin whose transaction started first can be inserted last, so its
+	// creation time precedes the pin made before it.
+	f.exec(t, `INSERT INTO olp.code_pins(root_id,model,account_id,principal,adapter,created_at) SELECT root_id,'gpt-5.5',$2,$3,'codex',created_at-interval '1 second' FROM olp.code_pins WHERE root_id=$1 AND model='minimax-m3'`,
+		root, gpt, "principal-"+codexauth.ProfileID)
+	// The Codex provider becomes OpenCode Go, so the republished route freezes
+	// two of the tree's accounts into one family. The one the tree pinned first
+	// keeps it.
+	f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{profile_id}',to_jsonb($2::text)) WHERE id=$1`, codex, codeplans.OpenCodeGoProfile)
+	published = h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(published, idem("mixed-republish")), 200)
+	for _, pin := range [][2]string{{"glm-5.3", glm}, {"minimax-m3", minimax}} {
+		if permit, err := admit(pin[0]); err != nil || permit.Account.ID != pin[1] {
+			t.Fatalf("%s after republish: %v %v", pin[0], permit.Account.ID, err)
+		}
+	}
+	_, err := admit("gpt-5.5")
+	codeRefusal(t, err, "code_account_unavailable")
+	var models []string
+	for _, item := range h.want(owner, "GET", "/api/v1/code/bindings?project_id="+f.project, nil, nil, 200)["items"].([]any) {
+		if binding := item.(map[string]any); binding["conversation"] == "c1" {
+			for _, pin := range binding["pins"].([]any) {
+				models = append(models, pin.(map[string]any)["model"].(string))
+			}
+		}
+	}
+	if strings.Join(models, " ") != "glm-5.3 minimax-m3 gpt-5.5" {
+		t.Fatalf("binding pins: %v", models)
+	}
+	// Accounts after the tree's first serve it only through pins.
+	for _, account := range []string{glm, minimax, gpt, f.account} {
+		items := h.want(owner, "GET", "/api/v1/code/bindings?project_id="+f.project+"&account_id="+account, nil, nil, 200)["items"].([]any)
+		if found := slices.ContainsFunc(items, func(item any) bool { return item.(map[string]any)["root_id"] == root }); found != (account != f.account) {
+			t.Fatalf("bindings of account %s: %v", account, items)
+		}
+	}
+}
+
+// A republish can drop the provider of an account a tree pins, which then
+// has no family in the revision. The tree keeps the family its pin recorded,
+// so another account of that family still cannot join it.
+func TestCodeFoundationTreesKeepTheFamiliesOfDroppedAccounts(t *testing.T) {
+	f := newCodeFixture(t)
+	h, owner := f.h, f.owner
+	f.exec(t, `UPDATE olp.api_keys SET policy=jsonb_set(policy,'{allowed_routes}','["coding","mixed"]') WHERE id=$1`, f.key)
+	add := func(name string) (provider, account string) {
+		provider = access.NewID()
+		f.exec(t, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,$2,'plugin','draft',$3,$4,$5,$6,$7)`,
+			provider, name, `{"kind":"plugin","auth_mode":"grant","profile_id":"`+codeplans.ZAIProfile+`"}`, access.NewID(), access.NewID(), f.user, f.project)
+		credential := access.NewID()
+		f.exec(t, `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts) VALUES($1,$2,1,'fixture-digest',$3,'{}')`, credential, provider, "principal-"+name)
+		f.exec(t, `INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, credential)
+		record := h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": name, "enabled": true, "models": []string{"glm-5.3", "glm-4.7"}}, idem("account-"+name), 201)
+		return provider, record["id"].(string)
+	}
+	dropped, first := add("First plan")
+	replacement, second := add("Second plan")
+	pool := map[string]any{"project_id": f.project, "name": "Mixed pool", "kind": "shared", "owner_user_id": nil, "account_ids": []string{first}, "api_key_ids": []string{f.key}}
+	created := h.want(owner, "POST", "/api/v1/code/pools", pool, idem("mixed-pool"), 201)
+	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": f.project, "slug": "mixed", "pool_id": created["id"], "models": []string{"glm-5.3", "glm-4.7"}, "enabled": true}, idem("mixed-route"), 201)
+	published := h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(draft, idem("mixed-publish")), 200)
+	admit := func(conversation, model string, providers ...string) (resources.CodePermit, error) {
+		route := codePublicDecode[codemode.Route](t, published)
+		return f.store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: providers, Operation: codemode.Operation{Name: "messages.create", Model: model, Identity: codemode.Identity{Conversation: conversation}}})
+	}
+	if permit, err := admit("c1", "glm-5.3", dropped); err != nil || permit.Account.ID != first {
+		t.Fatalf("first pin: %v %v", permit.Account.ID, err)
+	}
+	pool["account_ids"] = []string{second}
+	h.want(owner, "PUT", "/api/v1/code/pools/"+created["id"].(string), pool, etagHeader(created), 200)
+	published = h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(published, idem("mixed-republish")), 200)
+	for _, model := range []string{"glm-5.3", "glm-4.7"} {
+		_, err := admit("c1", model, replacement)
+		codeRefusal(t, err, "code_account_unavailable")
+	}
+	if permit, err := admit("c2", "glm-4.7", replacement); err != nil || permit.Account.ID != second {
+		t.Fatalf("a new tree's pin: %v %v", permit.Account.ID, err)
+	}
 }
 
 func TestCodeFoundationTokenReservationsAcrossReplicas(t *testing.T) {

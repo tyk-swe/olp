@@ -28,7 +28,8 @@ import (
 const codeGenerationTimeout = 10 * time.Minute
 
 // RegisterCode mounts raw code-mode transport, which requires CodeLedger and
-// CodeAuthorizer. Each route's adapter decides the paths it serves. It never
+// CodeAuthorizer. A route serves the paths of its accounts' adapters, and
+// each request goes to an account whose adapter serves its path. It never
 // invokes ordinary request preparation, credential failover, response
 // transformation or retries.
 func (s *Server) RegisterCode(mux *http.ServeMux) {
@@ -70,18 +71,18 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(400, "code_operation_unsupported"))
 		return
 	}
-	adapter := release.Snapshot.CodeAdapter(route)
-	if adapter == "" {
+	adapters := release.Snapshot.CodeAdapters(route)
+	if len(adapters) == 0 {
 		refuse(codemode.Refuse(503, "code_adapter_unavailable"))
 		return
 	}
-	if adapter == codemode.AdapterCodex && r.Method == http.MethodGet && path == "responses" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+	if slices.Contains(adapters, codemode.AdapterCodex) && r.Method == http.MethodGet && path == "responses" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		s.codeWebSocket(w, r, release, route, authority)
 		return
 	}
-	ingress, ok := codeIngressFor(adapter, r.Method, path)
-	if !ok {
-		if codeProbe(adapter, r.Method, path) {
+	ingress, ok := codeIngressFor(r.Method, path)
+	if !ok || len(release.Snapshot.CodeProviders(route, path)) == 0 {
+		if codeProbe(r.Method, path) && len(release.Snapshot.CodeProviders(route, "v1/messages")) != 0 {
 			codeWriteError(w, r, codemode.Refuse(404, "code_operation_unsupported"))
 			return
 		}
@@ -112,7 +113,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
-	attempt, err := s.prepareCode(r.WithContext(ctx), release, route, observation, codemode.Dispatch{Adapter: adapter, Protocol: ingress.protocol})
+	attempt, err := s.prepareCode(r.WithContext(ctx), release, route, observation, path, ingress.protocol)
 	if err != nil {
 		refuse(err)
 		return
@@ -125,7 +126,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer client.CloseIdleConnections()
-	target, err := s.codeEndpoint(attempt.config, ingress.upstream, r.URL.RawQuery)
+	target, err := s.codeEndpoint(attempt.config, attempt.upstream, r.URL.RawQuery)
 	if err != nil {
 		refuse(err)
 		return
@@ -199,6 +200,8 @@ type codeAttempt struct {
 	lease         *limits.Lease
 	providerLease *limits.Lease
 	observer      codewire.Observer
+	// upstream is the path the account's adapter serves the client path at.
+	upstream string
 	// allowance reads subscription allowance from response headers.
 	allowance   bool
 	dispatched  bool
@@ -208,13 +211,20 @@ type codeAttempt struct {
 	prewarm     bool
 }
 
-func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, dispatch codemode.Dispatch) (*codeAttempt, error) {
+// prepareCode admits a request on a client path to an account whose adapter
+// serves the path for the request's model, and authorizes it with that
+// adapter's credential.
+func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, path string, protocol codemode.Protocol) (*codeAttempt, error) {
 	authority, failure := s.authenticate(r, "inference")
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_authentication_refused")
 	}
 	if !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
 		return nil, codemode.Refuse(403, "code_permission_denied")
+	}
+	providers := release.Snapshot.CodeModelProviders(route, path, protocol, observation.Operation.Model)
+	if len(providers) == 0 {
+		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
 	labels, failure := s.parseAttribution(r, authority)
 	if failure != nil {
@@ -224,12 +234,15 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 	}
-	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest, Operation: observation.Operation, PreviousResponse: observation.PreviousResponse})
+	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{
+		Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest,
+		Operation: observation.Operation, Providers: providers, PreviousResponse: observation.PreviousResponse,
+	})
 	if err != nil {
 		settleKey(r.Context(), lease, false, nil, s.log)
 		return nil, err
 	}
-	a := &codeAttempt{server: s, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm", allowance: dispatch.Adapter == codemode.AdapterCodex}
+	a := &codeAttempt{server: s, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
 	ok := false
 	defer func() {
 		if !ok {
@@ -262,14 +275,21 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 			return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 		}
 	}
-	if permit.Binding.AccountID != permit.Account.ID || permit.Binding.Principal != permit.Account.Principal || permit.Authority.ID != authority.ID {
+	if permit.Pin.AccountID != permit.Account.ID || permit.Pin.Principal != permit.Account.Principal || permit.Authority.ID != authority.ID {
 		return nil, codemode.Refuse(503, "code_binding_invalid")
 	}
 	configuration, exists := release.Snapshot.CodeConnection(route, permit.Account.ProviderID)
 	if !exists {
 		return nil, codemode.Refuse(503, "code_connection_unpublished")
 	}
-	a.config = configuration
+	// The account's frozen connection names the adapter that serves it.
+	vendor, known := codeadapter.ForConnection(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
+	upstream, served := vendor.Paths[path]
+	if !known || !served {
+		return nil, codemode.Refuse(503, "code_configuration_unsupported")
+	}
+	dispatch := codemode.Dispatch{Adapter: vendor.Adapter, Protocol: protocol}
+	a.config, a.upstream, a.allowance = configuration, upstream, vendor.Adapter == codemode.AdapterCodex
 	a.providerLease, failure = s.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, configuration, observation.Estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
@@ -278,12 +298,11 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if err != nil {
 		return nil, codemode.Refuse(503, "code_account_unavailable")
 	}
-	if a.auth.Principal == "" || a.auth.Principal != permit.Binding.Principal {
+	if a.auth.Principal == "" || a.auth.Principal != permit.Pin.Principal {
 		return nil, codemode.Refuse(409, "code_principal_mismatch")
 	}
 	// The authorization carries exactly the adapter's credential header for
 	// this protocol, and only the other headers the adapter declares.
-	vendor, _ := codeadapter.Lookup(dispatch.Adapter)
 	credential := codeadapter.CredentialHeader(dispatch.Adapter, dispatch.Protocol)
 	for name, values := range a.auth.Headers {
 		declared := strings.EqualFold(name, credential) || slices.ContainsFunc(vendor.Extra, func(extra string) bool { return strings.EqualFold(name, extra) })

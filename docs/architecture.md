@@ -63,15 +63,19 @@ implemented management/ledger behavior from client and real-provider evidence.
 `Snapshot.CodeRoutes` contains immutable published route documents.
 `Snapshot.CodeConnection(route, providerID)` resolves connections frozen under
 `revisionID:providerID`; a missing connection refuses until republish instead of
-falling back to a mutable provider draft. Pool membership, API-key permission,
-account/grant eligibility and retirement remain live admission authority.
+falling back to a mutable provider draft. `Snapshot.CodeProviders(route, path)`
+names the frozen connections whose adapter serves a request path, so a route
+whose pool mixes adapters admits each request only to accounts of those
+providers, and the serving account's adapter places the upstream path and
+credential. Pool membership, API-key permission, account/grant eligibility and
+retirement remain live admission authority.
 
 `gateway.CodeTransport` owns raw HTTP/SSE and WebSocket forwarding.
 `gateway.CodeAuthorizer` resolves encrypted account authorization and returns
 headers plus an observed principal. `gateway.CodeLedger`, implemented by
-`resources.CodeStore`, atomically authorizes each generation, creates/reuses a
-whole-tree account pin, reserves all matching hard-token budgets and records an
-attempt. WebSocket upgrade does not substitute for per-generation admission.
+`resources.CodeStore`, atomically authorizes each generation, creates/reuses the
+tree's binding and its pin for the generation's model, reserves all matching
+hard-token budgets and records an attempt. WebSocket upgrade does not substitute for per-generation admission.
 Process composition supplies `gateway.NewCodeForwarder` and
 `providers.CodeAuthorizer` with the existing runtime and plugin host.
 WebSocket handshakes bind and authorize before upstream connection and downstream

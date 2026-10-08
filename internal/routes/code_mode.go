@@ -3,8 +3,8 @@ package routes
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,17 +24,17 @@ func (s *Server) registerCodeMode(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/code/routes/{id}/client-config", s.CodeClientConfiguration)
 }
 
-// codeRoute is a route as management returns it: with the adapter its latest
+// codeRoute is a route as management returns it: with the adapters its latest
 // published revision serves, derived from the connections it froze.
 type codeRoute struct {
 	codemode.Route
-	Adapter codemode.Adapter `json:"adapter,omitempty"`
+	Adapters []codemode.Adapter `json:"adapters"`
 }
 
 func (s *Server) codeRoutes(r *http.Request, p access.Principal) (access.Reply, error) {
 	return s.Access.CodeList(r, p, `SELECT x.draft||jsonb_build_object('etag',x.etag,
 		'revision_id',coalesce(v.id::text,''),'revision',coalesce(v.revision,0),'published_at',v.published_at)
-		||jsonb_strip_nulls(jsonb_build_object('adapter',`+codeadapter.SQLRevision("v.connections")+`))
+		||jsonb_build_object('adapters',`+codeadapter.SQLAdapters("v.connections")+`)
 		FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id`)
 }
 
@@ -71,7 +71,7 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 	}
 	return s.Access.CodeWrite(r, "code_routes", "code_route", in.ProjectID, in, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
 		out := codemode.Route{MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
-		var adapter *string
+		adapters := []codemode.Adapter{}
 		var matches bool
 		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.code_pools WHERE id=$1 AND project_id=$2)`, in.PoolID, in.ProjectID).Scan(&matches); err != nil {
 			return nil, err
@@ -81,8 +81,8 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 		}
 		if r.PathValue("id") != "" {
 			var slug string
-			if err := tx.QueryRow(r.Context(), `SELECT x.slug,coalesce(v.id::text,''),coalesce(v.revision,0),v.published_at,`+codeadapter.SQLRevision("v.connections")+`
-				FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id WHERE x.id=$1`, id).Scan(&slug, &out.RevisionID, &out.Revision, &out.PublishedAt, &adapter); err != nil {
+			if err := tx.QueryRow(r.Context(), `SELECT x.slug,coalesce(v.id::text,''),coalesce(v.revision,0),v.published_at,`+codeadapter.SQLAdapters("v.connections")+`
+				FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id WHERE x.id=$1`, id).Scan(&slug, &out.RevisionID, &out.Revision, &out.PublishedAt, &adapters); err != nil {
 				return nil, err
 			}
 			if slug != in.Slug {
@@ -98,11 +98,7 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 		document, _ := json.Marshal(out)
 		_, err := tx.Exec(r.Context(), `INSERT INTO olp.code_routes(id,project_id,slug,draft,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)
 			ON CONFLICT(id) DO UPDATE SET draft=excluded.draft,etag=excluded.etag`, id, in.ProjectID, in.Slug, document, etag, p.UserID())
-		result := codeRoute{Route: out}
-		if adapter != nil {
-			result.Adapter = codemode.Adapter(*adapter)
-		}
-		return result, err
+		return codeRoute{Route: out, Adapters: adapters}, err
 	})
 }
 
@@ -155,7 +151,7 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 			}
 		}
 	}
-	connections, adapter, err := codePublication(r.Context(), tx, route.PoolID)
+	connections, adapters, err := codePublication(r.Context(), tx, route.PoolID)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -180,7 +176,7 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "code_route.publish", "code_route", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	out := access.Detail(codeRoute{Route: route, Adapter: adapter}, route.ETag)
+	out := access.Detail(codeRoute{Route: route, Adapters: adapters}, route.ETag)
 	if err = s.Access.CompleteReplay(r, tx, claim, out); err != nil {
 		return access.Reply{}, err
 	}
@@ -203,7 +199,7 @@ func (s *Server) codeRevisions(r *http.Request, p access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT jsonb_build_object('id',id,'route',document||jsonb_strip_nulls(jsonb_build_object('adapter',`+codeadapter.SQLRevision("connections")+`)))
+	rows, err := s.Access.Pool.Query(r.Context(), `SELECT jsonb_build_object('id',id,'route',document||jsonb_build_object('adapters',`+codeadapter.SQLAdapters("connections")+`))
 		FROM olp.code_route_revisions WHERE route_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3`, id, page.Before, page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
@@ -213,22 +209,22 @@ func (s *Server) codeRevisions(r *http.Request, p access.Principal) (access.Repl
 }
 
 // codePublication reads the configurations of the providers behind a pool's
-// accounts, which a revision freezes as its connections, and the adapter
-// they derive. A pool mixing adapters can't be published.
-func codePublication(ctx context.Context, tx pgx.Tx, poolID string) ([]byte, codemode.Adapter, error) {
+// accounts, which a revision freezes as its connections, and the adapters
+// they serve in table order. A pool may mix adapters.
+func codePublication(ctx context.Context, tx pgx.Tx, poolID string) ([]byte, []codemode.Adapter, error) {
 	rows, err := tx.Query(ctx, `SELECT p.id::text,p.configuration FROM olp.providers p
 		WHERE EXISTS(SELECT 1 FROM olp.code_accounts a JOIN olp.code_pool_accounts pa ON pa.account_id=a.id WHERE pa.pool_id=$1 AND a.provider_id=p.id)`, poolID)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	connections := map[string]json.RawMessage{}
-	var derived []codeadapter.Connection
+	adapters := []codemode.Adapter{}
 	for rows.Next() {
 		var id string
 		var configuration json.RawMessage
 		if err = rows.Scan(&id, &configuration); err != nil {
-			return nil, "", err
+			return nil, nil, err
 		}
 		var c struct {
 			Kind      string `json:"kind"`
@@ -236,18 +232,17 @@ func codePublication(ctx context.Context, tx pgx.Tx, poolID string) ([]byte, cod
 			ProfileID string `json:"profile_id"`
 		}
 		if err = json.Unmarshal(configuration, &c); err != nil {
-			return nil, "", err
+			return nil, nil, err
 		}
 		connections[id] = configuration
-		derived = append(derived, codeadapter.Connection{Kind: c.Kind, AuthMode: c.AuthMode, ProfileID: c.ProfileID})
+		if v, ok := codeadapter.ForConnection(c.Kind, c.AuthMode, c.ProfileID); ok && !slices.Contains(adapters, v.Adapter) {
+			adapters = append(adapters, v.Adapter)
+		}
 	}
 	if err = rows.Err(); err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
-	adapter, err := codeadapter.Derive(derived)
-	if errors.Is(err, codeadapter.ErrMixed) {
-		return nil, "", access.Invalid("pool_id", err.Error())
-	}
+	slices.SortFunc(adapters, codeadapter.Compare)
 	encoded, err := json.Marshal(connections)
-	return encoded, adapter, err
+	return encoded, adapters, err
 }

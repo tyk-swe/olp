@@ -102,6 +102,8 @@ func codeForwardRequest(t *testing.T, server *httptest.Server, identity, parent 
 	return response.StatusCode, body
 }
 
+// codeForwardAwait waits for count finished attempts in state. A dispatched
+// attempt is already uncertain while its response is still being finished.
 func codeForwardAwait(t *testing.T, f *codeFixture, state string, count int) {
 	t.Helper()
 	deadline := time.NewTimer(5 * time.Second)
@@ -110,8 +112,6 @@ func codeForwardAwait(t *testing.T, f *codeFixture, state string, count int) {
 	defer tick.Stop()
 	for {
 		var got int
-		// Dispatch itself marks an attempt uncertain. Wait for terminal
-		// accounting as well before inspecting settlement and cleanup.
 		if err := f.h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.code_attempts WHERE state=$1 AND finished_at IS NOT NULL`, state).Scan(&got); err != nil {
 			t.Fatal(err)
 		}

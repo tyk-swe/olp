@@ -20,13 +20,21 @@ import (
 	"github.com/tyk-swe/olp/tests/codecli"
 )
 
-// scriptedVendor answers as the coding plan's upstream with the scripted
-// client fixture. It first holds each request to the credential the account's
-// adapter places for the request's protocol, then gives the fixture its own
-// path, credential and model; the answer streams back unchanged.
-func scriptedVendor(t *testing.T, f *codingPlanFixture, key string) {
+// vendorHosts names the adapter whose upstream each of the fixture peer's
+// hosts stands in for.
+var vendorHosts = map[string]codemode.Adapter{
+	"api.z.ai":         codemode.AdapterZAICoding,
+	"open.bigmodel.cn": codemode.AdapterZAICoding,
+	"opencode.ai":      codemode.AdapterOpenCodeGo,
+}
+
+// scriptedVendor answers as each coding plan's upstream with the scripted
+// client fixture. It first holds each request to the key of the adapter whose
+// host it reached, in the header that adapter places for the request's
+// protocol, then gives the fixture its own path, credential and model; the
+// answer streams back unchanged.
+func scriptedVendor(t *testing.T, f *codingPlanFixture, keys map[codemode.Adapter]string) {
 	t.Helper()
-	vendor, _ := codeadapter.ForConnection("plugin", "grant", f.profile)
 	fixture := scripted.New(scripted.Options{Credential: "scripted-upstream"})
 	f.peer.mu.Lock()
 	defer f.peer.mu.Unlock()
@@ -35,11 +43,13 @@ func scriptedVendor(t *testing.T, f *codingPlanFixture, key string) {
 		if strings.HasSuffix(r.URL.Path, "/messages") {
 			protocol, path, model = codemode.ProtocolMessages, scripted.AnthropicPrefix+"/messages", scripted.AnthropicModel
 		}
-		header, want := codeadapter.CredentialHeader(vendor.Adapter, protocol), key
+		adapter := vendorHosts[r.Host]
+		key, known := keys[adapter]
+		header, want := codeadapter.CredentialHeader(adapter, protocol), key
 		if header == "Authorization" {
 			want = "Bearer " + key
 		}
-		if r.Header.Get(header) != want || len(r.Header.Values("Authorization"))+len(r.Header.Values("X-Api-Key")) != 1 {
+		if !known || r.Header.Get(header) != want || len(r.Header.Values("Authorization"))+len(r.Header.Values("X-Api-Key")) != 1 {
 			t.Errorf("%s reached the upstream without the account's own credential", r.URL.Path)
 			w.WriteHeader(401)
 			return
@@ -115,10 +125,11 @@ func quoted(value any) any {
 }
 
 // clientConfiguration is the configuration management generates for client
-// against the fixture's in-process gateway.
-func (f *codingPlanFixture) clientConfiguration(t *testing.T, client, model string) string {
+// against the fixture's in-process gateway. An empty plan takes the default
+// planning model.
+func (f *codingPlanFixture) clientConfiguration(t *testing.T, client, model, plan string) string {
 	t.Helper()
-	query := url.Values{"gateway_url": {f.gateway.URL}, "client": {client}, "model": {model}}
+	query := url.Values{"gateway_url": {f.gateway.URL}, "client": {client}, "model": {model}, "plan_model": {plan}}
 	config := f.h.want(f.owner, "GET", "/api/v1/code/routes/"+f.route["id"].(string)+"/client-config?"+query.Encode(), nil, nil, 200)
 	return config["configuration"].(string)
 }
@@ -166,6 +177,11 @@ func (f *codingPlanFixture) qualified(t *testing.T, agent *codecli.Agent, roots 
 	return out
 }
 
+func adapterOf(profile string) codemode.Adapter {
+	vendor, _ := codeadapter.ForConnection("plugin", "grant", profile)
+	return vendor.Adapter
+}
+
 func fmtRequest(r peerRequest) string {
 	var b strings.Builder
 	b.WriteString(r.Path + "?" + r.RawQuery)
@@ -184,8 +200,8 @@ func TestCodeQualificationClaudeCodeJourneys(t *testing.T) {
 		t.Run(test.profile, func(t *testing.T) {
 			key := "0123456789abcdef0123456789abcdef.CONTROLLEDclaude"
 			f := newCodingPlanFixture(t, test.plugin, test.profile, key)
-			scriptedVendor(t, f, key)
-			configuration := f.clientConfiguration(t, codeadapter.ClientClaudeCode, test.model)
+			scriptedVendor(t, f, map[codemode.Adapter]string{adapterOf(test.profile): key})
+			configuration := f.clientConfiguration(t, codeadapter.ClientClaudeCode, test.model, "")
 			claude := codecli.NewClaudeCode(t, f.key)
 			note := filepath.Join(claude.Work, "note.txt")
 			if err := os.WriteFile(note, []byte("CONTROLLED_NOTE_CONTENT"), 0600); err != nil {
@@ -234,8 +250,8 @@ func TestCodeQualificationOpenCodeJourneys(t *testing.T) {
 		t.Run(test.profile+"/"+test.model, func(t *testing.T) {
 			key := "0123456789abcdef0123456789abcdef.CONTROLLEDopencode"
 			f := newCodingPlanFixture(t, test.plugin, test.profile, key)
-			scriptedVendor(t, f, key)
-			configuration := f.clientConfiguration(t, codeadapter.ClientOpenCode, test.model)
+			scriptedVendor(t, f, map[codemode.Adapter]string{adapterOf(test.profile): key})
+			configuration := f.clientConfiguration(t, codeadapter.ClientOpenCode, test.model, "")
 			opencode := codecli.NewOpenCode(t, f.key)
 			note := filepath.Join(opencode.Work, "note.txt")
 			if err := os.WriteFile(note, []byte("CONTROLLED_NOTE_CONTENT"), 0600); err != nil {
@@ -271,6 +287,76 @@ func TestCodeQualificationOpenCodeJourneys(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(opencode.Home, ".local", "share", "opencode", "auth.json")); !os.IsNotExist(err) {
 				t.Fatalf("an OpenCode login was stored: %v", err)
+			}
+		})
+	}
+}
+
+// TestCodeQualificationMixedSubscriptionJourneys plans on an OpenCode Go model
+// and implements on a GLM Coding Plan model within one client session. Each
+// model reaches its own subscription with that subscription's key, and the
+// session's tree pins one account to each model.
+func TestCodeQualificationMixedSubscriptionJourneys(t *testing.T) {
+	glmKey, goKey := "0123456789abcdef0123456789abcdef.CONTROLLEDmixed", "opencode0123456789abcdef0123456789"
+	for _, test := range []struct {
+		client string
+		plan   func(*testing.T, *codingPlanFixture, string) *codecli.Agent
+	}{
+		{codeadapter.ClientClaudeCode, func(t *testing.T, f *codingPlanFixture, configuration string) *codecli.Agent {
+			claude := codecli.NewClaudeCode(t, f.key)
+			for _, args := range [][]string{
+				{"-p", "Plan the change.", "--output-format", "json", "--permission-mode", "plan"},
+				{"-p", "Implement it.", "--continue", "--output-format", "json", "--permission-mode", "default"},
+			} {
+				if out := claude.Run(t, configuration, args...); bytes.Contains(out, []byte(`"is_error":true`)) {
+					t.Fatalf("%s: %s", args[1], out)
+				}
+			}
+			return claude
+		}},
+		{codeadapter.ClientOpenCode, func(t *testing.T, f *codingPlanFixture, configuration string) *codecli.Agent {
+			opencode := codecli.NewOpenCode(t, f.key)
+			for _, args := range [][]string{
+				{"run", "--agent", "plan", "Plan the change.", "--format", "json"},
+				{"run", "--continue", "Implement it.", "--format", "json"},
+			} {
+				if out := opencode.Run(t, configuration, args...); bytes.Contains(out, []byte(`"type":"error"`)) {
+					t.Fatalf("%s: %s", args[len(args)-3], out)
+				}
+			}
+			return opencode
+		}},
+	} {
+		t.Run(test.client, func(t *testing.T) {
+			f := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, glmKey)
+			glm, other := f.mix(t, goKey)
+			scriptedVendor(t, f, map[codemode.Adapter]string{codemode.AdapterZAICoding: glmKey, codemode.AdapterOpenCodeGo: goKey})
+			agent := test.plan(t, f, f.clientConfiguration(t, test.client, "glm-5.3", "minimax-m3"))
+			bindings := f.qualified(t, agent, 1)
+			hosts := map[string]string{"glm-5.3": "api.z.ai", "minimax-m3": "opencode.ai"}
+			seen := map[string]bool{}
+			for _, request := range f.peer.received() {
+				var body struct{ Model string }
+				if json.Unmarshal(request.Body, &body) != nil || hosts[body.Model] != request.Host {
+					t.Fatalf("model %q reached %s%s", body.Model, request.Host, request.Path)
+				}
+				seen[body.Model] = true
+			}
+			if !seen["glm-5.3"] || !seen["minimax-m3"] {
+				t.Fatalf("the session did not use both subscriptions: %v", seen)
+			}
+			accounts := map[string]any{"glm-5.3": glm["id"], "minimax-m3": other["id"]}
+			for _, binding := range bindings {
+				pins := binding["pins"].([]any)
+				for _, item := range pins {
+					pin := item.(map[string]any)
+					if accounts[pin["model"].(string)] != pin["account_id"] {
+						t.Fatalf("pin %v is not its model's account", pin)
+					}
+				}
+				if binding["parent_id"] == nil && len(pins) != 2 {
+					t.Fatalf("the session pinned %d models: %v", len(pins), binding)
+				}
 			}
 		})
 	}

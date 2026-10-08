@@ -37,7 +37,7 @@ external vendor or identity implementation has been certified.
 - **Contracts and authority:** `openapi/management.json` is the source of truth;
   generated Go/TypeScript and authorization goldens were regenerated. The final
   organization-aware authorization and project-isolation sweeps passed.
-- **Storage and privacy:** migrations 0023–0042 are forward-only. Each feature's
+- **Storage and privacy:** migrations 0024–0043 are forward-only. Each feature's
   durable state, retention and cryptographic purposes are documented in
   [access](../access.md), [security](../security.md), [gateway](../gateway.md) and
   [operations](../operations.md). Caller secrets and raw end-user identifiers

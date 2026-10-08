@@ -42,6 +42,7 @@
   const ids = $derived({
     client: `code-client-${route.id}`,
     model: `code-client-model-${route.id}`,
+    planModel: `code-client-plan-model-${route.id}`,
     smallModel: `code-client-small-model-${route.id}`,
     configuration: `code-client-configuration-${route.id}`
   });
@@ -77,6 +78,13 @@
       selection: { ...selection, ...change }
     };
   }
+
+  // On a mixed route each client has its own native models, so a new client
+  // starts again from its default models.
+  function selectClient(client: CodeClient) {
+    copied = '';
+    chosen = { revisionId: route.revision_id, selection: { client } };
+  }
 </script>
 
 <section class="card" aria-label="Client configuration">
@@ -92,7 +100,7 @@
             value: client,
             label: clientLabel(client)
           }))}
-          onChange={(client) => select({ client: client as CodeClient })}
+          onChange={(client) => selectClient(client as CodeClient)}
         />
       {/if}
       <div class="form-field">
@@ -107,6 +115,27 @@
             >{/each}
         </select>
       </div>
+      {#if pickerConfig.plan_model != null}
+        <div class="form-field">
+          <label for={ids.planModel}>Planning model</label>
+          <select
+            id={ids.planModel}
+            aria-describedby="{ids.planModel}-help"
+            value={pickerConfig.plan_model}
+            onchange={(event) =>
+              select({ plan_model: event.currentTarget.value })}
+          >
+            {#each pickerConfig.native_models as model (model)}<option
+                value={model}>{model}</option
+              >{/each}
+          </select>
+          <small id="{ids.planModel}-help"
+            >{pickerConfig.client === 'claude-code'
+              ? 'Plan mode, through opusplan; other requests use the native model.'
+              : 'The plan agent; the build agent uses the native model.'}</small
+          >
+        </div>
+      {/if}
       {#if pickerConfig.small_model != null}
         <div class="form-field">
           <label for={ids.smallModel}>Background model</label>
@@ -146,8 +175,12 @@
   {:else if !config}<p role="status">Loading supported configuration…</p>
   {:else}
     <dl>
-      <dt>Subscription</dt>
-      <dd><span class="badge">{adapterLabel(config.adapter)}</span></dd>
+      <dt>{config.adapters.length > 1 ? 'Subscriptions' : 'Subscription'}</dt>
+      <dd class="badges">
+        {#each config.adapters as adapter (adapter)}
+          <span class="badge">{adapterLabel(adapter)}</span>
+        {/each}
+      </dd>
       <dt>Client release</dt>
       <dd>
         {clientLabel(config.client)}
@@ -221,6 +254,11 @@
     color: var(--foreground-subtle);
     overflow-wrap: anywhere;
     line-height: 1.6;
+  }
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
   }
   ul {
     list-style: disc;

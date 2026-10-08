@@ -1,11 +1,12 @@
 // Package codeadapter is the table of code-mode adapters: the plugin profiles
-// each subscription family enrolls through, the wire protocols its routes
-// serve, the header that carries its upstream credential, and the coding
-// clients OLP generates configuration for.
+// each subscription family enrolls through, the client paths and wire
+// protocols it serves, the header that carries its upstream credential, and
+// the coding clients OLP generates configuration for. A route's pool may mix
+// families; each request goes to an account whose family serves its path.
 package codeadapter
 
 import (
-	"errors"
+	"cmp"
 	"slices"
 	"strings"
 
@@ -46,25 +47,60 @@ type Vendor struct {
 	// codeplans.Principal, rather than a refreshed OAuth grant.
 	KeyGrant  bool
 	Protocols []codemode.Protocol
+	// Endpoint, when set, is the one protocol the adapter serves a model on;
+	// otherwise each of Protocols serves every model.
+	Endpoint func(model string) codemode.Protocol
+	// Paths maps each client path under a route to the upstream path that
+	// extends the profile's hosting address.
+	Paths map[string]string
 	// Extra names the upstream authorization headers besides the credential.
 	Extra []string
 	// Clients lists the clients with a generated configuration, default first.
 	Clients []string
 }
 
+// vendors is in display order, which orders every list of adapters.
 var vendors = []Vendor{
 	{
 		Adapter: codemode.AdapterCodex, Name: "Codex", Profiles: []string{codexauth.ProfileID}, Manifest: codexauth.Manifest,
-		Protocols: []codemode.Protocol{codemode.ProtocolResponses}, Extra: []string{"Chatgpt-Account-Id"}, Clients: []string{ClientCodex},
+		Protocols: []codemode.Protocol{codemode.ProtocolResponses},
+		Paths:     map[string]string{"responses": "responses", "responses/compact": "responses/compact"},
+		Extra:     []string{"Chatgpt-Account-Id"}, Clients: []string{ClientCodex},
 	},
 	{
 		Adapter: codemode.AdapterOpenCodeGo, Name: "OpenCode Go", Profiles: []string{codeplans.OpenCodeGoProfile}, Manifest: codeplans.OpenCodeGoManifest, KeyGrant: true,
-		Protocols: []codemode.Protocol{codemode.ProtocolChat, codemode.ProtocolMessages, codemode.ProtocolResponses}, Clients: []string{ClientOpenCode, ClientClaudeCode},
+		Protocols: []codemode.Protocol{codemode.ProtocolChat, codemode.ProtocolMessages, codemode.ProtocolResponses}, Endpoint: openCodeGoEndpoint,
+		Paths:   map[string]string{"v1/chat/completions": "chat/completions", "v1/messages": "messages", "v1/responses": "responses"},
+		Clients: []string{ClientOpenCode, ClientClaudeCode},
 	},
 	{
 		Adapter: codemode.AdapterZAICoding, Name: "GLM Coding Plan", Profiles: []string{codeplans.ZAIProfile, codeplans.BigModelProfile}, Manifest: codeplans.ZAIManifest, KeyGrant: true,
-		Protocols: []codemode.Protocol{codemode.ProtocolMessages, codemode.ProtocolChat}, Clients: []string{ClientClaudeCode, ClientOpenCode},
+		Protocols: []codemode.Protocol{codemode.ProtocolMessages, codemode.ProtocolChat},
+		Paths:     map[string]string{"v1/messages": "anthropic/v1/messages", "v1/chat/completions": "coding/paas/v4/chat/completions"},
+		Clients:   []string{ClientClaudeCode, ClientOpenCode},
 	},
+}
+
+// clientProtocols lists the protocols each client speaks, in the order it
+// prefers them: OpenCode sends a model through a provider on the first one the
+// provider's adapter serves it on.
+var clientProtocols = map[string][]codemode.Protocol{
+	ClientCodex:      {codemode.ProtocolResponses},
+	ClientClaudeCode: {codemode.ProtocolMessages},
+	ClientOpenCode:   {codemode.ProtocolChat, codemode.ProtocolMessages, codemode.ProtocolResponses},
+}
+
+// openCodeGoEndpoint is the protocol OpenCode Go serves a model on: Messages
+// for MiniMax and Qwen, Responses for GPT and Grok, and Chat Completions for
+// the rest.
+func openCodeGoEndpoint(model string) codemode.Protocol {
+	switch model = strings.ToLower(model); {
+	case strings.HasPrefix(model, "minimax"), strings.HasPrefix(model, "qwen"):
+		return codemode.ProtocolMessages
+	case strings.HasPrefix(model, "gpt"), strings.HasPrefix(model, "grok"):
+		return codemode.ProtocolResponses
+	}
+	return codemode.ProtocolChat
 }
 
 // Lookup returns an adapter's row.
@@ -91,30 +127,17 @@ func ForConnection(kind, authMode, profileID string) (Vendor, bool) {
 	return Vendor{}, false
 }
 
-// Connection is what a provider configuration says about its adapter.
-type Connection struct {
-	Kind, AuthMode, ProfileID string
+// Compare orders adapters as the table does, unknown ones last.
+func Compare(a, b codemode.Adapter) int {
+	return cmp.Compare(rank(a), rank(b))
 }
 
-// ErrMixed reports connections of more than one adapter.
-var ErrMixed = errors.New("Use accounts of one subscription family: Codex, OpenCode Go or GLM Coding Plan.")
-
-// Derive returns the one adapter of connections. Connections no adapter
-// accepts are ignored, so a set of only those derives no adapter, and serves
-// nothing; more than one adapter is ErrMixed.
-func Derive(connections []Connection) (codemode.Adapter, error) {
-	var adapter codemode.Adapter
-	for _, c := range connections {
-		v, ok := ForConnection(c.Kind, c.AuthMode, c.ProfileID)
-		if !ok {
-			continue
-		}
-		if adapter != "" && adapter != v.Adapter {
-			return "", ErrMixed
-		}
-		adapter = v.Adapter
+func rank(adapter codemode.Adapter) int {
+	i := slices.IndexFunc(vendors, func(v Vendor) bool { return v.Adapter == adapter })
+	if i < 0 {
+		return len(vendors)
 	}
-	return adapter, nil
+	return i
 }
 
 // Serves reports whether the adapter's routes serve a protocol.
@@ -122,6 +145,36 @@ func (v Vendor) Serves(p codemode.Protocol) bool { return slices.Contains(v.Prot
 
 // Supports reports whether OLP generates configuration for a client.
 func (v Vendor) Supports(client string) bool { return slices.Contains(v.Clients, client) }
+
+// Reaches reports whether a client OLP generates configuration for reaches a
+// model through the adapter: the client speaks a protocol the adapter serves
+// the model on.
+func (v Vendor) Reaches(client, model string) bool {
+	_, ok := v.Protocol(client, model)
+	return ok
+}
+
+// Protocol returns the protocol a client OLP generates configuration for sends
+// a model on through the adapter: the first the client speaks that the adapter
+// serves the model on.
+func (v Vendor) Protocol(client, model string) (codemode.Protocol, bool) {
+	if v.Supports(client) {
+		for _, p := range clientProtocols[client] {
+			if v.ServesModel(p, model) {
+				return p, true
+			}
+		}
+	}
+	return "", false
+}
+
+// ServesModel reports whether the adapter serves a model on a protocol.
+func (v Vendor) ServesModel(p codemode.Protocol, model string) bool {
+	if v.Endpoint != nil {
+		return v.Endpoint(model) == p
+	}
+	return v.Serves(p)
+}
 
 // Address returns a profile's hosting address, the upstream base its
 // requests' paths extend.
@@ -158,9 +211,14 @@ func SQL(config string) string {
 	return b.String()
 }
 
-// SQLRevision is a SQL expression for the adapter Derive returns for a route
-// revision's connections, a jsonb object of provider configurations, or NULL
-// when they name none or several.
-func SQLRevision(connections string) string {
-	return "(SELECT CASE WHEN count(DISTINCT adapter)=1 THEN min(adapter) END FROM (SELECT " + SQL("c.value") + " adapter FROM jsonb_each(" + connections + ") c) adapters)"
+// SQLAdapters is a SQL expression for the adapters of a route revision's
+// connections, a jsonb object of provider configurations: a jsonb array in
+// table order, empty when the revision is absent or names none.
+func SQLAdapters(connections string) string {
+	order := make([]string, len(vendors))
+	for i, v := range vendors {
+		order[i] = "'" + string(v.Adapter) + "'"
+	}
+	return "(SELECT coalesce(jsonb_agg(adapter ORDER BY array_position(ARRAY[" + strings.Join(order, ",") + "],adapter)),'[]'::jsonb) FROM (SELECT DISTINCT " + SQL("c.value") +
+		" adapter FROM jsonb_each(" + connections + ") c) adapters WHERE adapter IS NOT NULL)"
 }

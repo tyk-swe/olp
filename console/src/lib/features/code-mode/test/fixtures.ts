@@ -48,7 +48,7 @@ export const route: CodeRoute = {
   revision_id: '01980000-0000-7000-8000-000000000031',
   revision: 1,
   published_at: '2026-10-01T10:00:00Z',
-  adapter: 'zai_coding',
+  adapters: ['zai_coding'],
   etag
 };
 export const budget: CodeBudget = {
@@ -72,7 +72,15 @@ export const binding: CodeBinding = {
   conversation: 'fixture-conversation',
   parent_id: null,
   created_at: '2026-10-01T10:01:00Z',
-  retired_at: null
+  retired_at: null,
+  pins: [
+    {
+      model: 'native-model',
+      account_id: account.id,
+      principal: account.principal,
+      created_at: '2026-10-01T10:01:00Z'
+    }
+  ]
 };
 export const attempt: CodeAttempt = {
   end_user_digest: '',

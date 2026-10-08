@@ -172,7 +172,7 @@ type Snapshot struct {
 	hasBodyLimits      bool
 	CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
 	CodeConnections    map[string]Configuration  `json:"code_connections,omitempty"`
-	codeAdapters       map[string]codemode.Adapter
+	codeRevisions      map[string]codeRevision
 	interactions       map[string]map[string]*interaction.Template
 	operations         map[string]map[string]*operationplan.Template
 	media              map[string]map[string]*mediacontract.Template

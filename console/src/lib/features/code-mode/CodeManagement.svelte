@@ -322,9 +322,10 @@
     {:else if kind === 'routes'}
       <p>
         Route base paths select policy; the client sends native models
-        unchanged. A route serves the clients of its pool's subscription family:
-        Codex, OpenCode Go or GLM Coding Plan. Connection edits require route
-        republish. Pool/account/key permissions remain live.
+        unchanged. A pool may mix Codex, OpenCode Go and GLM Coding Plan
+        accounts: each request goes to an account that lists its model and whose
+        subscription serves the client's protocol. Connection edits require
+        route republish. Pool/account/key permissions remain live.
       </p>
       {#each routes.data?.items ?? [] as route (route.id)}
         <article class="card">
@@ -352,12 +353,15 @@
           <dl>
             <dt>Base path</dt>
             <dd><code>/code/{route.slug}</code></dd>
-            <dt>Published subscription</dt>
-            <dd>
-              {#if route.adapter}<span class="badge"
-                  >{adapterLabel(route.adapter)}</span
-                >{:else if route.published_at}No adapter: its accounts serve no
-                supported client{:else}Set at publication{/if}
+            <dt>Published subscriptions</dt>
+            <dd class="badges">
+              {#each route.adapters as adapter (adapter)}
+                <span class="badge">{adapterLabel(adapter)}</span>
+              {:else}
+                {route.published_at
+                  ? 'No adapter: its accounts serve no supported client'
+                  : 'Set at publication'}
+              {/each}
             </dd>
             <dt>Draft models</dt>
             <dd>{route.models.join(', ')}</dd>
@@ -478,6 +482,11 @@
     color: var(--foreground-subtle);
     line-height: 1.6;
     overflow-wrap: anywhere;
+  }
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
   }
   .empty {
     padding: 2rem;

@@ -60,7 +60,22 @@ func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (r
 	if l.refuse != "" {
 		return resources.CodePermit{}, codemode.Refuse(409, l.refuse)
 	}
-	return resources.CodePermit{Authority: access.Authority{ID: in.APIKeyID, Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}}, Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"}, Binding: codemode.Binding{ID: "binding", AccountID: "account", Principal: "principal"}, Attempt: codemode.Attempt{ID: fmt.Sprint(len(l.inputs))}}, nil
+	permit, err := codeTestPermit(in.APIKeyID, in.Providers)
+	permit.Attempt = codemode.Attempt{ID: fmt.Sprint(len(l.inputs))}
+	return permit, err
+}
+
+// codeTestPermit pins an account of the first provider serving the request.
+func codeTestPermit(key string, providers []string) (resources.CodePermit, error) {
+	if len(providers) == 0 {
+		return resources.CodePermit{}, codemode.Refuse(503, "code_account_unavailable")
+	}
+	return resources.CodePermit{
+		Authority: access.Authority{ID: key, Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}},
+		Account:   codemode.Account{ID: "account", ProviderID: providers[0], Principal: "principal"},
+		Binding:   codemode.Binding{ID: "binding", AccountID: "account", Principal: "principal"},
+		Pin:       codemode.Pin{AccountID: "account", Principal: "principal"},
+	}, nil
 }
 func (l *codeTestLedger) MarkDispatched(_ context.Context, id string) error {
 	l.mu.Lock()
@@ -77,8 +92,8 @@ func (l *codeTestLedger) ObserveReference(_ context.Context, _, id string) error
 	l.references[id] = true
 	return nil
 }
-func (l *codeTestLedger) BindConnection(_ context.Context, _ codemode.Route, key string, _ codemode.Identity, _ string) (resources.CodePermit, error) {
-	return resources.CodePermit{Authority: access.Authority{ID: key, Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}}, Account: codemode.Account{ID: "account", ProviderID: "provider", Principal: "principal"}, Binding: codemode.Binding{ID: "binding", AccountID: "account", Principal: "principal"}}, nil
+func (l *codeTestLedger) BindConnection(_ context.Context, _ codemode.Route, key string, _ codemode.Identity, _ string, providers []string) (resources.CodePermit, error) {
+	return codeTestPermit(key, providers)
 }
 func (l *codeTestLedger) Settle(_ context.Context, _ string, u codemode.Usage) error {
 	l.mu.Lock()

@@ -5,6 +5,11 @@ It uses a route-specific URL such as `https://olp.example/code/team-coding` and
 keeps the native model in the request. Ordinary inference routes continue to
 use OLP route slugs as model names.
 
+A route can mix subscriptions. One OpenCode or Claude Code session can plan on
+an OpenCode Go model and implement on a GLM Coding Plan model, each request
+reaching its own subscription unchanged; see
+[Mixing subscriptions](#mixing-subscriptions).
+
 **Qualification status:** management, durable ledger and raw transports are wired
 into OLP. The pinned official Codex CLI, Claude Code and OpenCode have
 controlled-fixture qualification. This is not yet a release claim for a real
@@ -13,12 +18,13 @@ ChatGPT, OpenCode Go or GLM Coding Plan subscription. See the
 
 ## Adapters and clients
 
-A route serves one subscription family, its **adapter**, which OLP derives from
-the plugin profiles of the provider connections the published revision froze.
-The adapter decides which paths the route serves, how the upstream credential
-is placed and which clients OLP generates configuration for. A pool holds
-accounts of one adapter; management refuses a pool or publication that mixes
-them. Every other path refuses before upstream dispatch.
+Each code account belongs to a subscription family, its **adapter**, which OLP
+derives from the plugin profile of the account's provider connection. The
+adapter decides which paths the account serves, where upstream they go, how the
+upstream credential is placed and which clients OLP generates configuration
+for. A route serves the paths of every adapter its published revision froze,
+and each request reaches an account whose adapter serves its path. Every other
+path refuses before upstream dispatch.
 
 | Adapter | Plugin and profiles | Paths under `/code/{slug}/` | Upstream | Clients (default first) |
 | --- | --- | --- | --- | --- |
@@ -31,6 +37,38 @@ the responses paths the Responses API. OpenCode Go serves each model on one
 endpoint: most on Chat Completions, MiniMax and Qwen models on Messages and
 Grok and GPT models on Responses. OpenCode picks it per model; Claude Code
 speaks only Messages, so on OpenCode Go it works only with Messages models.
+
+### Mixing subscriptions
+
+A pool may hold accounts of several adapters, and a route may list the models
+of all of them. Each request reaches an account that lists its model and whose
+adapter serves the model on the request's path, with that account's credential,
+at that subscription's upstream; a model no adapter serves on the path is
+refused with `code_operation_unsupported` before any account is chosen. A
+client can use every route model its own protocols reach. OLP never translates between protocols, so a model no subscription
+serves on the client's protocol stays out of that client's configuration.
+
+| Client | Paths it uses | Models a mixed route can give it |
+| --- | --- | --- |
+| Claude Code | `v1/messages` | GLM Coding Plan models, and OpenCode Go's Messages models such as MiniMax and Qwen |
+| OpenCode | `v1/chat/completions`, `v1/messages`, `v1/responses` | GLM Coding Plan models, and every OpenCode Go model including GPT and Grok |
+| Codex CLI | `responses`, `responses/compact` | ChatGPT subscription models only |
+
+To plan with a GPT model and implement with GLM in OpenCode, put an OpenCode Go
+account listing `gpt-5.5` and a GLM Coding Plan account listing `glm-5.3` in one
+pool, publish a route with both models, and generate the OpenCode configuration
+with `model=glm-5.3` and `plan_model=gpt-5.5`. Claude Code can plan the same way
+with MiniMax or Qwen, but not with GPT: no subscription serves GPT on Messages.
+When several accounts list a model, the conversation's own accounts come first;
+see [Conversations and authority](#conversations-and-authority). A conversation
+uses one account of each adapter, so the planning and background models must be
+ones it reaches with the main model whichever account it pins first: two OpenCode
+Go accounts listing different models cannot serve one conversation.
+
+Every request carries the conversation so far, so each subscription a
+conversation mixes receives the turns the others produced. No live vendor is
+yet qualified to accept another vendor's reasoning and tool calls in that
+history; mixed conversations are qualified against scripted vendors only.
 
 ## Operator workflow
 
@@ -57,11 +95,13 @@ and retirement, and `If-Match` on updates and publication.
 2. Create a code account with `project_id`, `provider_id`, `credential_id`,
    `name`, `enabled` and an explicit `models` array. Account identity survives
    credential rotation only when both provider and principal remain the same.
-3. Create a pool and assign accounts of one adapter and API keys explicitly. A `shared` pool
-   has no owner. A `personal` pool names `owner_user_id` and accepts only keys
+3. Create a pool and assign accounts and API keys explicitly; accounts of
+   several adapters may share one. A `shared` pool has no owner. A `personal`
+   pool names `owner_user_id` and accepts only keys
    issued by that owner. Being a project member does not itself grant pool use.
 4. Create a route with a stable `slug`, `pool_id`, `models` and `enabled`, then
-   publish it. The published revision freezes connection configuration. Adding
+   publish it; each model needs an enrolled pool account that lists it. The
+   published revision freezes connection configuration. Adding
    an account backed by a previously absent provider requires republishing the
    route before that connection can serve it.
 5. Give the developer an OLP inference key and the supported route configuration.
@@ -86,22 +126,27 @@ activation checks.
 | Update one resource | `PUT /api/v1/code/{collection}/{id}` |
 | Publish an immutable route revision | `POST /api/v1/code/routes/{id}/publish` |
 | Inspect route history | `GET /api/v1/code/routes/{id}/revisions` |
-| Generate client configuration | `GET /api/v1/code/routes/{id}/client-config?gateway_url=...&client=...&model=...&small_model=...` |
+| Generate client configuration | `GET /api/v1/code/routes/{id}/client-config?gateway_url=...&client=...&model=...&plan_model=...&small_model=...` |
 | Inspect metadata | `GET /api/v1/code/{bindings,attempts,refusals,token-windows}` |
 | Retire the root of a conversation tree | `POST /api/v1/code/bindings/{id}/retire` |
 
 Lists support `project_id`, `cursor` and `limit`; diagnostics additionally support
 the applicable `route_id`, `api_key_id`, `account_id` and `binding_id` filters.
+A binding matches `account_id` through its first account or any of its tree's pins.
 Use collection results' ETags when updating resources. The API and console must
 ship together; a backend-only deployment does not meet the complete product contract.
 
 ## Client configuration
 
-Client configuration reads the published revision. `client` defaults to the
-adapter's first client and `model` to the route's first model; `small_model`,
-for background requests, defaults to `model`. A client the adapter does not
-support, or a model the route does not admit, is a 422. No configuration ever
-contains an OLP key: each reads it from `OLP_API_KEY`.
+Client configuration reads the published revision and the accounts of its pool.
+`supported_clients` lists the clients the route's subscriptions support, in the
+order of the route's models, and `client` defaults to the first. `native_models`
+are the route models the client can reach, those listed by an account whose
+adapter supports it, and `model` defaults to the first; `adapters` names the
+subscriptions they come from. `plan_model`, for planning, and `small_model`, for
+background requests, default to `model`; Codex takes neither. A client no
+subscription supports, or a model the client cannot reach, is a 422. No
+configuration ever contains an OLP key: each reads it from `OLP_API_KEY`.
 
 ### Codex
 
@@ -148,7 +193,7 @@ The controlled suite runs Claude Code **2.1.286**. OLP generates a POSIX shell
 file to source before starting `claude`:
 
 ```sh
-unset ANTHROPIC_API_KEY CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
+unset ANTHROPIC_API_KEY ANTHROPIC_SMALL_FAST_MODEL CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
 export ANTHROPIC_BASE_URL='https://olp.example/code/team-glm'
 export ANTHROPIC_AUTH_TOKEN="${OLP_API_KEY:?Set OLP_API_KEY to your OLP inference key}"
 export ANTHROPIC_MODEL='glm-5.3'
@@ -158,6 +203,11 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL='glm-5.3-flash'
 export CLAUDE_CODE_SUBAGENT_MODEL='glm-5.3'
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 ```
+
+With a `plan_model` other than `model`, the file sets `ANTHROPIC_MODEL` to
+`opusplan` and `ANTHROPIC_DEFAULT_OPUS_MODEL` to the planning model. Claude Code
+then plans on the planning model in plan mode and uses
+`ANTHROPIC_DEFAULT_SONNET_MODEL`, the native model, for everything else.
 
 Every model variable names a native model the route admits, so background,
 subagent and classifier requests stay on the route; Claude Code otherwise
@@ -176,19 +226,29 @@ claude.ai login features are outside code mode.
 ### OpenCode
 
 The controlled suite runs OpenCode **1.18.34**. OLP generates an `opencode.json`
-that overrides the base URL of OpenCode's own provider for the plan:
-`opencode-go`, or `zai-coding-plan` for either GLM profile.
+that overrides the base URL of OpenCode's own provider for each subscription:
+`opencode-go`, or `zai-coding-plan` for either GLM profile. Each model is listed
+under the provider of the subscription that serves it, and every provider points
+at the route. The provider picks the endpoint OpenCode sends a model on, so for
+a model both subscriptions offer OLP picks the providers with which one
+conversation reaches the main, planning and background models together. With a `plan_model` other than `model`, OpenCode's plan agent uses
+the planning model and its build agent `model`. For a route mixing both plans:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "opencode-go/kimi-k3",
-  "small_model": "opencode-go/kimi-k3",
-  "enabled_providers": ["opencode-go"],
+  "model": "zai-coding-plan/glm-5.3",
+  "small_model": "zai-coding-plan/glm-5.3",
+  "agent": { "plan": { "model": "opencode-go/gpt-5.5" } },
+  "enabled_providers": ["opencode-go", "zai-coding-plan"],
   "provider": {
     "opencode-go": {
-      "options": { "baseURL": "https://olp.example/code/team-go/v1", "apiKey": "{env:OLP_API_KEY}" },
-      "whitelist": ["kimi-k3", "minimax-m3"]
+      "options": { "baseURL": "https://olp.example/code/team-mix/v1", "apiKey": "{env:OLP_API_KEY}" },
+      "whitelist": ["gpt-5.5"]
+    },
+    "zai-coding-plan": {
+      "options": { "baseURL": "https://olp.example/code/team-mix/v1", "apiKey": "{env:OLP_API_KEY}" },
+      "whitelist": ["glm-5.3"]
     }
   }
 }
@@ -200,6 +260,7 @@ catalogue, so a route model the pinned release does not know is unavailable.
 title generation on the route. Never run `opencode auth login` for the plan on a
 developer machine. OpenCode asks the npm registry for its own dependencies at
 startup; that is not model traffic.
+
 ## Conversations and authority
 
 Clients name their conversations in headers OLP reads and forwards unchanged:
@@ -214,14 +275,24 @@ A Claude Code agent is scoped by its session, as `session/agent`, because
 teammate agents reuse name-based identifiers. Identifier bytes outside letters,
 digits, `.` and `-` are encoded as `:xx`, so OpenCode's `ses_…` appears as
 `ses:5f…`. A request naming no conversation, or naming both clients', refuses.
-Only the client headers of the route's adapter count: a Codex route ignores
-Claude Code and OpenCode headers, and the coding plans ignore Codex's.
+The request's path decides whose headers count: the Codex paths read only
+Codex's, and the `v1/` paths only Claude Code's and OpenCode's.
 
 The first admitted top-level conversation selects one eligible pool account and
-atomically persists its binding. Concurrent first turns on different replicas
-must resolve to that same binding. Resumes, reconnects, children, compaction and
-client retries retain the root's account. A child with an unresolved parent is
-refused instead of receiving a new account.
+atomically persists its binding. The first admission of each model in the
+conversation tree pins one account to that model. A tree uses at most one
+account of each subscription family, so a new model takes the tree's first
+account, or else another account the tree already uses, when it lists the model
+and serves the request's path; otherwise it takes the first available eligible
+account of a family the tree does not use yet. Another account of a family the
+tree already uses never joins it, which keeps a vendor's conversation state on
+one account. When a republish puts two of a tree's accounts in one family, the
+account the tree used first keeps serving and the other refuses its pinned
+models. Each pin records its account's family, so a family stays the tree's
+after a republish drops that account. Concurrent first turns on different
+replicas must resolve to the same binding and pins. Resumes, reconnects, children, compaction and client
+retries keep each model's pinned account. A child with an unresolved parent is
+refused instead of receiving a new account. Bindings list their tree's pins.
 
 Fresh `codex exec review` is a child-first workflow. With the generated
 WebSocket-enabled configuration, controlled tests observe a root handshake
@@ -237,7 +308,8 @@ the root handshake before OLP is not qualified by the fallback test.
 Every generation rechecks key/project/route/pool permission, account eligibility,
 grant state and limits. A WebSocket upgrade is not lasting authorization to
 generate. Revocation, retirement, an unavailable account, exhausted allowance or
-an unsupported model never triggers silent account switching. A credential
+an unsupported model never triggers silent account switching; a cooling
+account the tree would take for a new model refuses that model too. A credential
 refresh may change authentication for the same principal; it must not change
 the principal stored in the binding.
 
@@ -297,8 +369,8 @@ controls, hop-by-hop headers and protocol-required framing/upgrade handling.
 Request authentication fields consumed locally are `Authorization`,
 `ChatGPT-Account-ID`, `Cookie`, `X-API-Key` and `X-Goog-API-Key`. A route's
 Messages paths also accept the OLP key in `X-API-Key`, as Anthropic SDKs send
-it, and refuse in Anthropic's error envelope. Only the adapter's own headers
-replace them: Codex's `Authorization` and `ChatGPT-Account-ID`, a bearer
+it, and refuse in Anthropic's error envelope. Only the headers of the serving
+account's adapter replace them: Codex's `Authorization` and `ChatGPT-Account-ID`, a bearer
 `Authorization` for GLM Coding Plan, and for OpenCode Go a bearer
 `Authorization`, or `X-API-Key` on Messages as OpenCode's Anthropic SDK sends it.
 All `X-OLP-*` fields are consumed. Hop-by-hop exclusions are `Connection`,

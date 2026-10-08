@@ -276,11 +276,12 @@ function clientConfiguration(
     route_slug: route.slug,
     base_url: 'https://olp.example/code/team-code',
     native_models: ['native-model'],
-    adapter: 'codex',
+    adapters: ['codex'],
     client: 'codex',
     supported_clients: ['codex'],
     client_version: '0.160.0',
     model: 'native-model',
+    plan_model: null,
     small_model: null,
     format: 'toml',
     file: '$CODEX_HOME/config.toml',
@@ -416,6 +417,7 @@ it('paginates filtered metadata and keeps uncertain tokens distinct from measure
 it('retires a whole pinned tree only after confirmation and removes the retire action', async () => {
   await render();
   await click('Conversation trees');
+  expect(host.textContent).toContain(`native-model → ${account.id}`);
   vi.mocked(confirm).mockReturnValueOnce(false);
   await click('Retire entire tree');
   expect(api.retireCodeBinding).not.toHaveBeenCalled();
@@ -783,18 +785,19 @@ it('shows exhausted counts beside windows with their own resets and unknown valu
   expect(text).toContain('codex / primary: 20% used · 80% remaining');
 });
 
-it("offers the route adapter's clients and regenerates for a chosen client and models", async () => {
-  const models = ['glm-5.3', 'glm-5.3-flash'];
+it("offers the route's clients and regenerates for a chosen client and models", async () => {
+  const models = ['glm-5.3', 'minimax-m3'];
   const load = vi.fn(
     async (_route: api.CodeRoute, selection: api.CodeClientSelection) => {
       const client = selection.client ?? 'claude-code';
       return clientConfiguration({
         native_models: models,
-        adapter: 'zai_coding',
+        adapters: ['opencode_go', 'zai_coding'],
         client,
         supported_clients: ['claude-code', 'opencode'],
         client_version: client === 'opencode' ? '1.18.34' : '2.1.286',
         model: selection.model ?? models[0],
+        plan_model: selection.plan_model ?? selection.model ?? models[0],
         small_model: selection.small_model ?? selection.model ?? models[0],
         format: client === 'opencode' ? 'json' : 'shell',
         file: client === 'opencode' ? 'opencode.json' : null,
@@ -809,6 +812,15 @@ it("offers the route adapter's clients and regenerates for a chosen client and m
   expect(text()).toContain('Claude Code 2.1.286');
   expect(text()).toContain('Source this file in your shell');
   expect(text()).toContain('Generated configuration · SHELL');
+  expect(text()).toContain('Subscriptions');
+  expect(
+    [
+      ...host.querySelectorAll(
+        '[aria-label="Client configuration"] .badges .badge'
+      )
+    ].map((badge) => badge.textContent)
+  ).toEqual(['OpenCode Go', 'GLM Coding Plan']);
+  expect(text()).toContain('Plan mode, through opusplan');
   expect(
     host.querySelector(`#code-client-small-model-${route.id}`)
   ).not.toBeNull();
@@ -829,20 +841,33 @@ it("offers the route adapter's clients and regenerates for a chosen client and m
     { client: 'opencode' },
     expect.any(AbortSignal)
   );
-  field(`code-client-model-${route.id}`, 'glm-5.3-flash');
+  field(`code-client-model-${route.id}`, 'minimax-m3');
+  await settle();
+  field(`code-client-plan-model-${route.id}`, 'glm-5.3');
   await settle();
   expect(load).toHaveBeenLastCalledWith(
     route,
-    { client: 'opencode', model: 'glm-5.3-flash' },
+    { client: 'opencode', model: 'minimax-m3', plan_model: 'glm-5.3' },
     expect.any(AbortSignal)
   );
   expect(
     host.querySelector<HTMLTextAreaElement>(
       `#code-client-configuration-${route.id}`
     )!.value
-  ).toBe('opencode glm-5.3-flash');
+  ).toBe('opencode minimax-m3');
   expect(text()).toContain('Save as opencode.json.');
   expect(text()).toContain('OpenCode 1.18.34');
+  expect(text()).toContain('The plan agent; the build agent uses');
+  // Another client has its own native models, so its models start again
+  // from their defaults.
+  radios[0].click();
+  flushSync();
+  await settle();
+  expect(load).toHaveBeenLastCalledWith(
+    route,
+    { client: 'claude-code' },
+    expect.any(AbortSignal)
+  );
 });
 
 it('keeps client pickers after a refused selection and restores the defaults', async () => {
@@ -855,9 +880,10 @@ it('keeps client pickers after a refused selection and restores the defaults', a
           detail: "This route's GLM Coding Plan accounts support Claude Code."
         });
       return clientConfiguration({
-        adapter: 'zai_coding',
+        adapters: ['zai_coding'],
         client: 'claude-code',
         supported_clients: ['claude-code', 'opencode'],
+        plan_model: 'native-model',
         small_model: 'native-model',
         format: 'shell',
         file: null,
@@ -890,7 +916,7 @@ it('keeps client pickers after a refused selection and restores the defaults', a
   ).toBe('default configuration');
 });
 
-it('shows the subscription family of accounts and published routes', async () => {
+it('shows the subscription families of accounts and published routes', async () => {
   await render();
   expect(
     [...host.querySelectorAll('.badge')].map((badge) => badge.textContent)
@@ -900,7 +926,18 @@ it('shows the subscription family of accounts and published routes', async () =>
     [...host.querySelectorAll('.badge')].map((badge) => badge.textContent)
   ).toContain('GLM Coding Plan');
   vi.mocked(api.listCodeRoutes).mockResolvedValue({
-    items: [{ ...route, adapter: undefined, published_at: null }],
+    items: [{ ...route, adapters: ['opencode_go', 'zai_coding'] }],
+    nextCursor: null
+  });
+  await client.invalidateQueries();
+  await settle();
+  expect(
+    [...host.querySelectorAll('.badges .badge')].map(
+      (badge) => badge.textContent
+    )
+  ).toEqual(['OpenCode Go', 'GLM Coding Plan']);
+  vi.mocked(api.listCodeRoutes).mockResolvedValue({
+    items: [{ ...route, adapters: [], published_at: null }],
     nextCursor: null
   });
   await client.invalidateQueries();
