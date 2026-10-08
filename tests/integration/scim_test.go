@@ -154,6 +154,9 @@ func TestSCIMKeepsAProjectManager(t *testing.T) {
 	scimCall(t, h, token, "PATCH", gpath, scimPatch(map[string]any{"op": "replace", "path": scim.GroupExtension + ":projects", "value": []any{map[string]any{"value": project, "role": "viewer"}}}), "", 409)
 	scimCall(t, h, token, "DELETE", gpath, nil, "", 409)
 	scimCall(t, h, token, "DELETE", upath, nil, "", 409)
+	// Taking the user over locally would end their group grant too.
+	provisioned := h.want(owner, "GET", "/api/v1/users/"+uid, nil, nil, 200)
+	h.want(owner, "PATCH", "/api/v1/users/"+uid, map[string]any{"role": "developer"}, etagHeader(provisioned), 409)
 	// The console's mapping editor applies the same rule.
 	mapping := h.want(owner, "GET", "/api/v1/scim/groups", nil, nil, 200)["items"].([]any)[0].(map[string]any)
 	h.want(owner, "PUT", "/api/v1/scim/groups/"+group["id"].(string)+"/mapping", map[string]any{"mapping": map[string]any{"role": "developer", "accessScope": "assigned", "projects": []any{}}}, etagHeader(mapping), 409)

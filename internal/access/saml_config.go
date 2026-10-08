@@ -248,7 +248,9 @@ func (s *Server) StoreSAMLDefinition(r *http.Request, tx pgx.Tx, p Principal, d 
 	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.saml_configuration(singleton,id,document,etag,updated_by) VALUES(true,$1,$2,$3,$4) ON CONFLICT(singleton) DO UPDATE SET document=excluded.document,etag=excluded.etag,updated_by=excluded.updated_by,updated_at=now()`, c.ID, raw, c.ETag, p.UserID()); err != nil {
 		return c, err
 	}
-	if old.EntityID != c.EntityID || old.EmailAttribute != c.EmailAttribute || old.GroupsAttribute != c.GroupsAttribute || rotate {
+	// Role evidence comes from the IdP's signed attributes, which a new SP
+	// signing key leaves unchanged.
+	if old.EntityID != c.EntityID || old.EmailAttribute != c.EmailAttribute || old.GroupsAttribute != c.GroupsAttribute {
 		if _, err = tx.Exec(r.Context(), "UPDATE olp.saml_identities SET role_claims=NULL"); err != nil {
 			return c, err
 		}

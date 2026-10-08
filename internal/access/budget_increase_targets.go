@@ -68,11 +68,9 @@ func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p Principal, t
 		err = tx.QueryRow(r.Context(), "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&policy)
 		return
 	}
-	if err = p.Authorize(Keys); err != nil {
-		return
-	}
-	switch t.Kind {
-	case "organization":
+	if t.Kind == "organization" {
+		// An organization's budget belongs to whoever manages it, so a token
+		// delegated only that scope raises it without managing keys.
 		if err = p.Authorize(ManageOrganization); err != nil {
 			return
 		}
@@ -82,6 +80,11 @@ func (s *Server) budgetIncreaseTarget(r *http.Request, tx pgx.Tx, p Principal, t
 		owner = limits.AggregateBudgetID("organization", t.ID)
 		err = tx.QueryRow(r.Context(), "SELECT budget_policy FROM olp.organizations WHERE id=$1", t.ID).Scan(&policy)
 		return
+	}
+	if err = p.Authorize(Keys); err != nil {
+		return
+	}
+	switch t.Kind {
 	case "project", "project_end_user", "attribution":
 		project = &t.ID
 		if err = p.Project(project, Change); err != nil {

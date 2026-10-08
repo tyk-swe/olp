@@ -347,6 +347,14 @@ func TestSAMLRecentProofUnlinkAndOwnerProtection(t *testing.T) {
 	input["enabled"] = false
 	h.want(owner, "PUT", "/api/v1/saml/configuration", input, etagHeader(config), 409)
 	h.want(owner, "DELETE", "/api/v1/profile/saml-identities/"+identity, nil, nil, 409)
+	// A new SP signing key keeps the IdP's role evidence, so the owner stays usable.
+	input["enabled"] = true
+	input["rotate_signing_key"] = true
+	config = h.want(owner, "PUT", "/api/v1/saml/configuration", input, etagHeader(config), 200)
+	var evidence bool
+	if err := h.Pool.QueryRow(t.Context(), "SELECT role_claims IS NOT NULL FROM olp.saml_identities WHERE id=$1", identity).Scan(&evidence); err != nil || !evidence {
+		t.Fatalf("role evidence=%v err=%v", evidence, err)
+	}
 	setting = h.want(owner, "GET", "/api/v1/settings/auth.local_login_enabled", nil, nil, 200)
 	h.want(owner, "PUT", "/api/v1/settings/auth.local_login_enabled", map[string]any{"value": "true"}, etagHeader(setting), 200)
 	h.want(owner, "DELETE", "/api/v1/profile/saml-identities/"+identity, nil, nil, 204)

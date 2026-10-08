@@ -88,6 +88,12 @@ func TestOrganizationMembershipIntersectionAndLastManager(t *testing.T) {
 	token := h.want(owner, "POST", "/api/v1/management-tokens", map[string]any{"name": "creator bound", "scopes": []string{"read", "manage_organization"}, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}, idem("token"), 201)["secret"].(string)
 	// Global ownership alone does not let a token without access manage unrelated organizations.
 	h.machineWant(token, "GET", base, nil, nil, 200)
+	// Managing the organization is enough to raise its budget for a while.
+	budget := h.want(owner, "GET", base+"/budget", nil, nil, 200)
+	h.want(owner, "PUT", base+"/budget", map[string]any{"policy": map[string]any{"daily_cost_limit": "10"}}, etagHeader(budget), 200)
+	increase := h.machineWant(token, "POST", "/api/v1/budget-increases", map[string]any{"target": map[string]any{"kind": "organization", "id": o["id"]}, "window": "day", "amount": "5", "reason": "Launch day"}, idem("org-increase"), 201)
+	h.machineWant(token, "DELETE", "/api/v1/budget-increases/"+increase["id"].(string), nil, etagHeader(increase), 204)
+	o = h.want(owner, "GET", base, nil, nil, 200)
 	h.want(owner, "PATCH", "/api/v1/users/"+uid, map[string]any{"access_scope": "assigned"}, etagHeader(profile), 200)
 	user = login(h, "inherited@example.com")
 	h.want(owner, "PUT", base+"/members/"+uid, map[string]any{"role": "viewer"}, etagHeader(o), 204)

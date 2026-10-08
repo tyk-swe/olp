@@ -348,10 +348,19 @@ func (s *Server) updateUser(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, Fail(409, "cannot_change_current_user_access", "Ask another owner to change your access.")
 	}
 	u.ETag = NewID()
+	// Taking over a provisioned user ends the project grants their SCIM groups
+	// gave them, which must not leave a project without a manager.
+	managed, err := scimManagedProjects(r, tx)
+	if err != nil {
+		return Reply{}, err
+	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET role=$1,active=$2,access_scope=$3,etag=$4,updated_at=now(),role_management=CASE WHEN role_management='provisioned' THEN 'local' ELSE role_management END WHERE id=$5", u.Role, u.Active, u.AccessScope, u.ETag, id); err != nil {
 		return Reply{}, err
 	}
 	if err = s.usableOwner(r, tx); err != nil {
+		return Reply{}, err
+	}
+	if err = keepSCIMManagers(r, tx, managed); err != nil {
 		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", id); err != nil {
