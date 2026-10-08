@@ -81,7 +81,9 @@ var vendors = []Vendor{
 	},
 }
 
-// clientProtocols lists the protocols each client speaks.
+// clientProtocols lists the protocols each client speaks, in the order it
+// prefers them: OpenCode sends a model through a provider on the first one the
+// provider's adapter serves it on.
 var clientProtocols = map[string][]codemode.Protocol{
 	ClientCodex:      {codemode.ProtocolResponses},
 	ClientClaudeCode: {codemode.ProtocolMessages},
@@ -148,7 +150,22 @@ func (v Vendor) Supports(client string) bool { return slices.Contains(v.Clients,
 // model through the adapter: the client speaks a protocol the adapter serves
 // the model on.
 func (v Vendor) Reaches(client, model string) bool {
-	return v.Supports(client) && slices.ContainsFunc(clientProtocols[client], func(p codemode.Protocol) bool { return v.ServesModel(p, model) })
+	_, ok := v.Protocol(client, model)
+	return ok
+}
+
+// Protocol returns the protocol a client OLP generates configuration for sends
+// a model on through the adapter: the first the client speaks that the adapter
+// serves the model on.
+func (v Vendor) Protocol(client, model string) (codemode.Protocol, bool) {
+	if v.Supports(client) {
+		for _, p := range clientProtocols[client] {
+			if v.ServesModel(p, model) {
+				return p, true
+			}
+		}
+	}
+	return "", false
 }
 
 // ServesModel reports whether the adapter serves a model on a protocol.

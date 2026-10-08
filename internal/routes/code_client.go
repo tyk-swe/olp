@@ -91,18 +91,49 @@ func (o Offers) adapters(model string) []codemode.Adapter {
 	return adapters
 }
 
-// reaches reports whether one conversation reaches every model, whatever order
-// it first uses them in and whichever account admission pins for each. The
-// conversation's accounts serve the models they offer; another account joins
-// it only with an adapter it does not use yet.
-func (o Offers) reaches(client string, models []string) bool {
+// through returns the adapter a client sends each model through: the first
+// choice, in table order, with which one conversation reaches them all.
+func (o Offers) through(client string, models []string) (map[string]codemode.Adapter, bool) {
+	chosen := make([]codemode.Adapter, len(models))
+	var choose func(i int) bool
+	choose = func(i int) bool {
+		if i == len(models) {
+			return o.reaches(client, models, chosen)
+		}
+		for _, adapter := range o.adapters(models[i]) {
+			if vendor, _ := codeadapter.Lookup(adapter); vendor.Reaches(client, models[i]) {
+				if chosen[i] = adapter; choose(i + 1) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !choose(0) {
+		return nil, false
+	}
+	through := map[string]codemode.Adapter{}
+	for i, model := range models {
+		through[model] = chosen[i]
+	}
+	return through, true
+}
+
+// reaches reports whether one conversation reaches every model, sent through
+// its adapter, whatever order it first uses them in and whichever account
+// admission pins for each. The client sends a model through an adapter on one
+// protocol, and an account serves it when its adapter serves the model on that
+// protocol; another account joins the conversation only with an adapter it
+// does not use yet.
+func (o Offers) reaches(client string, models []string, through []codemode.Adapter) bool {
 	// Accounts with one adapter serving the same of these models are alike.
 	var alike Offers
 	for _, offer := range o {
 		vendor, _ := codeadapter.Lookup(offer.Adapter)
 		kind := Offer{Adapter: offer.Adapter}
-		for _, model := range models {
-			if slices.Contains(offer.Models, model) && vendor.Reaches(client, model) {
+		for i, model := range models {
+			sender, _ := codeadapter.Lookup(through[i])
+			if p, ok := sender.Protocol(client, model); ok && slices.Contains(offer.Models, model) && vendor.ServesModel(p, model) {
 				kind.Models = append(kind.Models, model)
 			}
 		}
@@ -241,6 +272,7 @@ func ClientConfiguration(route codemode.Route, offers Offers, in ClientRequest) 
 		return out, err
 	}
 	selected := []string{model}
+	through, _ := offers.through(client, selected)
 	for _, companion := range []struct {
 		field string
 		model *string
@@ -248,7 +280,9 @@ func ClientConfiguration(route codemode.Route, offers Offers, in ClientRequest) 
 		if companion.model == nil || slices.Contains(selected, *companion.model) {
 			continue
 		}
-		if selected = append(selected, *companion.model); !offers.reaches(client, selected) {
+		selected = append(selected, *companion.model)
+		var ok bool
+		if through, ok = offers.through(client, selected); !ok {
 			return out, access.Invalid(companion.field, "A conversation uses one account of each subscription, so it cannot reach this model alongside the others selected.")
 		}
 	}
@@ -284,7 +318,7 @@ func ClientConfiguration(route codemode.Route, offers Offers, in ClientRequest) 
 		out.Configuration = claudeCodeConfiguration(route.Slug, conjoin(names), out.BaseURL, model, *plan, *small)
 	case codeadapter.ClientOpenCode:
 		out.ClientVersion, out.Format, out.File = codeadapter.OpenCodeVersion, "json", new("opencode.json")
-		out.Configuration, err = openCodeConfiguration(adapters, offers, native, out.BaseURL, model, *plan, *small)
+		out.Configuration, err = openCodeConfiguration(adapters, offers, through, native, out.BaseURL, model, *plan, *small)
 	}
 	return out, err
 }
@@ -378,10 +412,12 @@ func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''
 // overrides, keeping OpenCode's own choice of endpoint for each model.
 var openCodeProviders = map[codemode.Adapter]string{codemode.AdapterOpenCodeGo: "opencode-go", codemode.AdapterZAICoding: "zai-coding-plan"}
 
-// openCodeConfiguration lists each native model under the provider of the
-// first adapter that offers it, and enables those providers. A planning model
-// other than the main one becomes the plan agent's.
-func openCodeConfiguration(adapters []codemode.Adapter, offers Offers, native []string, baseURL, model, plan, small string) (string, error) {
+// openCodeConfiguration lists each selected model under the provider of the
+// adapter it is sent through, which picks its protocol, and every other native
+// model under the provider of the first adapter that offers it, and enables
+// those providers. A planning model other than the main one becomes the plan
+// agent's.
+func openCodeConfiguration(adapters []codemode.Adapter, offers Offers, through map[string]codemode.Adapter, native []string, baseURL, model, plan, small string) (string, error) {
 	type options struct {
 		BaseURL string `json:"baseURL"`
 		APIKey  string `json:"apiKey"`
@@ -396,7 +432,11 @@ func openCodeConfiguration(adapters []codemode.Adapter, offers Offers, native []
 	whitelists := map[codemode.Adapter][]string{}
 	qualified := map[string]string{}
 	for _, m := range native {
-		for _, adapter := range offers.adapters(m) {
+		adapters := offers.adapters(m)
+		if adapter, ok := through[m]; ok {
+			adapters = []codemode.Adapter{adapter}
+		}
+		for _, adapter := range adapters {
 			if provider, ok := openCodeProviders[adapter]; ok {
 				whitelists[adapter] = append(whitelists[adapter], m)
 				qualified[m] = provider + "/" + m

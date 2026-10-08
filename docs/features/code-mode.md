@@ -229,7 +229,9 @@ The controlled suite runs OpenCode **1.18.34**. OLP generates an `opencode.json`
 that overrides the base URL of OpenCode's own provider for each subscription:
 `opencode-go`, or `zai-coding-plan` for either GLM profile. Each model is listed
 under the provider of the subscription that serves it, and every provider points
-at the route. With a `plan_model` other than `model`, OpenCode's plan agent uses
+at the route. The provider picks the endpoint OpenCode sends a model on, so for
+a model both subscriptions offer OLP picks the providers with which one
+conversation reaches the main, planning and background models together. With a `plan_model` other than `model`, OpenCode's plan agent uses
 the planning model and its build agent `model`. For a route mixing both plans:
 
 ```json

@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"encoding/json"
 	"errors"
 	"os/exec"
 	"reflect"
@@ -299,14 +300,37 @@ func TestConfigurationsSelectOnlyModelsOneConversationReaches(t *testing.T) {
 			t.Fatalf("plan %q small %q refused %q; want %q", c.plan, c.small, got, c.refused)
 		}
 	}
-	// Admission may still pin the other OpenCode Go account for qwen-4 first
-	// when Z.ai also serves it, but not once Z.ai serves both models.
+	// Sent through Z.ai, qwen-4 goes on Chat Completions, which the other
+	// OpenCode Go account does not serve it on, so a conversation reaches it.
 	offers[2].Models = append(offers[2].Models, "qwen-4")
-	if got := refused("qwen-4", ""); got != "plan_model" {
+	if got := refused("qwen-4", ""); got != "" {
 		t.Fatalf("qwen-4 beside Z.ai refused %q", got)
 	}
-	offers[2].Models = append(offers[2].Models, "minimax-m3")
-	if got := refused("qwen-4", ""); got != "" {
-		t.Fatalf("qwen-4 with Z.ai serving both refused %q", got)
+	configured := func(model, plan string) (string, string) {
+		out, err := ClientConfiguration(route, offers, ClientRequest{GatewayURL: "https://gateway.example", Client: "opencode", Model: model, PlanModel: plan})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document struct {
+			Model string
+			Agent map[string]struct{ Model string }
+		}
+		if err := json.Unmarshal([]byte(out.Configuration), &document); err != nil {
+			t.Fatal(err)
+		}
+		return document.Model, document.Agent["plan"].Model
+	}
+	if build, plan := configured("minimax-m3", "qwen-4"); build != "opencode-go/minimax-m3" || plan != "zai-coding-plan/qwen-4" {
+		t.Fatalf("qwen-4 plan: build %q plan %q", build, plan)
+	}
+	// OpenCode Go serves GPT only on Responses, which Z.ai does not.
+	route.Models = []string{"gpt-5.5", "kimi-k3"}
+	offers = Offers{
+		{Adapter: codemode.AdapterOpenCodeGo, Models: []string{"kimi-k3"}},
+		{Adapter: codemode.AdapterOpenCodeGo, Models: []string{"gpt-5.5"}},
+		{Adapter: codemode.AdapterZAICoding, Models: []string{"kimi-k3", "gpt-5.5"}},
+	}
+	if build, plan := configured("kimi-k3", "gpt-5.5"); build != "opencode-go/kimi-k3" || plan != "zai-coding-plan/gpt-5.5" {
+		t.Fatalf("gpt-5.5 plan: build %q plan %q", build, plan)
 	}
 }
