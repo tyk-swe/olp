@@ -69,11 +69,18 @@ func (s *Server) scimGroupMapping(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, err
 	}
 	document[scim.GroupExtension] = mapping
+	managed, err := scimManagedProjects(r, tx)
+	if err != nil {
+		return Reply{}, err
+	}
 	affected, err := s.writeSCIMGroup(r, tx, id, document, "PUT")
 	if err != nil {
 		return Reply{}, err
 	}
 	if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
+		return Reply{}, err
+	}
+	if err = keepSCIMManagers(r, tx, managed); err != nil {
 		return Reply{}, err
 	}
 	if err = s.usableOwner(r, tx); err != nil {
@@ -90,6 +97,16 @@ func (s *Server) scimGroupMapping(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, err
 	}
 	return Commit(r, tx, Detail(json.RawMessage(body), etag))
+}
+
+// keepSCIMManagers refuses a mapping change that leaves a project it managed
+// through SCIM without a delegated manager, as member changes are refused.
+func keepSCIMManagers(r *http.Request, tx pgx.Tx, projects []string) error {
+	orphaned, err := scimOrphansProject(r, tx, projects)
+	if err == nil && orphaned {
+		err = Fail(409, "last_project_manager", "Keep at least one project manager.")
+	}
+	return err
 }
 
 // StoreSCIMMapping promotes policy only. Directory identities and memberships
@@ -121,11 +138,18 @@ func (s *Server) StoreSCIMMapping(ctx context.Context, tx pgx.Tx, p Principal, n
 		}
 	}
 	document[scim.GroupExtension] = mapping
+	managed, err := scimManagedProjects(r, tx)
+	if err != nil {
+		return err
+	}
 	affected, err := s.writeSCIMGroup(r, tx, id, document, method)
 	if err != nil {
 		return err
 	}
 	if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
+		return err
+	}
+	if err = keepSCIMManagers(r, tx, managed); err != nil {
 		return err
 	}
 	if err = s.usableOwner(r, tx); err != nil {

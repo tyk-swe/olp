@@ -154,6 +154,9 @@ func TestSCIMKeepsAProjectManager(t *testing.T) {
 	scimCall(t, h, token, "PATCH", gpath, scimPatch(map[string]any{"op": "replace", "path": scim.GroupExtension + ":projects", "value": []any{map[string]any{"value": project, "role": "viewer"}}}), "", 409)
 	scimCall(t, h, token, "DELETE", gpath, nil, "", 409)
 	scimCall(t, h, token, "DELETE", upath, nil, "", 409)
+	// The console's mapping editor applies the same rule.
+	mapping := h.want(owner, "GET", "/api/v1/scim/groups", nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	h.want(owner, "PUT", "/api/v1/scim/groups/"+group["id"].(string)+"/mapping", map[string]any{"mapping": map[string]any{"role": "developer", "accessScope": "assigned", "projects": []any{}}}, etagHeader(mapping), 409)
 	var managers int
 	if e := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.effective_project_members WHERE project_id=$1 AND role='manager'", project).Scan(&managers); e != nil || managers != 1 {
 		t.Fatalf("managers=%d err=%v", managers, e)

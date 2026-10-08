@@ -275,13 +275,15 @@
     return `${rule.subject_kind === 'api_key' ? 'API key' : 'Budget group'} · ${rule.subject_name ?? rule.subject_id}`;
   }
 
+  // Budget windows follow the installation's budget time zone, which may
+  // change, so the labels name no zone.
   function windowLabel(windowKind: NotificationRule['window_kind']) {
     if (!windowKind) return '—';
     return windowKind === 'day'
-      ? 'UTC day'
+      ? 'Budget day'
       : windowKind === 'week'
-        ? 'UTC ISO week'
-        : 'UTC month';
+        ? 'Budget week'
+        : 'Budget month';
   }
 
   function amount(value: string | null, currency: string | null) {
@@ -502,9 +504,9 @@
               <label for="rule-window">Window</label><select
                 id="rule-window"
                 bind:value={ruleWindow}
-                ><option value="day">UTC day</option><option value="week"
-                  >UTC ISO week</option
-                ><option value="month">UTC month</option></select
+                ><option value="day">Budget day</option><option value="week"
+                  >Budget week</option
+                ><option value="month">Budget month</option></select
               >
             </div>
             <div class="form-field">

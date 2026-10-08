@@ -1,8 +1,11 @@
 package samlidentity
 
 import (
+	"crypto/x509"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestXMLRejectsAmbiguousOrUnboundedStructures(t *testing.T) {
@@ -23,4 +26,17 @@ func FuzzMetadataNeverPanics(f *testing.F) {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, b []byte) { _, _ = ParseMetadata(b) })
+}
+
+func TestOnlyCurrentCertificatesVouchForAssertions(t *testing.T) {
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	retired := &x509.Certificate{NotBefore: now.AddDate(-2, 0, 0), NotAfter: now.AddDate(0, 0, -1)}
+	current := &x509.Certificate{NotBefore: now.AddDate(-1, 0, 0), NotAfter: now.AddDate(1, 0, 0)}
+	future := &x509.Certificate{NotBefore: now.AddDate(0, 0, 1), NotAfter: now.AddDate(2, 0, 0)}
+	if got := currentCertificates([]*x509.Certificate{retired, current, future}, now); !slices.Equal(got, []*x509.Certificate{current}) {
+		t.Fatalf("trusted %d certificates, want only the current one", len(got))
+	}
+	if got := currentCertificates([]*x509.Certificate{retired, future}, now); len(got) != 0 {
+		t.Fatalf("trusted %d certificates outside their validity", len(got))
+	}
 }

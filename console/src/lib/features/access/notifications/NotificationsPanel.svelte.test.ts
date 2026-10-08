@@ -228,3 +228,26 @@ it.each([
     expect(host.querySelector('#rule-subject')).not.toBeNull();
   }
 );
+
+it('names budget windows without assuming a time zone', async () => {
+  vi.mocked(listNotificationRules).mockResolvedValue([
+    {
+      ...lapseRule,
+      event: 'budget.threshold',
+      subject_kind: 'api_key',
+      subject_id: '01980000-0000-7000-8000-000000000b01',
+      subject_name: 'Checkout',
+      window_kind: 'week',
+      threshold_percent: 80
+    }
+  ]);
+  await render();
+
+  const windows = [
+    ...host.querySelectorAll<HTMLOptionElement>('#rule-window option')
+  ].map((option) => option.textContent);
+  expect(windows).toEqual(['Budget day', 'Budget week', 'Budget month']);
+  const rules = [...host.querySelectorAll('table')][1]!;
+  expect(rules.textContent).toContain('Budget week');
+  expect(host.textContent).not.toContain('UTC');
+});

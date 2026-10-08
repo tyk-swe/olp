@@ -82,7 +82,10 @@ func (s *Server) scimWrite(r *http.Request, _ Principal, group bool) (Reply, err
 	if err = s.reconcileSCIMUsers(r, tx, p, affected); err != nil {
 		return Reply{}, err
 	}
-	if err = keepSCIMManagers(r, tx, managed); err != nil {
+	if orphaned, err := scimOrphansProject(r, tx, managed); err != nil || orphaned {
+		if err == nil {
+			err = scim.Fail(409, "", "Keep at least one project manager.")
+		}
 		return Reply{}, err
 	}
 	if err = s.usableOwner(r, tx); err != nil {
@@ -120,20 +123,16 @@ func scimManagedProjects(r *http.Request, tx pgx.Tx) ([]string, error) {
 	return ids, err
 }
 
-// keepSCIMManagers applies the console's last-manager rule to a directory
-// change: a project it managed through SCIM must keep a delegated manager.
-func keepSCIMManagers(r *http.Request, tx pgx.Tx, projects []string) error {
+// scimOrphansProject applies the console's last-manager rule to a directory
+// change: it reports whether a project once managed through SCIM has lost every
+// delegated manager.
+func scimOrphansProject(r *http.Request, tx pgx.Tx, projects []string) (bool, error) {
 	if len(projects) == 0 {
-		return nil
+		return false, nil
 	}
 	var orphaned bool
-	if err := tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.projects p WHERE p.id=ANY($1::uuid[]) AND NOT EXISTS(SELECT 1 FROM olp.effective_project_members m WHERE m.project_id=p.id AND m.role='manager'))", projects).Scan(&orphaned); err != nil {
-		return err
-	}
-	if orphaned {
-		return scim.Fail(409, "", "Keep at least one project manager.")
-	}
-	return nil
+	err := tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.projects p WHERE p.id=ANY($1::uuid[]) AND NOT EXISTS(SELECT 1 FROM olp.effective_project_members m WHERE m.project_id=p.id AND m.role='manager'))", projects).Scan(&orphaned)
+	return orphaned, err
 }
 
 func boundedSCIMText(v any, max int, required bool) (string, error) {

@@ -188,6 +188,18 @@ func strongSignatures(e *etree.Element) bool {
 	return true
 }
 
+// currentCertificates keeps the signing certificates valid at now. Rollover
+// metadata may also list a retired or future one, which never vouches alone.
+func currentCertificates(certificates []*x509.Certificate, now time.Time) []*x509.Certificate {
+	var current []*x509.Certificate
+	for _, c := range certificates {
+		if !now.Before(c.NotBefore) && !now.After(c.NotAfter) {
+			current = append(current, c)
+		}
+	}
+	return current
+}
+
 // Verify requires exactly one separately signed, unencrypted assertion. Outer
 // response signatures are verified too; they never substitute for this proof.
 func Verify(sp *saml.ServiceProvider, metadata Metadata, raw []byte, requestID string, now time.Time) (*saml.Assertion, error) {
@@ -216,7 +228,12 @@ func Verify(sp *saml.ServiceProvider, metadata Metadata, raw []byte, requestID s
 			return nil, ErrDocument
 		}
 	}
-	ctx := dsig.NewDefaultValidationContext(&dsig.MemoryX509CertificateStore{Roots: metadata.Certificates})
+	roots := currentCertificates(metadata.Certificates, now)
+	if len(roots) == 0 {
+		return nil, ErrDocument
+	}
+	ctx := dsig.NewDefaultValidationContext(&dsig.MemoryX509CertificateStore{Roots: roots})
+	ctx.Clock = dsig.NewFakeClockAt(now)
 	ctx.IdAttribute = "ID"
 	if _, err := ctx.Validate(assertion); err != nil {
 		return nil, ErrDocument

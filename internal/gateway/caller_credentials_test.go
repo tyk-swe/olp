@@ -118,6 +118,16 @@ func TestCallerCostExemptionRequiresCallerTargetsAndMatchingRouteTransitions(t *
 	if err := snapshot.Validate(); err == nil {
 		t.Fatal("route transition bypassed cost admission")
 	}
+	route.Fallbacks = nil
+	route.CallerCostExempt = false
+	snapshot.Routes[routeSlug] = route
+	classified := backup
+	classified.Slug = "classified"
+	classified.Selectors = []runtime.Selector{{When: runtime.Predicate{Classifier: &runtime.ClassifierPredicate{Route: routeSlug, Labels: []string{"code"}, TimeoutMS: 1000}}, Route: backup.Slug}}
+	snapshot.Routes[classified.Slug] = classified
+	if err := snapshot.Validate(); err == nil || !strings.Contains(err.Error(), "requires caller credentials") {
+		t.Fatalf("classifier route requires a caller credential it never receives: %v", err)
+	}
 }
 
 func TestCallerCredentialIsRemovedBeforeSemanticOrRetainedProcessing(t *testing.T) {
