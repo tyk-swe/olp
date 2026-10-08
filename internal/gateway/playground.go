@@ -282,8 +282,8 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 		return access.Reply{}, access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
 	}
 	defer s.release(r.Context())
-	// Playground calls are charged to the route's project and installation, so
-	// they hold against those caps as probes and shadows do.
+	// Playground calls, streamed or not, are charged to the route's project and
+	// installation, so they hold against those caps as probes and shadows do.
 	defer s.settleAdmission(r.Context(), x)
 	if e := s.reserveSystemBudgets(r.Context(), x); e != nil {
 		x.failure = e
@@ -424,6 +424,12 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 		return access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
 	}
 	defer s.release(r.Context())
+	defer s.settleAdmission(r.Context(), x)
+	if e := s.reserveSystemBudgets(r.Context(), x); e != nil {
+		x.failure = e
+		s.finish(x, nil, e.Status)
+		return access.Fail(e.Status, e.Code, e.Message)
+	}
 	sw := &playgroundStreamWriter{w: w, maxTotal: s.cfg.MaxResponseBytes}
 	x.emit = sw.emit
 	out := s.execute(r.Context(), x)

@@ -50,6 +50,7 @@ func TestAggregateInstallationBudgetPreservesHistoricalSpendAcrossKeys(t *testin
 	call(replica, second, 429)
 	// The Playground spends against the same caps, without a key of its own.
 	f.h.want(f.owner, "POST", "/api/v1/playground", map[string]any{"model": routeSlug, "input": "hi"}, nil, 429)
+	f.h.want(f.owner, "POST", "/api/v1/playground/stream", map[string]any{"model": routeSlug, "input": "hi", "stream": true}, nil, 429)
 	policy = f.h.want(f.owner, "PUT", path, map[string]any{"policy": nil}, etagHeader(policy), 200)
 	f.h.refresh()
 	call(f.h, first, 200)

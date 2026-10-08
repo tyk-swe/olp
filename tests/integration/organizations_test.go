@@ -23,6 +23,16 @@ func TestOrganizationsDelegateProjectsWithoutChangingInstallationRoles(t *testin
 	h.want(manager, "GET", base, nil, nil, 404)
 	h.want(owner, "PUT", base+"/members/"+uuid.NewString(), map[string]any{"role": "manager"}, etagHeader(org), 404)
 	h.want(owner, "PUT", base+"/members/"+uid, map[string]any{"role": "manager"}, etagHeader(org), 204)
+	first := h.want(owner, "GET", base+"/members?limit=1", nil, nil, 200)
+	cursor, _ := first["next_cursor"].(string)
+	if len(first["items"].([]any)) != 1 || cursor == "" {
+		t.Fatalf("first member page: %v", first)
+	}
+	last := h.want(owner, "GET", base+"/members?limit=1&cursor="+cursor, nil, nil, 200)
+	if len(last["items"].([]any)) != 1 || last["next_cursor"] != nil || last["items"].([]any)[0].(map[string]any)["user_id"] == first["items"].([]any)[0].(map[string]any)["user_id"] {
+		t.Fatalf("last member page: %v", last)
+	}
+	h.want(owner, "GET", base+"/members?cursor=bad", nil, nil, 422)
 	project := h.want(manager, "POST", base+"/projects", map[string]any{"name": "North team"}, idem("project"), 201)
 	pid := project["id"].(string)
 	if project["organization_id"] != oid {

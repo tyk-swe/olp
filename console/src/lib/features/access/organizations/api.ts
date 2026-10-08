@@ -2,6 +2,8 @@ import { apiClient } from '$lib/api/client';
 import { ensureOk, unwrap } from '$lib/api/http';
 import type { components } from '$lib/api/schema';
 export type Organization = components['schemas']['Organization'];
+type OrganizationMember = components['schemas']['OrganizationMember'];
+type ProjectMember = components['schemas']['ProjectMemberResponse'];
 export async function listOrganizations(signal?: AbortSignal) {
   const items: Organization[] = [];
   let cursor: string | undefined;
@@ -44,12 +46,19 @@ export async function organizationMembers(
   organization_id: string,
   signal?: AbortSignal
 ) {
-  return unwrap(
-    await apiClient.GET('/api/v1/organizations/{organization_id}/members', {
-      params: { path: { organization_id } },
-      signal
-    })
-  ).items;
+  const items: OrganizationMember[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = unwrap(
+      await apiClient.GET('/api/v1/organizations/{organization_id}/members', {
+        params: { path: { organization_id }, query: { cursor } },
+        signal
+      })
+    );
+    items.push(...page.items);
+    cursor = page.next_cursor ?? undefined;
+  } while (cursor);
+  return items;
 }
 export async function putOrganizationMember(
   organization_id: string,
@@ -125,12 +134,22 @@ export async function projectMembers(
   project_id: string,
   signal?: AbortSignal
 ) {
-  return unwrap(
-    await apiClient.GET(
-      '/api/v1/organizations/{organization_id}/projects/{project_id}/members',
-      { params: { path: { organization_id, project_id } }, signal }
-    )
-  ).items;
+  const items: ProjectMember[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = unwrap(
+      await apiClient.GET(
+        '/api/v1/organizations/{organization_id}/projects/{project_id}/members',
+        {
+          params: { path: { organization_id, project_id }, query: { cursor } },
+          signal
+        }
+      )
+    );
+    items.push(...page.items);
+    cursor = page.next_cursor ?? undefined;
+  } while (cursor);
+  return items;
 }
 export async function putProjectMember(
   organization_id: string,

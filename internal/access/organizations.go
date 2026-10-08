@@ -190,12 +190,19 @@ func (s *Server) organizationMembers(r *http.Request, p Principal) (Reply, error
 	if err = p.Organization(id, View); err != nil {
 		return Reply{}, err
 	}
-	rows, err := s.Pool.Query(r.Context(), `SELECT jsonb_build_object('user_id',u.id,'email',u.email,'display_name',u.display_name,'role',m.role,'installation_role',u.role,'active',u.active) FROM olp.organization_members m JOIN olp.users u ON u.id=m.user_id WHERE organization_id=$1 ORDER BY u.id`, id)
+	page, err := Page(r)
+	if err != nil {
+		return Reply{}, err
+	}
+	rows, err := s.Pool.Query(r.Context(), `SELECT jsonb_build_object('user_id',u.id,'email',u.email,'display_name',u.display_name,'role',m.role,'installation_role',u.role,'active',u.active) FROM olp.organization_members m JOIN olp.users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.user_id<$2 ORDER BY m.user_id DESC LIMIT $3`, id, page.Before, page.Limit+1)
 	if err != nil {
 		return Reply{}, err
 	}
 	items, err := JSONRows(rows)
-	return OK(map[string]any{"items": items}), err
+	if err != nil {
+		return Reply{}, err
+	}
+	return ListReplyBy(items, page, func(item map[string]any) string { return item["user_id"].(string) }), nil
 }
 
 func (s *Server) putOrganizationMember(r *http.Request, p Principal) (Reply, error) {

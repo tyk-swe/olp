@@ -5418,7 +5418,8 @@ type OrganizationMemberRole string
 
 // OrganizationMembers defines model for OrganizationMembers.
 type OrganizationMembers struct {
-	Items []OrganizationMember `json:"items"`
+	Items      []OrganizationMember      `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
 // OverviewResponse Aggregate counts the console overview needs; one round-trip instead of paginating every collection.

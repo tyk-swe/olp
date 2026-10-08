@@ -17249,6 +17249,12 @@
             "items": {
               "$ref": "#/components/schemas/OrganizationMember"
             }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
