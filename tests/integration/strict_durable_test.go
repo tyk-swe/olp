@@ -235,9 +235,11 @@ func TestStrictUnaryBackgroundResponseRetainsOneAcceptedWork(t *testing.T) {
 	h := newAccessHarness(t)
 	owner, _, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
 		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
-		map[string]any{"fidelity": map[string]any{"mode": "strict"}},
+		map[string]any{"fidelity": map[string]any{"mode": "strict"}, "max_body_bytes": 512},
 		map[string]any{"profile_id": "azure-legacy-responses", "profile_revision": "1"})
-	key := stateKey(t, h, owner, slug, true)
+	keyRecord := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Background identity", "scopes": []string{"inference"}, "allowed_routes": []string{slug}, "allow_provider_state": true, "end_user_source": "header", "required_attribution_keys": []string{"team"}, "attribution_defaults": map[string]string{"team": "creator"}}, idem("background-identity"), 201)
+	key := keyRecord["secret"].(string)
+	digest := h.want(owner, "POST", "/api/v1/api-keys/"+keyRecord["id"].(string)+"/end-user", map[string]any{"identifier": "background-creator"}, nil, 200)["end_user_digest"].(string)
 	h.refresh()
 	fixture.resps["resp-up-1"]["status"] = "in_progress"
 	fixture.resps["resp-up-1"]["usage"] = nil
@@ -246,14 +248,14 @@ func TestStrictUnaryBackgroundResponseRetainsOneAcceptedWork(t *testing.T) {
 		`{"model":"` + slug + `","input":"queued","background":true,"store":false}`,
 		`{"model":"` + slug + `","input":"queued","background":true,"store":true,"stream":true}`,
 	} {
-		status, _, _ := h.gatewayRaw(http.MethodPost, "/v1/responses", key, strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+		status, _, _ := h.gatewayRaw(http.MethodPost, "/v1/responses", key, strings.NewReader(body), map[string]string{"Content-Type": "application/json", "X-OLP-End-User": "background-creator"})
 		if status < 400 || fixture.dials.Load() != before {
 			t.Fatalf("unqualified background contract dispatched: %d %s", status, body)
 		}
 	}
 	status, raw, _ := h.gatewayRaw(http.MethodPost, "/v1/responses", key,
-		strings.NewReader(`{"model":"`+slug+`","input":"queued","background":true,"store":true}`),
-		map[string]string{"Content-Type": "application/json"})
+		strings.NewReader(`{"model":"`+slug+`","input":"queued","background":true,"store":true,"user":"native-user-retention-sentinel","safety_identifier":"native-safety-retention-sentinel"}`),
+		map[string]string{"Content-Type": "application/json", "X-OLP-End-User": "background-creator"})
 	if status != http.StatusOK {
 		t.Fatalf("background create: %d %s", status, raw)
 	}
@@ -261,13 +263,37 @@ func TestStrictUnaryBackgroundResponseRetainsOneAcceptedWork(t *testing.T) {
 	if !ok || !strings.HasPrefix(local, "strict_response_") || fixture.dials.Load() != before+1 {
 		t.Fatalf("background accepted work identity: %d %s", status, raw)
 	}
+	resource, contract, err := h.Gateway.Resources.ReadContract(t.Context(), resources.KindStrictResponse, keyRecord["id"].(string), local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"native-user-retention-sentinel", "native-safety-retention-sentinel", "background-creator", `"input"`, `"source"`} {
+		if bytes.Contains(contract, []byte(forbidden)) || bytes.Contains(resource.Metadata, []byte(forbidden)) {
+			t.Fatalf("retained response persisted request identity/content: %s", forbidden)
+		}
+	}
+
+	beforeOversized := fixture.dials.Load()
+	oversized := `{"model":"` + slug + `","previous_response_id":"` + local + `","input":"` + strings.Repeat("x", 1024) + `","store":false}`
+	rejected, _, _ := h.gatewayRaw(http.MethodPost, "/v1/responses", key, strings.NewReader(oversized), map[string]string{"Content-Type": "application/json", "X-OLP-End-User": "background-creator"})
+	if rejected != 413 || fixture.dials.Load() != beforeOversized {
+		t.Fatalf("retained response body limit bypassed: %d", rejected)
+	}
+	keyPath := "/api/v1/api-keys/" + keyRecord["id"].(string)
+	detail := h.want(owner, "GET", keyPath, nil, nil, 200)
+	h.want(owner, "PATCH", keyPath, map[string]any{"attribution_defaults": map[string]string{"team": "poller"}}, etagHeader(detail), 200)
+	h.refresh()
 	fixture.resps["resp-up-1"]["status"] = "completed"
 	fixture.resps["resp-up-1"]["usage"] = map[string]any{"input_tokens": 4, "output_tokens": 6, "total_tokens": 10}
 	for range 2 {
-		status, raw, _ = h.gatewayRaw(http.MethodGet, "/v1/responses/"+local, key, nil, nil)
+		status, raw, _ = h.gatewayRaw(http.MethodGet, "/v1/responses/"+local, key, nil, map[string]string{"X-OLP-End-User": "different-poller"})
 		if status != http.StatusOK || !bytes.Contains(raw, []byte(`"status":"completed"`)) || bytes.Contains(raw, []byte("resp-up-1")) {
 			t.Fatalf("background retrieve: %d %s", status, raw)
 		}
+	}
+	var storedDigest, storedTeam string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT end_user_digest,attribution->>'team' FROM olp.attempt_usage_facts WHERE operation='generation'`).Scan(&storedDigest, &storedTeam); err != nil || storedDigest != digest || storedTeam != "creator" {
+		t.Fatalf("background usage attributed to poller: %q %v", storedDigest, err)
 	}
 	var attempts, inputTokens, outputTokens int64
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),coalesce(sum(input_tokens),0),coalesce(sum(output_tokens),0)

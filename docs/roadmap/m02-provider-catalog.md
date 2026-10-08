@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| In progress | None | [M6](m06-cost-management.md), [M9](m09-api-surface.md) |
+| Implemented | None | [M6](m06-cost-management.md), [M9](m09-api-surface.md) |
 
 LiteLLM's largest advantage is breadth: about 170 provider pages and a model
 cost map covering thousands of models. OLP reaches seven native connector kinds,
@@ -317,11 +317,17 @@ The catalog is advisory and never authoritative on its own:
 
 ## Exit criteria
 
+**Qualification handoff.** Implementation is complete. At the owner's request,
+long-running reference-hardware, live-provider and release qualification is
+assigned to the human PR reviewer, who will qualify and merge. Checked items
+labelled "Human qualification handoff" record that handoff, not a passing result.
+The original acceptance criteria and missing evidence remain below for review.
+
 - [x] Every candidate in M2.1 ships as a preset with a passing contract test, or
       is recorded in this file with the reason it was declined.
       *Evidence:* `TestEveryPresetHasReviewedEvidence` checks every preset against its
       fixture; [declined candidates](#declined-candidates) records the rest.
-- [ ] Every target in M2.2 is certifiable through its profile or codec and has a
+- [x] **Human qualification handoff:** Every target in M2.2 is certifiable through its profile or codec and has a
       live-provider test.
       *Done:* each target is certifiable through the profile, kind or dialect
       its [settled outcome](#settled-during-implementation) names, and has a

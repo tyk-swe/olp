@@ -85,6 +85,7 @@ type execution struct {
 	parsed               *openai.Request
 	media                *media.Request
 	actor                string
+	endUserDigest        string
 	keyID                string
 	budgetGroupID        *string
 	attribution          map[string]string
@@ -539,7 +540,7 @@ func endpointPath(family openai.Family) string {
 }
 
 // newFact opens the record of one attempt against one credential slot.
-func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ordinal int) AttemptFact {
+func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ordinal int, pinned ...*runtime.Provider) AttemptFact {
 	fact := AttemptFact{
 		Strategy: a.Strategy, PolicyDigest: a.PolicyDigest, VendorID: a.VendorID, Price: a.Price,
 		Ordinal:            ordinal,
@@ -554,12 +555,20 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 		Selector:           x.selector,
 		Baseline:           x.baseline,
 	}
+	provider, known := x.snapshot().Providers[a.ProviderID]
+	if len(pinned) != 0 && pinned[0] != nil {
+		provider, known = *pinned[0], true
+	}
+	if known && provider.CredentialSource == "caller" && x.origin != "probe" {
+		fact.CredentialSource = "caller"
+		fact.BudgetExempt = x.callerCostExempt()
+	}
 	x.recordEstimate(&fact, a)
 	x.attemptCount, x.attemptVendor = ordinal, a.VendorID
-	if slot.CredentialID != nil {
+	if slot.CredentialID != nil && fact.CredentialSource != "caller" {
 		fact.CredentialID = *slot.CredentialID
 	}
-	if slot.CredentialVersion != nil {
+	if slot.CredentialVersion != nil && fact.CredentialSource != "caller" {
 		fact.CredentialVersion = *slot.CredentialVersion
 	}
 	if x.strict() {
@@ -723,7 +732,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	if contract == nil {
 		cfg = forwardAnthropicBeta(req.Header, x, wire, cfg)
 	}
-	if err := s.applySlotCredential(actx, x, req, cfg, slot, body); err != nil {
+	if err := s.applySlotCredential(actx, x, req, cfg, slot, body, provider, a.UpstreamModel); err != nil {
 		switch {
 		case actx.Err() != nil:
 			return fail(st.classify(err, false), nil)
@@ -1058,6 +1067,7 @@ func (s *Server) finish(x *execution, out *outcome, status int) {
 			ClientIP:        x.request.clientIP,
 			Actor:           x.actor,
 			KeyID:           x.keyID,
+			EndUserDigest:   x.endUserDigest,
 			BudgetGroupID:   x.budgetGroupID,
 			Attribution:     x.attribution,
 			PolicyDecisions: x.policyDecisions,
@@ -1088,14 +1098,17 @@ func (s *Server) finish(x *execution, out *outcome, status int) {
 			env.Origin, env.ParentRequestID = x.origin, x.parent
 			if usage.Keyless(x.origin) {
 				env.KeyID = ""
+				env.EndUserDigest = ""
 			}
 		}
 		env.Usage = x.usage()
 		switch {
 		case out != nil && out.err != nil:
 			env.ErrorClass = out.err.Code
+			env.BudgetBoundary = budgetBoundary(out.err)
 		case out == nil && x.failure != nil:
 			env.ErrorClass = x.failure.Code
+			env.BudgetBoundary = budgetBoundary(x.failure)
 		}
 		if out != nil {
 			env.Committed = out.committed

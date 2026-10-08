@@ -1,14 +1,14 @@
-principal                            read usage keys playground configure settings access_read access self manage_sessions manage_tokens manage_projects local_login manage_plugins
-owner global                            Y     Y    Y          Y         Y        Y           Y      Y    Y               Y             Y               Y           Y              Y
-owner assigned                          Y     Y    Y          Y         Y        -           -      -    Y               -             -               -           -              -
-operator global                         Y     Y    Y          Y         Y        Y           Y      -    Y               -             -               -           -              -
-operator assigned                       Y     Y    Y          Y         Y        -           -      -    Y               -             -               -           -              -
-developer global                        Y     Y    Y          Y         -        -           -      -    Y               -             -               -           -              -
-developer assigned                      Y     Y    Y          Y         -        -           -      -    Y               -             -               -           -              -
-viewer global                           Y     Y    -          -         -        -           -      -    Y               -             -               -           -              -
-viewer assigned                         Y     Y    -          -         -        -           -      -    Y               -             -               -           -              -
-token every scope, owner global         Y     Y    Y          Y         Y        Y           Y      Y    -               -             -               -           -              -
-token every scope, owner assigned       Y     Y    Y          Y         Y        -           -      -    -               -             -               -           -              -
-token every scope, operator global      Y     Y    Y          Y         Y        Y           Y      -    -               -             -               -           -              -
-token read+configure, owner global      Y     -    -          -         Y        -           -      -    -               -             -               -           -              -
-unknown role                            -     -    -          -         -        -           -      -    -               -             -               -           -              -
+principal                            read usage keys playground configure settings access_read access self manage_sessions manage_tokens manage_projects local_login manage_plugins manage_organization
+owner global                            Y     Y    Y          Y         Y        Y           Y      Y    Y               Y             Y               Y           Y              Y                   Y
+owner assigned                          Y     Y    Y          Y         Y        -           -      -    Y               -             -               -           -              -                   Y
+operator global                         Y     Y    Y          Y         Y        Y           Y      -    Y               -             -               -           -              -                   Y
+operator assigned                       Y     Y    Y          Y         Y        -           -      -    Y               -             -               -           -              -                   Y
+developer global                        Y     Y    Y          Y         -        -           -      -    Y               -             -               -           -              -                   Y
+developer assigned                      Y     Y    Y          Y         -        -           -      -    Y               -             -               -           -              -                   Y
+viewer global                           Y     Y    -          -         -        -           -      -    Y               -             -               -           -              -                   -
+viewer assigned                         Y     Y    -          -         -        -           -      -    Y               -             -               -           -              -                   -
+token every scope, owner global         Y     Y    Y          Y         Y        Y           Y      Y    -               -             -               -           -              -                   Y
+token every scope, owner assigned       Y     Y    Y          Y         Y        -           -      -    -               -             -               -           -              -                   Y
+token every scope, operator global      Y     Y    Y          Y         Y        Y           Y      -    -               -             -               -           -              -                   Y
+token read+configure, owner global      Y     -    -          -         Y        -           -      -    -               -             -               -           -              -                   -
+unknown role                            -     -    -          -         -        -           -      -    -               -             -               -           -              -                   -

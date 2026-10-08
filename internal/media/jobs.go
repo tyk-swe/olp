@@ -179,7 +179,7 @@ type Filters struct {
 	APIKeyID        *string
 	ProviderID      *string
 	RouteSlug       *string
-	RouteSlugs      []string
+	RouteSlugs      []string // nil is unrestricted; empty denies all routes.
 	Operation       *string
 	Surface         *string
 	State           *State
@@ -297,7 +297,7 @@ func Jobs(ctx context.Context, q Querier, filters Filters, cursor *Cursor, limit
 	if filters.RouteSlug != nil {
 		push(" AND j.route_slug = $%d", *filters.RouteSlug)
 	}
-	if len(filters.RouteSlugs) > 0 {
+	if filters.RouteSlugs != nil {
 		push(" AND j.route_slug = ANY($%d::text[])", filters.RouteSlugs)
 	}
 	if filters.Operation != nil {
@@ -355,17 +355,13 @@ func JobsAfterID(ctx context.Context, q Querier, filters Filters, after *string,
 	var positionAt *time.Time
 	var positionID *string
 	if after != nil {
-		routes := filters.RouteSlugs
-		if routes == nil {
-			routes = []string{}
-		}
 		err := q.QueryRow(ctx, `SELECT created_at, id::text FROM olp.media_jobs
 			WHERE id = $1
 			  AND ($2::uuid IS NULL OR api_key_id = $2)
-			  AND (cardinality($3::text[]) = 0 OR route_slug = ANY($3::text[]))
+			  AND ($3::text[] IS NULL OR route_slug = ANY($3::text[]))
 			  AND ($4::text IS NULL OR operation = $4)
 			  AND ($5::text IS NULL OR surface = $5)`,
-			*after, filters.APIKeyID, routes, filters.Operation, filters.Surface).
+			*after, filters.APIKeyID, filters.RouteSlugs, filters.Operation, filters.Surface).
 			Scan(&positionAt, &positionID)
 		if err != nil {
 			return Page{}, &JobError{Kind: JobErrorInvalid, Message: "video cursor is invalid"}
@@ -386,7 +382,7 @@ func JobsAfterID(ctx context.Context, q Querier, filters Filters, after *string,
 	if filters.RouteSlug != nil {
 		push(" AND j.route_slug = $%d", *filters.RouteSlug)
 	}
-	if len(filters.RouteSlugs) > 0 {
+	if filters.RouteSlugs != nil {
 		push(" AND j.route_slug = ANY($%d::text[])", filters.RouteSlugs)
 	}
 	if filters.Operation != nil {
@@ -983,6 +979,7 @@ func ClaimJobs(ctx context.Context, q Querier, now time.Time, limit int) ([]JobR
 	rows, err := q.Query(ctx, `WITH candidates AS (
 			SELECT id FROM olp.media_jobs
 			WHERE lifecycle_state <> 'deleted'
+              AND NOT EXISTS (SELECT 1 FROM olp.provider_revisions revision WHERE revision.id = media_jobs.provider_revision_id AND revision.configuration->>'credential_source' = 'caller')
 			  AND next_reconciliation_at <= $1
 			  AND (reconciliation_claimed_until IS NULL
 			       OR reconciliation_claimed_until <= $1)
@@ -1116,7 +1113,8 @@ func ReconciliationSummary(ctx context.Context, q Querier, now time.Time) (Summa
 			COUNT(*) FILTER (
 				WHERE lifecycle_state <> 'deleted' AND reconciliation_error IS NOT NULL)::bigint,
 			MIN(created_at) FILTER (WHERE lifecycle_state NOT IN ('active','deleted'))
-		FROM olp.media_jobs WHERE lifecycle_state <> 'deleted'`,
+		FROM olp.media_jobs WHERE lifecycle_state <> 'deleted'
+ AND NOT EXISTS (SELECT 1 FROM olp.provider_revisions revision WHERE revision.id = media_jobs.provider_revision_id AND revision.configuration->>'credential_source' = 'caller')`,
 		now, PollGateSeconds).
 		Scan(&s.Pending, &s.Stale, &s.Failed, &s.OldestPendingAt)
 	return s, dbError(err)

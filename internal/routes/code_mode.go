@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -38,17 +39,21 @@ func (s *Server) codeRoutes(r *http.Request, p access.Principal) (access.Reply, 
 }
 
 type codeRouteInput struct {
-	ProjectID string   `json:"project_id"`
-	Slug      string   `json:"slug"`
-	PoolID    string   `json:"pool_id"`
-	Models    []string `json:"models"`
-	Enabled   bool     `json:"enabled"`
+	MaxBodyBytes *int64   `json:"max_body_bytes,omitempty"`
+	ProjectID    string   `json:"project_id"`
+	Slug         string   `json:"slug"`
+	PoolID       string   `json:"pool_id"`
+	Models       []string `json:"models"`
+	Enabled      bool     `json:"enabled"`
 }
 
 func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var in codeRouteInput
 	if err := access.Decode(r, &in); err != nil {
 		return access.Reply{}, err
+	}
+	if !bodylimit.Valid(in.MaxBodyBytes) {
+		return access.Reply{}, access.Invalid("max_body_bytes", "Use 1 to 1073741824 bytes, or null to inherit the installation limit.")
 	}
 	projectID, err := access.ParseUUID(in.ProjectID)
 	if err != nil {
@@ -65,7 +70,7 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, access.Invalid("models", err.Error())
 	}
 	return s.Access.CodeWrite(r, "code_routes", "code_route", in.ProjectID, in, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
-		out := codemode.Route{ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
+		out := codemode.Route{MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
 		var adapter *string
 		var matches bool
 		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.code_pools WHERE id=$1 AND project_id=$2)`, in.PoolID, in.ProjectID).Scan(&matches); err != nil {

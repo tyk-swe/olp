@@ -585,7 +585,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 			if userID != p.ID {
 				return Reply{}, Fail(403, "oidc_identity_mismatch", "Use an identity already linked to this account.")
 			}
-			grant, err := s.grantRecent(r, tx, p, flow.Purpose, flow.ResourceID)
+			grant, err := s.grantRecent(r, tx, p, flow.Purpose, flow.ResourceID, false)
 			if err != nil {
 				return Reply{}, err
 			}
@@ -636,7 +636,7 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 		if !active {
 			return Reply{}, Fail(403, "account_disabled", "This account is disabled.")
 		}
-		session, err := s.newSession(r, tx, userID)
+		session, err := s.newSession(r, tx, userID, sessionAuth{Method: "oidc"})
 		if err != nil {
 			return Reply{}, err
 		}
@@ -735,7 +735,7 @@ func usableOIDCIdentities(r *http.Request, q Queryer, p Principal, local bool) (
 func (s *Server) oidcIdentities(r *http.Request, p Principal) (Reply, error) {
 	var err error
 	var local, localEnabled, enabled, locallyManaged bool
-	if err = s.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.oidc_configuration WHERE singleton),false),role_management='local' FROM olp.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled, &locallyManaged); err != nil {
+	if err = s.Pool.QueryRow(r.Context(), "SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.oidc_configuration WHERE singleton),false),role_management<>'oidc' FROM olp.users WHERE id=$1", p.ID).Scan(&local, &localEnabled, &enabled, &locallyManaged); err != nil {
 		return Reply{}, err
 	}
 	usable, err := usableOIDCIdentities(r, s.Pool, p, locallyManaged)
@@ -753,12 +753,16 @@ func (s *Server) oidcIdentities(r *http.Request, p Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
+	samlUsable, err := usableSAMLIdentities(r, s.Pool, p)
+	if err != nil {
+		return Reply{}, err
+	}
 	for _, item := range items {
 		remaining := len(usable)
 		if usable[item["id"].(string)] {
 			remaining--
 		}
-		item["can_unlink"] = local && locallyManaged && localEnabled && !s.LocalLoginDisabled || remaining > 0
+		item["can_unlink"] = local && locallyManaged && localEnabled && !s.LocalLoginDisabled || remaining > 0 || len(samlUsable) > 0
 	}
 	return OK(map[string]any{"items": items, "linking_available": enabled, "has_local_password": local, "oidc_reauthentication_available": len(usable) > 0}), nil
 }
@@ -790,7 +794,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error)
 		return Reply{}, err
 	}
 	var local, localEnabled, locallyManaged bool
-	if err = tx.QueryRow(r.Context(), `SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),role_management='local' FROM olp.users WHERE id=$1`, p.ID).Scan(&local, &localEnabled, &locallyManaged); err != nil {
+	if err = tx.QueryRow(r.Context(), `SELECT password_hash IS NOT NULL,COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),role_management<>'oidc' FROM olp.users WHERE id=$1`, p.ID).Scan(&local, &localEnabled, &locallyManaged); err != nil {
 		return Reply{}, err
 	}
 	if !local || !locallyManaged || !localEnabled || s.LocalLoginDisabled {
@@ -798,7 +802,11 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error)
 		if err != nil {
 			return Reply{}, err
 		}
-		if len(usable) == 0 {
+		samlUsable, err := usableSAMLIdentities(r, tx, p)
+		if err != nil {
+			return Reply{}, err
+		}
+		if len(usable) == 0 && len(samlUsable) == 0 {
 			return Reply{}, Fail(409, "last_sign_in_method", "Keep at least one usable sign-in method.")
 		}
 	}
@@ -826,19 +834,22 @@ func (s *Server) changeSignInMethod(r *http.Request, tx pgx.Tx, userID string) (
 	if err := Audit(r.Context(), tx, r, UserActor(userID), "user.authentication_method_change", "user", userID, "success"); err != nil {
 		return Reply{}, err
 	}
-	return s.newSession(r, tx, userID)
+	return s.newSession(r, tx, userID, sessionAuth{Method: "oidc"})
 }
 
 // Only called after signature, claims, flow and configuration verification.
 // Administrative active status remains independent of external authorization.
 func syncOIDCAuthority(r *http.Request, tx pgx.Tx, userID, mapped string) (changed, allowed bool, err error) {
+	return syncFederatedAuthority(r, tx, userID, mapped, "oidc")
+}
+func syncFederatedAuthority(r *http.Request, tx pgx.Tx, userID, mapped, source string) (changed, allowed bool, err error) {
 	var management, role string
 	var authorized bool
 	err = tx.QueryRow(r.Context(), "SELECT role_management,role,oidc_authorized FROM olp.users WHERE id=$1", userID).Scan(&management, &role, &authorized)
 	if err != nil {
 		return false, false, err
 	}
-	if management != "oidc" {
+	if management != source {
 		return false, true, nil
 	}
 	allowed = mapped != ""
@@ -862,7 +873,7 @@ func syncOIDCAuthority(r *http.Request, tx pgx.Tx, userID, mapped string) (chang
 	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
 		return false, false, err
 	}
-	err = Audit(r.Context(), tx, r, System, "user.role_sync_oidc", "user", userID, "success")
+	err = Audit(r.Context(), tx, r, System, "user.role_sync_"+source, "user", userID, "success")
 	return true, allowed, err
 }
 

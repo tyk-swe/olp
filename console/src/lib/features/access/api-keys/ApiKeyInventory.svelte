@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { currentBudgetLimit } from './budgetPresentation';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   const services = useServiceCapabilities();
   import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
@@ -17,6 +18,7 @@
     type ApiKey,
     type ApiKeySecret
   } from '$lib/features/access/api-keys/api';
+  import SecretDialog from '$lib/components/SecretDialog.svelte';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
@@ -46,6 +48,11 @@
 
   const queryClient = useQueryClient();
   let busy = $state('');
+  let rotating = $state<ApiKey | null>(null);
+  let overlapSeconds = $state('0');
+  let rotationError = $state('');
+  let rotationId = $state('');
+  let rotationAttempted = $state(false);
   let mutationError = $state('');
   const createdBy = $derived(
     page.url.searchParams.get('created_by')?.trim().toLowerCase() || undefined
@@ -92,21 +99,26 @@
   }
 
   async function rotate(key: ApiKey) {
-    if (
-      !confirm(
-        services.gatewayAvailable
-          ? `Rotate “${key.name}”? Existing clients stop authenticating when revocation converges.`
-          : `Rotate “${key.name}”? Its current secret will become invalid.`
-      )
-    )
+    if (!/^\d+$/.test(overlapSeconds) || Number(overlapSeconds) > 86400) {
+      rotationError =
+        'Overlap must be a whole number of seconds from 0 to 86400.';
       return;
+    }
     busy = `rotate-${key.id}`;
+    rotationAttempted = true;
     mutationError = '';
     try {
-      onSecret(await rotateApiKey(key), key.allowed_routes[0]);
+      const replacement = await rotateApiKey(
+        key,
+        Number(overlapSeconds),
+        rotationId
+      );
+      rotating = null;
+      onSecret(replacement, key.allowed_routes[0]);
       await queryClient.invalidateQueries({ queryKey: apiKeyKeys.root });
     } catch (error) {
-      mutationError = errorMessage(error);
+      rotationError = errorMessage(error);
+      mutationError = rotationError;
     } finally {
       busy = '';
     }
@@ -267,15 +279,29 @@
                 >{key.rotated_at
                   ? `Rotated ${formatDate(key.rotated_at)}`
                   : 'Never rotated'}</small
-              ></td
-            >
+              >
+              {#if key.rotation_due_at}<br /><small
+                  >Rotation due {formatDate(key.rotation_due_at)}</small
+                >{/if}
+              {#each key.active_overlaps ?? [] as overlap (overlap.lookup_id)}<br
+                /><small
+                  >Previous {overlap.lookup_id} valid until {formatDate(
+                    overlap.expires_at
+                  )}</small
+                >{/each}
+            </td>
             <td
-              >{key.scopes.join(', ') || 'none'}<br /><small
-                >{key.allowed_routes.length
-                  ? key.allowed_routes.join(', ')
-                  : 'all routes'}</small
-              ></td
-            >
+              >{key.scopes.join(', ') || 'none'}<br />
+              {#if key.allowed_routes.length}<small
+                  >{key.allowed_routes.join(', ')}</small
+                >{/if}
+              {#if key.allowed_route_groups?.length}{#if key.allowed_routes.length}<br
+                  />{/if}<small
+                  >Groups: {key.allowed_route_groups.join(', ')}</small
+                >
+              {:else if !key.allowed_routes.length}<small>all routes</small
+                >{/if}
+            </td>
             <td
               ><small
                 >{key.requests_per_minute
@@ -291,16 +317,24 @@
               {#if !services.limitsEnforced || budget === 'policy'}<small
                   >Saved policy · not enforced</small
                 >
-              {:else if key.budget.daily.limit !== null || key.budget.monthly.limit !== null}
+              {:else if currentBudgetLimit(key.budget.daily) !== null || currentBudgetLimit(key.budget.monthly) !== null || currentBudgetLimit(key.budget.weekly) != null}
                 <small>
-                  {#if key.budget.daily.limit !== null}Daily {formatBudget(
+                  {#if currentBudgetLimit(key.budget.daily) !== null}Daily {formatBudget(
                       key.budget.daily.accrued
-                    )} / {formatBudget(key.budget.daily.limit)}{/if}
-                  {#if key.budget.daily.limit !== null && key.budget.monthly.limit !== null}<br
+                    )} / {formatBudget(
+                      currentBudgetLimit(key.budget.daily)
+                    )}{/if}
+                  {#if key.budget.weekly && currentBudgetLimit(key.budget.weekly) != null}{#if currentBudgetLimit(key.budget.daily) !== null}<br
+                      />{/if}Weekly {formatBudget(key.budget.weekly.accrued)} / {formatBudget(
+                      currentBudgetLimit(key.budget.weekly)
+                    )}{/if}
+                  {#if (currentBudgetLimit(key.budget.daily) !== null || currentBudgetLimit(key.budget.weekly) != null) && currentBudgetLimit(key.budget.monthly) !== null}<br
                     />{/if}
-                  {#if key.budget.monthly.limit !== null}Monthly {formatBudget(
+                  {#if currentBudgetLimit(key.budget.monthly) !== null}Monthly {formatBudget(
                       key.budget.monthly.accrued
-                    )} / {formatBudget(key.budget.monthly.limit)}{/if}
+                    )} / {formatBudget(
+                      currentBudgetLimit(key.budget.monthly)
+                    )}{/if}
                 </small>
                 {#if budget === 'exhausted' || budget === 'unknown'}<br /><span
                     class="badge"
@@ -331,11 +365,19 @@
                   type="button"
                   onclick={() => onEdit(key)}
                   disabled={Boolean(busy)}
-                  >{canManage && usable ? 'Edit' : 'View'}</button
-                >{#if canManage && !key.revoked_at}{#if usable}<button
+                  >{canManage && usable && !key.workload_issuer_id
+                    ? 'Edit'
+                    : 'View'}</button
+                >{#if canManage && !key.revoked_at}{#if usable && !key.workload_issuer_id}<button
                       class="button button-secondary"
                       type="button"
-                      onclick={() => rotate(key)}
+                      onclick={() => {
+                        rotating = key;
+                        overlapSeconds = '0';
+                        rotationAttempted = false;
+                        rotationId = crypto.randomUUID();
+                        rotationError = '';
+                      }}
                       disabled={Boolean(busy)}
                       >{busy === `rotate-${key.id}`
                         ? 'Rotating…'
@@ -360,6 +402,58 @@
     {...cursorPaginationProps(listState, keys.data?.nextCursor)}
     label="API key pages"
   />
+{/if}
+
+{#if rotating}
+  <SecretDialog
+    eyebrow="Explicit rotation"
+    title={`Rotate ${rotating.name}`}
+    description="Generate a new secret and choose how long the previous secret remains valid. All versions share the key's current permissions, limits and budgets."
+    onClose={() => {
+      rotating = null;
+    }}
+  >
+    {#snippet children(close)}
+      <form
+        onsubmit={(event) => {
+          event.preventDefault();
+          if (rotating) void rotate(rotating);
+        }}
+      >
+        <div class="form-field full">
+          <label for="rotation-overlap">Previous-secret overlap (seconds)</label
+          ><input
+            id="rotation-overlap"
+            data-autofocus
+            inputmode="numeric"
+            bind:value={overlapSeconds}
+            disabled={Boolean(busy) || rotationAttempted}
+            aria-describedby="rotation-overlap-help"
+          /><small id="rotation-overlap-help"
+            >0 ends all previous overlaps when gateways refresh. A positive
+            value allows up to 24 hours, bounded by key expiry; existing overlap
+            deadlines stay unchanged.</small
+          >
+        </div>
+        {#if rotationError}<div class="inline-problem" role="alert">
+            {rotationError} Retry uses the same request and overlap to recover its
+            result. Close this dialog to start a new rotation.
+          </div>{/if}
+        <div class="form-actions">
+          <button
+            class="button button-primary"
+            type="submit"
+            disabled={Boolean(busy)}>Rotate key</button
+          ><button
+            class="button button-secondary"
+            type="button"
+            onclick={close}
+            disabled={Boolean(busy)}>Cancel</button
+          >
+        </div>
+      </form>
+    {/snippet}
+  </SecretDialog>
 {/if}
 
 <style>

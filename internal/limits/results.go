@@ -202,21 +202,23 @@ func parseCostReservation(value any) (scriptResult, error) {
 	switch {
 	case status == 1 && detail == "ok" && retry == 0:
 		return scriptResult{kind: resultGranted}, nil
-	case status == 0 && (detail == "daily_cost" || detail == "daily_cost_estimate") && retry >= 1 && retry <= dayMS:
+	case status == 0 && (detail == "daily_cost" || detail == "daily_cost_estimate") && retry >= 1 && retry <= 3*dayMS:
 		return scriptResult{
 			kind: resultRejected, dimension: DimensionDailyCost, retryAfterMS: retry,
 			estimate: detail == "daily_cost_estimate",
 		}, nil
+	case status == 0 && (detail == "weekly_cost" || detail == "weekly_cost_estimate") && retry >= 1 && retry <= 9*dayMS:
+		return scriptResult{kind: resultRejected, dimension: DimensionWeeklyCost, retryAfterMS: retry, estimate: detail == "weekly_cost_estimate"}, nil
 	case status == 0 && (detail == "monthly_cost" || detail == "monthly_cost_estimate") && retry >= 1 && retry <= maxMonthMS:
 		return scriptResult{
 			kind: resultRejected, dimension: DimensionMonthlyCost, retryAfterMS: retry,
 			estimate: detail == "monthly_cost_estimate",
 		}, nil
 	case status == -1 && retry == 0 &&
-		(detail == "uninitialized_daily_cost_state" || detail == "uninitialized_monthly_cost_state"):
+		(detail == "uninitialized_daily_cost_state" || detail == "uninitialized_monthly_cost_state" || detail == "uninitialized_weekly_cost_state"):
 		return scriptResult{kind: resultUninitialized}, nil
 	case status == -1 && retry == 0 &&
-		(detail == "malformed_daily_cost_state" || detail == "malformed_monthly_cost_state"):
+		(detail == "malformed_daily_cost_state" || detail == "malformed_monthly_cost_state" || detail == "malformed_weekly_cost_state"):
 		return scriptResult{kind: resultMalformed}, nil
 	default:
 		return scriptResult{}, ErrUnexpectedResponse
@@ -244,7 +246,7 @@ func parseReconciliation(value any) (bool, bool, error) {
 		(daily == 0 || daily == 1) && (monthly == 0 || monthly == 1):
 		return daily == 1, monthly == 1, nil
 	case status == -1 && daily == 0 && monthly == 0 &&
-		(detail == "malformed_daily_cost_state" || detail == "malformed_monthly_cost_state"):
+		(detail == "malformed_daily_cost_state" || detail == "malformed_monthly_cost_state" || detail == "malformed_weekly_cost_state"):
 		return false, false, ErrMalformedState
 	default:
 		return false, false, ErrUnexpectedResponse

@@ -4,6 +4,7 @@
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
   import { retryQuery } from '$lib/api/http';
   import '../app.css';
+  import MFAConfirmationHost from '$lib/features/access/mfa/MFAConfirmationHost.svelte';
 
   let { children } = $props();
   const queryClient = new QueryClient({
@@ -29,4 +30,5 @@
 
 <QueryClientProvider client={queryClient}>
   {@render children()}
+  <MFAConfirmationHost />
 </QueryClientProvider>

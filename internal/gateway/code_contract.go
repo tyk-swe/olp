@@ -20,7 +20,7 @@ type CodeLedger interface {
 	ObserveAllowance(context.Context, string, codemode.Allowance) error
 	ObserveReference(context.Context, string, string) error
 	ObserveOutcome(context.Context, string, codemode.Outcome) error
-	RecordRefusal(context.Context, codemode.Route, string, string) error
+	RecordRefusal(context.Context, codemode.Route, string, string, string) error
 }
 
 // CodeAuthorizer returns the upstream authorization of one request: its

@@ -32,16 +32,25 @@ export default defineConfig({
   projects: [
     {
       name: 'packaged',
-      testIgnore: '**/vite-smoke.spec.ts',
+      // WebAuthn requires a DNS relying-party ID; the Vite origin is localhost.
+      testIgnore: ['**/vite-smoke.spec.ts', '**/access/mfa.spec.ts'],
       use: { baseURL: 'http://127.0.0.1:4182' }
     },
     {
       name: 'vite',
-      testMatch: '**/basics/{shell,vite-smoke}.spec.ts',
+      testMatch: [
+        '**/basics/{shell,vite-smoke}.spec.ts',
+        '**/access/mfa.spec.ts'
+      ],
       use: { baseURL: 'http://localhost:4183' }
     }
   ],
   webServer: [
+    {
+      command: 'go run ../tests/samlfixture',
+      url: 'http://127.0.0.1:4196/metadata',
+      reuseExistingServer: false
+    },
     {
       command: './tests/journeys/run-olp.sh',
       url: 'http://127.0.0.1:9182/health/live',

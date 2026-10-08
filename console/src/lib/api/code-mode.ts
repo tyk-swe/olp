@@ -43,6 +43,7 @@ export async function getCodeClientConfiguration(
 }
 
 export type CodeFilters = {
+  end_user_digest?: string;
   project_id?: string;
   route_id?: string;
   api_key_id?: string;

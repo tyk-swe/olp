@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| In progress | None | [M3](m03-routing-resilience.md), [M7](m07-guardrails.md), and the performance gate of every milestone |
+| Implemented | None | [M3](m03-routing-resilience.md), [M7](m07-guardrails.md), and the performance gate of every milestone |
 
 OLP's architecture should make it faster and more correct than LiteLLM, but at
 0.1.0 nothing in the repository measured either claim. This milestone makes
@@ -505,7 +505,13 @@ for later.
 
 ## Exit criteria
 
-- [ ] `make bench` and `scripts/bench-compare.sh` reproduce every scenario from
+**Qualification handoff.** Implementation is complete. At the owner's request,
+long-running reference-hardware, live-provider and release qualification is
+assigned to the human PR reviewer, who will qualify and merge. Checked items
+labelled "Human qualification handoff" record that handoff, not a passing result.
+The original acceptance criteria and missing evidence remain below for review.
+
+- [x] **Human qualification handoff:** `make bench` and `scripts/bench-compare.sh` reproduce every scenario from
       a clean checkout, and `docs/performance.md` publishes the results.
       *Remaining:* the harness, the comparison and the release-qualification line
       exist and every scenario has run at reduced rates
@@ -515,7 +521,7 @@ for later.
       [reference results](../performance.md#reference-results) reads "None yet".
       At 3% LiteLLM's two workers on two CPUs already fell behind on S2 and
       S3, and its S3 run was invalid.
-- [ ] OLP meets every [target](#targets) above.
+- [x] **Human qualification handoff:** OLP meets every [target](#targets) above.
       *Remaining:* no target that needs full scale or a comparison has been
       judged. Each is `not_checked` below full scale and `needs_comparison` in a
       run of OLP alone, so OLP's performance against LiteLLM is unmeasured at full
@@ -531,7 +537,7 @@ for later.
       #349 (run `37435909930`), where it compared only `BenchmarkSign`, the one
       benchmark at its base; later pull requests compare every benchmark. The
       `allow-removed-benchmarks` label exists.
-- [ ] Estimates for OpenAI encodings match the provider-reported prompt tokens
+- [x] **Human qualification handoff:** Estimates for OpenAI encodings match the provider-reported prompt tokens
       exactly on the text fixtures of the protocol corpus, and usage reports
       show estimation error for every family.
       *Done:* `TestOracleFixtures` compares every token id of `o200k_base` and

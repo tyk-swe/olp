@@ -107,20 +107,20 @@ of [M3](m03-routing-resilience.md).
 | Capability | LiteLLM | OLP today | Status | Milestone |
 | --- | --- | --- | --- | --- |
 | Virtual keys | [Virtual keys](https://docs.litellm.ai/docs/proxy/virtual_keys) | Digest-only keys with scopes, expiry, route allowlists and rotation | `Parity` | |
-| Scheduled key rotation | [Enterprise](https://docs.litellm.ai/docs/proxy/virtual_keys) | On-demand rotation | `Partial` | M4.3 |
+| Scheduled key rotation | [Enterprise](https://docs.litellm.ai/docs/proxy/virtual_keys) | Declared intervals, expiry/due reminders, explicit idempotent rotation and bounded overlap | `Parity` | M4.3 |
 | Teams | [Teams](https://docs.litellm.ai/docs/proxy/multi_tenant_architecture) | Projects with manager and viewer membership | `Parity` | |
-| Organizations and delegated admins | [Enterprise](https://docs.litellm.ai/docs/proxy/access_control) | Installation roles and project managers | `Gap` | M4.5 |
+| Organizations and delegated admins | [Enterprise](https://docs.litellm.ai/docs/proxy/access_control) | One-level organizations, inherited project scope, delegated management, immutable project ownership and aggregate caps | `Parity` | M4.5 |
 | Roles | [RBAC](https://docs.litellm.ai/docs/proxy/access_control) | Owner, operator, developer and viewer, contract-declared per operation | `Parity` | |
-| End users with limits | [Customers](https://docs.litellm.ai/docs/proxy/customers) | Attribution labels only | `Gap` | M4.1 |
+| End users with limits | [Customers](https://docs.litellm.ai/docs/proxy/customers) | Project-scoped digests, reporting, key/project limits and blocking; concurrent and protocol-boundary evidence | `Parity` | M4.1 |
 | Service accounts | [Service accounts](https://docs.litellm.ai/docs/proxy/service_accounts) | Keys outlive their issuer and keep their project | `Parity` | |
-| Model access groups | [Access groups](https://docs.litellm.ai/docs/proxy/model_access_groups) | Per-key route allowlists | `Partial` | M4.3 |
+| Model access groups | [Access groups](https://docs.litellm.ai/docs/proxy/model_access_groups) | Project route groups, live authority refresh, union allowlists | `Parity` | M4.3 |
 | OIDC single sign-on | [Enterprise beyond five users](https://docs.litellm.ai/docs/proxy/admin_ui_sso) | Core OIDC with role mapping and push provisioning | `Ahead` | |
-| SAML single sign-on | [SAML](https://docs.litellm.ai/docs/proxy/saml_sso) | Not available | `Gap` | M4.5 |
-| SCIM provisioning | [Enterprise](https://docs.litellm.ai/docs/proxy/identity_provisioning) | Push provisioning API, not SCIM | `Partial` | M4.5 |
-| JWT authentication for requests | [Enterprise](https://docs.litellm.ai/docs/proxy/token_auth) | Not available | `Gap` | M4.4 |
-| IP allowlists | [Enterprise](https://docs.litellm.ai/docs/proxy/ip_address) | Trusted-proxy client address resolution only | `Gap` | M4.3 |
+| SAML single sign-on | [SAML](https://docs.litellm.ai/docs/proxy/saml_sso) | Signed SP-initiated login, metadata import, browser binding, role/link/owner protection, local signing keys and promotion | `Parity` | M4.5 |
+| SCIM provisioning | [Enterprise](https://docs.litellm.ai/docs/proxy/identity_provisioning) | SCIM Users/Groups, atomic PATCH, discovery/filtering, inherited role/project grants, console and mapping promotion | `Parity` | M4.5 |
+| JWT authentication for requests | [Enterprise](https://docs.litellm.ai/docs/proxy/token_auth) | Declared issuers, bounded JWT verification, digest principals, live revocation and promotion | `Parity` | M4.4 |
+| IP allowlists | [Enterprise](https://docs.litellm.ai/docs/proxy/ip_address) | Key and management CIDRs with trusted-proxy resolution, live-session checks and deployment recovery | `Parity` | M4.3 |
 | Route-level access control | [Enterprise public routes](https://docs.litellm.ai/docs/proxy/public_routes) | Every management route admitted from its contract requirement, held by a golden sweep | `Ahead` | |
-| Caller-supplied provider credentials | [Client-side credentials](https://docs.litellm.ai/docs/proxy/clientside_auth) | Not available | `Gap` | M4.6 |
+| Caller-supplied provider credentials | [Client-side credentials](https://docs.litellm.ai/docs/proxy/clientside_auth) | Request-only credentials on operator-declared connections; isolated transports, redacted errors, source accounting and caller-paid route budgets | `Parity` | M4.6 |
 | Audit logs | [Enterprise](https://docs.litellm.ai/docs/enterprise) | Metadata-only audit for every mutation | `Ahead` | |
 | Invitations and onboarding | [Self-serve](https://docs.litellm.ai/docs/proxy/self_serve) | Invitations and mapped OIDC provisioning | `Parity` | |
 | Email delivery | [Enterprise](https://docs.litellm.ai/docs/proxy/email) | Not available | `Gap` | M5.4 |
@@ -130,13 +130,13 @@ of [M3](m03-routing-resilience.md).
 | Capability | LiteLLM | OLP today | Status | Milestone |
 | --- | --- | --- | --- | --- |
 | Key request, token and concurrency limits | [Rate limits](https://docs.litellm.ai/docs/proxy/users) | Requests and tokens per minute, concurrency; the OpenAI and Anthropic surfaces return the remaining allowance in [response headers](../gateway.md#rate-limit-headers) | `Parity` | |
-| Key budgets with reset periods | [Budgets](https://docs.litellm.ai/docs/proxy/users) | Daily and monthly UTC windows; admission also reserves the request's estimated cost ([cost reservation](../gateway.md#cost-reservation)) | `Partial` | M4.2 |
-| Budget reset time zone | [Reset and time zone](https://docs.litellm.ai/docs/proxy/budget_reset_and_tz) | UTC only | `Gap` | M4.2 |
-| User and team budgets | [Team budgets](https://docs.litellm.ai/docs/proxy/team_budgets) | Shared budget groups, with the same cost reservation; no project budget | `Partial` | M4.2 |
-| Per-model limits on a key | [Model-specific budgets](https://docs.litellm.ai/docs/proxy/users) | Not available | `Gap` | M4.2 |
-| Tag budgets | [Enterprise](https://docs.litellm.ai/docs/proxy/tag_budgets) | Not available | `Gap` | M4.2 |
+| Key budgets with reset periods | [Budgets](https://docs.litellm.ai/docs/proxy/users) | Calendar day, ISO-Monday week and month windows; admission also reserves the request's estimated cost ([cost reservation](../gateway.md#cost-reservation)) | `Parity` | M4.2 |
+| Budget reset time zone | [Reset and time zone](https://docs.litellm.ai/docs/proxy/budget_reset_and_tz) | IANA installation calendar, next-boundary changes, DST and subhour retention | `Parity` | M4.2 |
+| User and team budgets | [Team budgets](https://docs.litellm.ai/docs/proxy/team_budgets) | Shared groups, organization/project/installation caps and project templates, with independent reservations, calendar windows, system accounting and durable refusal levels | `Parity` | M4.2 |
+| Per-model limits on a key | [Model-specific budgets](https://docs.litellm.ai/docs/proxy/users) | Per-key route RPM, TPM, concurrency and day/week/month caps with shared fleet counters and historical accounting | `Parity` | M4.2 |
+| Tag budgets | [Enterprise](https://docs.litellm.ai/docs/proxy/tag_budgets) | Project label/value day/week/month caps, shared accounting, required/pinned labels and promotion | `Parity` | M4.2 |
 | Budget and limit tiers | [Enterprise](https://docs.litellm.ai/docs/proxy/rate_limit_tiers) | Not available | `Gap` | M4.2 |
-| Temporary budget increases | [Enterprise](https://docs.litellm.ai/docs/proxy/temporary_budget_increase) | Not available | `Gap` | M4.2 |
+| Temporary budget increases | [Enterprise](https://docs.litellm.ai/docs/proxy/temporary_budget_increase) | Audited additive increases with window-bounded expiry, replay, revocation, fleet enforcement and console controls | `Parity` | M4.2 |
 | Soft budget alerts | [Alerting](https://docs.litellm.ai/docs/proxy/alerting) | `budget.threshold` notification rules | `Parity` | |
 | Distributed enforcement | Redis counters | Valkey scripts on the server clock, PostgreSQL spend authority, reconciliation, fail-closed cost budgets, estimate-based cost reservation | `Ahead` | |
 | Deployment rate limits | Deployment `rpm` and `tpm` | Connection and slot request, token and concurrency quotas | `Parity` | |
@@ -186,7 +186,7 @@ of [M3](m03-routing-resilience.md).
 | Request log viewer | [UI logs](https://docs.litellm.ai/docs/proxy/ui_logs) | Request history with attempts, usage and policy decisions | `Parity` | |
 | Session grouping | [Sessions](https://docs.litellm.ai/docs/proxy/ui_logs_sessions) | Attribution labels | `Partial` | M5.5 |
 | Alert channels | [Slack, Discord, Teams](https://docs.litellm.ai/docs/proxy/alerting), [PagerDuty](https://docs.litellm.ai/docs/proxy/pagerduty) | Signed webhooks | `Partial` | M5.4 |
-| Alert events | Hanging, slow and failed calls, outages, budgets, reports | `budget.threshold`, `provider.grant.lapsed` | `Partial` | M5.4 |
+| Alert events | Hanging, slow and failed calls, outages, budgets, reports | `budget.threshold`, `provider.grant.lapsed`, `key.expiring` | `Partial` | M5.4 |
 | Health endpoints | [Health checks](https://docs.litellm.ai/docs/proxy/health) | Private liveness, readiness and metrics; provider health API | `Parity` | |
 | Log retention | [Retention](https://docs.litellm.ai/docs/proxy/spend_logs_deletion) | Retention settings enforced by the maintenance worker | `Parity` | |
 | Audit and security event export | [Azure Sentinel](https://docs.litellm.ai/docs/observability/azure_sentinel), [Splunk](https://docs.litellm.ai/docs/observability/splunk_observability_cloud) | Audit API only | `Partial` | M5.1 |

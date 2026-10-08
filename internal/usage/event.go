@@ -38,10 +38,13 @@ func Keyless(origin string) bool { return origin == OriginShadow || origin == Or
 // Event is one request's content-free metadata. Every optional field is
 // serialized explicitly, so a reader can tell "absent" from "not yet known".
 type Event struct {
+	BudgetBoundary      string `json:"budget_boundary,omitempty"`
 	Version             int    `json:"version"`
 	EventID             string `json:"event_id"`
 	RequestID           string `json:"request_id"`
 	RuntimeGenerationID string `json:"runtime_generation_id"`
+	// EndUserDigest contains a project-scoped digest, never a caller identifier.
+	EndUserDigest string `json:"end_user_digest,omitempty"`
 	// APIKeyID is empty exactly when the origin is keyless.
 	APIKeyID    string            `json:"api_key_id"`
 	Attribution map[string]string `json:"attribution,omitempty"`
@@ -128,6 +131,8 @@ var knownEstimateProvenances = map[string]struct{}{
 	EstimateTokenizer: {}, EstimateCalibrated: {}, EstimateHeuristic: {},
 }
 
+var endUserDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 // modelFamilyPattern bounds a model family label. The set of families grows
 // with the reference catalogue, so the label is checked for shape here and the
 // producer owns which names exist.
@@ -184,6 +189,8 @@ type AttemptUsage struct {
 // the attempt so a request can be explained months later, when the revisions
 // that produced it have long been superseded.
 type Routing struct {
+	BudgetExempt         bool                 `json:"budget_exempt,omitempty"`
+	CredentialSource     string               `json:"credential_source,omitempty"`
 	Interaction          *InteractionEvidence `json:"interaction,omitempty"`
 	Policy               *json.RawMessage     `json:"policy,omitempty"`
 	Mode                 *string              `json:"mode,omitempty"`
@@ -279,9 +286,11 @@ func Decode(payload []byte) (*Event, error) {
 // The wire types mirror the event shape with every required field behind a
 // pointer, so an absent field is a decode failure instead of a zero value.
 type wireEvent struct {
+	BudgetBoundary          string             `json:"budget_boundary,omitempty"`
 	EventID                 *string            `json:"event_id"`
 	RequestID               *string            `json:"request_id"`
 	RuntimeGenerationID     *string            `json:"runtime_generation_id"`
+	EndUserDigest           *string            `json:"end_user_digest"`
 	APIKeyID                *string            `json:"api_key_id"`
 	Attribution             *map[string]string `json:"attribution"`
 	Origin                  *string            `json:"origin"`
@@ -355,6 +364,8 @@ type wireDecision struct {
 }
 
 type wireRouting struct {
+	BudgetExempt         bool                 `json:"budget_exempt,omitempty"`
+	CredentialSource     string               `json:"credential_source,omitempty"`
 	Interaction          *InteractionEvidence `json:"interaction"`
 	Policy               *json.RawMessage     `json:"policy"`
 	Mode                 *string              `json:"mode"`
@@ -419,6 +430,12 @@ func (w wireEvent) decode() (*Event, error) {
 	if (event.ParentRequestID != nil) != (event.Origin == OriginShadow || event.Origin == OriginClassifier) {
 		return nil, errors.New("request metadata field parent_request_id belongs to shadow and classifier requests")
 	}
+	if w.EndUserDigest != nil {
+		event.EndUserDigest = *w.EndUserDigest
+		if event.EndUserDigest != "" && (!endUserDigestPattern.MatchString(event.EndUserDigest) || Keyless(event.Origin)) {
+			return nil, errors.New("request metadata field end_user_digest is invalid")
+		}
+	}
 	if w.Attribution != nil {
 		event.Attribution = *w.Attribution
 		if err := ValidateAttribution(event.Attribution); err != nil {
@@ -467,6 +484,10 @@ func (w wireEvent) decode() (*Event, error) {
 	}
 	event.StatusCode = optionalStatus(w.StatusCode)
 	event.ErrorClass = w.ErrorClass
+	event.BudgetBoundary = w.BudgetBoundary
+	if !validBudgetBoundary(event.BudgetBoundary, event.ErrorClass) {
+		return nil, errors.New("invalid budget boundary")
+	}
 	if event.Committed, err = requiredField("committed", w.Committed); err != nil {
 		return nil, err
 	}
@@ -587,6 +608,19 @@ func (w wireUsage) decode() (*AttemptUsage, error) {
 	return usage, nil
 }
 
+func (r *Routing) validateCredentialSource() error {
+	if r.BudgetExempt && (r.CredentialSource != "caller" || len(r.Budgets) != 0) {
+		return errors.New("caller-paid attempts cannot claim operator budget owners")
+	}
+	if r.CredentialSource != "" && r.CredentialSource != "operator" && r.CredentialSource != "caller" {
+		return errors.New("routing.credential_source is invalid")
+	}
+	if r.CredentialSource == "caller" && r.CredentialVersionID != nil {
+		return errors.New("caller routing cannot claim a stored credential")
+	}
+	return nil
+}
+
 func (w wireRouting) decode() (*Routing, error) {
 	routing := &Routing{Policy: w.Policy, Mode: w.Mode, Interaction: w.Interaction}
 	if err := routing.Interaction.validate(); err != nil {
@@ -606,7 +640,15 @@ func (w wireRouting) decode() (*Routing, error) {
 	if routing.CredentialSlotID, err = optionalUUID("routing.credential_slot_id", w.CredentialSlotID); err != nil {
 		return nil, err
 	}
+	if w.CredentialSource != "" && w.CredentialSource != "operator" && w.CredentialSource != "caller" {
+		return nil, errors.New("routing.credential_source is invalid")
+	}
+	routing.CredentialSource = w.CredentialSource
+	routing.BudgetExempt = w.BudgetExempt
 	if routing.CredentialVersionID, err = optionalUUID("routing.credential_version_id", w.CredentialVersionID); err != nil {
+		return nil, err
+	}
+	if err = routing.validateCredentialSource(); err != nil {
 		return nil, err
 	}
 	if routing.ProviderRevisionID, err = requiredUUID("routing.provider_revision_id", w.ProviderRevisionID); err != nil {
@@ -648,6 +690,9 @@ func (w wireRouting) decode() (*Routing, error) {
 		routing.Baseline = b
 	}
 	routing.Selector, routing.Retry, routing.Budgets = w.Selector, w.Retry, w.Budgets
+	if err := routing.validateCredentialSource(); err != nil {
+		return nil, err
+	}
 	return routing, nil
 }
 
@@ -812,6 +857,9 @@ type ValidatedAttempt struct {
 // three states the charge model recognizes. Anything else is rejected whole:
 // half an event is worse than none, because the missing half is invisible.
 func Validate(e *Event) (*Validated, error) {
+	if !validBudgetBoundary(e.BudgetBoundary, e.ErrorClass) {
+		return nil, fmt.Errorf("%w: invalid budget boundary", ErrInvalidEvent)
+	}
 	hasAttempts := len(e.Attempts) > 0
 	finalTargetMatches := true
 	if hasAttempts {
@@ -837,6 +885,9 @@ func Validate(e *Event) (*Validated, error) {
 		return nil, fmt.Errorf("%w: final attempt is not the reported target", ErrInvalidEvent)
 	case !emptyAttemptMetadataIsValid:
 		return nil, fmt.Errorf("%w: target metadata without an attempt", ErrInvalidEvent)
+	}
+	if e.EndUserDigest != "" && (!endUserDigestPattern.MatchString(e.EndUserDigest) || Keyless(e.Origin)) {
+		return nil, fmt.Errorf("%w: invalid end-user digest", ErrInvalidEvent)
 	}
 	if err := ValidateAttribution(e.Attribution); err != nil {
 		return nil, fmt.Errorf("%w: attribution %w", ErrInvalidEvent, err)
@@ -874,6 +925,9 @@ func Validate(e *Event) (*Validated, error) {
 
 func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
 	if attempt.Routing != nil {
+		if err := attempt.Routing.validateCredentialSource(); err != nil {
+			return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
+		}
 		if err := attempt.Routing.Interaction.validate(); err != nil {
 			return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 		}
@@ -1005,4 +1059,18 @@ func narrowOptionalMilliseconds(value *int64) (*int32, error) {
 		return nil, err
 	}
 	return &narrowed, nil
+}
+
+func validBudgetBoundary(boundary string, code *string) bool {
+	if boundary == "" {
+		return true
+	}
+	if code == nil || *code != "budget_exhausted" {
+		return false
+	}
+	switch boundary {
+	case "api_key", "budget_group", "key_route", "key_end_user", "project_end_user", "attribution", "project", "organization", "installation":
+		return true
+	}
+	return false
 }

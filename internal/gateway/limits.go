@@ -28,6 +28,7 @@ type Admission struct {
 	failOpen                atomic.Int64
 	dailyBudgetRejections   atomic.Int64
 	monthlyBudgetRejections atomic.Int64
+	weeklyBudgetRejections  atomic.Int64
 }
 
 // NewAdmission binds a limiter to the outage policy of the installation. The
@@ -56,6 +57,8 @@ func (a *Admission) BudgetRejections(dimension limits.Dimension) int64 {
 	switch dimension {
 	case limits.DimensionDailyCost:
 		return a.dailyBudgetRejections.Load()
+	case limits.DimensionWeeklyCost:
+		return a.weeklyBudgetRejections.Load()
 	case limits.DimensionMonthlyCost:
 		return a.monthlyBudgetRejections.Load()
 	}
@@ -69,6 +72,8 @@ func (a *Admission) recordRejection(dimension limits.Dimension) {
 	switch dimension {
 	case limits.DimensionDailyCost:
 		a.dailyBudgetRejections.Add(1)
+	case limits.DimensionWeeklyCost:
+		a.weeklyBudgetRejections.Add(1)
 	case limits.DimensionMonthlyCost:
 		a.monthlyBudgetRejections.Add(1)
 	}
@@ -113,7 +118,7 @@ func rateLimited(dimension limits.Dimension, retryAfter time.Duration, estimate 
 		message = "The API key tokens per minute limit was exceeded."
 	case limits.DimensionConcurrency:
 		message = "The API key concurrency limit was exceeded."
-	case limits.DimensionDailyCost, limits.DimensionMonthlyCost:
+	case limits.DimensionDailyCost, limits.DimensionWeeklyCost, limits.DimensionMonthlyCost:
 		// Both budgets keep one code. An exhausted budget says why spend a
 		// dashboard reports as under the limit can still exhaust it: an attempt
 		// nobody could price is charged nothing. A budget with room left says it
@@ -155,30 +160,31 @@ func keyRequest(authority access.Authority, estimate int64, ttl time.Duration) l
 	policy := authority.Policy
 	return limits.Request{
 		CostOwnerID:       authority.ID,
-		LookupID:          authority.LookupID,
+		LookupID:          authority.LimitsLookup(),
 		RequestsPerMinute: policy.RequestsPerMinute,
 		TokensPerMinute:   policy.TokensPerMinute,
 		MaxConcurrency:    policy.MaxConcurrency,
 		DailyCostLimit:    policy.DailyCostLimit,
-		MonthlyCostLimit:  policy.MonthlyCostLimit,
-		RequestedTokens:   estimate,
-		LeaseTTL:          ttl,
-		ReportRate:        true,
+		MonthlyCostLimit:  policy.MonthlyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
+		RequestedTokens: estimate,
+		LeaseTTL:        ttl,
+		ReportRate:      true,
 	}
 }
 
 func groupRequest(authority access.Authority, ttl time.Duration) *limits.Request {
 	if authority.BudgetGroupID == nil ||
-		(authority.BudgetGroupDailyCostLimit == nil && authority.BudgetGroupMonthlyCostLimit == nil) {
+		(authority.BudgetGroupDailyCostLimit == nil && authority.BudgetGroupMonthlyCostLimit == nil && authority.BudgetGroupWeeklyCostLimit == nil && authority.BudgetGroupRPM == nil && authority.BudgetGroupTPM == nil && authority.BudgetGroupConcurrency == nil) {
 		return nil
 	}
 	return &limits.Request{
+		RequestsPerMinute: authority.BudgetGroupRPM, TokensPerMinute: authority.BudgetGroupTPM, MaxConcurrency: authority.BudgetGroupConcurrency,
 		CostOwnerID:      *authority.BudgetGroupID,
 		LookupID:         limits.BudgetGroupLookup(*authority.BudgetGroupID),
 		DailyCostLimit:   authority.BudgetGroupDailyCostLimit,
-		MonthlyCostLimit: authority.BudgetGroupMonthlyCostLimit,
-		RequestedTokens:  0,
-		LeaseTTL:         ttl,
+		MonthlyCostLimit: authority.BudgetGroupMonthlyCostLimit, WeeklyCostLimit: authority.BudgetGroupWeeklyCostLimit,
+		RequestedTokens: 0,
+		LeaseTTL:        ttl,
 	}
 }
 
@@ -187,43 +193,91 @@ func groupRequest(authority access.Authority, ttl time.Duration) *limits.Request
 // or the limiter is unreachable and the installation chose to fail open. The
 // surface is the one the caller speaks, whose headers report the key's allowance
 // if it has any.
-func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration) (*limits.Lease, *Error) {
-	return a.reserveKeyCosted(ctx, authority, surface, estimate, ttl, costReservation{})
+func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration, route ...string) (*limits.Lease, *Error) {
+	return a.reserveKeyCosted(ctx, authority, surface, estimate, ttl, costReservation{}, route...)
 }
 
-// reserveKeyCosted admits one request against the API key budgets and, for a
-// request that can be priced, reserves its estimated cost against the cost
-// budgets of the key and its budget group beside the spend already accrued. The
-// group's budget is taken first, since it is shared; its lease is attached to the
-// key's, so the one handle the request keeps finishes both. A budget that
-// refuses the request after the group's was taken gives the group's back.
-func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
+// reserveKeyCosted applies all configured caller boundaries and attaches their
+// leases for one settlement. Every refusal refunds earlier reservations. The
+// optional route identifies the ingress route for per-key route policy.
+func (a *Admission) reserveKeyCosted(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
+	aggregate, err := a.reserveAggregateBudgets(ctx, authority, ttl, hold)
+	if err != nil {
+		return nil, err
+	}
+
+	endUsers, err := a.reserveEndUsers(ctx, authority, estimate, ttl, hold)
+	if err != nil {
+		settleKey(ctx, aggregate, false, nil, a.logger())
+		return nil, err
+	}
+	if endUsers == nil {
+		endUsers = aggregate
+	} else {
+		endUsers.Attach(aggregate)
+	}
+	var named string
+	if len(route) > 0 {
+		named = route[0]
+	}
+	routeLease, refusal := a.reserveRouteLimits(ctx, authority, named, estimate, ttl, hold)
+	if refusal != nil {
+		settleKey(ctx, endUsers, false, nil, a.logger())
+		return nil, refusal
+	}
+	if routeLease != nil {
+		routeLease.Attach(endUsers)
+		endUsers = routeLease
+	}
+	lease, failure := a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold)
+	if failure != nil {
+		settleKey(ctx, endUsers, false, nil, a.logger())
+		return nil, failure
+	}
+	if lease == nil {
+		return endUsers, nil
+	}
+	lease.Attach(endUsers)
+	return lease, nil
+}
+
+func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
 	var group *limits.Lease
 	if request := groupRequest(authority, ttl); request != nil {
 		if !a.ready() {
 			return nil, limitsUnavailable()
 		}
-		request.CostEstimate, request.RequestID = hold.amount, hold.requestID
+		request.CostIncreases = authority.BudgetIncreases[request.CostOwnerID]
+		request.RequestedTokens = estimate
+		if request.TokensPerMinute != nil && estimate > *request.TokensPerMinute {
+			return nil, invalidRequest("request_exceeds_token_limit", "This request exceeds the budget group token limit.", nil)
+		}
+		if request.DailyCostLimit != nil || request.MonthlyCostLimit != nil || request.WeeklyCostLimit != nil {
+			request.CostEstimate, request.RequestID = hold.amount, hold.requestID
+		}
 		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 		lease, err := a.limiter.Reserve(decision, *request)
 		cancel()
 		if err != nil {
 			if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 				a.recordRejection(exceeded.Dimension)
-				return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
+				return nil, budgetBoundaryError(rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate), "budget group", "budget_group")
 			}
-			return nil, a.outage(authority.ID, true, err)
+			if failure := a.outage(authority.ID, request.DailyCostLimit != nil || request.MonthlyCostLimit != nil || request.WeeklyCostLimit != nil, err); failure != nil {
+				return nil, failure
+			}
 		}
 		group = lease
 	}
 	policy := &authority.Policy
 	if policy.RequestsPerMinute == nil && policy.TokensPerMinute == nil && policy.MaxConcurrency == nil &&
-		policy.DailyCostLimit == nil && policy.MonthlyCostLimit == nil {
+		policy.DailyCostLimit == nil && policy.MonthlyCostLimit == nil && policy.WeeklyCostLimit == nil {
 		// Nothing to enforce, so nothing to store: a key without hard limits
 		// reaches Valkey only for the group it belongs to.
 		return group, nil
 	}
 	request := keyRequest(authority, estimate, ttl)
+	request.CostIncreases = authority.BudgetIncreases[authority.ID]
 	// The allowance is stated for a response that will report it. A surface
 	// whose SDKs read no rate-limit headers, Gemini, Bedrock and the native
 	// operations, would be answered an allowance nothing writes, and the reply

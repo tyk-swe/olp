@@ -43,9 +43,10 @@ func configureObservability(state *observability.State, rt *runtime.Manager, gw 
 		state.Shadows = gw.ShadowCounts
 		if gw.Admission != nil {
 			admission := gw.Admission
-			state.LimiterCounts = func() (failOpen, daily, monthly int64) {
+			state.LimiterCounts = func() (failOpen, daily, weekly, monthly int64) {
 				return admission.FailOpenTotal(),
 					admission.BudgetRejections(limits.DimensionDailyCost),
+					admission.BudgetRejections(limits.DimensionWeeklyCost),
 					admission.BudgetRejections(limits.DimensionMonthlyCost)
 			}
 		}

@@ -55,19 +55,20 @@ type Options struct {
 // ProviderConfiguration verbatim. A plugin provider pins its plugin's digest
 // as the profile revision; Pin resolves that plugin profile.
 type Configuration struct {
-	ProviderID      string   `json:"-"`
-	ProfileID       string   `json:"profile_id,omitempty"`
-	ProfileRevision string   `json:"profile_revision,omitempty"`
-	ProbeModels     []string `json:"-"`
-	Kind            string   `json:"kind"`
-	AuthMode        string   `json:"auth_mode"`
-	Endpoint        *string  `json:"endpoint"`
-	CloudRegion     *string  `json:"cloud_region"`
-	CloudProject    *string  `json:"cloud_project"`
-	Deployment      *string  `json:"deployment"`
-	APIVersion      *string  `json:"api_version"`
-	Options         Options  `json:"options"`
-	plugin          *connectors.PluginProfile
+	CredentialSource string   `json:"credential_source,omitempty"`
+	ProviderID       string   `json:"-"`
+	ProfileID        string   `json:"profile_id,omitempty"`
+	ProfileRevision  string   `json:"profile_revision,omitempty"`
+	ProbeModels      []string `json:"-"`
+	Kind             string   `json:"kind"`
+	AuthMode         string   `json:"auth_mode"`
+	Endpoint         *string  `json:"endpoint"`
+	CloudRegion      *string  `json:"cloud_region"`
+	CloudProject     *string  `json:"cloud_project"`
+	Deployment       *string  `json:"deployment"`
+	APIVersion       *string  `json:"api_version"`
+	Options          Options  `json:"options"`
+	plugin           *connectors.PluginProfile
 }
 
 // normalize applies defaults and canonical forms so equal configurations
@@ -160,6 +161,9 @@ func (c *Configuration) VendorMissing() bool {
 
 // validate rejects configurations this gateway cannot serve.
 func (c *Configuration) Validate(policy *egress.Policy) error {
+	if err := connectors.ValidateCredentialSource(c.CredentialSource, c.Kind, c.AuthMode); err != nil {
+		return access.Invalid("configuration.credential_source", err.Error())
+	}
 	options, err := json.Marshal(c.Options)
 	if err != nil || len(options) > 1<<20 {
 		return access.Invalid("configuration.options", "Connection options must fit within 1 MiB")

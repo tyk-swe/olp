@@ -14,6 +14,8 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
@@ -54,9 +56,13 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		codeWriteError(w, r, codemode.Refuse(404, "code_route_unavailable"))
 		return
 	}
-	refuse := func(err error) { s.codeRefuse(w, r, route, authority.ID, err) }
+	refuse := func(err error) { s.codeRefuse(w, r, route, authority.ID, authority.EndUserDigest, err) }
 	if !route.Enabled || !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
 		refuse(codemode.Refuse(404, "code_route_unavailable"))
+		return
+	}
+	if _, failure = s.parseAttribution(r, authority); failure != nil {
+		refuse(codemode.Refuse(failure.Status, "code_"+failure.Code))
 		return
 	}
 	path := r.PathValue("operation")
@@ -70,7 +76,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if adapter == codemode.AdapterCodex && r.Method == http.MethodGet && path == "responses" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		s.codeWebSocket(w, r, release, route, authority.ID)
+		s.codeWebSocket(w, r, release, route, authority)
 		return
 	}
 	ingress, ok := codeIngressFor(adapter, r.Method, path)
@@ -82,7 +88,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(400, "code_operation_unsupported"))
 		return
 	}
-	limit := s.codeBodyLimit()
+	limit := bodylimit.Lower(s.codeBodyLimit(), route.MaxBodyBytes)
 	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
 	raw, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
@@ -210,11 +216,15 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
 		return nil, codemode.Refuse(403, "code_permission_denied")
 	}
-	lease, failure := s.Admission.ReserveCodeRate(r.Context(), authority, observation.Estimate, codeGenerationTimeout+time.Minute)
+	labels, failure := s.parseAttribution(r, authority)
+	if failure != nil {
+		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
+	}
+	lease, failure := s.Admission.ReserveCodeRate(r.Context(), authority, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 	}
-	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: authority.ID, Operation: observation.Operation, PreviousResponse: observation.PreviousResponse})
+	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest, Operation: observation.Operation, PreviousResponse: observation.PreviousResponse})
 	if err != nil {
 		settleKey(r.Context(), lease, false, nil, s.log)
 		return nil, err
@@ -226,9 +236,28 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 			a.finish(r.Context())
 		}
 	}()
-	if !reflect.DeepEqual(authority.Policy, permit.Authority.Policy) {
+	if err := bindCodeWorkload(&permit.Authority, authority); err != nil {
+		return nil, err
+	}
+	a.permit.Authority = permit.Authority
+	if !permit.Authority.AllowsAttribution(labels) {
+		return nil, codemode.Refuse(409, "code_attribution_changed")
+	}
+	if !reflect.DeepEqual(authority.Policy, permit.Authority.Policy) || !reflect.DeepEqual(authority.ProjectEndUserPolicy, permit.Authority.ProjectEndUserPolicy) || !reflect.DeepEqual(authority.BudgetGroupID, permit.Authority.BudgetGroupID) || !reflect.DeepEqual(authority.GroupLimits(), permit.Authority.GroupLimits()) {
 		settleKey(r.Context(), a.lease, false, nil, s.log)
-		a.lease, failure = s.Admission.ReserveCodeRate(r.Context(), permit.Authority, observation.Estimate, codeGenerationTimeout+time.Minute)
+		a.lease = nil
+		fresh := permit.Authority
+		if failure = s.checkKeyAddress(r, fresh); failure != nil {
+			return nil, codemode.Refuse(failure.Status, "code_ip_not_allowed")
+		}
+		fresh, failure = s.identifyEndUser(r, fresh)
+		if failure != nil {
+			return nil, codemode.Refuse(failure.Status, "code_end_user_invalid")
+		}
+		if fresh.EndUserDigest != authority.EndUserDigest {
+			return nil, codemode.Refuse(409, "code_end_user_changed")
+		}
+		a.lease, failure = s.Admission.ReserveCodeRate(r.Context(), fresh, observation.Estimate, codeGenerationTimeout+time.Minute, route.Slug)
 		if failure != nil {
 			return nil, codemode.Refuse(failure.Status, "code_rate_limited")
 		}
@@ -534,14 +563,28 @@ func codeWriteError(w http.ResponseWriter, r *http.Request, err error) {
 	writeSurfaceError(w, &Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: refusal.Code}, surface)
 }
 
-func (s *Server) codeRefuse(w http.ResponseWriter, r *http.Request, route codemode.Route, keyID string, err error) {
+func (s *Server) codeRefuse(w http.ResponseWriter, r *http.Request, route codemode.Route, keyID, digest string, err error) {
 	refusal := codeRefusal(err)
-	s.recordCodeRefusal(r.Context(), route, keyID, refusal.Code)
+	s.recordCodeRefusal(r.Context(), route, keyID, digest, refusal.Code)
 	codeWriteError(w, r, refusal)
 }
 
-func (s *Server) recordCodeRefusal(ctx context.Context, route codemode.Route, keyID, code string) {
+func (s *Server) recordCodeRefusal(ctx context.Context, route codemode.Route, keyID, digest, code string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	_ = s.CodeLedger.RecordRefusal(ctx, route, keyID, code)
+	_ = s.CodeLedger.RecordRefusal(ctx, route, keyID, digest, code)
+}
+
+// A durable permit reads current issuer state. It may retain the verified claim
+// digest only while the same declared issuer revision still owns the principal.
+func bindCodeWorkload(fresh *access.Authority, verified access.Authority) error {
+	if fresh.WorkloadIssuerID == nil && verified.WorkloadIssuerID == nil {
+		return nil
+	}
+	if fresh.WorkloadIssuerID == nil || verified.WorkloadIssuerID == nil || *fresh.WorkloadIssuerID != *verified.WorkloadIssuerID || fresh.WorkloadDigest != verified.WorkloadDigest || fresh.WorkloadMapping != verified.WorkloadMapping || fresh.WorkloadRevision != verified.WorkloadRevision {
+		return codemode.Refuse(409, "code_workload_changed")
+	}
+	fresh.EndUserDigest = verified.EndUserDigest
+	fresh.ExpiresAt = verified.ExpiresAt
+	return nil
 }

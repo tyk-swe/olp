@@ -17,6 +17,7 @@
     onClose?: () => void;
   } = $props();
 
+  const dialogId = $props.id();
   let dialog: HTMLDialogElement;
 
   onMount(() => {
@@ -25,7 +26,12 @@
     dialog.showModal();
     dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus();
     return () => {
-      document.body.classList.remove('secret-dialog-open');
+      if (
+        !Array.from(
+          document.querySelectorAll('dialog.secret-dialog[open]')
+        ).some((other) => other !== dialog)
+      )
+        document.body.classList.remove('secret-dialog-open');
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
   });
@@ -39,8 +45,8 @@
   class="secret-dialog card"
   class:wide={size === 'wide'}
   bind:this={dialog}
-  aria-labelledby="secret-dialog-title"
-  aria-describedby="secret-dialog-description"
+  aria-labelledby={`${dialogId}-title`}
+  aria-describedby={`${dialogId}-description`}
   onclose={() => onClose()}
 >
   <div class="dialog-header">
@@ -52,8 +58,8 @@
       onclick={close}>×</button
     >
   </div>
-  <h2 id="secret-dialog-title" class="dialog-title">{title}</h2>
-  <p id="secret-dialog-description" class="dialog-description">{description}</p>
+  <h2 id={`${dialogId}-title`} class="dialog-title">{title}</h2>
+  <p id={`${dialogId}-description`} class="dialog-description">{description}</p>
   {@render children(close)}
 </dialog>
 

@@ -40,14 +40,19 @@ func run(ctx context.Context, args []string) error {
 			fmt.Printf("olp %s\n", process.Version)
 			return nil
 		case "help", "--help", "-h":
-			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt|verify-retirement> [flags]\n       olp account reset-password EMAIL PASSWORD_FILE [flags]")
+			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt|verify-retirement> [flags]\n       olp account reset-password EMAIL PASSWORD_FILE [--reset-mfa] [flags]")
 			return nil
 		case "account":
 			if len(args) < 4 || args[1] != "reset-password" || strings.HasPrefix(args[2], "-") || strings.HasPrefix(args[3], "-") {
-				return errors.New("usage: olp account reset-password EMAIL PASSWORD_FILE [flags]")
+				return errors.New("usage: olp account reset-password EMAIL PASSWORD_FILE [--reset-mfa] [flags]")
 			}
 			maintenance := process.MaintenanceOptions{AccountEmail: args[2], PasswordFile: args[3]}
-			c, err := config.Parse(append([]string{"all"}, args[4:]...), os.Getenv, os.Stderr)
+			options := args[4:]
+			if len(options) > 0 && options[0] == "--reset-mfa" {
+				maintenance.ResetMFA = true
+				options = options[1:]
+			}
+			c, err := config.Parse(append([]string{"all"}, options...), os.Getenv, os.Stderr)
 			if err != nil {
 				return err
 			}

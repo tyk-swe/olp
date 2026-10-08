@@ -145,10 +145,14 @@
   let ruleName = $state('');
   let ruleEvent = $state<NotificationEvent>('budget.threshold');
   const watchesBudget = $derived(ruleEvent === 'budget.threshold');
+  const watchesKey = $derived(ruleEvent === 'key.expiring');
+  $effect(() => {
+    if (watchesKey) ruleSubjectKind = 'api_key';
+  });
   let ruleProjectId = $state('');
   let ruleSubjectKind = $state<'api_key' | 'budget_group'>('api_key');
   let ruleSubjectId = $state('');
-  let ruleWindow = $state<'day' | 'month'>('month');
+  let ruleWindow = $state<'day' | 'week' | 'month'>('month');
   let ruleThreshold = $state('80');
   let ruleDestinationId = $state('');
   let ruleBusy = $state(false);
@@ -166,7 +170,7 @@
     (destinations.data ?? []).filter(
       (destination) =>
         (destination.project_id ?? null) ===
-        (watchesBudget ? ruleProjectId || null : null)
+        (watchesBudget || watchesKey ? ruleProjectId || null : null)
     )
   );
 
@@ -191,7 +195,7 @@
       !canManage ||
       ruleBusy ||
       !ruleName.trim() ||
-      (watchesBudget && !ruleSubjectId) ||
+      ((watchesBudget || watchesKey) && !ruleSubjectId) ||
       !ruleDestinationId
     )
       return;
@@ -218,11 +222,20 @@
               threshold_percent: threshold,
               destination_id: ruleDestinationId
             }
-          : {
-              name: ruleName.trim(),
-              event: ruleEvent,
-              destination_id: ruleDestinationId
-            }
+          : watchesKey
+            ? {
+                name: ruleName.trim(),
+                event: ruleEvent,
+                project_id: ruleProjectId || null,
+                subject_kind: 'api_key',
+                subject_id: ruleSubjectId,
+                destination_id: ruleDestinationId
+              }
+            : {
+                name: ruleName.trim(),
+                event: ruleEvent,
+                destination_id: ruleDestinationId
+              }
       );
       ruleName = '';
       ruleSubjectId = '';
@@ -253,17 +266,22 @@
 
   const eventLabels: Record<NotificationEvent, string> = {
     'budget.threshold': 'Budget threshold',
-    'provider.grant.lapsed': 'Grant lapsed'
+    'provider.grant.lapsed': 'Grant lapsed',
+    'key.expiring': 'Key expiry or rotation due'
   };
 
   function subjectLabel(rule: NotificationRule) {
-    if (rule.event !== 'budget.threshold') return 'Every provider';
+    if (rule.event === 'provider.grant.lapsed') return 'Every provider';
     return `${rule.subject_kind === 'api_key' ? 'API key' : 'Budget group'} · ${rule.subject_name ?? rule.subject_id}`;
   }
 
   function windowLabel(windowKind: NotificationRule['window_kind']) {
     if (!windowKind) return '—';
-    return windowKind === 'day' ? 'UTC day' : 'UTC month';
+    return windowKind === 'day'
+      ? 'UTC day'
+      : windowKind === 'week'
+        ? 'UTC ISO week'
+        : 'UTC month';
   }
 
   function amount(value: string | null, currency: string | null) {
@@ -279,12 +297,11 @@
   <p class="eyebrow">Notifications</p>
   <h2 id="notifications-heading">Notification destinations and rules</h2>
   <p class="section-help">
-    {#if services.notificationsActive}Crossed budget thresholds and lapsed
-      provider grants post a metadata-only webhook to each subscribed
-      destination. A budget rule fires at most once per window, a grant lapse
-      once per rule; failed deliveries retry with backoff.{:else}Rules and
-      destinations are stored, but this installation is not running the delivery
-      worker, so no notifications will be sent yet.{/if}
+    {#if services.notificationsActive}Budget thresholds, lapsed provider grants,
+      and key expiry or rotation dates send metadata-only webhooks. Failed
+      deliveries retry with backoff.{:else}Rules and destinations are stored,
+      but this installation is not running the delivery worker, so no
+      notifications will be sent yet.{/if}
   </p>
 
   {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
@@ -443,13 +460,16 @@
               bind:value={ruleEvent}
               ><option value="budget.threshold"
                 >{eventLabels['budget.threshold']}</option
-              ><option value="provider.grant.lapsed"
+              ><option value="key.expiring"
+                >{eventLabels['key.expiring']}</option
+              >
+              <option value="provider.grant.lapsed"
                 >{eventLabels['provider.grant.lapsed']}</option
               ></select
             >
           </div>
         {/if}
-        {#if watchesBudget}
+        {#if watchesBudget || watchesKey}
           <ProjectScopeField
             id="rule-project"
             bind:value={ruleProjectId}
@@ -458,6 +478,7 @@
           <div class="form-field">
             <label for="rule-subject-kind">Subject</label><select
               id="rule-subject-kind"
+              disabled={watchesKey}
               bind:value={ruleSubjectKind}
               ><option value="api_key">API key</option><option
                 value="budget_group">Budget group</option
@@ -476,23 +497,28 @@
                 >{/each}</select
             >
           </div>
-          <div class="form-field">
-            <label for="rule-window">Window</label><select
-              id="rule-window"
-              bind:value={ruleWindow}
-              ><option value="day">UTC day</option><option value="month"
-                >UTC month</option
-              ></select
-            >
-          </div>
-          <div class="form-field">
-            <label for="rule-threshold">Threshold %</label><input
-              id="rule-threshold"
-              inputmode="numeric"
-              bind:value={ruleThreshold}
-              required
-            />
-          </div>
+          {#if watchesBudget}
+            <div class="form-field">
+              <label for="rule-window">Window</label><select
+                id="rule-window"
+                bind:value={ruleWindow}
+                ><option value="day">UTC day</option><option value="week"
+                  >UTC ISO week</option
+                ><option value="month">UTC month</option></select
+              >
+            </div>
+            <div class="form-field">
+              <label for="rule-threshold">Threshold %</label><input
+                id="rule-threshold"
+                inputmode="numeric"
+                bind:value={ruleThreshold}
+                required
+              />
+            </div>
+          {:else}<p class="section-help">
+              Sends once for each expiry or declared rotation date within 24
+              hours, or when overdue. No secret is generated or sent.
+            </p>{/if}
         {/if}
         <div class="form-field">
           <label for="rule-destination">Destination</label><select
@@ -512,11 +538,11 @@
           type="submit"
           disabled={ruleBusy ||
             !ruleName.trim() ||
-            (watchesBudget && !ruleSubjectId) ||
+            ((watchesBudget || watchesKey) && !ruleSubjectId) ||
             !ruleDestinationId}>{ruleBusy ? 'Creating…' : 'Create rule'}</button
         >
       </div>
-      {#if !watchesBudget}<p class="section-help">
+      {#if !watchesBudget && !watchesKey}<p class="section-help">
           A grant lapses when its provider plugin can no longer refresh it. Each
           lapse, on any provider, notifies an installation-wide destination
           once.
@@ -610,8 +636,15 @@
           {#each deliveries.data ?? [] as delivery (delivery.id)}
             <tr
               ><td>{delivery.rule_name}</td><td
-                >{eventLabels[delivery.event]}{#if delivery.provider_name}<br
-                  /><small
+                >{eventLabels[
+                  delivery.event
+                ]}{#if delivery.event === 'key.expiring'}<small
+                    >{delivery.api_key_name} · {delivery.reason}
+                    {delivery.due_at
+                      ? new Date(delivery.due_at).toLocaleString()
+                      : ''}</small
+                  >{/if}
+                {#if delivery.provider_name}<br /><small
                     >{delivery.provider_name} · credential v{delivery.credential_version}</small
                   >{/if}</td
               ><td><span class="mono">{delivery.window_id ?? '—'}</span></td><td

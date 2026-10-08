@@ -414,3 +414,15 @@ func (b *retiringDuplexBody) Close() error {
 	}
 	return err
 }
+
+// EphemeralClient never joins a process-wide pool and never retains idle
+// connections. Caller-authenticated requests use a new transport per attempt.
+// Only operator-owned network credentials configure its TLS/proxy connection.
+func (p Policy) EphemeralClient(options *ConnectionOptions, secret []byte, timeout time.Duration) (*http.Client, error) {
+	client, err := p.ConnectionClient(options, secret, timeout)
+	if err != nil {
+		return nil, err
+	}
+	client.Transport.(*connectionTransport).transport.DisableKeepAlives = true
+	return client, nil
+}

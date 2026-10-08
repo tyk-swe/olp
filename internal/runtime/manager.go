@@ -18,8 +18,10 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/workload"
 )
 
 // Production guarantees: authority is polled every five seconds and a read
@@ -81,16 +83,25 @@ type AuthorityStatus struct {
 }
 
 type keyRecord struct {
+	expiresAt *time.Time
 	authority access.Authority
 	digest    []byte
 }
 
 type authorityState struct {
-	loaded   bool
-	readAt   time.Time
-	id       string
-	sequence int64
-	keys     map[string]keyRecord
+	workloadIssuers           map[string]workloadIssuer
+	workloadPrincipals        map[string]access.Authority
+	budgetIncreases           map[string]string
+	installationBudget        *access.BudgetPolicy
+	projectOrganizations      map[string]string
+	organizationBudgets       map[string]*access.BudgetPolicy
+	projectBudgets            map[string]*access.BudgetPolicy
+	projectAttributionBudgets map[string]access.AttributionBudgets
+	loaded                    bool
+	readAt                    time.Time
+	id                        string
+	sequence                  int64
+	keys                      map[string]keyRecord
 	// ineligible holds the credential versions and network credentials that
 	// may not serve, with why.
 	ineligible map[string]Eligibility
@@ -98,12 +109,14 @@ type authorityState struct {
 
 // Manager installs releases and refreshes key authority for one gateway.
 type Manager struct {
-	pool         *pgxpool.Pool
-	installation string
-	auth         *secrets.AuthKey
-	keys         *secrets.KeyRing
-	Mounted      map[string]MountedProvider
-	log          *slog.Logger
+	workloadKeys         *workload.Cache
+	workloadRegistration sync.Mutex
+	pool                 *pgxpool.Pool
+	installation         string
+	auth                 *secrets.AuthKey
+	keys                 *secrets.KeyRing
+	Mounted              map[string]MountedProvider
+	log                  *slog.Logger
 
 	// GrantRefreshed, when set before Start, is told of each credential
 	// version of the installed release whose grant a poll found refreshed,
@@ -133,7 +146,7 @@ type Manager struct {
 // NewManager prepares a manager that serves the empty snapshot until the
 // first release installs and rejects admissions until authority loads.
 func NewManager(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, keys *secrets.KeyRing, log *slog.Logger) *Manager {
-	return &Manager{
+	return &Manager{workloadKeys: workload.NewCache(access.IdentityHTTPClient()),
 		pool:         pool,
 		installation: installation,
 		auth:         auth,
@@ -215,14 +228,50 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 		return nil
 	}
 	state := authorityState{loaded: true, readAt: start, id: id, sequence: sequence, keys: map[string]keyRecord{}}
-	rows, err := tx.Query(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text FROM olp.api_keys k LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id")
+	if err = tx.QueryRow(ctx, "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&state.installationBudget); err != nil {
+		return err
+	}
+	state.budgetIncreases, err = limits.LoadBudgetIncreases(ctx, tx)
+	if err != nil {
+		return err
+	}
+	budgetRows, err := tx.Query(ctx, "SELECT p.id::text,p.budget_policy,p.attribution_budgets,p.organization_id::text,o.budget_policy FROM olp.projects p LEFT JOIN olp.organizations o ON o.id=p.organization_id WHERE p.organization_id IS NOT NULL OR p.budget_policy IS NOT NULL OR p.attribution_budgets<>'{}'::jsonb")
+	if err != nil {
+		return err
+	}
+	state.projectOrganizations = map[string]string{}
+	state.organizationBudgets = map[string]*access.BudgetPolicy{}
+	state.projectBudgets = map[string]*access.BudgetPolicy{}
+	state.projectAttributionBudgets = map[string]access.AttributionBudgets{}
+	for budgetRows.Next() {
+		var project string
+		var policy *access.BudgetPolicy
+		var labels access.AttributionBudgets
+		var organization *string
+		var organizationPolicy *access.BudgetPolicy
+		if err = budgetRows.Scan(&project, &policy, &labels, &organization, &organizationPolicy); err != nil {
+			budgetRows.Close()
+			return err
+		}
+		if organization != nil {
+			state.projectOrganizations[project] = *organization
+			state.organizationBudgets[*organization] = organizationPolicy
+		}
+		state.projectBudgets[project] = policy
+		state.projectAttributionBudgets[project] = labels
+	}
+	budgetRows.Close()
+	if err = budgetRows.Err(); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text,g.weekly_cost_limit::text,p.end_user_policy,COALESCE(p.attribution_policy,'{}'::jsonb),COALESCE(k.limit_lookup_id,k.lookup_id),g.limit_template,g.requests_per_minute,g.tokens_per_minute,g.max_concurrency,k.workload_issuer_id::text,COALESCE(k.workload_digest,''),COALESCE(k.workload_mapping,'') FROM olp.api_keys k LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id LEFT JOIN olp.projects p ON p.id=k.project_id")
 	if err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
 	for rows.Next() {
 		var policy []byte
 		record := keyRecord{}
-		if err = rows.Scan(&record.authority.ID, &record.authority.LookupID, &record.authority.Issuer, &record.authority.ProjectID, &record.digest, &policy, &record.authority.ExpiresAt, &record.authority.RevokedAt, &record.authority.BudgetGroupID, &record.authority.BudgetGroupDailyCostLimit, &record.authority.BudgetGroupMonthlyCostLimit); err != nil {
+		if err = rows.Scan(&record.authority.ID, &record.authority.LookupID, &record.authority.Issuer, &record.authority.ProjectID, &record.digest, &policy, &record.authority.ExpiresAt, &record.authority.RevokedAt, &record.authority.BudgetGroupID, &record.authority.BudgetGroupDailyCostLimit, &record.authority.BudgetGroupMonthlyCostLimit, &record.authority.BudgetGroupWeeklyCostLimit, &record.authority.ProjectEndUserPolicy, &record.authority.ProjectAttributionPolicy, &record.authority.LimitLookupID, &record.authority.BudgetGroupTemplate, &record.authority.BudgetGroupRPM, &record.authority.BudgetGroupTPM, &record.authority.BudgetGroupConcurrency, &record.authority.WorkloadIssuerID, &record.authority.WorkloadDigest, &record.authority.WorkloadMapping); err != nil {
 			rows.Close()
 			return fmt.Errorf("authority: %w", err)
 		}
@@ -230,11 +279,90 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 			rows.Close()
 			return fmt.Errorf("authority: key %s policy: %w", record.authority.ID, err)
 		}
+		record.authority.BudgetIncreases = state.budgetIncreases
+		record.authority.InstallationID = m.installation
+		record.authority.InstallationBudget = state.installationBudget
+		if record.authority.ProjectID != nil {
+			if org, ok := state.projectOrganizations[*record.authority.ProjectID]; ok {
+				record.authority.OrganizationID = &org
+				record.authority.OrganizationBudget = state.organizationBudgets[org]
+			}
+			record.authority.ProjectBudget = state.projectBudgets[*record.authority.ProjectID]
+			record.authority.ProjectAttributionBudgets = state.projectAttributionBudgets[*record.authority.ProjectID]
+		}
 		state.keys[record.authority.LookupID] = record
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
 		return fmt.Errorf("authority: %w", err)
+	}
+
+	if err = m.loadWorkloadAuthority(ctx, tx, &state); err != nil {
+		return err
+	}
+	// Fetch each needed project's group document once, rather than copying all
+	// groups into every key row (including keys which never reference a group).
+	var projectIDs []string
+	var needed map[string]bool
+	for _, record := range state.keys {
+		a := record.authority
+		if a.WorkloadIssuerID != nil {
+			continue
+		} // Workload bindings are compiled from current issuer policy.
+		if (len(a.Policy.AllowedRouteGroups) == 0 && !a.UsesLimitTemplates()) || a.ProjectID == nil {
+			continue
+		}
+		if needed == nil {
+			needed = map[string]bool{}
+		}
+		if !needed[*a.ProjectID] {
+			needed[*a.ProjectID] = true
+			projectIDs = append(projectIDs, *a.ProjectID)
+		}
+	}
+	if len(projectIDs) > 0 {
+		groupRows, e := tx.Query(ctx, `SELECT id::text,route_groups,limit_templates FROM olp.projects WHERE id=ANY($1::uuid[])`, projectIDs)
+		if e != nil {
+			return fmt.Errorf("authority route groups: %w", e)
+		}
+		byProject := map[string]access.RouteGroups{}
+		templatesByProject := map[string]access.LimitTemplates{}
+		for groupRows.Next() {
+			var id string
+			var groups access.RouteGroups
+			var templates access.LimitTemplates
+			if e = groupRows.Scan(&id, &groups, &templates); e != nil {
+				groupRows.Close()
+				return e
+			}
+			byProject[id] = groups
+			templatesByProject[id] = templates
+		}
+		groupRows.Close()
+		if e = groupRows.Err(); e != nil {
+			return e
+		}
+		for lookup, record := range state.keys {
+			if record.authority.ProjectID == nil || record.authority.WorkloadIssuerID != nil {
+				continue
+			}
+			if e = record.authority.BindRouteGroups(byProject[*record.authority.ProjectID]); e != nil {
+				return fmt.Errorf("authority route groups: %w", e)
+			}
+			if e = record.authority.BindLimitTemplates(templatesByProject[*record.authority.ProjectID]); e != nil {
+				return e
+			}
+			state.keys[lookup] = record
+		}
+	}
+	state.workloadPrincipals = map[string]access.Authority{}
+	for _, record := range state.keys {
+		if record.authority.WorkloadIssuerID != nil {
+			state.workloadPrincipals[record.authority.WorkloadDigest] = record.authority
+		}
+	}
+	if err = m.loadKeyOverlaps(ctx, tx, &state); err != nil {
+		return fmt.Errorf("authority overlaps: %w", err)
 	}
 	if state.ineligible, err = ReadIneligible(ctx, tx, nil); err != nil {
 		return fmt.Errorf("authority: %w", err)
@@ -365,6 +493,11 @@ func (m *Manager) Release() *Release {
 	return m.release
 }
 
+// EndUserDigest derives a project-scoped identity without retaining the identifier.
+func (m *Manager) EndUserDigest(projectID *string, identifier string) string {
+	return access.DigestEndUser(m.auth, projectID, identifier)
+}
+
 // Authenticate resolves an API key against the last authority read.
 func (m *Manager) Authenticate(secret string) (access.Authority, error) {
 	m.mu.RLock()
@@ -373,12 +506,15 @@ func (m *Manager) Authenticate(secret string) (access.Authority, error) {
 	if !state.loaded || time.Since(state.readAt) > AuthorityStaleAfter {
 		return access.Authority{}, ErrStaleAuthority
 	}
+	if !strings.HasPrefix(secret, "olp_") {
+		return m.authenticateWorkload(secret, state)
+	}
 	parts := strings.Split(secret, "_")
 	if len(parts) != 3 || parts[0] != "olp" {
 		return access.Authority{}, ErrInvalidKey
 	}
 	record, ok := state.keys[parts[1]]
-	if !ok || !hmac.Equal(record.digest, m.auth.Digest(secrets.APIKeyDigest, secret)) {
+	if !ok || record.authority.WorkloadIssuerID != nil || record.expiresAt != nil && !time.Now().Before(*record.expiresAt) || !hmac.Equal(record.digest, m.auth.Digest(secrets.APIKeyDigest, secret)) {
 		return access.Authority{}, ErrInvalidKey
 	}
 	return record.authority, nil
@@ -402,11 +538,42 @@ func (m *Manager) DesiredGeneration() int64 { return m.desired.Load() }
 func (m *Manager) HasHardLimits() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	for _, issuer := range m.authority.workloadIssuers {
+		if !issuer.Config.Enabled {
+			continue
+		}
+		for _, a := range issuer.bindings {
+			if a.Policy.AdmissionLimits().Limited() || a.ProjectEndUserPolicy != nil {
+				return true
+			}
+		}
+	}
+	if m.authority.installationBudget.Limited() {
+		return true
+	}
+	for _, p := range m.authority.projectAttributionBudgets {
+		if len(p) > 0 {
+			return true
+		}
+	}
+	for _, p := range m.authority.organizationBudgets {
+		if p.Limited() {
+			return true
+		}
+	}
+	for _, p := range m.authority.projectBudgets {
+		if p.Limited() {
+			return true
+		}
+	}
 	for _, record := range m.authority.keys {
+		if record.authority.Policy.RouteLimits.Limited() {
+			return true
+		}
 		p := record.authority.Policy
 		if p.RequestsPerMinute != nil || p.TokensPerMinute != nil || p.MaxConcurrency != nil ||
-			p.DailyCostLimit != nil || p.MonthlyCostLimit != nil ||
-			record.authority.BudgetGroupDailyCostLimit != nil || record.authority.BudgetGroupMonthlyCostLimit != nil {
+			p.DailyCostLimit != nil || p.MonthlyCostLimit != nil || p.WeeklyCostLimit != nil || p.EndUserPolicy != nil || record.authority.ProjectEndUserPolicy != nil ||
+			record.authority.BudgetGroupRPM != nil || record.authority.BudgetGroupTPM != nil || record.authority.BudgetGroupConcurrency != nil || record.authority.BudgetGroupDailyCostLimit != nil || record.authority.BudgetGroupMonthlyCostLimit != nil || record.authority.BudgetGroupWeeklyCostLimit != nil {
 			return true
 		}
 	}
@@ -432,4 +599,53 @@ func (m *Manager) refreshInputs(ctx context.Context) error {
 	m.inputs = inputs
 	m.mu.Unlock()
 	return nil
+}
+
+func (m *Manager) loadKeyOverlaps(ctx context.Context, tx pgx.Tx, state *authorityState) error {
+	rows, err := tx.Query(ctx, "SELECT api_key_id::text,lookup_id,digest,expires_at FROM olp.api_key_overlaps WHERE expires_at>now()")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var byID map[string]keyRecord
+	for rows.Next() {
+		var id, lookup string
+		var digest []byte
+		var until time.Time
+		if err = rows.Scan(&id, &lookup, &digest, &until); err != nil {
+			return err
+		}
+		if byID == nil {
+			byID = make(map[string]keyRecord, len(state.keys))
+			for _, r := range state.keys {
+				byID[r.authority.ID] = r
+			}
+		}
+		if record, ok := byID[id]; ok {
+			record.digest = digest
+			record.expiresAt = &until
+			state.keys[lookup] = record
+		}
+	}
+	return rows.Err()
+}
+
+// BudgetAuthority gives system-origin work the same aggregate caps and freshness
+// bound as caller work, without creating an API-key or end-user identity.
+func (m *Manager) BudgetAuthority(project *string) (access.Authority, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.authority.loaded || time.Since(m.authority.readAt) > AuthorityStaleAfter {
+		return access.Authority{}, ErrStaleAuthority
+	}
+	a := access.Authority{BudgetIncreases: m.authority.budgetIncreases, InstallationID: m.installation, ProjectID: project, InstallationBudget: m.authority.installationBudget}
+	if project != nil {
+		if org, ok := m.authority.projectOrganizations[*project]; ok {
+			a.OrganizationID = &org
+			a.OrganizationBudget = m.authority.organizationBudgets[org]
+		}
+		a.ProjectBudget = m.authority.projectBudgets[*project]
+		a.ProjectAttributionBudgets = m.authority.projectAttributionBudgets[*project]
+	}
+	return a, nil
 }

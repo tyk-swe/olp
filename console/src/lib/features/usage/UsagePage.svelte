@@ -184,13 +184,13 @@
       >Break down by <select bind:value={draft.dimension}
         ><option value="route">Route</option><option value="provider"
           >Provider</option
-        ><option value="model">Model</option><option value="model_family"
-          >Model family</option
-        ><option value="estimate_provenance">Estimate provenance</option><option
-          value="api_key">API key</option
-        ><option value="operation">Operation</option><option value="attribution"
-          >Attribution</option
-        ></select
+        ><option value="end_user">End user (digest)</option><option
+          value="model">Model</option
+        ><option value="model_family">Model family</option><option
+          value="estimate_provenance">Estimate provenance</option
+        ><option value="api_key">API key</option><option value="operation"
+          >Operation</option
+        ><option value="attribution">Attribution</option></select
       ></label
     >
     <label

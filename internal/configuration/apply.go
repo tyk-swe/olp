@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -27,6 +30,10 @@ type resolvedSlot struct {
 }
 
 func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document, bindings map[string]string) error {
+	if err := applyMFAPolicy(ctx, tx, p, doc.RequireLocalMFA); err != nil {
+		return err
+	}
+
 	state, err := loadState(ctx, tx)
 	if err != nil {
 		return err
@@ -34,17 +41,101 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 	// Plan resolves a project reference against both the document and the
 	// destination, so apply must resolve undeclared destination projects too.
 	projectIDs := maps.Clone(state.projects)
+	if err := applyOrganizations(ctx, tx, p, doc); err != nil {
+		return err
+	}
+	if err := applyBudgetTimeZone(ctx, tx, p, doc.BudgetTimeZone); err != nil {
+		return err
+	}
+	projectPoliciesChanged, err := applyInstallationBudget(ctx, tx, p, doc.InstallationBudget)
+	if err != nil {
+		return err
+	}
 	for _, project := range doc.Projects {
 		key := strings.ToLower(project.Name)
-		if _, ok := projectIDs[key]; ok {
+		id, exists := projectIDs[key]
+		if !exists {
+			var err error
+			id, _, err = access.CreateProject(ctx, tx, project.Name, p.UserID())
+			if err != nil {
+				return err
+			}
+			projectIDs[key] = id
+		}
+		if err := applyProjectOrganization(ctx, tx, p, id, project.Organization); err != nil {
+			return err
+		}
+		var current *access.EndUserPolicy
+		var currentAttribution *attribution.Policy
+		var currentGroups access.RouteGroups
+		var currentBudget *access.BudgetPolicy
+		var currentTemplates access.LimitTemplates
+		var currentCaps access.AttributionBudgets
+		if err := tx.QueryRow(ctx, `SELECT end_user_policy,attribution_policy,route_groups,budget_policy,limit_templates,attribution_budgets FROM olp.projects WHERE id=$1 FOR UPDATE`, id).Scan(&current, &currentAttribution, &currentGroups, &currentBudget, &currentTemplates, &currentCaps); err != nil {
+			return err
+		}
+		policy := projectEndUserPolicy(current, project.EndUserDefaults, project.EndUserLimitTemplate)
+		templates := currentTemplates
+		if project.LimitTemplates != nil {
+			templates = *project.LimitTemplates
+		}
+		if currentCaps.Equal(project.AttributionBudgets) && reflect.DeepEqual(templates, currentTemplates) && reflect.DeepEqual(current, policy) && reflect.DeepEqual(currentAttribution, project.AttributionPolicy) && currentGroups.Equal(project.RouteGroups) && reflect.DeepEqual(currentBudget, project.Budget) {
 			continue
 		}
-		id, _, err := access.CreateProject(ctx, tx, project.Name, p.UserID())
+		// Promoting admission policy needs the same permission as editing it
+		// directly. A configure-only token may still apply unchanged defaults.
+		if err := p.Authorize(access.Keys); err != nil {
+			return err
+		}
+		encoded, err := json.Marshal(policy)
 		if err != nil {
 			return err
 		}
-		projectIDs[key] = id
+		labels, err := json.Marshal(project.AttributionPolicy)
+		if err != nil {
+			return err
+		}
+		if project.Budget.Limited() {
+			if err := limits.EnsureAggregateBudget(ctx, tx, "project", id); err != nil {
+				return err
+			}
+		}
+		if err := project.AttributionBudgets.EnsureAccounts(ctx, tx, id); err != nil {
+			return err
+		}
+		budget, err := json.Marshal(project.Budget)
+		if err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE olp.projects SET end_user_policy=NULLIF($2::jsonb,'null'::jsonb),etag=$3,updated_at=now(),attribution_policy=NULLIF($4::jsonb,'null'::jsonb),route_groups=$5::jsonb,budget_policy=NULLIF($6::jsonb,'null'::jsonb),limit_templates=$7::jsonb,attribution_budgets=$8::jsonb
+   WHERE id=$1`, id, encoded, access.NewID(), labels, project.RouteGroups.JSON(), budget, templates.JSON(), project.AttributionBudgets.JSON())
+		if err != nil {
+			return err
+		}
+		projectPoliciesChanged = projectPoliciesChanged || tag.RowsAffected() > 0
 	}
+	if err := s.applySCIMMappings(ctx, tx, p, doc, projectIDs); err != nil {
+		return err
+	}
+	if err := s.applyWorkloadIssuers(ctx, tx, p, doc, projectIDs); err != nil {
+		return err
+	}
+	for _, project := range doc.Projects {
+		var templates access.LimitTemplates
+		id := projectIDs[strings.ToLower(project.Name)]
+		if err := tx.QueryRow(ctx, "SELECT limit_templates FROM olp.projects WHERE id=$1", id).Scan(&templates); err != nil {
+			return err
+		}
+		if err := access.ValidateTemplateReferences(ctx, tx, id, templates); err != nil {
+			return err
+		}
+	}
+	if projectPoliciesChanged {
+		if _, err := access.AdvanceAuthority(ctx, tx); err != nil {
+			return err
+		}
+	}
+
 	providerIDs := map[string]string{}
 	for name, existing := range state.providers {
 		providerIDs[name] = existing.ID
@@ -123,7 +214,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			return err
 		}
 		input := routes.DraftInput{Slug: route.Slug, Operations: route.Operations, OverallTimeoutMS: route.OverallTimeoutMS, MaxAttempts: route.MaxAttempts, ContentPolicy: route.ContentPolicy, Fidelity: route.Fidelity,
-			Fallbacks: route.Fallbacks, Selectors: route.Selectors, Retry: route.Retry, Affinity: route.Affinity, Budget: route.Budget}
+			CallerCostExempt: route.CallerCostExempt, MaxBodyBytes: route.MaxBodyBytes, Fallbacks: route.Fallbacks, Selectors: route.Selectors, Retry: route.Retry, Affinity: route.Affinity, Budget: route.Budget}
 		for _, t := range route.Targets {
 			providerID := providerIDs[strings.ToLower(t.Provider)]
 			input.Targets = append(input.Targets, routes.TargetInput{ProviderID: &providerID, ProviderModel: &t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: t.TimeoutMS, Tags: t.Tags, Shadow: t.Shadow})
@@ -195,6 +286,19 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			}
 		}
 	}
+	for _, project := range doc.Projects {
+		id := projectIDs[strings.ToLower(project.Name)]
+		for _, members := range project.RouteGroups {
+			var foreign bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM (SELECT slug,project_id FROM olp.routes UNION ALL SELECT slug,project_id FROM olp.code_routes) r WHERE slug=ANY($1::text[]) AND project_id IS DISTINCT FROM $2::uuid)`, members, id).Scan(&foreign); err != nil {
+				return err
+			}
+			if foreign {
+				return access.Invalid("route_groups", "Group routes must belong to their project.")
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -365,4 +469,22 @@ func applyTemplates(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Doc
 
 func sameProjectID(a, b *string) bool {
 	return (a == nil) == (b == nil) && (a == nil || *a == *b)
+}
+
+// Digest-specific controls belong to the destination installation. Promotion
+// changes portable defaults while preserving its local overrides and blocks.
+func projectEndUserPolicy(existing *access.EndUserPolicy, defaults *access.AdmissionLimits, template *string) *access.EndUserPolicy {
+	if defaults == nil && template == nil && (existing == nil || len(existing.Overrides)+len(existing.Blocked) == 0) {
+		return nil
+	}
+	policy := &access.EndUserPolicy{}
+	if existing != nil {
+		*policy = *existing
+	}
+	policy.LimitTemplate = template
+	policy.Defaults = access.AdmissionLimits{}
+	if defaults != nil {
+		policy.Defaults = *defaults
+	}
+	return policy
 }

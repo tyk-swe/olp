@@ -70,6 +70,9 @@ func (x *execution) routeContext(ctx context.Context) (context.Context, context.
 // replan plans x.route with the request's own planner.
 func (s *Server) replan(ctx context.Context, x *execution) *Error {
 	x.planConditions = nil
+	if e := x.checkBody(x.route); e != nil {
+		return e
+	}
 	switch x.planner {
 	case unaryPlanner:
 		return s.planUnary(ctx, x)

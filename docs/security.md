@@ -11,12 +11,12 @@ describes.
 
 | Boundary | What crosses it | How it is protected |
 | --- | --- | --- |
-| Edge → public listener | Console, management API, and inference traffic | The edge terminates TLS. OLP classifies each path's surface (`internal/surface`), admits it from that surface's pool, and sets the [perimeter headers](#public-perimeter). Forwarded client addresses are trusted only through `OLP_TRUSTED_PROXY_CIDRS`. |
+| Edge → public listener | Console, management API, and inference traffic | The edge terminates TLS. OLP classifies each path's surface (`internal/surface`), admits it from that surface's pool, and sets the [perimeter headers](#public-perimeter). Forwarded client addresses are trusted only through `OLP_TRUSTED_PROXY_CIDRS`. `OLP_MANAGEMENT_ALLOWED_CIDRS` optionally restricts management and console clients before admission and authentication. |
 | Private listener | Health probes and metrics | Unauthenticated by design. Bind it to a private interface and restrict it with the chart's NetworkPolicy. |
 | OLP → PostgreSQL | All durable state | Bearer credentials are stored only as digests and other secrets only sealed by the master key ring; see [secrets](#secrets). |
 | OLP → Valkey | Limits, routing hints, accounting events | Carries metadata, never credentials or content. Installations sharing one Valkey stay isolated by namespace. |
 | OLP → providers | Inference and management calls | [Provider egress](#egress) validates every destination and pins every dial; provider errors are scrubbed of the credentials OLP sent. |
-| OLP → identity provider | OIDC discovery, tokens, keys | Identity egress applies the provider denylist with no operator exceptions. |
+| OLP → identity provider | OIDC discovery/tokens/keys; declared SAML metadata | Identity egress applies the provider denylist with no operator exceptions. |
 | Operator → CLI | Password recovery, key rotation, `doctor` | Requires the secret files and database access; secret files must not be readable by others. |
 
 ## Principals
@@ -59,6 +59,7 @@ installation lock, so they commit only under authority that is still current.
 | `manage_projects` | yes |  |  |  | yes |  |
 | `local_login` | yes |  |  |  | yes |  |
 | `manage_plugins` | yes |  |  |  | yes |  |
+| `manage_organization` | yes | yes | yes |  |  | yes |
 <!-- /operations -->
 
 `internal/access/testdata/authorization.golden.json` records which callers
@@ -79,6 +80,20 @@ resource the caller may not change answers 403. Lists include only reachable
 resources, and only installation-wide principals place resources in the
 unassigned boundary. The isolation sweep reads every operation as a member of
 another project and fails on any disclosure of a canary project.
+
+Organization membership adds project scope without adding installation operations.
+One organization level contains projects; manager/viewer membership combines with
+direct project membership using manager precedence. Explicitly project-scoped
+tokens do not inherit organization administration. Nested operations recheck the
+organization and owning project; writes use the current principal inside the
+management transaction. See [organizations](access.md#organizations).
+
+| Organization context | Read organization | Change organization/members | Project scope |
+| --- | --- | --- | --- |
+| Global owner | Yes | `manage_organization`; tokens also need `access` when relying on global authority | Existing global scope |
+| Organization manager | `read` | `manage_organization`, subject to installation role | Manager in contained projects |
+| Organization viewer | `read` | No | Viewer, plus independent direct grants |
+| Explicit project-scoped token | No parent grant | No | Its project list intersected with current creator authority |
 
 ## Gateway keys
 
@@ -104,6 +119,13 @@ may still use. `gateway/retained.go` answers any other key with 404, and
 answers 409 when the provider revision, slot, or credential that serves the
 resource is gone.
 
+The `native-responses-v2` retained-response contract stores the serving receipt,
+model binding and optional prior-response provider ID under `provider_continuation`.
+It does not retain the caller's source request, including native user identifiers.
+The earlier internal v1 storage format is no longer readable; recreate those
+short-lived response handles after upgrading. Other retained native contracts keep
+only the encrypted dependencies their documented continuation protocol requires.
+
 ## Secrets
 
 OLP holds two keys, both mounted from files that others cannot read:
@@ -126,8 +148,8 @@ names are bound into stored data and never change:
 <!-- purposes -->
 | Kind | Purposes |
 | --- | --- |
-| Digest | `api_key`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation` |
-| Seal | `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source`, `provider_grant_refresh`, `grant_enrollment` |
+| Digest | `saml_state`, `saml_cookie`, `saml_assertion`, `mfa_challenge`, `mfa_recovery`, `api_key`, `workload_identity`, `end_user`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation` |
+| Seal | `saml_key`, `saml_flow`, `mfa_totp`, `mfa_webauthn`, `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source`, `provider_grant_refresh`, `grant_enrollment` |
 <!-- /purposes -->
 
 Passwords are hashed with Argon2id, with at most four concurrent hashes per
@@ -163,7 +185,7 @@ so refusals and fallbacks carry the same headers as handled responses:
 
 Browser sessions use `__Host-` cookies that are `Secure` and `SameSite=Lax`.
 Unsafe management requests need the configured `Origin` and a CSRF proof, and
-cross-site fetches are refused except for the OIDC callback.
+cross-site fetches are refused except for the OIDC callback and the narrowly scoped SAML POST receipt/completion. The SAML POST creates no session; a separately cookie-bound GET consumes verified sealed facts.
 
 ## Audit
 
@@ -190,3 +212,16 @@ user-agent family, never request bodies, credentials, or content. See
   identity for AWS and Azure providers.
 - Bedrock clients authenticate to OLP with an API key, never with AWS
   signatures.
+
+Local password authentication with enrolled or required MFA cannot create a
+session until its challenge is completed. Enrollment rotates the current
+session; factors/recovery codes are managed only with fresh proof. WebAuthn
+binds the configured public origin and requires user verification; TOTP and
+recovery proofs are transactionally one-use. See [local MFA](access.md#local-multi-factor-authentication)
+for storage purposes, bootstrap, offline recovery and the external-SSO boundary.
+
+SAML uses independently verified assertion signatures, explicit issuer/audience/
+request/recipient checks and a browser-bound two-stage callback. Only declared
+metadata URLs use identity egress; assertion-controlled URLs are never fetched.
+Signing material and short-lived verified flow facts use distinct `saml_key` and
+`saml_flow` seal purposes. See [SAML console sign-in](access.md#saml-console-sign-in).

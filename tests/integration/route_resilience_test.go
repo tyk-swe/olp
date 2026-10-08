@@ -21,7 +21,7 @@ import (
 
 // resilienceFields are a route's declared fallbacks, selectors, retry policy,
 // affinity and spend cap, as the management API serves them.
-var resilienceFields = []string{"fallbacks", "selectors", "retry", "affinity", "budget"}
+var resilienceFields = []string{"fallbacks", "selectors", "retry", "affinity", "budget", "max_body_bytes"}
 
 // sameJSON compares two decoded JSON values after a round trip through JSON,
 // so that a number decoded from either side compares equal.
@@ -54,11 +54,12 @@ func TestRouteResilienceRoundTripsThroughDraftsRevisionsAndConfiguration(t *test
 	candidate := activeAzureProvider(t, h, owner, "Shadow candidate", fixture.URL, generation)
 
 	behavior := map[string]any{
-		"fallbacks": []any{map[string]any{"route": backup, "on": []any{"exhausted", "context_window"}}},
-		"selectors": []any{map[string]any{"id": "short", "when": map[string]any{"max_input_tokens": 1000, "tools": false}, "tags": []any{"fast"}}},
-		"retry":     map[string]any{"rate_limit": map[string]any{"max_retries": 2, "base_backoff_ms": 100, "max_backoff_ms": 1000, "respect_retry_after": true}},
-		"affinity":  map[string]any{"source": "cache_key"},
-		"budget":    map[string]any{"daily_cost_limit": "5", "monthly_cost_limit": "100"},
+		"max_body_bytes": 1048576,
+		"fallbacks":      []any{map[string]any{"route": backup, "on": []any{"exhausted", "context_window"}}},
+		"selectors":      []any{map[string]any{"id": "short", "when": map[string]any{"max_input_tokens": 1000, "tools": false}, "tags": []any{"fast"}}},
+		"retry":          map[string]any{"rate_limit": map[string]any{"max_retries": 2, "base_backoff_ms": 100, "max_backoff_ms": 1000, "respect_retry_after": true}},
+		"affinity":       map[string]any{"source": "cache_key"},
+		"budget":         map[string]any{"daily_cost_limit": "5", "monthly_cost_limit": "100"},
 	}
 	slug := "resilient-" + uuid.NewString()[:8]
 	body := map[string]any{"slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 2,

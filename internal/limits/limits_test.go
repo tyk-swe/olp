@@ -344,11 +344,11 @@ func TestParseCostReservationRejectsMalformedResponses(t *testing.T) {
 		{"missing day window", reply(int64(1), int64(1), "ok", int64(0), int64(0), int64(24_000))},
 		{"missing month window", reply(int64(1), int64(1), "ok", int64(0), int64(20_000), int64(0))},
 		{"granted with a retry hint", reply(int64(1), int64(1), "ok", int64(1), int64(20_000), int64(24_000))},
-		{"daily retry beyond a day", reply(int64(1), int64(0), "daily_cost", dayMS+1, int64(20_000), int64(24_000))},
+		{"daily retry beyond a day", reply(int64(1), int64(0), "daily_cost", 3*dayMS+1, int64(20_000), int64(24_000))},
 		{"monthly retry beyond a month", reply(int64(1), int64(0), "monthly_cost", maxMonthMS+1, int64(20_000), int64(24_000))},
 		{"rejection without a retry hint", reply(int64(1), int64(0), "daily_cost", int64(0), int64(20_000), int64(24_000))},
 		{"estimate rejection without a retry hint", reply(int64(1), int64(0), "daily_cost_estimate", int64(0), int64(20_000), int64(24_000))},
-		{"estimate rejection beyond a day", reply(int64(1), int64(0), "daily_cost_estimate", dayMS+1, int64(20_000), int64(24_000))},
+		{"estimate rejection beyond a day", reply(int64(1), int64(0), "daily_cost_estimate", 3*dayMS+1, int64(20_000), int64(24_000))},
 		{"estimate rejection of an unknown window", reply(int64(1), int64(0), "yearly_cost_estimate", int64(1), int64(20_000), int64(24_000))},
 		{"uninitialized with a retry hint", reply(int64(1), int64(-1), "uninitialized_daily_cost_state", int64(1), int64(20_000), int64(24_000))},
 		{"unknown reason", reply(int64(1), int64(-1), "exploded", int64(0), int64(20_000), int64(24_000))},
@@ -999,11 +999,13 @@ func TestLeasesForwardToTheAttachedGroupLease(t *testing.T) {
 	}
 	key.Attach(nil)
 	key.Attach(group)
+	endUser := &Lease{costReserved: true}
+	key.Attach(endUser)
 	if !key.HasCostReservation() {
 		t.Fatal("the attached group's estimate is not reported")
 	}
 	key.SetActualCost("0.5")
-	if group.actualCost != "0.5" || key.actualCost != "0.5" {
+	if group.actualCost != "0.5" || key.actualCost != "0.5" || endUser.actualCost != "0.5" {
 		t.Fatalf("actual cost = %q / %q, want both leases told", key.actualCost, group.actualCost)
 	}
 	// A lease without an estimate and a reconcile without a token budget touch

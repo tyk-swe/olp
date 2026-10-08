@@ -169,12 +169,16 @@ func (s *Server) probe(ctx context.Context, release *runtime.Release, target pro
 		priority: runtime.PriorityLow,
 	}
 	x.bind(canonicalPlanner, nil, true)
-	defer s.settleCaps(ctx, x)
+	defer s.settleAdmission(ctx, x)
 	if e := s.planCanonical(ctx, x); e != nil {
 		s.log.Info("health probe not planned", "provider_id", target.provider, "route", route.Slug, "code", e.Code)
 		return limits.ProbeResult{}, false
 	}
 	x.budget, x.allowance = 1, 1
+	if e := s.reserveSystemBudgets(ctx, x); e != nil {
+		s.finish(x, &outcome{err: e}, e.Status)
+		return limits.ProbeResult{}, false
+	}
 	out := s.execute(ctx, x)
 	s.finish(x, out, cmp.Or(errorStatus(out.err), 200))
 	if !x.dispatched || len(x.facts) == 0 {

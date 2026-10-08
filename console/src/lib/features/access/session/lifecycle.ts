@@ -7,6 +7,7 @@ import {
 import { QueryPartition } from '$lib/features/access/session/queryPartition';
 import {
   isAuthenticationEndpoint,
+  isMFAEndpoint,
   isCurrentSessionDeletion,
   isMutationRequest,
   isSessionValidationEndpoint
@@ -320,7 +321,10 @@ export class AuthenticationLifecycle {
 
   async prepareRequest(request: Request): Promise<Request> {
     if (
-      isAuthenticationEndpoint(request) ||
+      (isAuthenticationEndpoint(request) &&
+        !(
+          isMFAEndpoint(request) && this.snapshotValue.phase === 'authenticated'
+        )) ||
       isSessionValidationEndpoint(request)
     ) {
       return request;

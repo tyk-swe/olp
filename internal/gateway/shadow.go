@@ -167,11 +167,15 @@ func (s *Server) runShadow(parent *execution, attempt runtime.Attempt) {
 		}
 	}
 	ctx := s.shadows.ctx
+	defer s.settleAdmission(ctx, x)
+	if e := s.reserveSystemBudgets(ctx, x); e != nil {
+		s.finish(x, &outcome{err: e}, e.Status)
+		return
+	}
 	out := s.execute(ctx, x)
 	status := 200
 	if out.err != nil {
 		status = out.err.Status
 	}
 	s.finish(x, out, status)
-	s.settleCaps(ctx, x)
 }

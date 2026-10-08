@@ -75,6 +75,7 @@ export const binding: CodeBinding = {
   retired_at: null
 };
 export const attempt: CodeAttempt = {
+  end_user_digest: '',
   upstream_status: null,
   outcome_origin: null,
   outcome: null,

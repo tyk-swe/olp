@@ -13,6 +13,10 @@ import (
 // second Anthropic-Version still has no meaning.
 func semanticHeaders(header http.Header) http.Header {
 	out := header.Clone()
+	// Canonical names keep absent private-header removal allocation-free.
+	out.Del("X-Olp-End-User")
+	out.Del("X-Olp-Attribution")
+	out.Del(callerCredentialHeader)
 	if values := out.Values("Anthropic-Beta"); len(values) > 1 {
 		out.Set("Anthropic-Beta", strings.Join(values, ","))
 	}

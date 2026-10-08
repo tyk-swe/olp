@@ -10,7 +10,10 @@ export type PendingIdentityAction =
 export type RecentAuthenticationCallback = {
   // The profile page continues every security operation but permitting an
   // unconfined plugin, which the Plugins page continues.
-  purpose: Exclude<RecentAuthenticationPurpose, 'plugin_permit'>;
+  purpose: Exclude<
+    RecentAuthenticationPurpose,
+    'plugin_permit' | 'mfa_manage' | 'saml_link' | 'saml_unlink'
+  >;
   resourceId?: string;
 };
 

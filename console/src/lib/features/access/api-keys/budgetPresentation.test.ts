@@ -225,3 +225,31 @@ describe('budget state wording', () => {
     expect(budgetStateNote('unlimited')).toBeNull();
   });
 });
+
+it('includes weekly exhaustion in the key status without rounding money', () => {
+  const value = budget({
+    weekly: {
+      limit: '0.000000000001',
+      accrued: '0.000000000001',
+      window_ends_at: '2026-07-20T00:00:00Z'
+    }
+  });
+  expect(budgetWindowState(value, 'weekly')).toBe('exhausted');
+  expect(budgetState(value)).toBe('exhausted');
+  expect(budgetWindowState(budget(), 'weekly')).toBe('unknown');
+});
+
+it('compares the effective allowance without changing the editable cap', () => {
+  const value = budget();
+  value.daily = {
+    ...value.daily,
+    limit: '1',
+    accrued: '2',
+    effective_limit: '3',
+    temporary_increase: '2'
+  };
+  expect(budgetWindowState(value, 'daily')).toBe('within');
+  expect(value.daily.limit).toBe('1');
+  value.daily.effective_limit = '1';
+  expect(budgetWindowState(value, 'daily')).toBe('exhausted');
+});

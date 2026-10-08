@@ -1,4 +1,6 @@
 <script lang="ts">
+  import SAMLIdentitiesPanel from '../saml/SAMLIdentitiesPanel.svelte';
+  import { listSAMLIdentities } from '../saml/api';
   import { oidcFailureMessage } from '$lib/features/access/login/oidcFailure';
   import { profileKeys } from '$lib/features/access/profile/profileKeys';
   import { userKeys } from '$lib/features/access/users/userKeys';
@@ -23,7 +25,7 @@
     reconcile
   } from '$lib/forms/concurrentEdit';
   import {
-    beginOidcReauthentication,
+    beginIdentityReauthentication,
     changePassword,
     enrollPassword,
     getProfile,
@@ -35,6 +37,7 @@
   import ActiveSessionsPanel from '$lib/features/access/profile/ActiveSessionsPanel.svelte';
   import LocalPasswordPanel from '$lib/features/access/profile/LocalPasswordPanel.svelte';
   import OidcIdentitiesPanel from '$lib/features/access/profile/OidcIdentitiesPanel.svelte';
+  import MFAPanel from '$lib/features/access/mfa/MFAPanel.svelte';
   import ProfileDetailsPanel from '$lib/features/access/profile/ProfileDetailsPanel.svelte';
   import {
     ENROLLMENT_VERIFIED_MESSAGE,
@@ -90,6 +93,10 @@
     queryKey: profileKeys.oidcIdentities(),
     queryFn: listOidcIdentities
   }));
+  const samlIdentities = createQuery(() => ({
+    queryKey: ['profile', 'saml'],
+    queryFn: ({ signal }) => listSAMLIdentities(signal)
+  }));
   let passwordEnrollmentNeeded = $derived(
     identities.data ? !identities.data.has_local_password : false
   );
@@ -138,7 +145,7 @@
       enrollmentVerified = false;
       if (message === ENROLLMENT_VERIFIED_MESSAGE) message = '';
       passwordError =
-        'Identity verification expired. Verify your identity with OIDC again.';
+        'Identity verification expired. Verify your linked identity again.';
     }, ENROLLMENT_VERIFICATION_TTL_MS);
   }
 
@@ -194,7 +201,7 @@
 
   /**
    * Recent authentication is proven either by an inline password confirmation
-   * or by an OIDC round trip. The password path opens a real form so the value
+   * or by a linked-identity round trip. The password path opens a real form so the value
    * is masked, cancellable, and never typed into a browser prompt.
    */
   async function acquireRecentAuthentication(
@@ -207,7 +214,7 @@
       return;
     }
     window.location.assign(
-      await beginOidcReauthentication(purpose, resourceId)
+      await beginIdentityReauthentication(purpose, resourceId)
     );
   }
 
@@ -218,7 +225,7 @@
     reauthenticationError = '';
     try {
       window.location.assign(
-        await beginOidcReauthentication(request.purpose, request.resourceId)
+        await beginIdentityReauthentication(request.purpose, request.resourceId)
       );
     } catch (cause) {
       reauthenticationError = errorMessage(cause, SECURITY_OPERATION_FAILED);
@@ -269,7 +276,7 @@
     savingPassword = true;
     try {
       window.location.assign(
-        await beginOidcReauthentication('password_enrollment')
+        await beginIdentityReauthentication('password_enrollment')
       );
     } catch (cause) {
       passwordError = errorMessage(
@@ -338,7 +345,7 @@
     savingPassword = true;
     if (passwordEnrollmentNeeded && !enrollmentVerified) {
       passwordError =
-        'Verify your identity with OIDC before adding a local password.';
+        'Verify your linked identity before adding a local password.';
       savingPassword = false;
       return;
     }
@@ -464,7 +471,8 @@
       : 'Unlinking an OIDC identity revokes every other session, so verify with your password or a usable linked identity.'}
     busy={reauthenticationBusy}
     error={reauthenticationError}
-    onOidc={identities.data?.oidc_reauthentication_available
+    onOidc={identities.data?.oidc_reauthentication_available ||
+    samlIdentities.data?.reauthentication_available
       ? confirmWithOidc
       : undefined}
     onConfirm={confirmReauthentication}
@@ -498,6 +506,14 @@
       saving={savingProfile}
       onDisplayName={changeDisplayName}
       onSave={saveProfile}
+    />
+    <SAMLIdentitiesPanel
+      hasLocalPassword={identities.data?.has_local_password ?? false}
+    />
+    <MFAPanel
+      hasLocalPassword={identities.data?.has_local_password ?? false}
+      hasLinkedIdentity={(identities.data?.items.length ?? 0) > 0 ||
+        Boolean(samlIdentities.data?.reauthentication_available)}
     />
     <LocalPasswordPanel
       identitiesPending={identities.isPending}

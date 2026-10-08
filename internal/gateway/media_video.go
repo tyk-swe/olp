@@ -65,6 +65,10 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider is currently able to serve `"+x.route.Slug+"`."))
 		return
 	}
+	if e := x.checkCallerTarget(&provider, attempt.UpstreamModel); e != nil {
+		s.mediaFail(x, w, e)
+		return
+	}
 	slots := s.slots(x, attempt, &provider)
 	if len(slots) == 0 {
 		s.mediaFail(x, w, serverError(http.StatusServiceUnavailable, "upstream_unavailable", "No provider credential is currently able to serve `"+x.route.Slug+"`."))
@@ -75,7 +79,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := x.routeContext(r.Context())
 	defer cancel()
 	var e *Error
-	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, overall); e != nil {
+	if x.lease, e = s.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, overall, x.limitRoute()); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}
@@ -300,7 +304,7 @@ func (s *Server) handleFailedAttachment(ctx context.Context, x *execution, reser
 	}
 	compensated := false
 	if intentPersisted {
-		compensated = s.compensateCreate(ctx, reservedRecord, upstreamID)
+		compensated = s.compensateCreate(ctx, x, reservedRecord, upstreamID)
 	}
 	if compensated {
 		// The compensating delete may outlast the caller's commit bound.
@@ -322,11 +326,19 @@ func (s *Server) handleFailedAttachment(ctx context.Context, x *execution, reser
 
 // compensateCreate issues the upstream delete that retires an orphaned job.
 // A missing upstream object is a successful compensation.
-func (s *Server) compensateCreate(ctx context.Context, reserved media.JobRecord, upstreamID string) bool {
+func (s *Server) compensateCreate(ctx context.Context, x *execution, reserved media.JobRecord, upstreamID string) bool {
 	target, routeTimeout, _ := s.Media.Jobs.JobTarget(ctx, &reserved)
 	if target == nil {
 		return false
 	}
+	if target.Provider.CredentialSource == "caller" {
+		secret, err := x.callerSecret(target.Provider.ID, target.Model)
+		if err != nil {
+			return false
+		}
+		target.Secret, target.CallerCredential = secret, true
+	}
+
 	call, failure := media.EncodeJob(&media.Request{Op: media.OpVideoDelete, JobID: upstreamID, Route: reserved.RouteSlug}, target.Target.Config, target.Model)
 	if failure != nil {
 		return false
@@ -335,6 +347,7 @@ func (s *Server) compensateCreate(ctx context.Context, reserved media.JobRecord,
 	// persistence deadline, which a slow provider would otherwise outlive.
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), routeTimeout+media.ReconciliationLeaseSlack)
 	defer cancel()
+	target.Sensitive = &x.sensitive
 	result, transportFailure := s.Media.Jobs.Transport.Do(callCtx, target.Target, call, nil)
 	if transportFailure != nil {
 		return transportFailure.Status == 404
@@ -439,7 +452,7 @@ func (s *Server) admitVideoRequest(parent context.Context, x *execution, authori
 	var e *Error
 	// A job call carries no prompt, and reserves what any other call on a resource
 	// does: a key with a token limit refuses a reservation of nothing.
-	x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), resourceEstimate, ttl)
+	x.lease, e = s.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), resourceEstimate, ttl, x.limitRoute())
 	if e != nil {
 		cancel()
 		return nil, nil, e
@@ -479,6 +492,28 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 	// Connection and credential authority stay pinned; quota changes in the
 	// current release still apply to subsequent requests for the retained job.
 	provider, slot := target.Provider, target.Slot
+	if provider.CredentialSource == "caller" {
+		fact.CredentialSource, fact.CredentialID, fact.CredentialVersion = "caller", "", 0
+		fact.BudgetExempt = x.callerCostExempt()
+	}
+
+	if e := x.checkCallerTarget(&provider, record.UpstreamModel); e != nil {
+		fact.Class = classCredential
+		fact.Duration = s.now().Sub(fact.StartedAt)
+		fact.recordEvidence(false)
+		return nil, &attemptFailure{class: classCredential}, fact
+	}
+	if provider.CredentialSource == "caller" {
+		secret, err := x.callerSecret(provider.ID, record.UpstreamModel)
+		if err != nil {
+			fact.Class = classCredential
+			fact.Duration = s.now().Sub(fact.StartedAt)
+			fact.recordEvidence(false)
+			return nil, &attemptFailure{class: classCredential}, fact
+		}
+		target.Secret, target.CallerCredential = secret, true
+	}
+
 	fact.VendorID = provider.VendorID
 	call, encodeFailure := media.EncodeJob(request, target.Config, record.UpstreamModel)
 	if encodeFailure != nil {
@@ -542,6 +577,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 	}
 	callCtx, cancel := context.WithTimeout(attemptCtx, timeout+media.ReconciliationLeaseSlack)
 	defer cancel()
+	target.Sensitive = &x.sensitive
 	result, failure := s.Media.Jobs.Transport.Do(callCtx, target.Target, call, request)
 	dispatched = failure == nil || failure.Dispatched
 	fact.Duration = s.now().Sub(fact.StartedAt)
@@ -670,7 +706,7 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 	}
 	page, err := media.JobsAfterID(r.Context(), s.Media.Jobs.Pool, media.Filters{
 		APIKeyID:   &authority.ID,
-		RouteSlugs: authority.Policy.AllowedRoutes,
+		RouteSlugs: authority.RouteAllowlist(),
 		Operation:  new(media.OpVideoCreate),
 		Surface:    new("openai"),
 	}, cursorUUID(query.After), query.Order, query.Limit)

@@ -42,6 +42,7 @@ type Principal struct {
 	Creator          string
 	AllProjects      bool
 	Projects         map[string]string
+	Organizations    map[string]string
 	SessionID, Token string
 
 	// scopes and creatorRole bound a management token's authority.
@@ -74,7 +75,7 @@ func (s *Server) Authenticate(r *http.Request, q Queryer) (Principal, error) {
 	var p Principal
 	p.Kind = "user"
 	p.Token = cookieValue(r, sessionCookie)
-	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp.sessions s JOIN olp.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized", s.Auth.Digest(secrets.SessionDigest, p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.AccessScope, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
+	err := q.QueryRow(r.Context(), "SELECT "+userColumns+",s.id::text FROM olp.sessions s JOIN olp.users u ON u.id=s.user_id WHERE s.digest=$1 AND s.expires_at>now() AND u.active AND u.oidc_authorized AND (s.auth_method<>'local' OR s.mfa_verified OR (NOT EXISTS(SELECT 1 FROM olp.mfa_factors f WHERE f.user_id=u.id) AND NOT COALESCE((SELECT value<>'false' FROM olp.settings WHERE key='auth.mfa_required'),false)))", s.Auth.Digest(secrets.SessionDigest, p.Token)).Scan(&p.ID, &p.Email, &p.DisplayName, &p.Role, &p.Active, &p.AccessScope, &p.ETag, &p.CreatedAt, &p.UpdatedAt, &p.SessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, Fail(401, "authentication_required", "Sign in to continue.")
 	}
@@ -92,7 +93,7 @@ func (s *Server) Authenticate(r *http.Request, q Queryer) (Principal, error) {
 }
 
 func (p *Principal) loadProjects(ctx context.Context, q Queryer) error {
-	rows, err := q.Query(ctx, "SELECT project_id::text,role FROM olp.project_members WHERE user_id=$1", p.ID)
+	rows, err := q.Query(ctx, "SELECT project_id::text,role FROM olp.effective_project_members WHERE user_id=$1", p.ID)
 	if err != nil {
 		return err
 	}
@@ -107,7 +108,11 @@ func (p *Principal) loadProjects(ctx context.Context, q Queryer) error {
 		}
 		p.Projects[id] = role
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	return p.loadOrganizations(ctx, q, p.ID)
 }
 func managementBearer(r *http.Request) (string, bool) {
 	const prefix = "Bearer olpm_"
@@ -136,7 +141,7 @@ func (s *Server) machinePrincipal(r *http.Request, q Queryer, secret string) (Pr
 	err := q.QueryRow(r.Context(), `SELECT t.id::text,t.name,t.scopes,t.digest,t.created_by::text,
 		t.expires_at>now() AND t.revoked_at IS NULL AND u.active AND u.oidc_authorized,
 		t.all_projects,t.project_ids,u.role,u.access_scope,
-		COALESCE((SELECT jsonb_object_agg(m.project_id,m.role) FROM olp.project_members m WHERE m.user_id=u.id),'{}'::jsonb)
+		COALESCE((SELECT jsonb_object_agg(m.project_id,m.role) FROM olp.effective_project_members m WHERE m.user_id=u.id),'{}'::jsonb)
 		FROM olp.management_tokens t JOIN olp.users u ON u.id=t.created_by WHERE t.lookup_id=$1`, parts[1]).Scan(&p.ID, &p.DisplayName, &data, &digest, &p.Creator, &live, &allProjects, &projectData, &p.creatorRole, &creatorScope, &memberData)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && (!live || !hmac.Equal(digest, s.Auth.Digest(secrets.ManagementTokenDigest, secret))) {
 		return p, Fail(401, "authentication_required", "Sign in to continue.")
@@ -151,6 +156,11 @@ func (s *Server) machinePrincipal(r *http.Request, q Queryer, secret string) (Pr
 	for _, name := range scopes {
 		if op, ok := ParseOperation(name); ok {
 			p.scopes |= 1 << op
+		}
+	}
+	if allProjects {
+		if err = p.loadOrganizations(r.Context(), q, p.Creator); err != nil {
+			return p, err
 		}
 	}
 	creatorGlobal := creatorScope == "global"

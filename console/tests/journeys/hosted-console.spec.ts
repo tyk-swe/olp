@@ -707,6 +707,10 @@ test.describe('Hosted console integration', () => {
     const row = page.getByRole('row').filter({ hasText: keyName });
     await expect(row).toHaveCount(1);
     await row.getByRole('button', { name: 'Rotate' }).click();
+    await page
+      .getByRole('dialog', { name: `Rotate ${keyName}` })
+      .getByRole('button', { name: 'Rotate key', exact: true })
+      .click();
     const rotated = page.getByRole('dialog', { name: 'Copy this secret now.' });
     await expect(rotated).toBeVisible();
     const rotatedSecret = await takeSecret(rotated);

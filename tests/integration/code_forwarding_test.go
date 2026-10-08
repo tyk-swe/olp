@@ -110,7 +110,9 @@ func codeForwardAwait(t *testing.T, f *codeFixture, state string, count int) {
 	defer tick.Stop()
 	for {
 		var got int
-		if err := f.h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.code_attempts WHERE state=$1`, state).Scan(&got); err != nil {
+		// Dispatch itself marks an attempt uncertain. Wait for terminal
+		// accounting as well before inspecting settlement and cleanup.
+		if err := f.h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.code_attempts WHERE state=$1 AND finished_at IS NOT NULL`, state).Scan(&got); err != nil {
 			t.Fatal(err)
 		}
 		if got == count {

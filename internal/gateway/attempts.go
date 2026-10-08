@@ -65,6 +65,9 @@ route:
 		if !ok || s.health.open(provider.ID) {
 			continue
 		}
+		if e := x.checkCallerTarget(&provider, attempt.UpstreamModel); e != nil {
+			return attemptOutcome[Result]{err: e}, nil
+		}
 		next := false
 		slots := s.slots(x, attempt, &provider)
 		// retry counts the repeats of slot retried; any other slot starts
@@ -130,7 +133,7 @@ route:
 					return attemptOutcome[Result]{result: result, committed: fact.Committed}, nil
 				}
 				if failure.overall || !failoverAllowed(failure.class, failure.committed) {
-					s.cooldownFailure(ctx, provider.ID, &slot, x.grantGeneration, failure)
+					s.cooldownFailure(ctx, provider.ID, &slot, x.grantGeneration, failure, fact.CredentialSource == "caller")
 					out := attemptOutcome[Result]{err: failure.toError(), committed: failure.committed, cancelled: failure.class == classCancelled}
 					if failure.class == classContentFilter && !failure.committed {
 						// A content filter refuses the request on every target
@@ -149,7 +152,7 @@ route:
 					i-- // the same slot again
 					continue
 				}
-				next = s.cooldownFailure(ctx, provider.ID, &slot, x.grantGeneration, failure)
+				next = s.cooldownFailure(ctx, provider.ID, &slot, x.grantGeneration, failure, fact.CredentialSource == "caller")
 				last = failure
 				met = meet(met, failure.class)
 			}

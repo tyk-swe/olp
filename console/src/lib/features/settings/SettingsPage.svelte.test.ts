@@ -19,6 +19,18 @@ import {
   type PricingRevision
 } from '$lib/features/usage/api/pricing';
 
+vi.mock('$lib/features/access/budgets/api', () => ({
+  getBudget: vi.fn().mockResolvedValue({
+    policy: null,
+    etag: '00000000-0000-4000-8000-000000000001',
+    usage: {
+      daily: { accrued: '0', window_ends_at: '2026-10-08T00:00:00Z' },
+      monthly: { accrued: '0', window_ends_at: '2026-11-01T00:00:00Z' },
+      unpriced_attempts: 0
+    }
+  }),
+  putBudget: vi.fn()
+}));
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
 }));
@@ -344,4 +356,46 @@ it('keeps pricing mounted and blocks setting saves throughout creation and capab
   );
   expect(host.textContent).toContain('Pricing revision created.');
   expect(host.querySelector<HTMLInputElement>('#price-model')!.value).toBe('');
+});
+
+it('shows the deployment network restriction as an informational setting', async () => {
+  client.setQueryData(sessionKeys.serviceCapabilities, {
+    ...capabilities,
+    management_network_restricted: true
+  });
+  component = mount(SettingsPageProbe, { target: host, props: { client } });
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain(
+      'Management access is restricted to client networks'
+    )
+  );
+  expect(updateSetting).not.toHaveBeenCalled();
+});
+
+it('shows current budget periods separately from the pending time zone', async () => {
+  const setting: Setting = {
+    ...auditSetting,
+    key: 'budgets.time_zone',
+    value: 'Asia/Kathmandu',
+    calendar: [
+      {
+        window_kind: 'day',
+        time_zone: 'UTC',
+        starts_at: '2026-10-08T00:00:00Z',
+        ends_at: '2026-10-09T00:00:00Z',
+        pending_time_zone: 'Asia/Kathmandu',
+        effective_at: '2026-10-09T00:00:00Z'
+      }
+    ]
+  };
+  vi.mocked(listSettings).mockResolvedValue([setting]);
+  component = mount(SettingsPageProbe, { target: host, props: { client } });
+  await vi.waitFor(() =>
+    expect(host.textContent?.replace(/\s+/g, ' ')).toContain(
+      'Asia/Kathmandu takes effect'
+    )
+  );
+  expect(host.textContent).toContain('day: UTC');
+  expect(host.textContent).toContain('never resets current spend');
+  expect(input(setting.key).value).toBe('Asia/Kathmandu');
 });

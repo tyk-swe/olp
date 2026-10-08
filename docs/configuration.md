@@ -34,6 +34,7 @@ bind.
 | `OLP_PUBLIC_ORIGIN` | `http://127.0.0.1:8080` | OIDC redirects and generated links. |
 | `OLP_LOCAL_LOGIN_ENABLED` | `true` | Keep local sign-in available after setup. |
 | `OLP_TRUSTED_PROXY_CIDRS` | empty | Proxies allowed to supply `X-Forwarded-For`. |
+| `OLP_MANAGEMENT_ALLOWED_CIDRS` | empty | Up to 64 client CIDRs allowed to reach management and the console, resolved through trusted proxies. Empty allows all; see [Management network restrictions](access.md#management-network-restrictions). |
 | `OLP_GATEWAY_CORS_ALLOWED_ORIGINS` | empty | Browser origins allowed to call the inference gateway cross-origin; wildcards are refused and the management API stays same-origin. |
 | `OLP_PROVIDER_EGRESS_ALLOW_CIDRS` | empty | CIDRs exempt from the non-public provider egress denylist; see [Provider egress policy](#provider-egress-policy). |
 | `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS` | empty | Hostnames or IP literals whose provider endpoints may use plain HTTP. |

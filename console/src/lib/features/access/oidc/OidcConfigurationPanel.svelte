@@ -11,7 +11,7 @@
     type OidcConfigurationInput
   } from '$lib/features/access/oidc/api';
   import {
-    beginOidcReauthentication,
+    beginIdentityReauthentication,
     listOidcIdentities,
     reauthenticateWithPassword
   } from '$lib/features/access/profile/api';
@@ -169,7 +169,9 @@
       if (!identities.has_local_password) {
         // The profile callback requires explicit confirmation before consuming
         // the one-time OIDC reauthentication.
-        window.location.assign(await beginOidcReauthentication('oidc_link'));
+        window.location.assign(
+          await beginIdentityReauthentication('oidc_link')
+        );
         return;
       }
       reauthenticationError = '';

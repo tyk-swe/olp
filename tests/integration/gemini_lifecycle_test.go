@@ -269,7 +269,7 @@ func (p *geminiLifecycleProvider) captured() []geminiLifecycleCall {
 	return append([]geminiLifecycleCall(nil), p.calls...)
 }
 
-func provisionGeminiLifecycle(t *testing.T, h *accessHarness, owner *browser, profile string, provider *geminiLifecycleProvider) (string, string, string) {
+func provisionGeminiLifecycle(t *testing.T, h *accessHarness, owner *browser, profile string, provider *geminiLifecycleProvider, keyFields ...map[string]any) (string, string, string) {
 	t.Helper()
 	config := map[string]any{"kind": "gemini", "profile_id": profile, "profile_revision": "1", "endpoint": provider.URL + "/v1beta", "auth_mode": "api_key"}
 	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": profile + uuid.NewString(), "configuration": config, "model": vendorModel, "credential": vendorSecret}, idem(uuid.NewString()), 201)
@@ -293,18 +293,29 @@ func provisionGeminiLifecycle(t *testing.T, h *accessHarness, owner *browser, pr
 	draftInput["fidelity"] = map[string]any{"mode": "strict"}
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", draftInput, idem(uuid.NewString()), 201)
 	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": profile + " key", "scopes": []string{"inference"}, "allowed_routes": []string{slug}, "allow_provider_state": true}, idem(uuid.NewString()), 201)
+	keyInput := map[string]any{"name": profile + " key", "scopes": []string{"inference"}, "allowed_routes": []string{slug}, "allow_provider_state": true}
+	for _, fields := range keyFields {
+		for name, value := range fields {
+			keyInput[name] = value
+		}
+	}
+	key := h.want(owner, "POST", "/api/v1/api-keys", keyInput, idem(uuid.NewString()), 201)
 	h.refresh()
 	return slug, key["secret"].(string), created["id"].(string)
 }
 
-func geminiPublic(t *testing.T, h *accessHarness, method, path, key string, body []byte) (*http.Response, []byte) {
+func geminiPublic(t *testing.T, h *accessHarness, method, path, key string, body []byte, headers ...map[string]string) (*http.Response, []byte) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, h.HTTP.URL+path, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("X-Goog-Api-Key", key)
+	for _, fields := range headers {
+		for name, value := range fields {
+			req.Header.Set(name, value)
+		}
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -324,10 +335,26 @@ func TestGeminiInteractionsPublicOwnedTwoTurnAndResourceLifecycle(t *testing.T) 
 	h := newAccessHarness(t)
 	provider := newGeminiLifecycleProvider(t)
 	owner := h.owner()
-	slug, key, _ := provisionGeminiLifecycle(t, h, owner, "gemini-interactions", provider)
+	slug, key, _ := provisionGeminiLifecycle(t, h, owner, "gemini-interactions", provider, map[string]any{"end_user_source": "header"})
+	sink := &captureSink{}
+	h.Gateway.Sink = sink
+	wantDigest := h.Runtime.EndUserDigest(nil, "interaction-user")
+	call := func(t *testing.T, instance *accessHarness, method, path, key string, body []byte) (*http.Response, []byte) {
+		t.Helper()
+		before := sink.count()
+		response, raw := geminiPublic(t, instance, method, path, key, body, map[string]string{"X-OLP-End-User": "interaction-user"})
+		deadline := time.Now().Add(time.Second)
+		for sink.count() == before && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		if sink.count() != before+1 || sink.last().EndUserDigest != wantDigest {
+			t.Fatalf("interaction lifecycle lost terminal identity: count=%d want=%d", sink.count(), before+1)
+		}
+		return response, raw
+	}
 	path := "/gemini/v1beta/interactions"
 	firstRequest := []byte(fmt.Sprintf(`{"model":%q,"input":"hello","generation_config":{"max_output_tokens":64,"seed":0},"tools":[{"type":"function","name":"weather","parameters":{"type":"object"}}],"store":true}`, slug))
-	response, raw := geminiPublic(t, h, http.MethodPost, path, key, firstRequest)
+	response, raw := call(t, h, http.MethodPost, path, key, firstRequest)
 	if response.StatusCode != 200 {
 		t.Fatalf("first Interaction: %d %s", response.StatusCode, raw)
 	}
@@ -339,7 +366,7 @@ func TestGeminiInteractionsPublicOwnedTwoTurnAndResourceLifecycle(t *testing.T) 
 		t.Fatalf("lost native first result: %s", raw)
 	}
 	secondRequest := []byte(fmt.Sprintf(`{"model":%q,"input":"next","previous_interaction_id":%q,"store":true}`, slug, first.ID))
-	response, raw = geminiPublic(t, h, http.MethodPost, path, key, secondRequest)
+	response, raw = call(t, h, http.MethodPost, path, key, secondRequest)
 	if response.StatusCode != 200 {
 		t.Fatalf("second Interaction: %d %s", response.StatusCode, raw)
 	}
@@ -353,22 +380,23 @@ func TestGeminiInteractionsPublicOwnedTwoTurnAndResourceLifecycle(t *testing.T) 
 	if len(prior) < 4 || !bytes.Contains(prior[len(prior)-1].Body, []byte(`"previous_interaction_id":"v1_fixture_3"`)) || bytes.Contains(prior[len(prior)-1].Body, []byte(first.ID)) || !bytes.Contains(prior[len(prior)-1].Body, []byte(`"model":"`+vendorModel+`"`)) {
 		t.Fatalf("native previous turn was not pinned: %+v", prior)
 	}
-	response, raw = geminiPublic(t, h, http.MethodGet, path+"/"+first.ID, key, nil)
+	response, raw = call(t, h, http.MethodGet, path+"/"+first.ID, key, nil)
 	if response.StatusCode != 200 || !bytes.Contains(raw, []byte(`"id":"`+first.ID+`"`)) {
 		t.Fatalf("GET Interaction: %d %s", response.StatusCode, raw)
 	}
 	restarted := newAccessHarnessOn(t, h.Pool, h.DBURL)
 	restarted.refresh()
-	response, raw = geminiPublic(t, restarted, http.MethodGet, path+"/"+second.ID, key, nil)
+	restarted.Gateway.Sink = sink
+	response, raw = call(t, restarted, http.MethodGet, path+"/"+second.ID, key, nil)
 	if response.StatusCode != 200 || !bytes.Contains(raw, []byte(`"id":"`+second.ID+`"`)) {
 		t.Fatalf("fresh gateway did not recover encrypted Interaction: %d %s", response.StatusCode, raw)
 	}
-	response, raw = geminiPublic(t, h, http.MethodGet, path+"/"+first.ID+"?stream=true&last_event_id=cursor-start", key, nil)
+	response, raw = call(t, h, http.MethodGet, path+"/"+first.ID+"?stream=true&last_event_id=cursor-start", key, nil)
 	if response.StatusCode != 200 || !bytes.Contains(raw, []byte("id: cursor-delta")) || !bytes.Contains(raw, []byte(`"id":"`+first.ID+`"`)) || bytes.Contains(raw, []byte(`"id":"v1_fixture_3"`)) {
 		t.Fatalf("cursor resume changed the resource or event ordering: %d %s", response.StatusCode, raw)
 	}
 	background := []byte(fmt.Sprintf(`{"model":%q,"input":"long running","background":true}`, slug))
-	response, raw = geminiPublic(t, h, http.MethodPost, path, key, background)
+	response, raw = call(t, h, http.MethodPost, path, key, background)
 	var queued struct {
 		ID     string `json:"id"`
 		Status string `json:"status"`
@@ -376,33 +404,37 @@ func TestGeminiInteractionsPublicOwnedTwoTurnAndResourceLifecycle(t *testing.T) 
 	if response.StatusCode != 200 || json.Unmarshal(raw, &queued) != nil || !strings.HasPrefix(queued.ID, "interaction_") || queued.Status != "in_progress" {
 		t.Fatalf("background acceptance was not retained: %d %s", response.StatusCode, raw)
 	}
-	response, raw = geminiPublic(t, h, http.MethodGet, path+"/"+queued.ID, key, nil)
+	response, raw = call(t, h, http.MethodGet, path+"/"+queued.ID, key, nil)
 	if response.StatusCode != 200 || !bytes.Contains(raw, []byte(`"status":"completed"`)) || !bytes.Contains(raw, []byte(`"id":"`+queued.ID+`"`)) {
 		t.Fatalf("background retrieval lost ownership or steps: %d %s", response.StatusCode, raw)
 	}
-	response, raw = geminiPublic(t, h, http.MethodPost, path, key, background)
+	response, raw = call(t, h, http.MethodPost, path, key, background)
 	if response.StatusCode != 200 || json.Unmarshal(raw, &queued) != nil || queued.Status != "in_progress" {
 		t.Fatalf("second background acceptance: %d %s", response.StatusCode, raw)
 	}
-	response, raw = geminiPublic(t, h, http.MethodPost, path+"/"+queued.ID+"/cancel", key, nil)
+	response, raw = call(t, h, http.MethodPost, path+"/"+queued.ID+"/cancel", key, nil)
 	if response.StatusCode != 200 || !bytes.Contains(raw, []byte(`"status":"cancelled"`)) || !bytes.Contains(raw, []byte(`"id":"`+queued.ID+`"`)) {
 		t.Fatalf("background cancellation: %d %s", response.StatusCode, raw)
 	}
-	response, raw = geminiPublic(t, h, http.MethodPost, path+"/"+first.ID+"/cancel", key, nil)
+	response, raw = call(t, h, http.MethodPost, path+"/"+first.ID+"/cancel", key, nil)
 	if response.StatusCode != 200 || !bytes.Contains(raw, []byte(`"status":"cancelled"`)) {
 		t.Fatalf("cancel Interaction: %d %s", response.StatusCode, raw)
 	}
-	response, raw = geminiPublic(t, h, http.MethodDelete, path+"/"+first.ID, key, nil)
+	response, raw = call(t, h, http.MethodDelete, path+"/"+first.ID, key, nil)
 	if response.StatusCode != 200 || len(raw) != 0 {
 		t.Fatalf("delete Interaction: %d %s", response.StatusCode, raw)
 	}
-	response, _ = geminiPublic(t, h, http.MethodGet, path+"/"+first.ID, key, nil)
+	response, _ = call(t, h, http.MethodGet, path+"/"+first.ID, key, nil)
 	if response.StatusCode != 404 {
 		t.Fatalf("deleted Interaction remained available: %d", response.StatusCode)
 	}
 	var residualSecret bool
 	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.secrets s JOIN olp.provider_resources r ON r.id=s.id WHERE r.kind='interaction' AND r.state='deleted')`).Scan(&residualSecret); err != nil || residualSecret {
 		t.Fatalf("deleted Interaction retained encrypted provider ID: %v %v", residualSecret, err)
+	}
+	var rawIdentity bool
+	if err := h.Pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM olp.provider_resources r WHERE to_jsonb(r)::text LIKE '%interaction-user%')").Scan(&rawIdentity); err != nil || rawIdentity {
+		t.Fatalf("interaction retained raw identity: %v", err)
 	}
 	var storedNativeID bool
 	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.provider_resources WHERE kind='interaction' AND (upstream_id LIKE 'v1_%' OR metadata::text LIKE '%v1_fixture_%'))`).Scan(&storedNativeID); err != nil || storedNativeID {

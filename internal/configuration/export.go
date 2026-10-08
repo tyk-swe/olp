@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -13,17 +14,54 @@ import (
 
 func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Document, error) {
 	doc := &Document{APIVersion: APIVersion}
-	projects, err := q.Query(ctx, "SELECT name FROM olp.projects ORDER BY lower(name),name")
+	if err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value FROM olp.settings WHERE key='budgets.time_zone'),'UTC')").Scan(&doc.BudgetTimeZone); err != nil {
+		return nil, err
+	}
+	if err := q.QueryRow(ctx, "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&doc.InstallationBudget); err != nil {
+		return nil, err
+	}
+	if doc.InstallationBudget == nil {
+		doc.InstallationBudget = &access.BudgetPolicy{}
+	}
+	organizations, err := q.Query(ctx, "SELECT name,budget_policy FROM olp.organizations ORDER BY lower(name),name")
+	if err != nil {
+		return nil, err
+	}
+	for organizations.Next() {
+		var o OrganizationEntry
+		if err = organizations.Scan(&o.Name, &o.Budget); err != nil {
+			organizations.Close()
+			return nil, err
+		}
+		doc.Organizations = append(doc.Organizations, o)
+	}
+	organizations.Close()
+	if err = organizations.Err(); err != nil {
+		return nil, err
+	}
+	projects, err := q.Query(ctx, "SELECT (SELECT name FROM olp.organizations WHERE id=organization_id) AS organization_name,name,end_user_policy,attribution_policy,route_groups,budget_policy,limit_templates,attribution_budgets FROM olp.projects ORDER BY lower(name),name")
 	if err != nil {
 		return nil, err
 	}
 	defer projects.Close()
 	for projects.Next() {
+		var organization *string
 		var name string
-		if err = projects.Scan(&name); err != nil {
+		var policy *access.EndUserPolicy
+		var labels *attribution.Policy
+		var groups access.RouteGroups
+		var budget *access.BudgetPolicy
+		var templates access.LimitTemplates
+		var caps access.AttributionBudgets
+		if err = projects.Scan(&organization, &name, &policy, &labels, &groups, &budget, &templates, &caps); err != nil {
 			return nil, err
 		}
-		doc.Projects = append(doc.Projects, ProjectEntry{Name: name})
+		entry := ProjectEntry{Organization: organization, AttributionBudgets: caps, LimitTemplates: &templates, Name: name, Budget: budget, AttributionPolicy: labels, RouteGroups: groups}
+		if policy != nil {
+			entry.EndUserDefaults = &policy.Defaults
+			entry.EndUserLimitTemplate = policy.LimitTemplate
+		}
+		doc.Projects = append(doc.Projects, entry)
 	}
 	if err = projects.Err(); err != nil {
 		return nil, err
@@ -188,6 +226,21 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		}
 	}
 	doc.canonicalize()
+	doc.SCIMGroupMappings, err = exportSCIMMappings(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	doc.SAML, err = loadSAMLDefinition(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	doc.WorkloadIssuers, err = exportWorkloadIssuers(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	if err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.mfa_required'),false)").Scan(&doc.RequireLocalMFA); err != nil {
+		return doc, err
+	}
 	return doc, nil
 }
 

@@ -20,6 +20,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
@@ -508,12 +509,13 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(authenticationError("missing_authorization", "Provide an Authorization bearer API key."))
 		return
 	}
-	authority, e := s.authorizeKey(token, "inference")
+	authority, e := s.authenticateRequest(r, token, "inference")
 	if e != nil {
 		fail(e)
 		return
 	}
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
+	x.endUserDigest = authority.EndUserDigest
 	x.budgetGroupID = authority.BudgetGroupID
 	attributionValues := r.Header.Values(usage.AttributionHeader)
 	if len(attributionValues) == 0 {
@@ -641,7 +643,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 {
 		limit = 1 << 20
 	}
-	client.SetReadLimit(limit)
+	client.SetReadLimit(bodylimit.Lower(limit, route.MaxBodyBytes))
 	conn.SetReadLimit(limit)
 	x.dispatched = true
 	x.delivered(s.now())
@@ -757,7 +759,7 @@ func realtimeURL(p *pin) (string, *Error) {
 }
 
 func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint string) (*websocket.Conn, *Error) {
-	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1)
+	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
 	fact.Mode = "realtime"
 	if p.hold != nil {
 		fact.Budgets = p.hold.budgets
@@ -773,7 +775,7 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 	if err != nil {
 		return nil, finish(classConnect, serverError(http.StatusBadGateway, "upstream_error", "The provider address could not be resolved."))
 	}
-	if err := s.applySlotCredential(ctx, x, probe, p.provider.Connector(), p.slot, nil); err != nil {
+	if err := s.applySlotCredential(ctx, x, probe, p.provider.Connector(), p.slot, nil, &p.provider, p.model); err != nil {
 		return nil, finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The provider credential could not be applied."))
 	}
 	headers := http.Header{}
@@ -986,10 +988,10 @@ loop:
 			break loop
 		case <-reauth.C:
 			authority, err := s.Runtime.Authenticate(token)
-			if err != nil || authority.ID != keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) {
+			if err != nil || authority.ID != keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) {
 				first = errRealtimeAuthorityRevoked
 				closeCode = websocket.StatusPolicyViolation
-				client.Close(websocket.StatusPolicyViolation, "key revoked")
+				client.Close(websocket.StatusPolicyViolation, "authority revoked")
 				break loop
 			}
 			if eligibility := s.pinEligibility(p); eligibility != runtime.Eligible {

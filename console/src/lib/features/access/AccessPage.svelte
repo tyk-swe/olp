@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SAMLConfigurationPanel from './saml/SAMLConfigurationPanel.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import InvitationsPanel from '$lib/features/access/invitations/InvitationsPanel.svelte';
   import OidcConfigurationPanel from '$lib/features/access/oidc/OidcConfigurationPanel.svelte';
@@ -9,7 +10,13 @@
   import { slidingIndicator } from '$lib/components/indicator';
 
   type Tab =
-    'members' | 'invitations' | 'sessions' | 'projects' | 'tokens' | 'oidc';
+    | 'members'
+    | 'invitations'
+    | 'sessions'
+    | 'projects'
+    | 'tokens'
+    | 'oidc'
+    | 'saml';
   const access = useRole();
   const canManage = $derived(access.can('users.manage'));
   const tabs = $derived.by((): ReadonlyArray<{ id: Tab; label: string }> => {
@@ -23,6 +30,8 @@
     if (access.allows('GET /api/v1/management-tokens'))
       items.push({ id: 'tokens', label: 'Tokens' });
     items.push({ id: 'oidc', label: 'OIDC' });
+    if (access.allows('GET /api/v1/saml/configuration'))
+      items.push({ id: 'saml', label: 'SAML' });
     return items;
   });
   let tab = $state<Tab>('members');
@@ -36,7 +45,7 @@
     <h1 class="page-title">Access</h1>
     <p class="page-description">
       Manage installation members, fixed roles, invitations, sessions, and the
-      linked OIDC provider.
+      linked identity providers.
     </p>
   </div>
   {#if canManage}
@@ -73,6 +82,8 @@
   <ProjectsPanel />
 {:else if tab === 'tokens'}
   <ManagementTokensPanel />
+{:else if tab === 'saml'}
+  <SAMLConfigurationPanel />
 {:else}
   <OidcConfigurationPanel />
 {/if}

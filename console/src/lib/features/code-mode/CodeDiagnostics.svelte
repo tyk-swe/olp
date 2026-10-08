@@ -38,7 +38,8 @@
   let route = $state(''),
     key = $state(''),
     account = $state(''),
-    binding = $state('');
+    binding = $state(''),
+    endUser = $state('');
   let applied = $state<CodeFilters>({});
   let paging = $state(emptyCursorHistory());
   let busy = $state('');
@@ -82,6 +83,9 @@
   function apply(event: SubmitEvent) {
     event.preventDefault();
     applied = {
+      ...(kind === 'attempts' || kind === 'refusals'
+        ? { end_user_digest: endUser.trim() || undefined }
+        : {}),
       route_id: route.trim() || undefined,
       api_key_id: key.trim() || undefined,
       ...(kind !== 'refusals'
@@ -171,6 +175,21 @@
             placeholder="All bindings"
           />
         </div>{/if}
+      {#if kind === 'attempts' || kind === 'refusals'}
+        <div>
+          <label for="code-filter-end-user">End-user digest</label>
+          <input
+            id="code-filter-end-user"
+            bind:value={endUser}
+            placeholder="All end users"
+            pattern={'([0-9a-f]{64}|unidentified)'}
+            aria-describedby="code-end-user-help"
+          />
+          <small id="code-end-user-help"
+            >Use a lookup digest, or unidentified.</small
+          >
+        </div>
+      {/if}
       <button class="button button-secondary" type="submit"
         >Apply filters</button
       >
@@ -182,6 +201,7 @@
           key = '';
           account = '';
           binding = '';
+          endUser = '';
           applied = {};
           resetCursor(paging);
         }}>Clear filters</button
@@ -269,6 +289,16 @@
           <dd>{attempt.route_id} / {attempt.route_revision_id}</dd>
           <dt>Key / account</dt>
           <dd>{attempt.api_key_id} / {attempt.account_id}</dd>
+          <dt>End user</dt>
+          <dd>{attempt.end_user_digest || 'Unidentified'}</dd>
+          {#if Object.keys(attempt.attribution ?? {}).length}
+            <dt>Attribution</dt>
+            <dd>
+              {Object.entries(attempt.attribution ?? {})
+                .map(([key, value]) => `${key}=${value}`)
+                .join(', ')}
+            </dd>
+          {/if}
           <dt>Binding</dt>
           <dd>{attempt.binding_id}</dd>
           <dt>{reservationLabel(attempt)}</dt>
@@ -317,6 +347,8 @@
           <dd>{formatDate(refusal.occurred_at)}</dd>
           <dt>Route / key</dt>
           <dd>{refusal.route_id} / {refusal.api_key_id}</dd>
+          <dt>End user</dt>
+          <dd>{refusal.end_user_digest || 'Unidentified'}</dd>
           <dt>Refusal ID</dt>
           <dd>{refusal.id}</dd>
         </dl>

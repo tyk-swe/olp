@@ -329,3 +329,39 @@ requests unmodified, including its user agent and session headers, but it
 cannot guarantee that a vendor accepts a plan used through a gateway or shared
 by several developers. Review each vendor's terms before pooling an account,
 and prefer a personal pool per subscriber where they require it.
+
+### End-user accounting
+
+Keys may identify callers through the ordinary [end-user policy](../access.md#end-user-identity).
+Code generations and admission refusals retain its project-scoped HMAC digest,
+never the raw identifier. `GET /api/v1/code/attempts` and `/api/v1/code/refusals`
+accept `end_user_digest=<digest>` or `end_user_digest=unidentified`; the console's
+Attempts and Refusals tabs expose the same filter and identity metadata. These
+fields share the existing code-ledger retention and project isolation boundaries.
+They do not turn subscription allowances into USD spend. Changes that would
+switch identity during admission refuse before dispatch with
+`code_end_user_changed`; reconnect or retry using the updated key policy.
+
+### Attribution policy
+
+Subscription calls enforce the same required and pinned labels as other
+inference requests. Attempts retain the resolved attribution object and display
+it in diagnostics. The ledger checks current project/key policy before creating
+a billable attempt; changed policy returns `code_attribution_changed`. See
+[attribution requirements](../access.md#attribution-requirements-and-pinned-labels)
+for configuration, refusal codes and retention.
+
+### Route request sizes
+
+The route editor's optional `max_body_bytes` is published with each subscription
+route revision. It lowers the installation/protocol cap for both encoded and
+decoded HTTP bodies and individual client WebSocket messages. Oversized requests
+are refused before durable generation admission or provider dispatch. See
+[per-route request sizes](../gateway.md#per-route-request-sizes).
+
+Workload JWTs use the same explicit pool assignment and current project authority
+as static principals. Their verified claim digest survives fresh-policy admission;
+issuer changes before dispatch require a retry, and idle subscription sockets
+close on the five-second expiry/authority check. See
+[workload JWT identity](../access.md#workload-jwt-identity) for provisioning and
+renewal behavior. No JWT or raw subject enters subscription ledgers.

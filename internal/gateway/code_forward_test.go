@@ -105,7 +105,7 @@ func (l *codeTestLedger) ObserveAllowance(_ context.Context, _ string, a codemod
 	l.allowances = append(l.allowances, a)
 	return nil
 }
-func (l *codeTestLedger) RecordRefusal(_ context.Context, _ codemode.Route, _ string, reason string) error {
+func (l *codeTestLedger) RecordRefusal(_ context.Context, _ codemode.Route, _, _ string, reason string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.refusals = append(l.refusals, reason)

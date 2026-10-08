@@ -33,6 +33,7 @@ type MaintenanceOptions struct {
 	RetirementVersion int
 	AccountEmail      string
 	PasswordFile      string
+	ResetMFA          bool
 }
 
 func readPasswordFile(path string) (string, error) {
@@ -86,7 +87,7 @@ func Maintenance(ctx context.Context, c config.Config, command string, options M
 		if err != nil {
 			return err
 		}
-		result, err := access.RecoverPassword(ctx, pool, options.AccountEmail, password)
+		result, err := access.RecoverPassword(ctx, pool, options.AccountEmail, password, options.ResetMFA)
 		if err != nil {
 			return err
 		}

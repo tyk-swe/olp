@@ -86,6 +86,9 @@ func (t *Transport) step(ctx context.Context, step *Step, call *UpstreamCall, se
 	fail := func(class FailureClass, detail string) (*stepResponse, *Failure) {
 		return nil, &Failure{Class: class, Dispatched: true, Detail: detail}
 	}
+	if target.CallerCredential && step.Credentials && !sameOrigin(step.URL, target.Config.Endpoint) {
+		return fail(ClassProtocol, "caller credentials cannot be sent to another origin")
+	}
 	if !t.stepAllowed(step.URL, call.StepDomains, target.Config.Endpoint, step.Credentials) {
 		return fail(ClassProtocol, "the vendor directed its work to an address outside its domains")
 	}
@@ -106,8 +109,12 @@ func (t *Transport) step(ctx context.Context, step *Step, call *UpstreamCall, se
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if step.Credentials {
-		if _, err := t.Auth.Apply(ctx, req, target.Config, target.Secret, step.JSON); err != nil {
+		values, err := t.Auth.Apply(ctx, req, target.Config, target.Secret, step.JSON)
+		if err != nil {
 			return fail(ClassCredential, "provider credential could not be applied")
+		}
+		if target.Sensitive != nil {
+			target.Sensitive.Include(values)
 		}
 	}
 	resp, err := send(req)
@@ -151,4 +158,10 @@ func (t *Transport) stepAllowed(raw string, domains []string, endpoint string, c
 	endpointOnly.RawQuery, endpointOnly.Fragment = "", ""
 	_, err = t.Egress.ValidateEndpoint(endpointOnly.String())
 	return err == nil
+}
+
+func sameOrigin(raw, endpoint string) bool {
+	a, e := url.Parse(raw)
+	b, f := url.Parse(endpoint)
+	return e == nil && f == nil && a.User == nil && a.Scheme == b.Scheme && strings.EqualFold(a.Host, b.Host)
 }

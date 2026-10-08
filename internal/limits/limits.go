@@ -98,7 +98,7 @@ const (
 	fixedWindowMS         = int64(60_000)
 	dayMS                 = int64(86_400_000)
 	// maxMonthMS bounds a monthly retry hint by the longest civil month.
-	maxMonthMS = 31 * dayMS
+	maxMonthMS = 33 * dayMS
 	// maxCooldownMS caps a provider cooldown at one day.
 	maxCooldownMS = dayMS
 	// Cleanup runs after the decision it undoes, so it is bounded tightly and
@@ -132,6 +132,7 @@ const (
 	DimensionTokens      Dimension = "tokens"
 	DimensionConcurrency Dimension = "concurrency"
 	DimensionDailyCost   Dimension = "daily_cost"
+	DimensionWeeklyCost  Dimension = "weekly_cost"
 	DimensionMonthlyCost Dimension = "monthly_cost"
 )
 
@@ -201,6 +202,7 @@ type Request struct {
 	// DailyCostLimit and MonthlyCostLimit are canonical decimal strings.
 	DailyCostLimit   *string
 	MonthlyCostLimit *string
+	WeeklyCostLimit  *string
 	// RequestedTokens is the estimate reserved up front and later reconciled
 	// against the tokens the attempt actually used.
 	RequestedTokens int64
@@ -211,6 +213,9 @@ type Request struct {
 	// reserves nothing and judges the request on accrued spend alone, which is
 	// what a request nobody can price gets.
 	CostEstimate string
+
+	// CostIncreases is compiled, server-authorized temporary grant evidence.
+	CostIncreases string
 	// RequestID names the cost reservation. It is the identifier accounting later
 	// carries on the spend it records for the request, which is how that spend
 	// replaces the reservation instead of counting beside it. Required with a
@@ -274,7 +279,7 @@ func (r Request) HasHardLimits() bool {
 // HasCostBudget reports whether a cost limit applies, which is what makes the
 // reservation depend on PostgreSQL-reconciled state.
 func (r Request) HasCostBudget() bool {
-	return r.DailyCostLimit != nil || r.MonthlyCostLimit != nil
+	return r.DailyCostLimit != nil || r.MonthlyCostLimit != nil || r.WeeklyCostLimit != nil
 }
 
 // HasRateLimits reports whether a request, token or concurrency limit applies,
@@ -341,7 +346,7 @@ func (r Request) Validate() error {
 	for _, limit := range [...]struct {
 		value *string
 		name  string
-	}{{r.DailyCostLimit, "daily"}, {r.MonthlyCostLimit, "monthly"}} {
+	}{{r.DailyCostLimit, "daily"}, {r.MonthlyCostLimit, "monthly"}, {r.WeeklyCostLimit, "weekly"}} {
 		if limit.value != nil && !ValidCostLimit(*limit.value) {
 			return &InvalidRequestError{
 				Reason: limit.name + " cost limit must be a positive decimal with at most 12 integer and 12 fractional digits",
@@ -460,6 +465,7 @@ type keys struct {
 	concurrency string
 	dailyCost   string
 	monthlyCost string
+	weeklyCost  string
 	pending     string
 	expiry      string
 }
@@ -474,6 +480,7 @@ func (l *Limiter) keysFor(r Request) keys {
 	if r.HasCostBudget() {
 		prefix := l.costPrefix(r.CostOwnerID)
 		k.dailyCost, k.monthlyCost = prefix+":day", prefix+":month"
+		k.weeklyCost = prefix + ":week"
 		k.pending, k.expiry = prefix+":pending", prefix+":expiry"
 	}
 	return k
@@ -693,9 +700,19 @@ func (l *Limiter) reserveCost(ctx context.Context, r Request, scriptKeys keys) (
 		amount, leaseID = r.CostEstimate, canonicalUUID(r.RequestID)
 		ttl = strconv.FormatInt((r.LeaseTTL + r.costGrace()).Milliseconds(), 10)
 	}
-	value, err := l.eval(ctx, reserveCostScript,
-		[]string{scriptKeys.dailyCost, scriptKeys.monthlyCost, scriptKeys.pending, scriptKeys.expiry},
-		daily, monthly, "0", amount, leaseID, ttl)
+	var value any
+	var err error
+	if r.CostIncreases != "" {
+		weekly := ""
+		if r.WeeklyCostLimit != nil {
+			weekly = *r.WeeklyCostLimit
+		}
+		value, err = l.eval(ctx, reserveCostScript, []string{scriptKeys.dailyCost, scriptKeys.monthlyCost, scriptKeys.pending, scriptKeys.expiry, scriptKeys.weeklyCost}, daily, monthly, "0", amount, leaseID, ttl, weekly, r.CostIncreases)
+	} else if r.WeeklyCostLimit == nil {
+		value, err = l.eval(ctx, reserveCostScript, []string{scriptKeys.dailyCost, scriptKeys.monthlyCost, scriptKeys.pending, scriptKeys.expiry}, daily, monthly, "0", amount, leaseID, ttl)
+	} else {
+		value, err = l.eval(ctx, reserveCostScript, []string{scriptKeys.dailyCost, scriptKeys.monthlyCost, scriptKeys.pending, scriptKeys.expiry, scriptKeys.weeklyCost}, daily, monthly, "0", amount, leaseID, ttl, *r.WeeklyCostLimit)
+	}
 	if err == nil {
 		result, parseErr := parseCostReservation(value)
 		if parseErr == nil {
@@ -926,9 +943,14 @@ type rateAnswer struct {
 // Attach makes group part of this lease, so that finishing the request finishes
 // both. A nil group changes nothing.
 func (le *Lease) Attach(group *Lease) {
-	if le != nil && group != nil {
-		le.group = group
+	if le == nil || group == nil || le == group {
+		return
 	}
+	if le.group == nil {
+		le.group = group
+		return
+	}
+	le.group.Attach(group)
 }
 
 // HasCostReservation reports whether this lease, or the one attached to it, holds

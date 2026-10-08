@@ -1,4 +1,10 @@
 <script lang="ts">
+  import AggregateBudgetPanel from '../budgets/AggregateBudgetPanel.svelte';
+  import ProjectLimitTemplatesPanel from './ProjectLimitTemplatesPanel.svelte';
+  import ProjectAttributionBudgetsPanel from './ProjectAttributionBudgetsPanel.svelte';
+  import ProjectRouteGroupsPanel from './ProjectRouteGroupsPanel.svelte';
+  import ProjectAttributionPolicyPanel from './ProjectAttributionPolicyPanel.svelte';
+  import ProjectEndUserPolicyPanel from './ProjectEndUserPolicyPanel.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, isEtagMismatch } from '$lib/api/http';
   import {
@@ -310,6 +316,14 @@
         </p>{/if}
       {#if memberNotice}<p class="notice" role="status">{memberNotice}</p>{/if}
 
+      {#key selected.id}
+        <ProjectEndUserPolicyPanel projectId={selected.id} />
+        <ProjectAttributionPolicyPanel projectId={selectedId} />
+        <ProjectRouteGroupsPanel projectId={selectedId} />
+        <ProjectLimitTemplatesPanel projectId={selectedId} />
+        <ProjectAttributionBudgetsPanel projectId={selectedId} />
+        <AggregateBudgetPanel projectId={selectedId} />
+      {/key}
       {#if members.isPending}<p class="inline-status" role="status">
           Loading members…
         </p>

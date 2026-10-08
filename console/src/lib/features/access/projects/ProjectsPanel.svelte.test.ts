@@ -4,6 +4,7 @@ import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   createProject,
+  getProjectEndUserPolicy,
   listAllProjectMembers,
   listProjectMemberPage,
   listProjectPage,
@@ -16,9 +17,41 @@ import {
 import { listUsers, type User } from '$lib/features/access/users/api';
 import ProjectsProbe from './test/ProjectsProbe.svelte';
 
+vi.mock('$lib/features/access/budgets/api', () => ({
+  getBudget: vi.fn().mockResolvedValue({
+    policy: null,
+    etag: '00000000-0000-4000-8000-000000000001',
+    usage: {
+      daily: { accrued: '0', window_ends_at: '2026-10-08T00:00:00Z' },
+      monthly: { accrued: '0', window_ends_at: '2026-11-01T00:00:00Z' },
+      unpriced_attempts: 0
+    }
+  }),
+  putBudget: vi.fn()
+}));
 vi.mock('$lib/features/access/projects/api', async (original) => ({
   ...(await original<typeof import('$lib/features/access/projects/api')>()),
   createProject: vi.fn(),
+  getProjectAttributionBudgets: vi.fn(async () => ({
+    budgets: {},
+    usage: {},
+    etag: '00000000-0000-4000-8000-000000000001'
+  })),
+  getProjectLimitTemplates: vi.fn(async () => ({
+    templates: {},
+    etag: '44444444-4444-4444-4444-444444444444'
+  })),
+  getProjectRouteGroups: vi.fn().mockResolvedValue({
+    groups: {},
+    etag: '00000000-0000-0000-0000-000000000001'
+  }),
+  getProjectAttributionPolicy: vi.fn(() =>
+    Promise.resolve({
+      policy: null,
+      etag: '00000000-0000-4000-8000-000000000001'
+    })
+  ),
+  getProjectEndUserPolicy: vi.fn(),
   listAllProjectMembers: vi.fn(),
   listProjectMemberPage: vi.fn(),
   listProjectPage: vi.fn(),
@@ -71,6 +104,10 @@ let client: QueryClient;
 let component: ReturnType<typeof mount> | undefined;
 
 beforeEach(() => {
+  vi.mocked(getProjectEndUserPolicy).mockResolvedValue({
+    policy: null,
+    etag: project.etag
+  });
   vi.resetAllMocks();
   host = document.createElement('div');
   document.body.append(host);

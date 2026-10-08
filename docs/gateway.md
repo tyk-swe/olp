@@ -105,14 +105,20 @@ up to the key's ceiling. Raw header values are never forwarded or persisted.
 The optional `X-OLP-Attribution` header attaches caller-chosen labels to a
 request's usage records, for example `{"team":"core","env":"prod"}`. Exactly one
 header is accepted, at most 4096 bytes, decoding to a single JSON object with at
-most four entries. Every key must appear in the API key's configured
-`allowed_attribution_keys` allowlist, and every value must be a short machine
+most four entries. Every unpinned caller key must appear in the API key's
+configured `allowed_attribution_keys` allowlist, and every value must be a short machine
 token (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`); nested values, numbers, nulls,
 free text, and control characters are refused with `invalid_attribution` before
-the request reaches a provider. Labels are metadata only: they never influence
-authentication, authorization, or routing, and they travel with the request's
-usage facts and hourly rollups so usage reports can filter and break down by
-them.
+the request reaches a provider.
+[Key and project policies](access.md#attribution-requirements-and-pinned-labels)
+can require labels and add pinned defaults. Missing required labels return
+`missing_attribution`; callers cannot override pins. The resolved labels travel
+with request usage facts and hourly rollups for filtering and breakdowns.
+
+Keys can also require [end-user identity](access.md#end-user-identity) from
+`X-OLP-End-User` or a declared native JSON field. Only a project-scoped HMAC
+digest enters accounting. The header stays local, and strict native fields
+continue upstream unchanged.
 
 Canonical attempts follow priority and preferred-order tiers, then the selected
 strategy. Weighted ties are seeded by the key so the same key sees a stable
@@ -203,6 +209,30 @@ its connection and slot quotas declare. Shadow traffic, classifier calls and
 probes run at `low`. `/metrics` reports `olp_admission_queue_depth{class}`,
 `olp_admission_queue_wait_seconds{class}` and
 `olp_admission_queue_rejections_total{class}`.
+
+
+### Per-route request sizes
+
+Ordinary and subscription routes accept `max_body_bytes` from 1 to 1,073,741,824,
+or null to inherit installation and protocol limits. Configure it in the route
+editor and publish the revision. A route can only lower an installation limit.
+Ordinary-route configuration export, plan and apply preserve the setting.
+
+JSON requests must fit both before and after decompression. Multipart requests
+include fields, file bytes, boundaries and trailing epilogue, including chunked
+uploads. Installation limits still bound parsing when the route is named inside
+the body; the route limit is checked once identified and before provider dispatch.
+Fallbacks, selector destinations and retained-resource requests cannot evade the
+bound. Internal classifier requests use their own generated body size.
+
+HTTP refusals use `413 request_too_large` (subscription endpoints retain their
+`code_` error namespace). OpenAI Realtime, Gemini Live and subscription WebSockets
+apply the lower limit to each client message; an oversized message closes with
+WebSocket status 1009. Gemini's initial setup is checked before opening the
+provider connection. Upstream response limits stay independent. Each
+request or WebSocket session keeps the body limit selected from its starting
+route revision.
+
 
 ## Response headers
 
@@ -675,3 +705,79 @@ A terminal stream event, retrieval, or cancellation carrying final usage settles
 that record once, including when several replicas poll concurrently. Until final
 usage is observed, the record remains pending; clients must poll responses that
 finish after their creation connection closes.
+
+## Caller-supplied provider credentials
+
+An operator may publish a connection with `credential_source: caller`. Its
+endpoint, connector profile, certified models, slots and network configuration
+remain operator-controlled. The ordinary secret stored with that connection is
+still used for probes and certification. The connection editor exposes this as
+**Serving credentials → Caller supplies each request**.
+
+Each inference or retained-resource request supplies exactly one
+`X-OLP-Provider-Credential` header, with a nonempty value of at most 16,384 bytes.
+It carries the connector's normal API-key value, declared-header JSON object,
+or static AWS credential JSON. Ambient identities, token-exchange modes and
+plugins cannot use caller mode. The header is accepted by gateway CORS but is
+removed before forwarding, semantic-header capture or retained continuation
+storage. A caller cannot use it to choose an endpoint or change authentication
+mode.
+
+The secret is held only by that request. Once consumed, it is bound to the
+provider connection and upstream model; a fallback to another target cannot
+reuse it. Retries against the same target may reuse it within the request.
+Caller-authenticated HTTP connections are created outside shared connection
+pools with keep-alives disabled; authentication modes with shared token caches
+are refused. Native realtime connections retain the secret only for their
+current connection. Error sanitization includes both the submitted secret and
+values produced by signing or declared-header placement. A caller's rejected
+credential does not revoke or cool down the operator's probe credential.
+
+Attempts carry `routing.credential_source: caller`, with no operator credential
+version ID. Usage and existing budgets apply by default. This metadata contains no
+secret or digest of the provider secret. Provider configuration, revision and
+promotion documents carry only the source choice; the operator's separately
+sealed probe credential follows its existing lifecycle.
+
+Durable video creation retains the pinned connection and operator probe
+reference, but never the caller secret. Poll, content and delete requests must
+supply the credential again. These jobs are excluded from autonomous polling
+and worker-backlog metrics: the worker cannot substitute the probe credential.
+Explicit caller-driven lifecycle operations remain accountable and bound to
+the original connection.
+
+### Caller-paid budget policy
+
+An ordinary route may publish `caller_cost_exempt: true` (default false), using
+**Caller-paid usage** in its draft editor. Every foreground target must use
+caller credentials. Fallback and route-selector destinations must declare the
+same policy, so a transition cannot turn an operator-paid request into an
+unreserved one. Classifiers are separately admitted requests. Shadows require
+operator credentials and keep their system-work budgets; active probes use the
+operator probe credential and remain budgeted.
+
+An eligible caller attempt bypasses USD admission at the installation,
+organization, project, budget-group, key, end-user, per-key-route, attribution,
+route, provider and slot boundaries. Request/token rates, concurrency, network
+and identity policies, body limits, provider quotas and route authorization
+still apply. A historical retained target using operator credentials cannot
+serve through a now-exempt ingress route. Repeated lifecycle operations require
+the caller credential again and use the policy pinned when that request starts.
+
+Priced usage, token/media counts and unpriced evidence remain in usage reports.
+`routing.budget_exempt` records the immutable per-attempt decision; request
+history displays both credential source and cost-budget treatment. Durable fact
+and hourly rows carry `budget_exempt` separately, and retention groups by it.
+Cost settlement, reconstruction, budget reports and threshold counters exclude
+those rows without changing invoice estimates in usage reports. Delayed Responses
+accounting preserves its original attempt evidence. Clearing the route option
+restores charging for new attempts without retroactively charging exempt history.
+
+Provider source and route exemption round-trip through configuration
+export/plan/apply and published revisions. No caller secret participates in
+promotion, cryptographic-purpose storage, quota keys or a shared authentication
+cache. Multi-step media calls reuse the request's isolated transport; credentialed
+steps must stay on the configured origin, and fetched products receive no
+credential. Both initial and follow-up errors use the collected credential
+redactions. Immediate video compensation can use the current request credential;
+background work cannot.

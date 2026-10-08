@@ -12,10 +12,15 @@ import (
 )
 
 type budgetGroupInput struct {
-	Name             string  `json:"name"`
-	ProjectID        *string `json:"project_id"`
-	DailyCostLimit   *string `json:"daily_cost_limit"`
-	MonthlyCostLimit *string `json:"monthly_cost_limit"`
+	LimitTemplate     *string `json:"limit_template"`
+	RequestsPerMinute *int64  `json:"requests_per_minute"`
+	TokensPerMinute   *int64  `json:"tokens_per_minute"`
+	MaxConcurrency    *int64  `json:"max_concurrency"`
+	Name              string  `json:"name"`
+	ProjectID         *string `json:"project_id"`
+	DailyCostLimit    *string `json:"daily_cost_limit"`
+	MonthlyCostLimit  *string `json:"monthly_cost_limit"`
+	WeeklyCostLimit   *string `json:"weekly_cost_limit"`
 }
 
 func validateBudgetGroup(input *budgetGroupInput) error {
@@ -23,7 +28,7 @@ func validateBudgetGroup(input *budgetGroupInput) error {
 		return err
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	for field, value := range map[string]*string{"daily_cost_limit": input.DailyCostLimit, "monthly_cost_limit": input.MonthlyCostLimit} {
+	for field, value := range map[string]*string{"daily_cost_limit": input.DailyCostLimit, "monthly_cost_limit": input.MonthlyCostLimit, "weekly_cost_limit": input.WeeklyCostLimit} {
 		if value != nil {
 			amount := strings.TrimSpace(*value)
 			if !decimal.MatchString(amount) || !strings.ContainsAny(amount, "123456789") {
@@ -32,22 +37,28 @@ func validateBudgetGroup(input *budgetGroupInput) error {
 			*value = amount
 		}
 	}
-	if input.DailyCostLimit == nil && input.MonthlyCostLimit == nil {
-		return Invalid("daily_cost_limit", "Set at least one cost limit.")
+	if err := validTemplateName(input.LimitTemplate); err != nil {
+		return err
+	}
+	if err := (AdmissionLimits{RequestsPerMinute: input.RequestsPerMinute, TokensPerMinute: input.TokensPerMinute, MaxConcurrency: input.MaxConcurrency}).Validate(); err != nil {
+		return err
+	}
+	if input.LimitTemplate == nil && input.RequestsPerMinute == nil && input.TokensPerMinute == nil && input.MaxConcurrency == nil && input.DailyCostLimit == nil && input.MonthlyCostLimit == nil && input.WeeklyCostLimit == nil {
+		return Invalid("daily_cost_limit", "Set at least one limit or reference a template.")
 	}
 	return nil
 }
 
-const budgetGroupFields = `'id',g.id,'name',g.name,'project_id',g.project_id,'project_name',pr.name,'daily_cost_limit',g.daily_cost_limit::text,'monthly_cost_limit',g.monthly_cost_limit::text,'created_by',g.created_by,'created_by_email',u.email,'etag',g.etag,'created_at',g.created_at,'updated_at',g.updated_at`
-const budgetGroupFrom = " FROM olp.budget_groups g JOIN olp.users u ON u.id=g.created_by LEFT JOIN olp.projects pr ON pr.id=g.project_id"
+const budgetGroupFields = `'limit_template',g.limit_template,'requests_per_minute',g.requests_per_minute,'tokens_per_minute',g.tokens_per_minute,'max_concurrency',g.max_concurrency,'effective_limits',g.effective_limits,'id',g.id,'name',g.name,'project_id',g.project_id,'project_name',pr.name,'daily_cost_limit',g.daily_cost_limit::text,'monthly_cost_limit',g.monthly_cost_limit::text,'weekly_cost_limit',g.weekly_cost_limit::text,'created_by',g.created_by,'created_by_email',u.email,'etag',g.etag,'created_at',g.created_at,'updated_at',g.updated_at`
+const budgetGroupFrom = " FROM olp.budget_groups_with_limits g JOIN olp.users u ON u.id=g.created_by LEFT JOIN olp.projects pr ON pr.id=g.project_id"
 
 func (s *Server) budgetGroupJSON() string {
 	enforcement := "false"
 	if s.LimitsEnforced {
 		enforcement = "true"
 	}
-	return `jsonb_build_object(` + budgetGroupFields + `,'budget',` + limits.GroupBudgetSQL +
-		`||jsonb_build_object('enforcement_active',` + enforcement + `))`
+	return `jsonb_build_object(` + budgetGroupFields + `,'budget',olp.budget_allowances(g.id,g.effective_limits,` + limits.GroupBudgetSQL +
+		`||jsonb_build_object('enforcement_active',` + enforcement + `)))`
 }
 
 func (s *Server) budgetGroups(r *http.Request, p Principal) (Reply, error) {
@@ -117,8 +128,11 @@ func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
+	if err = checkLimitTemplates(r.Context(), tx, input.ProjectID, input.LimitTemplate); err != nil {
+		return Reply{}, err
+	}
 	id, etag := NewID(), NewID()
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.budget_groups(id,name,project_id,daily_cost_limit,monthly_cost_limit,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", id, input.Name, input.ProjectID, input.DailyCostLimit, input.MonthlyCostLimit, etag, p.UserID()); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.budget_groups(id,name,project_id,daily_cost_limit,monthly_cost_limit,etag,created_by,limit_template,requests_per_minute,tokens_per_minute,max_concurrency,weekly_cost_limit) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", id, input.Name, input.ProjectID, input.DailyCostLimit, input.MonthlyCostLimit, etag, p.UserID(), input.LimitTemplate, input.RequestsPerMinute, input.TokensPerMinute, input.MaxConcurrency, input.WeeklyCostLimit); err != nil {
 		return Reply{}, err
 	}
 	result := Reply{Status: 201, ETag: etag, Location: "/api/v1/budget-groups/" + id, Body: map[string]any{"id": id, "etag": etag}}
@@ -139,7 +153,7 @@ func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 	if patch == nil {
 		return Reply{}, Invalid("budget_group", "Send a budget group object.")
 	}
-	allowed := []string{"name", "daily_cost_limit", "monthly_cost_limit"}
+	allowed := []string{"name", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "limit_template", "requests_per_minute", "tokens_per_minute", "max_concurrency"}
 	for field, value := range patch {
 		if !slices.Contains(allowed, field) {
 			return Reply{}, Invalid(field, "Unknown budget group field.")
@@ -164,7 +178,7 @@ func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 	var etag string
 	var projectID *string
 	var data []byte
-	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text,jsonb_build_object('name',name,'daily_cost_limit',daily_cost_limit::text,'monthly_cost_limit',monthly_cost_limit::text) FROM olp.budget_groups WHERE id=$1", id).Scan(&etag, &projectID, &data); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text,jsonb_build_object('limit_template',limit_template,'requests_per_minute',requests_per_minute,'tokens_per_minute',tokens_per_minute,'max_concurrency',max_concurrency,'name',name,'daily_cost_limit',daily_cost_limit::text,'monthly_cost_limit',monthly_cost_limit::text,'weekly_cost_limit',weekly_cost_limit::text) FROM olp.budget_groups WHERE id=$1", id).Scan(&etag, &projectID, &data); err != nil {
 		return Reply{}, err
 	}
 	if err := p.Project(projectID, Change); err != nil {
@@ -189,8 +203,11 @@ func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 	if err = validateBudgetGroup(&input); err != nil {
 		return Reply{}, err
 	}
+	if err = checkLimitTemplates(r.Context(), tx, projectID, input.LimitTemplate); err != nil {
+		return Reply{}, err
+	}
 	etag = NewID()
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.budget_groups SET name=$1,daily_cost_limit=$2,monthly_cost_limit=$3,etag=$4,updated_at=now() WHERE id=$5", input.Name, input.DailyCostLimit, input.MonthlyCostLimit, etag, id); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE olp.budget_groups SET name=$1,daily_cost_limit=$2,monthly_cost_limit=$3,etag=$4,updated_at=now(),limit_template=$6,requests_per_minute=$7,tokens_per_minute=$8,max_concurrency=$9,weekly_cost_limit=$10 WHERE id=$5", input.Name, input.DailyCostLimit, input.MonthlyCostLimit, etag, id, input.LimitTemplate, input.RequestsPerMinute, input.TokensPerMinute, input.MaxConcurrency, input.WeeklyCostLimit); err != nil {
 		return Reply{}, err
 	}
 	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {

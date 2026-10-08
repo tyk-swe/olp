@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { currentBudgetLimit } from '../api-keys/budgetPresentation';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
@@ -12,6 +13,7 @@
   } from '$lib/features/access/budget-groups/api';
   import { budgetGroupKeys } from '$lib/features/access/budget-groups/budgetGroupKeys';
   import { formatBudget, formatDate, formatInteger } from '$lib/format';
+  import { limitsError } from '../budgets/limitForm';
 
   const services = useServiceCapabilities();
   const queryClient = useQueryClient();
@@ -28,6 +30,18 @@
   let createProjectId = $state('');
   let createDaily = $state('');
   let createMonthly = $state('');
+  let createWeekly = $state('');
+  let createTemplate = $state('');
+  let createRates = $state({
+    requests_per_minute: '',
+    tokens_per_minute: '',
+    max_concurrency: ''
+  });
+  const rateFields = [
+    'requests_per_minute',
+    'tokens_per_minute',
+    'max_concurrency'
+  ] as const;
   let createBusy = $state(false);
   let error = $state('');
   let notice = $state('');
@@ -36,6 +50,13 @@
   let editName = $state('');
   let editDaily = $state('');
   let editMonthly = $state('');
+  let editWeekly = $state('');
+  let editTemplate = $state('');
+  let editRates = $state({
+    requests_per_minute: '',
+    tokens_per_minute: '',
+    max_concurrency: ''
+  });
   let editBusy = $state(false);
 
   function optionalDecimal(value: string): string | null {
@@ -47,14 +68,39 @@
     editName = group.name;
     editDaily = group.daily_cost_limit ?? '';
     editMonthly = group.monthly_cost_limit ?? '';
+    editWeekly = group.weekly_cost_limit ?? '';
+    editTemplate = group.limit_template ?? '';
+    for (const f of rateFields) editRates[f] = group[f]?.toString() ?? '';
     error = '';
   }
 
   async function submitCreate(event: SubmitEvent) {
     event.preventDefault();
     if (!canManage || createBusy || !createName.trim()) return;
-    if (!createDaily.trim() && !createMonthly.trim()) {
-      error = 'Set at least one cost limit.';
+    if (
+      !createTemplate.trim() &&
+      !Object.values(createRates).some(Boolean) &&
+      !createDaily.trim() &&
+      !createMonthly.trim() &&
+      !createWeekly.trim()
+    ) {
+      error = 'Set a limit or reference a project template.';
+      return;
+    }
+    const validation =
+      limitsError({
+        ...createRates,
+        daily_cost_limit: createDaily,
+        weekly_cost_limit: createWeekly,
+        monthly_cost_limit: createMonthly
+      }) ||
+      (createTemplate &&
+      (!createProjectId ||
+        !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(createTemplate.trim()))
+        ? 'Choose a project and a valid template name.'
+        : '');
+    if (validation) {
+      error = validation;
       return;
     }
     createBusy = true;
@@ -64,11 +110,25 @@
         name: createName.trim(),
         project_id: createProjectId || null,
         daily_cost_limit: optionalDecimal(createDaily),
-        monthly_cost_limit: optionalDecimal(createMonthly)
+        weekly_cost_limit: optionalDecimal(createWeekly),
+        monthly_cost_limit: optionalDecimal(createMonthly),
+        limit_template: createTemplate.trim() || null,
+        requests_per_minute: createRates.requests_per_minute
+          ? Number(createRates.requests_per_minute)
+          : null,
+        tokens_per_minute: createRates.tokens_per_minute
+          ? Number(createRates.tokens_per_minute)
+          : null,
+        max_concurrency: createRates.max_concurrency
+          ? Number(createRates.max_concurrency)
+          : null
       });
       createName = '';
+      createTemplate = '';
+      for (const f of rateFields) createRates[f] = '';
       createDaily = '';
       createMonthly = '';
+      createWeekly = '';
       notice = 'Budget group created.';
       await queryClient.invalidateQueries({ queryKey: budgetGroupKeys.root });
     } catch (cause) {
@@ -80,8 +140,30 @@
 
   async function submitEdit(group: BudgetGroup) {
     if (!canManage || editBusy || !editName.trim()) return;
-    if (!editDaily.trim() && !editMonthly.trim()) {
-      error = 'Set at least one cost limit.';
+    if (
+      !editTemplate.trim() &&
+      !Object.values(editRates).some(Boolean) &&
+      !editDaily.trim() &&
+      !editMonthly.trim() &&
+      !editWeekly.trim()
+    ) {
+      error = 'Set a limit or reference a project template.';
+      return;
+    }
+    const validation =
+      limitsError({
+        ...editRates,
+        daily_cost_limit: editDaily,
+        weekly_cost_limit: editWeekly,
+        monthly_cost_limit: editMonthly
+      }) ||
+      (editTemplate &&
+      (!group.project_id ||
+        !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(editTemplate.trim()))
+        ? 'Use a template from this group’s project.'
+        : '');
+    if (validation) {
+      error = validation;
       return;
     }
     editBusy = true;
@@ -90,7 +172,18 @@
       await updateBudgetGroup(group, {
         name: editName.trim(),
         daily_cost_limit: optionalDecimal(editDaily),
-        monthly_cost_limit: optionalDecimal(editMonthly)
+        weekly_cost_limit: optionalDecimal(editWeekly),
+        monthly_cost_limit: optionalDecimal(editMonthly),
+        limit_template: editTemplate.trim() || null,
+        requests_per_minute: editRates.requests_per_minute
+          ? Number(editRates.requests_per_minute)
+          : null,
+        tokens_per_minute: editRates.tokens_per_minute
+          ? Number(editRates.tokens_per_minute)
+          : null,
+        max_concurrency: editRates.max_concurrency
+          ? Number(editRates.max_concurrency)
+          : null
       });
       editingId = '';
       notice = 'Budget group updated.';
@@ -129,11 +222,34 @@
         </div>
         <ProjectScopeField id="group-project" bind:value={createProjectId} />
         <div class="form-field">
+          <label for="group-template">Limit template</label><input
+            id="group-template"
+            bind:value={createTemplate}
+            maxlength="100"
+          />
+        </div>
+        {#each rateFields as field (field)}<div class="form-field">
+            <label for={`group-${field}`}>{field.replaceAll('_', ' ')}</label
+            ><input
+              id={`group-${field}`}
+              bind:value={createRates[field]}
+              inputmode="numeric"
+            />
+          </div>{/each}
+        <div class="form-field">
           <label for="group-daily">Daily cost limit</label><input
             id="group-daily"
             inputmode="decimal"
             placeholder="10.00"
             bind:value={createDaily}
+          />
+        </div>
+        <div class="form-field">
+          <label for="group-weekly">Weekly cost limit</label><input
+            id="group-weekly"
+            inputmode="decimal"
+            placeholder="100.00"
+            bind:value={createWeekly}
           />
         </div>
         <div class="form-field">
@@ -175,7 +291,8 @@
           ><tr
             ><th scope="col">Name</th><th scope="col">Project</th><th
               scope="col">Daily</th
-            ><th scope="col">Monthly</th><th scope="col">Unpriced</th
+            ><th scope="col">Weekly</th><th scope="col">Monthly</th><th
+              scope="col">Unpriced</th
             >{#if canManage}<th scope="col"
                 ><span class="sr-only">Actions</span></th
               >{/if}</tr
@@ -196,6 +313,12 @@
                     aria-label="Daily cost limit"
                     inputmode="decimal"
                     bind:value={editDaily}
+                  /></td
+                ><td
+                  ><input
+                    aria-label="Weekly cost limit"
+                    inputmode="decimal"
+                    bind:value={editWeekly}
                   /></td
                 ><td
                   ><input
@@ -221,20 +344,38 @@
               >
             {:else}
               <tr
-                ><td><strong>{group.name}</strong></td><td
-                  >{group.project_name ?? 'Installation-wide'}</td
                 ><td
+                  ><strong>{group.name}</strong>{#if group.limit_template}<br
+                    /><small>Template: {group.limit_template}</small
+                    >{/if}{#each rateFields as field (field)}{#if group.effective_limits?.[field] != null}<br
+                      /><small
+                        >{field.replaceAll('_', ' ')}: {group
+                          .effective_limits?.[field]}</small
+                      >{/if}{/each}</td
+                ><td>{group.project_name ?? 'Installation-wide'}</td><td
                   >{formatBudget(group.budget.daily.accrued)} / {group.budget
                     .daily.limit === null
                     ? 'No limit'
-                    : formatBudget(group.budget.daily.limit)}<br /><small
+                    : formatBudget(currentBudgetLimit(group.budget.daily))}<br
+                  /><small
                     >resets {formatDate(group.budget.daily.reset_at)}</small
                   ></td
+                ><td
+                  >{#if group.budget.weekly}{formatBudget(
+                      group.budget.weekly.accrued
+                    )} / {currentBudgetLimit(group.budget.weekly) === null
+                      ? 'No limit'
+                      : formatBudget(
+                          currentBudgetLimit(group.budget.weekly)
+                        )}<br /><small
+                      >resets {formatDate(group.budget.weekly.reset_at)}</small
+                    >{:else}—{/if}</td
                 ><td
                   >{formatBudget(group.budget.monthly.accrued)} / {group.budget
                     .monthly.limit === null
                     ? 'No limit'
-                    : formatBudget(group.budget.monthly.limit)}<br /><small
+                    : formatBudget(currentBudgetLimit(group.budget.monthly))}<br
+                  /><small
                     >resets {formatDate(group.budget.monthly.reset_at)}</small
                   ></td
                 ><td>{formatInteger(group.budget.unpriced_attempts)}</td

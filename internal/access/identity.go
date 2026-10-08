@@ -17,9 +17,25 @@ func NewID() string { return uuid.Must(uuid.NewV7()).String() }
 
 func (s *Server) Register(mux *http.ServeMux) {
 	s.registerCodeMode(mux)
+	s.registerSCIM(mux)
+	s.Public(mux, "POST /api/v1/saml/login", s.beginSAMLLogin)
+	s.Public(mux, "POST /api/v1/saml/acs", s.samlACS, MaxBody(2<<20))
+	s.Public(mux, "GET /api/v1/saml/complete", s.completeSAML)
+	s.Route(mux, "GET /api/v1/saml/configuration", s.samlConfiguration)
+	s.Route(mux, "PUT /api/v1/saml/configuration", s.putSAMLConfiguration, MaxBody(2<<20))
+	s.Route(mux, "POST /api/v1/saml/import", s.importSAMLMetadata)
+	s.Stream(mux, "GET /api/v1/saml/metadata", s.samlMetadata)
+	s.Route(mux, "GET /api/v1/profile/saml-identities", s.samlIdentities)
+	s.Route(mux, "POST /api/v1/profile/saml/link", s.beginSAMLLink)
+	s.Route(mux, "POST /api/v1/profile/saml/reauthenticate", s.beginSAMLReauthentication)
+	s.Route(mux, "DELETE /api/v1/profile/saml-identities/{identity_id}", s.unlinkSAML)
+	s.Route(mux, "GET /api/v1/scim/groups", s.scimGroups)
+	s.Route(mux, "PUT /api/v1/scim/groups/{scim_id}/mapping", s.scimGroupMapping)
 	public := map[string]PublicHandler{
 		"GET /api/v1/setup/status": s.setupStatus, "POST /api/v1/setup": s.setup,
 		"GET /api/v1/auth/capabilities":   s.capabilities,
+		"POST /api/v1/auth/mfa/verify":    s.mfaVerify,
+		"POST /api/v1/auth/mfa/enroll":    s.mfaBootstrap,
 		"POST /api/v1/sessions":           s.login,
 		"POST /api/v1/invitations/accept": s.acceptInvitation,
 		"GET /api/v1/oidc/login":          s.beginOIDCLogin, "POST /api/v1/oidc/login": s.beginOIDCLogin,
@@ -34,11 +50,35 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"DELETE /api/v1/sessions/{session_id}": s.revokeSession,
 		"GET /api/v1/users":                    s.users, "GET /api/v1/users/{user_id}": s.user, "PATCH /api/v1/users/{user_id}": s.updateUser,
 		"GET /api/v1/invitations": s.invitations, "POST /api/v1/invitations": s.createInvitation,
-		"DELETE /api/v1/invitations/{invitation_id}": s.retireInvitation,
-		"GET /api/v1/profile":                        s.profile, "PATCH /api/v1/profile": s.updateProfile,
+		"DELETE /api/v1/invitations/{invitation_id}":     s.retireInvitation,
+		"GET /api/v1/profile/mfa":                        s.mfaStatus,
+		"POST /api/v1/profile/mfa/challenge":             s.mfaManageChallenge,
+		"POST /api/v1/profile/mfa/enroll":                s.mfaEnroll,
+		"POST /api/v1/profile/mfa/recovery-codes":        s.mfaRecovery,
+		"DELETE /api/v1/profile/mfa/factors/{factor_id}": s.mfaRemove,
+		"GET /api/v1/profile":                            s.profile, "PATCH /api/v1/profile": s.updateProfile,
 		"POST /api/v1/profile/password": s.changePassword, "POST /api/v1/profile/password/enroll": s.enrollPassword,
-		"POST /api/v1/profile/reauthenticate": s.reauthenticate,
-		"GET /api/v1/api-keys":                s.apiKeys, "POST /api/v1/api-keys": s.createAPIKey,
+		"POST /api/v1/profile/reauthenticate":                   s.reauthenticate,
+		"POST /api/v1/api-keys/{api_key_id}/end-user":           s.lookupEndUser,
+		"GET /api/v1/projects/{project_id}/limit-templates":     s.projectLimitTemplates,
+		"PUT /api/v1/projects/{project_id}/limit-templates":     s.putProjectLimitTemplates,
+		"GET /api/v1/projects/{project_id}/route-groups":        s.projectRouteGroups,
+		"PUT /api/v1/projects/{project_id}/route-groups":        s.putProjectRouteGroups,
+		"GET /api/v1/projects/{project_id}/attribution-budgets": s.projectAttributionBudgets,
+		"PUT /api/v1/projects/{project_id}/attribution-budgets": s.putProjectAttributionBudgets,
+		"GET /api/v1/projects/{project_id}/budget":              s.projectBudget,
+		"PUT /api/v1/projects/{project_id}/budget":              s.putProjectBudget,
+		"GET /api/v1/budget-increases":                          s.budgetIncreases,
+		"POST /api/v1/budget-increases":                         s.createBudgetIncrease,
+		"GET /api/v1/budget-increases/{increase_id}":            s.budgetIncrease,
+		"DELETE /api/v1/budget-increases/{increase_id}":         s.revokeBudgetIncrease,
+		"GET /api/v1/budgets/installation":                      s.installationBudget,
+		"PUT /api/v1/budgets/installation":                      s.putInstallationBudget,
+		"GET /api/v1/projects/{project_id}/attribution-policy":  s.projectAttributionPolicy,
+		"PUT /api/v1/projects/{project_id}/attribution-policy":  s.putProjectAttributionPolicy,
+		"GET /api/v1/projects/{project_id}/end-user-policy":     s.projectEndUserPolicy,
+		"PUT /api/v1/projects/{project_id}/end-user-policy":     s.putProjectEndUserPolicy,
+		"GET /api/v1/api-keys":                                  s.apiKeys, "POST /api/v1/api-keys": s.createAPIKey,
 		"GET /api/v1/api-keys/{api_key_id}": s.apiKey, "PATCH /api/v1/api-keys/{api_key_id}": s.updateAPIKey,
 		"POST /api/v1/api-keys/{api_key_id}/revoke": s.revokeAPIKey, "POST /api/v1/api-keys/{api_key_id}/rotate": s.rotateAPIKey,
 		"GET /api/v1/budget-groups": s.budgetGroups, "POST /api/v1/budget-groups": s.createBudgetGroup,
@@ -48,11 +88,31 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"GET /api/v1/notifications/destinations/{notification_destination_id}":   s.notificationDestination,
 		"PATCH /api/v1/notifications/destinations/{notification_destination_id}": s.updateNotificationDestination,
 		"GET /api/v1/notifications/rules":                                        s.notificationRules, "POST /api/v1/notifications/rules": s.createNotificationRule,
-		"GET /api/v1/notifications/rules/{notification_rule_id}":   s.notificationRule,
-		"PATCH /api/v1/notifications/rules/{notification_rule_id}": s.updateNotificationRule,
-		"GET /api/v1/notifications/deliveries":                     s.notificationDeliveries,
-		"GET /api/v1/audit":                                        s.auditEvents,
-		"GET /api/v1/projects":                                     s.projects, "POST /api/v1/projects": s.createProject,
+		"GET /api/v1/notifications/rules/{notification_rule_id}":                                 s.notificationRule,
+		"PATCH /api/v1/notifications/rules/{notification_rule_id}":                               s.updateNotificationRule,
+		"GET /api/v1/notifications/deliveries":                                                   s.notificationDeliveries,
+		"GET /api/v1/audit":                                                                      s.auditEvents,
+		"GET /api/v1/workload-issuers":                                                           s.workloadIssuers,
+		"POST /api/v1/workload-issuers":                                                          s.createWorkloadIssuer,
+		"GET /api/v1/workload-issuers/{issuer_id}":                                               s.workloadIssuer,
+		"PUT /api/v1/workload-issuers/{issuer_id}":                                               s.putWorkloadIssuer,
+		"GET /api/v1/organizations":                                                              s.organizations,
+		"POST /api/v1/organizations":                                                             s.createOrganization,
+		"GET /api/v1/organizations/{organization_id}":                                            s.organization,
+		"PATCH /api/v1/organizations/{organization_id}":                                          s.updateOrganization,
+		"GET /api/v1/organizations/{organization_id}/members":                                    s.organizationMembers,
+		"PUT /api/v1/organizations/{organization_id}/members/{user_id}":                          s.putOrganizationMember,
+		"DELETE /api/v1/organizations/{organization_id}/members/{user_id}":                       s.deleteOrganizationMember,
+		"GET /api/v1/organizations/{organization_id}/projects":                                   s.projects,
+		"POST /api/v1/organizations/{organization_id}/projects":                                  s.createProject,
+		"GET /api/v1/organizations/{organization_id}/projects/{project_id}":                      s.project,
+		"PATCH /api/v1/organizations/{organization_id}/projects/{project_id}":                    s.updateProject,
+		"GET /api/v1/organizations/{organization_id}/projects/{project_id}/members":              s.projectMembers,
+		"PUT /api/v1/organizations/{organization_id}/projects/{project_id}/members/{user_id}":    s.putProjectMember,
+		"DELETE /api/v1/organizations/{organization_id}/projects/{project_id}/members/{user_id}": s.deleteProjectMember,
+		"GET /api/v1/organizations/{organization_id}/budget":                                     s.installationBudget,
+		"PUT /api/v1/organizations/{organization_id}/budget":                                     s.putInstallationBudget,
+		"GET /api/v1/projects":                                                                   s.projects, "POST /api/v1/projects": s.createProject,
 		"GET /api/v1/project-memberships":   s.projectMemberships,
 		"GET /api/v1/projects/{project_id}": s.project, "PATCH /api/v1/projects/{project_id}": s.updateProject,
 		"GET /api/v1/projects/{project_id}/members":              s.projectMembers,
@@ -79,9 +139,9 @@ func (s *Server) setupStatus(r *http.Request) (Reply, error) {
 	return OK(map[string]bool{"setup_required": !complete}), err
 }
 func (s *Server) capabilities(r *http.Request) (Reply, error) {
-	var local, oidc bool
-	err := s.Pool.QueryRow(r.Context(), `SELECT COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.oidc_configuration WHERE singleton),false)`).Scan(&local, &oidc)
-	return OK(map[string]bool{"local_login_enabled": local && !s.LocalLoginDisabled, "oidc_login_enabled": oidc, "gateway_available": true, "limits_enforced": s.LimitsEnforced, "retention_enforced": s.RetentionEnforced, "notifications_active": s.NotificationsActive}), err
+	var local, oidc, samlEnabled bool
+	err := s.Pool.QueryRow(r.Context(), `SELECT COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.oidc_configuration WHERE singleton),false),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.saml_configuration WHERE singleton),false)`).Scan(&local, &oidc, &samlEnabled)
+	return OK(map[string]bool{"local_login_enabled": local && !s.LocalLoginDisabled, "oidc_login_enabled": oidc, "saml_login_enabled": samlEnabled, "gateway_available": true, "limits_enforced": s.LimitsEnforced, "management_network_restricted": s.ManagementNetworkRestricted, "retention_enforced": s.RetentionEnforced, "notifications_active": s.NotificationsActive}), err
 }
 
 func (s *Server) passwordWork(r *http.Request, work func()) error {
@@ -202,7 +262,7 @@ func (s *Server) setup(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.installation SET name=$1,setup_complete=true WHERE singleton", strings.TrimSpace(input.Name)); err != nil {
 		return Reply{}, err
 	}
-	for key, value := range map[string]string{"retention.requests_days": "30", "retention.usage_days": "90", "retention.audit_days": "365", "limits.valkey_unavailable": "fail_closed", "auth.local_login_enabled": "true"} {
+	for key, value := range map[string]string{"retention.requests_days": "30", "retention.usage_days": "90", "retention.audit_days": "365", "limits.valkey_unavailable": "fail_closed", "budgets.time_zone": "UTC", "auth.mfa_required": "false", "auth.local_login_enabled": "true"} {
 		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.settings(key,value,etag,updated_by) VALUES($1,$2,$3,$4)", key, value, NewID(), id); err != nil {
 			return Reply{}, err
 		}
@@ -327,6 +387,11 @@ func (s *Server) usableOwner(r *http.Request, tx pgx.Tx) error {
 	if exists {
 		return nil
 	}
+	if usable, e := s.usableSAMLOwner(r, tx); e != nil {
+		return e
+	} else if usable {
+		return nil
+	}
 	missing := Fail(409, "last_usable_owner", "Keep at least one active owner with a usable sign-in method and an owner role after sign-in.")
 	c, err := loadOIDC(r, tx)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Enabled {
@@ -335,7 +400,7 @@ func (s *Server) usableOwner(r *http.Request, tx pgx.Tx) error {
 	if err != nil {
 		return err
 	}
-	rows, err := tx.Query(r.Context(), `SELECT u.role_management='local',i.role_claims
+	rows, err := tx.Query(r.Context(), `SELECT u.role_management<>'oidc',i.role_claims
         FROM olp.users u JOIN olp.oidc_identities i ON i.user_id=u.id
         WHERE u.active AND u.oidc_authorized AND u.role='owner' AND u.access_scope='global' AND i.issuer=$1`, c.Issuer)
 	if err != nil {
@@ -560,7 +625,7 @@ func (s *Server) acceptInvitation(r *http.Request) (Reply, error) {
 	if err = Audit(r.Context(), tx, r, UserActor(userID), "invitation.accept", "invitation", id, "success"); err != nil {
 		return Reply{}, err
 	}
-	response, err := s.newSession(r, tx, userID)
+	response, err := s.localSession(r, tx, userID)
 	if err != nil {
 		return Reply{}, err
 	}

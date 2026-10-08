@@ -7,9 +7,12 @@ type AuthenticationPath = Extract<
   | '/api/v1/setup/status'
   | '/api/v1/setup'
   | '/api/v1/sessions'
+  | '/api/v1/auth/mfa/verify'
+  | '/api/v1/auth/mfa/enroll'
   | '/api/v1/invitations/accept'
   | '/api/v1/auth/capabilities'
   | '/api/v1/oidc/login'
+  | '/api/v1/saml/login'
   | '/api/v1/oidc/callback'
 >;
 
@@ -22,10 +25,13 @@ const AUTHENTICATION_ROUTES = [
   { method: 'GET', path: '/api/v1/setup/status' },
   { method: 'POST', path: '/api/v1/setup' },
   { method: 'POST', path: '/api/v1/sessions' },
+  { method: 'POST', path: '/api/v1/auth/mfa/verify' },
+  { method: 'POST', path: '/api/v1/auth/mfa/enroll' },
   { method: 'POST', path: '/api/v1/invitations/accept' },
   { method: 'GET', path: '/api/v1/auth/capabilities' },
   { method: 'GET', path: '/api/v1/oidc/login' },
   { method: 'POST', path: '/api/v1/oidc/login' },
+  { method: 'POST', path: '/api/v1/saml/login' },
   { method: 'GET', path: '/api/v1/oidc/callback' }
 ] as const satisfies readonly AuthenticationRoute[];
 
@@ -53,4 +59,14 @@ export function isCurrentSessionDeletion(request: Request): boolean {
 
 export function isMutationRequest(request: Request): boolean {
   return !SAFE_METHODS.has(request.method.toUpperCase());
+}
+
+/** MFA endpoints are also used with a session-bound management proof. */
+export function isMFAEndpoint(request: Request): boolean {
+  const { method, pathname } = endpoint(request);
+  return (
+    method === 'POST' &&
+    (pathname === '/api/v1/auth/mfa/verify' ||
+      pathname === '/api/v1/auth/mfa/enroll')
+  );
 }

@@ -211,6 +211,8 @@ func behaviorJSON(out map[string]any, raw []byte) map[string]any {
 	}
 	out["fallbacks"], out["selectors"], out["retry"] = orEmpty(behavior.Fallbacks), orEmpty(behavior.Selectors), retry
 	out["affinity"], out["budget"] = behavior.Affinity, behavior.Budget
+	out["max_body_bytes"] = behavior.MaxBodyBytes
+	out["caller_cost_exempt"] = behavior.CallerCostExempt
 	return out
 }
 
@@ -257,6 +259,8 @@ type TargetInput struct {
 }
 
 type DraftInput struct {
+	CallerCostExempt bool                `json:"caller_cost_exempt,omitempty"`
+	MaxBodyBytes     *int64              `json:"max_body_bytes,omitempty"`
 	Slug             string              `json:"slug"`
 	Operations       []string            `json:"operations"`
 	OverallTimeoutMS int                 `json:"overall_timeout_ms"`
@@ -275,7 +279,7 @@ type DraftInput struct {
 }
 
 func (in *DraftInput) behavior() runtime.Behavior {
-	return runtime.Behavior{Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget}
+	return runtime.Behavior{CallerCostExempt: in.CallerCostExempt, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget}
 }
 
 func sameProject(a, b *string) bool {

@@ -85,6 +85,15 @@ func (s *Server) CodeWrite(r *http.Request, table, resource, project string, inp
 }
 
 func (s *Server) CodeList(r *http.Request, p Principal, selectSQL string) (Reply, error) {
+	return s.codeList(r, p, selectSQL, false)
+}
+
+// CodeUsageList adds digest filtering for the two content-free usage ledgers.
+func (s *Server) CodeUsageList(r *http.Request, p Principal, selectSQL string) (Reply, error) {
+	return s.codeList(r, p, selectSQL, true)
+}
+
+func (s *Server) codeList(r *http.Request, p Principal, selectSQL string, endUsers bool) (Reply, error) {
 	page, err := Page(r)
 	if err != nil {
 		return Reply{}, err
@@ -101,6 +110,15 @@ func (s *Server) CodeList(r *http.Request, p Principal, selectSQL string) (Reply
 	}
 	where := ` WHERE x.id<$1 AND ($2 OR x.project_id=ANY($3::uuid[])) AND ($4='' OR x.project_id::text=$4)`
 	args := []any{page.Before, p.AllProjects, p.ProjectIDs(), project, page.Limit + 1}
+	if digest := r.URL.Query().Get("end_user_digest"); endUsers && digest != "" {
+		if digest == "unidentified" {
+			digest = ""
+		} else if !ValidEndUserDigest(digest) {
+			return Reply{}, Invalid("end_user_digest", "Use an end-user digest or unidentified.")
+		}
+		args = append(args, digest)
+		where += fmt.Sprintf(" AND x.end_user_digest=$%d", len(args))
+	}
 	for _, field := range []string{"route_id", "api_key_id", "account_id", "binding_id"} {
 		if value := r.URL.Query().Get(field); value != "" {
 			id, err := ParseUUID(value)
@@ -177,7 +195,7 @@ func (s *Server) writeCodePool(r *http.Request, _ Principal) (Reply, error) {
 	return s.CodeWrite(r, "code_pools", "code_pool", in.ProjectID, in, func(tx pgx.Tx, p Principal, id, etag string) (any, error) {
 		if in.OwnerUserID != nil {
 			var member bool
-			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.project_members WHERE project_id=$1 AND user_id=$2)`, in.ProjectID, *in.OwnerUserID).Scan(&member); err != nil {
+			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.effective_project_members WHERE project_id=$1 AND user_id=$2)`, in.ProjectID, *in.OwnerUserID).Scan(&member); err != nil {
 				return nil, err
 			}
 			if !member {

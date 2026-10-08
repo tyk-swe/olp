@@ -8,16 +8,18 @@ import (
 // Writes that require an Idempotency-Key and an If-Match must say so, or a
 // client generated from the contract cannot call them.
 func TestGuardedWritesDeclareTheirPreconditions(t *testing.T) {
+	type parameter struct {
+		In       string `json:"in"`
+		Name     string `json:"name"`
+		Required bool   `json:"required"`
+	}
+	type operation struct {
+		OperationID string                     `json:"operationId"`
+		Parameters  []parameter                `json:"parameters"`
+		Responses   map[string]json.RawMessage `json:"responses"`
+	}
 	var document struct {
-		Paths map[string]map[string]struct {
-			OperationID string `json:"operationId"`
-			Parameters  []struct {
-				In       string `json:"in"`
-				Name     string `json:"name"`
-				Required bool   `json:"required"`
-			} `json:"parameters"`
-			Responses map[string]json.RawMessage `json:"responses"`
-		} `json:"paths"`
+		Paths map[string]map[string]json.RawMessage `json:"paths"`
 	}
 	if err := json.Unmarshal(Document, &document); err != nil {
 		t.Fatal(err)
@@ -26,10 +28,22 @@ func TestGuardedWritesDeclareTheirPreconditions(t *testing.T) {
 		{"/api/v1/routing-policies/{scope}/{id}", "put"},
 		{"/api/v1/providers/{provider_id}/credential-slots/{slot_id}", "put"},
 	} {
-		op, ok := document.Paths[guarded.path][guarded.method]
+		raw, ok := document.Paths[guarded.path][guarded.method]
 		if !ok {
 			t.Fatalf("%s %s is missing", guarded.method, guarded.path)
 		}
+		var op operation
+		if err := json.Unmarshal(raw, &op); err != nil {
+			t.Fatal(err)
+		}
+		if inherited := document.Paths[guarded.path]["parameters"]; len(inherited) > 0 {
+			var parameters []parameter
+			if err := json.Unmarshal(inherited, &parameters); err != nil {
+				t.Fatal(err)
+			}
+			op.Parameters = append(parameters, op.Parameters...)
+		}
+
 		for _, header := range []string{"If-Match", "Idempotency-Key"} {
 			found := false
 			for _, p := range op.Parameters {

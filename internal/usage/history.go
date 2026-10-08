@@ -41,6 +41,7 @@ type Cursor struct {
 // metadata plus the usage its attempts accounted for. Token totals and money
 // are absent (null) when no fact exists yet, which is different from zero.
 type RequestSummary struct {
+	BudgetBoundary          string                   `json:"budget_boundary,omitempty"`
 	ID                      string                   `json:"id"`
 	RuntimeGenerationID     string                   `json:"runtime_generation_id"`
 	APIKeyID                *string                  `json:"api_key_id"`
@@ -66,6 +67,7 @@ type RequestSummary struct {
 	Currency                *string                  `json:"currency"`
 	Unpriced                *bool                    `json:"unpriced"`
 	UsageComplete           *bool                    `json:"usage_complete"`
+	EndUserDigest           string                   `json:"end_user_digest"`
 	Attribution             map[string]string        `json:"attribution"`
 	PolicyDecisions         []contentpolicy.Decision `json:"policy_decisions"`
 }
@@ -117,8 +119,8 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
         r.status_code::int, r.error_class, r.total_latency_ms::bigint, r.first_byte_ms::bigint,
         r.attempt_count::int, u.input_tokens, u.output_tokens, u.cached_input_tokens,
         u.cache_write_input_tokens, u.cache_write_5m_input_tokens, u.cache_write_1h_input_tokens,
-        u.estimated_cost, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions,
-        r.origin, r.parent_request_id::text
+        u.estimated_cost, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions, r.end_user_digest,
+        r.origin, r.parent_request_id::text, r.budget_boundary
     FROM olp.requests r LEFT JOIN LATERAL (
       SELECT SUM(f.input_tokens)::bigint AS input_tokens,
              SUM(f.output_tokens)::bigint AS output_tokens,
@@ -139,8 +141,8 @@ func (s *RequestSummary) scanTargets() []any {
 		&s.StartedAt, &s.CompletedAt, &s.StatusCode, &s.ErrorClass, &s.TotalLatencyMS,
 		&s.FirstByteMS, &s.AttemptCount, &s.InputTokens, &s.OutputTokens, &s.CachedInputTokens,
 		&s.CacheWriteInputTokens, &s.CacheWrite5MInputTokens, &s.CacheWrite1HInputTokens,
-		&s.EstimatedCost, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions,
-		&s.Origin, &s.ParentRequestID}
+		&s.EstimatedCost, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions, &s.EndUserDigest,
+		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary}
 }
 
 // normalize pins the timestamps to UTC so the JSON always renders as Z.

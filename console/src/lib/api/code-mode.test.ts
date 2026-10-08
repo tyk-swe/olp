@@ -94,7 +94,8 @@ describe('code-mode collection boundaries', () => {
       route_id: route.id,
       api_key_id: keyId,
       account_id: account.id,
-      binding_id: binding.id
+      binding_id: binding.id,
+      end_user_digest: 'a'.repeat(64)
     });
     expect(Object.fromEntries(new URL(requests[0].url).searchParams)).toEqual({
       project_id: projectId,
@@ -102,6 +103,7 @@ describe('code-mode collection boundaries', () => {
       api_key_id: keyId,
       account_id: account.id,
       binding_id: binding.id,
+      end_user_digest: 'a'.repeat(64),
       limit: '50'
     });
     await listCodeRevisions(route.id, 'older');

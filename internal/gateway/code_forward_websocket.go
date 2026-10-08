@@ -11,6 +11,8 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/codexwire"
@@ -54,8 +56,9 @@ func codeClosePeer(peer *websocket.Conn, err error) {
 	}
 }
 
-func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, keyID string) {
-	reject := func(err error) { s.codeRefuse(w, r, route, keyID, err) }
+func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, authority access.Authority) {
+	keyID, digest := authority.ID, authority.EndUserDigest
+	reject := func(err error) { s.codeRefuse(w, r, route, keyID, digest, err) }
 	if r.Header.Get("Sec-Websocket-Protocol") != "" {
 		reject(codemode.Refuse(400, "code_protocol_unsupported"))
 		return
@@ -73,6 +76,19 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 	permit, err := s.CodeLedger.BindConnection(r.Context(), route, keyID, identity, r.Header.Get("X-OLP-Code-Model"))
 	if err != nil {
 		reject(err)
+		return
+	}
+	if err := bindCodeWorkload(&permit.Authority, authority); err != nil {
+		reject(err)
+		return
+	}
+	labels, failure := s.parseAttribution(r, permit.Authority)
+	if failure != nil {
+		reject(codemode.Refuse(failure.Status, "code_"+failure.Code))
+		return
+	}
+	if failure := s.checkKeyAddress(r, permit.Authority); failure != nil {
+		reject(codemode.Refuse(failure.Status, "code_ip_not_allowed"))
 		return
 	}
 	config, ok := release.Snapshot.CodeConnection(route, permit.Account.ProviderID)
@@ -139,7 +155,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 		return
 	}
 	defer client.CloseNow()
-	client.SetReadLimit(s.codeBodyLimit())
+	client.SetReadLimit(bodylimit.Lower(s.codeBodyLimit(), route.MaxBodyBytes))
 	ctx, cancel := context.WithTimeout(r.Context(), time.Hour)
 	defer cancel()
 	clientMessages := codeRead(ctx, client)
@@ -164,11 +180,23 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 			active.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "rejected"})
 		}
 		refusal := codeRefusal(err)
-		s.recordCodeRefusal(ctx, route, keyID, refusal.Code)
+		s.recordCodeRefusal(ctx, route, keyID, digest, refusal.Code)
 		_ = client.Close(websocket.StatusPolicyViolation, refusal.Code)
+	}
+	var authorityTick <-chan time.Time
+	if authority.WorkloadIssuerID != nil {
+		ticker := time.NewTicker(realtimeReauth)
+		defer ticker.Stop()
+		authorityTick = ticker.C
 	}
 	for {
 		select {
+		case <-authorityTick:
+			fresh, problem := s.authenticate(r, "inference")
+			if problem != nil || fresh.ID != keyID || fresh.EndUserDigest != digest || !fresh.Allows("inference", route.Slug, &route.ProjectID, s.now()) || !fresh.AllowsAttribution(labels) {
+				refuse(codemode.Refuse(403, "code_authority_revoked"))
+				return
+			}
 		case <-ctx.Done():
 			return
 		case <-generationDone:

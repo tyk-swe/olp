@@ -41,16 +41,18 @@ const (
 const dueAlertSQL = `SELECT r.id::text,r.threshold_percent,r.window_kind,
  CASE r.subject_kind WHEN 'api_key' THEN k.id ELSE g.id END::text AS subject_id,
  CASE WHEN r.window_kind='day' THEN COALESCE(kwd.window_id,gwd.window_id)
-      ELSE COALESCE(kwm.window_id,gwm.window_id) END AS window_id,
+      WHEN r.window_kind='week' THEN COALESCE(kww.window_id,gww.window_id) ELSE COALESCE(kwm.window_id,gwm.window_id) END AS window_id,
  CASE WHEN r.window_kind='day' THEN COALESCE(kwd.accrued,gwd.accrued,0)
-      ELSE COALESCE(kwm.accrued,gwm.accrued,0) END::text AS accrued,
- CASE WHEN r.subject_kind='api_key' AND r.window_kind='day' THEN k.policy->>'daily_cost_limit'
-      WHEN r.subject_kind='api_key' THEN k.policy->>'monthly_cost_limit'
-      WHEN r.window_kind='day' THEN g.daily_cost_limit::text ELSE g.monthly_cost_limit::text END AS limit,
+      WHEN r.window_kind='week' THEN COALESCE(kww.accrued,gww.accrued,0) ELSE COALESCE(kwm.accrued,gwm.accrued,0) END::text AS accrued,
+ CASE WHEN r.subject_kind='api_key' AND r.window_kind='day' THEN k.effective_limits->>'daily_cost_limit'
+      WHEN r.subject_kind='api_key' AND r.window_kind='week' THEN k.effective_limits->>'weekly_cost_limit' WHEN r.subject_kind='api_key' THEN k.effective_limits->>'monthly_cost_limit'
+      WHEN r.window_kind='day' THEN g.effective_limits->>'daily_cost_limit' WHEN r.window_kind='week' THEN g.effective_limits->>'weekly_cost_limit' ELSE g.effective_limits->>'monthly_cost_limit' END AS limit,
  d.id::text,d.url,d.secret_id::text,r.name
 FROM olp.notification_rules r
-LEFT JOIN olp.api_keys k ON r.subject_kind='api_key' AND k.id=r.subject_id
-LEFT JOIN olp.budget_groups g ON r.subject_kind='budget_group' AND g.id=r.subject_id
+LEFT JOIN olp.api_keys_with_limits k ON r.subject_kind='api_key' AND k.id=r.subject_id
+LEFT JOIN olp.budget_groups_with_limits g ON r.subject_kind='budget_group' AND g.id=r.subject_id
+LEFT JOIN olp.api_key_cost_windows kww ON kww.api_key_id=k.id AND kww.window_kind='week' AND kww.weekly_complete
+LEFT JOIN olp.budget_group_cost_windows gww ON gww.budget_group_id=g.id AND gww.window_kind='week' AND gww.weekly_complete
 LEFT JOIN olp.api_key_cost_windows kwd ON kwd.api_key_id=k.id AND kwd.window_kind='day'
 LEFT JOIN olp.api_key_cost_windows kwm ON kwm.api_key_id=k.id AND kwm.window_kind='month'
 LEFT JOIN olp.budget_group_cost_windows gwd ON gwd.budget_group_id=g.id AND gwd.window_kind='day'
@@ -58,7 +60,7 @@ LEFT JOIN olp.budget_group_cost_windows gwm ON gwm.budget_group_id=g.id AND gwm.
 JOIN olp.notification_destinations d ON d.id=r.destination_id
 WHERE r.event=$1 AND r.enabled AND d.enabled`
 
-const pendingDeliverySQL = `SELECT v.id::text,v.rule_id::text,r.event,v.attempts,v.last_attempt_at,
+const pendingDeliverySQL = `SELECT v.id::text,v.rule_id::text,CASE WHEN v.api_key_id IS NOT NULL THEN 'key.expiring' ELSE r.event END,v.attempts,v.last_attempt_at,
  r.name,r.subject_kind,r.subject_id::text,r.window_kind,v.window_id,v.threshold_percent,
  v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),v.payload
 FROM olp.notification_deliveries v
@@ -261,7 +263,10 @@ func (w *notificationWorker) claimDue(ctx context.Context) (int, error) {
 	if err = rows.Err(); err != nil {
 		return 0, err
 	}
-	windows := limits.BudgetWindows(w.now())
+	windows, err := limits.CurrentBudgetWindows(ctx, tx, w.now())
+	if err != nil {
+		return 0, err
+	}
 	currency := w.currency(ctx)
 	claimed := 0
 	for _, a := range alerts {
@@ -269,7 +274,7 @@ func (w *notificationWorker) claimDue(ctx context.Context) (int, error) {
 			continue
 		}
 		current := a.windowKind == "day" && *a.windowID == windows.DailyID ||
-			a.windowKind == "month" && *a.windowID == windows.MonthlyID
+			a.windowKind == "month" && *a.windowID == windows.MonthlyID || a.windowKind == "week" && *a.windowID == windows.WeeklyID
 		if !current {
 			continue
 		}
@@ -292,6 +297,11 @@ func (w *notificationWorker) claimDue(ctx context.Context) (int, error) {
 			claimed++
 		}
 	}
+	reminders, err := w.claimKeyReminders(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	claimed += reminders
 	if err = tx.Commit(ctx); err != nil {
 		return 0, err
 	}
@@ -443,6 +453,21 @@ func (w *notificationWorker) deliver(ctx context.Context, d delivery) bool {
 		return false
 	}
 	defer tx.Rollback(ctx)
+	if d.event == access.KeyExpiringEvent {
+		current, e := keyReminderCurrent(ctx, tx, d.id)
+		if e != nil {
+			return false
+		}
+		if !current {
+			if _, e = tx.Exec(ctx, "UPDATE olp.notification_deliveries SET status='cancelled',last_error_code='superseded' WHERE id=$1", d.id); e != nil {
+				return false
+			}
+			if e = tx.Commit(ctx); e != nil {
+				w.log.Warn("notification cancellation failed", "delivery", d.id, "error", e)
+			}
+			return false
+		}
+	}
 	claimed, err := tx.Exec(ctx,
 		`UPDATE olp.notification_deliveries SET attempts=attempts+1,last_attempt_at=now()
 		 WHERE id=$1 AND attempts=$2 AND attempts<$3 AND status IN ('pending','failed')`,

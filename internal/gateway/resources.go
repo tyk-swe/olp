@@ -119,6 +119,9 @@ func (s *Server) selectPin(ctx context.Context, x *execution, route *runtime.Rou
 }
 
 func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runtime.Route, operation, surface, mode string, qualified func(*runtime.Provider, string) bool) (*pin, *Error) {
+	if e := x.checkBody(route); e != nil {
+		return nil, e
+	}
 	snapshot := x.request.release.Snapshot
 	// Pinned work must select a target on this route rather than delegate.
 	x.fixed = true
@@ -140,6 +143,9 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 	provider, ok := snapshot.Providers[attempt.ProviderID]
 	if !ok {
 		return nil, selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
+	}
+	if e := x.checkCallerTarget(&provider, attempt.UpstreamModel); e != nil {
+		return nil, e
 	}
 	var target runtime.Target
 	for _, candidate := range route.Targets {
@@ -182,7 +188,7 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 }
 
 func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, endpoint string, body []byte, contentType string) (*http.Response, *attemptFailure) {
-	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1)
+	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
 	fact.Mode = x.mode
 	if p.hold != nil {
 		fact.Budgets = p.hold.budgets
@@ -228,7 +234,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	cfg := p.provider.Connector()
-	if err := s.applySlotCredential(ctx, x, req, cfg, p.slot, body); err != nil {
+	if err := s.applySlotCredential(ctx, x, req, cfg, p.slot, body, &p.provider, p.model); err != nil {
 		if ctx.Err() != nil {
 			return nil, finish(classCancelled, nil)
 		}
@@ -299,6 +305,7 @@ func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family opena
 		return x, access.Authority{}, true
 	}
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
+	x.endUserDigest = authority.EndUserDigest
 	x.budgetGroupID = authority.BudgetGroupID
 	x.responseMetadata = authority.Policy.ResponseMetadata
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
@@ -320,8 +327,11 @@ func (s *Server) stateDeadline(ctx context.Context, route *runtime.Route) (conte
 }
 
 func (s *Server) reserveState(ctx context.Context, x *execution, authority access.Authority, overall time.Duration) *Error {
+	if e := x.checkBody(x.route); e != nil {
+		return e
+	}
 	var e *Error
-	x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), max(resourceEstimate, x.estimate), overall)
+	x.lease, e = s.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), max(resourceEstimate, x.estimate), overall, x.limitRoute())
 	return e
 }
 
@@ -909,7 +919,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 		}
 		sendDone <- pipeW.Close()
 	}()
-	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1)
+	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
 	finish := func(class string, f *attemptFailure) *attemptFailure {
 		if f == nil {
 			f = &attemptFailure{}
@@ -934,7 +944,7 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
 	cfg := p.provider.Connector()
-	if err := s.applySlotCredential(ctx, x, req, cfg, p.slot, nil); err != nil {
+	if err := s.applySlotCredential(ctx, x, req, cfg, p.slot, nil, &p.provider, p.model); err != nil {
 		pipeR.CloseWithError(err)
 		return nil, finish(classCredential, nil)
 	}

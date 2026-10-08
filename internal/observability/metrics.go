@@ -129,9 +129,9 @@ func CollectMetrics(ctx context.Context, s *State) (string, error) {
 		epochs.UnresolvedEventLowerBound)
 
 	// Limiter, circuits, and media reconciliation.
-	var failOpen, dailyRejections, monthlyRejections int64
+	var failOpen, dailyRejections, weeklyRejections, monthlyRejections int64
 	if s.LimiterCounts != nil {
-		failOpen, dailyRejections, monthlyRejections = s.LimiterCounts()
+		failOpen, dailyRejections, weeklyRejections, monthlyRejections = s.LimiterCounts()
 	}
 	var circuits int64
 	if s.Circuits != nil {
@@ -164,13 +164,14 @@ func CollectMetrics(ctx context.Context, s *State) (string, error) {
 	fmt.Fprintf(&body, "olp_distributed_limiter_available %d\n"+
 		"olp_limits_fail_open_total %d\n"+
 		"olp_key_budget_rejections_total{window=\"daily\"} %d\n"+
+		"olp_key_budget_rejections_total{window=\"weekly\"} %d\n"+
 		"olp_key_budget_rejections_total{window=\"monthly\"} %d\n"+
 		"olp_open_target_circuits %d\n"+
 		"olp_media_reconciliation_pending %d\n"+
 		"olp_media_reconciliation_stale %d\n"+
 		"olp_media_reconciliation_failed %d\n"+
 		"olp_media_reconciliation_gaps_total %d\n",
-		boolInt(limiterConfigured && limiterHealthy), failOpen, dailyRejections, monthlyRejections,
+		boolInt(limiterConfigured && limiterHealthy), failOpen, dailyRejections, weeklyRejections, monthlyRejections,
 		circuits, mediaPending, mediaStale, mediaFailed, mediaGaps)
 
 	// Shadow traffic never delays callers, so capacity shortfalls drop mirrors

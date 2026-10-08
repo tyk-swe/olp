@@ -209,11 +209,11 @@ const rollupSQL = `WITH candidates AS (
                 target_request_counted, request_unpriced_counted, provider_unpriced_counted,
                 model_unpriced_counted, target_unpriced_counted, request_incomplete_counted,
                 provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted,
-                attribution, usage_observed, estimated_input_tokens, estimate_provenance, model_family
+                attribution, end_user_digest, budget_exempt, usage_observed, estimated_input_tokens, estimate_provenance, model_family
     ), rolled AS (
       INSERT INTO olp.attempt_usage_hourly
-        (bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
-         budget_group_id, attribution,
+        (bucket, budget_bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
+         budget_group_id, attribution, end_user_digest, budget_exempt,
          request_count, provider_request_count, model_request_count, target_request_count,
          input_tokens, output_tokens, cached_input_tokens,
          cache_write_input_tokens, cache_write_5m_input_tokens, cache_write_1h_input_tokens,
@@ -223,9 +223,9 @@ const rollupSQL = `WITH candidates AS (
          provider_incomplete_count, model_incomplete_count, target_incomplete_count, currency,
          model_family, estimate_provenance, estimated_input_tokens,
          estimate_reported_input_tokens, estimate_attempt_count)
-      SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
+      SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
              route_slug, provider_id, upstream_model, operation, surface, api_key_id,
-             budget_group_id, attribution,
+             budget_group_id, attribution, end_user_digest, budget_exempt,
              COUNT(*) FILTER (WHERE request_counted),
              COUNT(*) FILTER (WHERE provider_request_counted),
              COUNT(*) FILTER (WHERE model_request_counted),
@@ -251,9 +251,9 @@ const rollupSQL = `WITH candidates AS (
              COALESCE(SUM(input_tokens) FILTER (WHERE ` + estimatePaired + `), 0),
              COUNT(*) FILTER (WHERE ` + estimatePaired + `)
         FROM expired
-       GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
+       GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
                 route_slug, provider_id, upstream_model, operation, surface, api_key_id,
-                budget_group_id, attribution, model_family, estimate_provenance
+                budget_group_id, attribution, end_user_digest, budget_exempt, model_family, estimate_provenance
       ON CONFLICT ON CONSTRAINT attempt_usage_hourly_dimensions_key DO UPDATE SET
         request_count = attempt_usage_hourly.request_count + EXCLUDED.request_count,
         provider_request_count = attempt_usage_hourly.provider_request_count + EXCLUDED.provider_request_count,
@@ -423,6 +423,8 @@ func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, wi
 		// Replay records first, then the encrypted responses they point at:
 		// deleting the secret would cascade the replay away uncounted.
 		{&report.ReplayRows, "DELETE FROM olp.replays WHERE expires_at <= $1", []any{now}},
+		{&report.OIDCFlowRows, "DELETE FROM olp.saml_flows WHERE expires_at <= $1", []any{now}},
+		{&report.OIDCFlowRows, "DELETE FROM olp.saml_assertion_replays WHERE expires_at <= $1", []any{now}},
 		{&report.OIDCFlowRows, "DELETE FROM olp.oidc_flows WHERE expires_at <= $1", []any{now}},
 		// An expired grant enrollment's row outlives its session state for an
 		// hour, so a late continuation learns that it expired.
@@ -438,6 +440,7 @@ func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, wi
 	// Stored replay responses and re-authentication grants expire with their
 	// owners; both are counted under the records above rather than separately.
 	for _, sql := range []string{
+		"DELETE FROM olp.mfa_challenges WHERE expires_at <= $1",
 		"DELETE FROM olp.secrets WHERE expires_at <= $1",
 		"DELETE FROM olp.recent_auth WHERE expires_at <= $1",
 	} {

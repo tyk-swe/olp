@@ -13,13 +13,13 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
-const responseContractVersion = "native-responses-v1"
+const responseContractVersion = "native-responses-v2"
 
 type storedResponseContract struct {
-	Version string              `json:"version"`
-	Receipt interaction.Receipt `json:"receipt"`
-	Binding string              `json:"binding"`
-	Source  json.RawMessage     `json:"source"`
+	Version            string              `json:"version"`
+	Receipt            interaction.Receipt `json:"receipt"`
+	Binding            string              `json:"binding"`
+	PreviousUpstreamID string              `json:"previous_upstream_id,omitempty"`
 }
 
 type responseProjection struct {
@@ -81,19 +81,10 @@ func responseParentProjection(res *resources.Resource, contract *storedResponseC
 	if res.ParentID == nil {
 		return "", "", nil
 	}
-	if contract == nil {
+	if contract == nil || contract.PreviousUpstreamID == "" {
 		return "", "", resources.ErrContract
 	}
-	doc, err := oif.ParseJSON(contract.Source, oif.Limits{MaxBytes: resources.MaxContinuationBytes})
-	if err != nil {
-		return "", "", resources.ErrContract
-	}
-	previous, present := doc.Lookup("/previous_response_id")
-	upstream, valid := previous.Text()
-	if !present || !valid || upstream == "" {
-		return "", "", resources.ErrContract
-	}
-	return upstream, resources.LocalID(resources.KindStrictResponse, *res.ParentID), nil
+	return contract.PreviousUpstreamID, resources.LocalID(resources.KindStrictResponse, *res.ParentID), nil
 }
 
 func responseResourceKind(x *execution) string {
@@ -145,12 +136,22 @@ func (s *Server) putStrictResponse(ctx context.Context, x *execution, fact *Atte
 	if fact.CredentialID != "" {
 		credential = &fact.CredentialID
 	}
-	payload, err := json.Marshal(storedResponseContract{Version: version, Receipt: prepared.plan.Receipt(), Binding: fact.UpstreamModel, Source: x.parsed.OIF().Document().Bytes()})
+	// Retrieval projects only the response and prior-response identities. Keep
+	// that binding, not the caller's input or native end-user identifiers.
+	previousID := ""
+	if previous, present := x.parsed.OIF().Document().Lookup("/previous_response_id"); present && previous.Kind() != oif.Null {
+		var valid bool
+		previousID, valid = previous.Text()
+		if !valid || previousID == "" {
+			return nil, resources.ErrContract
+		}
+	}
+	payload, err := json.Marshal(storedResponseContract{Version: version, Receipt: prepared.plan.Receipt(), Binding: fact.UpstreamModel, PreviousUpstreamID: previousID})
 	if err != nil {
 		return nil, err
 	}
 	// Keep only the non-secret serving index and the content-free deferred
-	// accounting template. Native source remains encrypted in the contract.
+	// accounting template. Provider identity bindings remain encrypted.
 	var billing map[string]json.RawMessage
 	if json.Unmarshal(metadata, &billing) != nil {
 		return nil, resources.ErrContract

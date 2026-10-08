@@ -27,7 +27,8 @@ func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal acce
 	}
 	var authority access.Authority
 	var raw []byte
-	if err := q.QueryRow(r.Context(), "SELECT policy,expires_at,revoked_at,project_id::text FROM olp.api_keys WHERE id=$1", key.id).Scan(&raw, &authority.ExpiresAt, &authority.RevokedAt, &authority.ProjectID); err != nil {
+	var groups access.RouteGroups
+	if err := q.QueryRow(r.Context(), "SELECT k.policy,k.expires_at,k.revoked_at,k.project_id::text,COALESCE(p.route_groups,'{}'::jsonb) FROM olp.api_keys k LEFT JOIN olp.projects p ON p.id=k.project_id WHERE k.id=$1", key.id).Scan(&raw, &authority.ExpiresAt, &authority.RevokedAt, &authority.ProjectID, &groups); err != nil {
 		return key, err
 	}
 	if err := principal.Project(authority.ProjectID, access.View); err != nil {
@@ -39,10 +40,13 @@ func (s *Server) inspectionKey(r *http.Request, q access.Queryer, principal acce
 	if err := json.Unmarshal(raw, &authority.Policy); err != nil {
 		return key, err
 	}
+	if err := authority.BindRouteGroups(groups); err != nil {
+		return key, err
+	}
 	key.allowProviderState = authority.Policy.AllowProviderState
 	if !authority.Allows("inference", route.Slug, route.ProjectID, time.Now()) {
 		key.reason = "api_key_not_authorized"
-		if len(authority.Policy.AllowedRoutes) > 0 && !slices.Contains(authority.Policy.AllowedRoutes, route.Slug) {
+		if allowed := authority.RouteAllowlist(); allowed != nil && !slices.Contains(allowed, route.Slug) {
 			key.reason = "route_not_allowed_for_key"
 		}
 	}

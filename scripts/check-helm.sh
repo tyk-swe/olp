@@ -19,6 +19,11 @@ if [ "$unconfined" != 3 ] || helm template olp deploy/helm | grep -q OLP_UNCONFI
   echo "Expected OLP_UNCONFINED_PLUGIN_DIR on every component only when config.unconfinedPluginDir is set" >&2
   exit 1
 fi
+management_network=$(helm template olp deploy/helm --set config.managementAllowedCidrs=192.0.2.0/24 | grep -c 'OLP_MANAGEMENT_ALLOWED_CIDRS' || true)
+if [ "$management_network" != 1 ] || helm template olp deploy/helm | grep -q OLP_MANAGEMENT_ALLOWED_CIDRS; then
+  echo "Expected OLP_MANAGEMENT_ALLOWED_CIDRS on control only when configured" >&2
+  exit 1
+fi
 runtime_role=$(helm template olp deploy/helm -f deploy/helm/values.production.yaml | grep -c 'OLP_RUNTIME_ROLE' || true)
 if [ "$runtime_role" != 1 ] || helm template olp deploy/helm | grep -q OLP_RUNTIME_ROLE; then
   echo "Expected OLP_RUNTIME_ROLE on the migration job only when migration.runtimeRole is set" >&2

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AggregateBudgetPanel from '$lib/features/access/budgets/AggregateBudgetPanel.svelte';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   const services = useServiceCapabilities();
   import RoutingPolicyEditor from '$lib/features/routes/RoutingPolicyEditor.svelte';
@@ -63,6 +64,10 @@
 
   function settingLabel(key: string) {
     switch (key) {
+      case 'auth.mfa_required':
+        return 'Require local multi-factor authentication';
+      case 'budgets.time_zone':
+        return 'Budget time zone';
       case 'auth.local_login_enabled':
         return 'Local password sign-in';
       case 'limits.valkey_unavailable':
@@ -82,6 +87,10 @@
   const LIMITS_OUTAGE_KEY = 'limits.valkey_unavailable';
 
   function settingHelp(key: string) {
+    if (key === 'auth.mfa_required')
+      return 'Require an authenticator app or security key before a local session is created. Existing enrolled members always verify a second factor. Only an owner can change this; linked identity sign-in follows the identity provider policy.';
+    if (key === 'budgets.time_zone')
+      return 'IANA name, such as America/New_York. Each active day, Monday-based week and month finishes before adopting the new zone. Changing this setting never resets current spend.';
     if (key === 'auth.local_login_enabled')
       return 'Allow members to sign in with local passwords. Only an owner can change this; keep a usable owner sign-in method.';
     if (key === LIMITS_OUTAGE_KEY && !services.limitsEnforced)
@@ -100,7 +109,8 @@
       !canEditSettings ||
       savingKey ||
       savingPrice ||
-      (setting.key === 'auth.local_login_enabled' &&
+      ((setting.key === 'auth.local_login_enabled' ||
+        setting.key === 'auth.mfa_required') &&
         !access.can('users.manage'))
     )
       return;
@@ -174,6 +184,12 @@
       <h2 id="installation-title">Installation defaults</h2>
     </div>
   </div>
+  {#if services.managementNetworkRestricted}
+    <p class="notice">
+      Management access is restricted to client networks configured by the
+      deployment. Update the deployment configuration to change those networks.
+    </p>
+  {/if}
   {#if settings.isPending}<div class="loading-state" role="status">
       Loading settings…
     </div>
@@ -198,13 +214,23 @@
               >{settingLabel(setting.key)}</label
             >
             <p>{settingHelp(setting.key)}</p>
+            {#if setting.calendar}
+              <ul>
+                {#each setting.calendar as window (window.window_kind)}<li>
+                    {stateLabel(window.window_kind)}: {window.time_zone}, ends {formatDate(
+                      window.ends_at
+                    )}{#if window.pending_time_zone}; {window.pending_time_zone} takes
+                      effect {formatDate(window.effective_at)}{/if}
+                  </li>{/each}
+              </ul>
+            {/if}
             <small
               >Updated {formatDate(setting.updated_at)} by
               <span class="mono">{setting.updated_by}</span></small
             >
           </div>
           <div class="setting-control">
-            {#if setting.key === 'auth.local_login_enabled'}<select
+            {#if setting.key === 'auth.local_login_enabled' || setting.key === 'auth.mfa_required'}<select
                 id={`setting-${setting.key}`}
                 value={values[setting.key] ?? setting.value}
                 onchange={(event) =>
@@ -262,7 +288,8 @@
               type="button"
               onclick={() => save(setting)}
               disabled={!canEditSettings ||
-                (setting.key === 'auth.local_login_enabled' &&
+                ((setting.key === 'auth.local_login_enabled' ||
+                  setting.key === 'auth.mfa_required') &&
                   !access.can('users.manage')) ||
                 Boolean(savingKey) ||
                 savingPrice ||
@@ -300,6 +327,9 @@
 {/if}
 
 {#if access.globalScope && access.can('providers.manage')}
+  <AggregateBudgetPanel
+    editable={access.allows('PUT /api/v1/budgets/installation')}
+  />
   <ConfigurationPanel />
 {/if}
 

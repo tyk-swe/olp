@@ -23,7 +23,8 @@ type Envelope struct {
 	Actor        string
 	// KeyID is the API key the request is accounted to; it is empty for the
 	// gateway's keyless requests, whose Origin says why they were made.
-	KeyID string
+	KeyID         string
+	EndUserDigest string
 	// Origin is empty for a caller request. ParentRequestID is the accounting
 	// identity of the caller request a shadow or classifier request serves.
 	Origin          string
@@ -46,9 +47,10 @@ type Envelope struct {
 	Status          int    // status sent to the client; 0 when nothing was sent
 	// ErrorClass is the terminal failure code the client was given, such as
 	// gateway_timeout or client_cancelled. It is empty on success.
-	ErrorClass string
-	Committed  bool
-	StartedAt  time.Time
+	ErrorClass     string
+	BudgetBoundary string
+	Committed      bool
+	StartedAt      time.Time
 	// CompletedAt is when the request reached its terminal outcome.
 	CompletedAt time.Time
 	Duration    time.Duration
@@ -66,7 +68,9 @@ type Envelope struct {
 
 // AttemptFact records one credential attempt against one target.
 type AttemptFact struct {
-	Interaction *usage.InteractionEvidence
+	BudgetExempt     bool
+	CredentialSource string
+	Interaction      *usage.InteractionEvidence
 	// Leg is the fallback or selector route the attempt ran on; nil on the
 	// route the caller named. Selector is the selector that chose its target,
 	// Retry how many times the route's retry policy repeated it, and Budgets
@@ -160,6 +164,7 @@ func (l LogSink) Terminal(e Envelope) {
 			"provider_id":          a.ProviderID,
 			"provider_revision_id": a.ProviderRevisionID,
 			"upstream_model":       a.UpstreamModel,
+			"credential_source":    a.CredentialSource,
 			"credential_id":        a.CredentialID,
 			"started_at":           a.StartedAt,
 			"usage":                a.Usage,
@@ -199,6 +204,7 @@ func (l LogSink) Terminal(e Envelope) {
 		slog.String("outcome", e.Outcome),
 		slog.Int("status", e.Status),
 		slog.String("error_class", e.ErrorClass),
+		slog.String("budget_boundary", e.BudgetBoundary),
 		slog.Bool("committed", e.Committed),
 		slog.Time("completed_at", e.CompletedAt),
 		slog.Duration("duration", e.Duration),

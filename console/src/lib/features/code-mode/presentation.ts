@@ -97,6 +97,22 @@ export function reservationLabel(attempt: CodeAttempt): string {
 }
 
 export function refusalAdvice(code: string): string {
+  if (code === 'code_ip_not_allowed')
+    return 'Check the API key’s allowed client networks and the gateway’s trusted-proxy configuration.';
+  if (
+    [
+      'code_missing_attribution',
+      'code_invalid_attribution',
+      'code_pinned_attribution_override',
+      'code_attribution_changed'
+    ].includes(code)
+  )
+    return 'Check required and pinned attribution labels on the key and project, then retry after authority refresh.';
+  if (code === 'code_workload_changed' || code === 'code_authority_revoked') {
+    return 'Refresh the workload credential and retry after checking the issuer and route permissions.';
+  }
+  if (code.startsWith('code_end_user_'))
+    return 'Check the API key’s configured end-user source. If that policy changed during admission, retry with the current identifier source.';
   if (code.includes('retired'))
     return 'This tree is permanently retired. Start a fresh independent conversation; this identifier cannot be reassigned.';
   if (code.includes('parent') || code.includes('identity'))

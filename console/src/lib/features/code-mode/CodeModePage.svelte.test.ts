@@ -392,6 +392,7 @@ it('paginates filtered metadata and keeps uncertain tokens distinct from measure
   );
   field('code-filter-route', route.id);
   field('code-filter-binding', binding.id);
+  field('code-filter-end-user', 'a'.repeat(64));
   await click('Apply filters');
   expect(api.listCodeAttempts).toHaveBeenLastCalledWith(
     {
@@ -400,7 +401,8 @@ it('paginates filtered metadata and keeps uncertain tokens distinct from measure
       route_id: route.id,
       api_key_id: undefined,
       account_id: undefined,
-      binding_id: binding.id
+      binding_id: binding.id,
+      end_user_digest: 'a'.repeat(64)
     },
     expect.any(AbortSignal)
   );

@@ -46,6 +46,7 @@ func (s *Server) beginGeminiInteraction(w http.ResponseWriter, r *http.Request, 
 	if e == nil {
 		x.authority = authority
 		x.keyID, x.affinity = authority.ID, []byte(authority.ID)
+		x.endUserDigest = authority.EndUserDigest
 		x.budgetGroupID = authority.BudgetGroupID
 		x.responseMetadata = authority.Policy.ResponseMetadata
 		x.attribution, e = s.parseAttribution(r, authority)
@@ -153,7 +154,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	sized := int64(len(body)) / 4
 	x.estimate, x.sizedInput = max(resourceEstimate, sized), &sized
-	x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, time.Duration(route.OverallTimeout)*time.Millisecond)
+	x.lease, e = s.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, time.Duration(route.OverallTimeout)*time.Millisecond, x.limitRoute())
 	if e != nil {
 		fail(e)
 		return

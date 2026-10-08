@@ -133,6 +133,7 @@ func (s *Server) callClassifier(ctx context.Context, parent *execution, c *runti
 		keyID:         parent.keyID,
 		budgetGroupID: parent.budgetGroupID,
 		attribution:   parent.attribution,
+		endUserDigest: parent.endUserDigest,
 		userID:        parent.userID,
 		authority:     parent.authority,
 		affinity:      []byte(parent.keyID),
@@ -165,6 +166,9 @@ func (s *Server) predict(ctx context.Context, x *execution, slug, text string) (
 	failed := classification{failure: classifierFailed}
 	codec, _ := operationregistry.Lookup("tei-classification")
 	body, _ := json.Marshal(map[string]string{"inputs": text})
+	if x.snapshot().HasBodyLimits() {
+		x.request.body = &measuredBody{decoded: int64(len(body))}
+	}
 	x.unary = &unaryExecution{dialect: codec, route: slug, surface: "native", plans: map[string]*operationplan.Plan{}}
 	x.mode = "unary"
 	source, err := operationplan.Parse(codec.Identity.ID, body, int(s.cfg.MaxBodyBytes))
@@ -198,6 +202,9 @@ func (s *Server) predict(ctx context.Context, x *execution, slug, text string) (
 func (s *Server) generateLabel(ctx context.Context, x *execution, slug, text string) (classification, *outcome) {
 	failed := classification{failure: classifierFailed}
 	body, _ := json.Marshal(map[string]any{"model": slug, "messages": []map[string]string{{"role": "user", "content": text}}})
+	if x.snapshot().HasBodyLimits() {
+		x.request.body = &measuredBody{decoded: int64(len(body))}
+	}
 	parsed, err := protocols.Parse(openai.FamilyChat, body, "")
 	if err != nil {
 		return failed, &outcome{err: requestError(err)}
@@ -232,6 +239,6 @@ func (s *Server) admitClassifier(ctx context.Context, x *execution) *Error {
 	x.estimate = requestEstimate(x)
 	ttl := time.Duration(x.named().OverallTimeout) * time.Millisecond
 	var e *Error
-	x.lease, e = s.Admission.reserveKeyCosted(ctx, x.authority, x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority))
+	x.lease, e = s.Admission.reserveKeyCosted(ctx, x.admissionAuthority(x.authority), x.clientSurface(), keyReservationEstimate(x.estimate, s.dispatchableAttempts(x)), ttl, s.costReservation(x, x.authority), x.limitRoute())
 	return e
 }

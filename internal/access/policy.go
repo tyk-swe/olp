@@ -35,6 +35,7 @@ const (
 	LocalLogin
 	// ManagePlugins installs and approves provider plugins.
 	ManagePlugins
+	ManageOrganization
 	operationCount
 )
 
@@ -82,20 +83,21 @@ type rule struct {
 
 // policy is the whole management authorization table.
 var policy = [operationCount]rule{
-	Read:           {name: "read", roles: everyone, delegable: true},
-	Usage:          {name: "usage", roles: everyone, delegable: true},
-	Keys:           {name: "keys", roles: owner | operator | developer, delegable: true},
-	Playground:     {name: "playground", roles: owner | operator | developer, delegable: true},
-	Configure:      {name: "configure", roles: owner | operator, delegable: true},
-	Settings:       {name: "settings", roles: owner | operator, installation: true, delegable: true},
-	AccessRead:     {name: "access_read", roles: owner | operator, installation: true, delegable: true},
-	Access:         {name: "access", roles: owner, installation: true, delegable: true},
-	Self:           {name: "self", roles: everyone},
-	ManageSessions: {name: "manage_sessions", roles: owner, installation: true},
-	ManageTokens:   {name: "manage_tokens", roles: owner, installation: true},
-	ManageProjects: {name: "manage_projects", roles: owner, installation: true},
-	LocalLogin:     {name: "local_login", roles: owner, installation: true},
-	ManagePlugins:  {name: "manage_plugins", roles: owner, installation: true},
+	ManageOrganization: {name: "manage_organization", roles: owner | operator | developer, delegable: true},
+	Read:               {name: "read", roles: everyone, delegable: true},
+	Usage:              {name: "usage", roles: everyone, delegable: true},
+	Keys:               {name: "keys", roles: owner | operator | developer, delegable: true},
+	Playground:         {name: "playground", roles: owner | operator | developer, delegable: true},
+	Configure:          {name: "configure", roles: owner | operator, delegable: true},
+	Settings:           {name: "settings", roles: owner | operator, installation: true, delegable: true},
+	AccessRead:         {name: "access_read", roles: owner | operator, installation: true, delegable: true},
+	Access:             {name: "access", roles: owner, installation: true, delegable: true},
+	Self:               {name: "self", roles: everyone},
+	ManageSessions:     {name: "manage_sessions", roles: owner, installation: true},
+	ManageTokens:       {name: "manage_tokens", roles: owner, installation: true},
+	ManageProjects:     {name: "manage_projects", roles: owner, installation: true},
+	LocalLogin:         {name: "local_login", roles: owner, installation: true},
+	ManagePlugins:      {name: "manage_plugins", roles: owner, installation: true},
 }
 
 func (op Operation) rule() (rule, bool) {

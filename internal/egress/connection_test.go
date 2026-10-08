@@ -543,3 +543,26 @@ func TestConnectionKeepsDuplexUpgradeWritableAcrossCacheEviction(t *testing.T) {
 		t.Fatal("duplex output changed")
 	}
 }
+
+func TestEphemeralClientNeverReusesAuthenticatedConnections(t *testing.T) {
+	peers := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { peers <- r.RemoteAddr; w.Write([]byte("ok")) }))
+	defer server.Close()
+	client, err := loopbackConnections().EphemeralClient(nil, nil, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"first", "second"} {
+		req, _ := http.NewRequest("GET", server.URL, nil)
+		req.Header.Set("Authorization", "Bearer "+secret)
+		response, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, response.Body)
+		response.Body.Close()
+	}
+	if <-peers == <-peers {
+		t.Fatal("caller authentication reused a connection")
+	}
+}
