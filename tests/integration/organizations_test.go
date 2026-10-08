@@ -73,6 +73,19 @@ func TestOrganizationsPromoteMembershipAndBudgetsWithExplicitAuthority(t *testin
 	h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 409)
 	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("move-denied"), 409)
 	h.want(owner, "GET", "/api/v1/organizations/"+other["id"].(string)+"/projects/"+project["id"].(string), nil, nil, 404)
+	// A project the document creates in an organization is managed through it,
+	// with no direct grant to whoever applied the document.
+	document["projects"].([]any)[0].(map[string]any)["organization"] = "Promoted org"
+	document["projects"] = append(document["projects"].([]any), map[string]any{"name": "Declared team", "organization": "Promoted org"})
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("declared"), 200)
+	var organization string
+	var direct int
+	if err := h.Pool.QueryRow(t.Context(), "SELECT p.organization_id::text,(SELECT count(*) FROM olp.project_members m WHERE m.project_id=p.id) FROM olp.projects p WHERE p.name='Declared team'").Scan(&organization, &direct); err != nil {
+		t.Fatal(err)
+	}
+	if organization != org["id"] || direct != 0 {
+		t.Fatalf("declared project organization=%s direct members=%d", organization, direct)
+	}
 }
 
 func TestOrganizationMembershipIntersectionAndLastManager(t *testing.T) {

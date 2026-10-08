@@ -56,7 +56,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 		id, exists := projectIDs[key]
 		if !exists {
 			var err error
-			id, _, err = access.CreateProject(ctx, tx, project.Name, p.UserID())
+			id, err = createProject(ctx, tx, p, project.Name, project.Organization)
 			if err != nil {
 				return err
 			}

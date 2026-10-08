@@ -98,7 +98,10 @@ func nullableOrganizationPath(r *http.Request) *string {
 	}
 	return nil
 }
-func createProjectInOrganization(ctx context.Context, tx pgx.Tx, name, creator string, organization *string) (string, string, error) {
+
+// CreateProjectInOrganization creates a project its organization manages, or
+// one managed by its creator when it belongs to no organization.
+func CreateProjectInOrganization(ctx context.Context, tx pgx.Tx, name, creator string, organization *string) (string, string, error) {
 	if organization == nil {
 		return CreateProject(ctx, tx, name, creator)
 	}

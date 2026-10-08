@@ -151,3 +151,23 @@ func applyProjectOrganization(ctx context.Context, tx pgx.Tx, p access.Principal
 	_, err := access.AdvanceAuthority(ctx, tx)
 	return err
 }
+
+// createProject creates a project the document declares. One that names an
+// organization is created inside it, as the API creates one, so the
+// organization's managers manage it rather than a direct grant to whoever
+// applied the document, which would outlive their organization membership.
+func createProject(ctx context.Context, tx pgx.Tx, p access.Principal, name string, organization *string) (string, error) {
+	if organization == nil {
+		id, _, err := access.CreateProject(ctx, tx, name, p.UserID())
+		return id, err
+	}
+	var desired string
+	if err := tx.QueryRow(ctx, "SELECT id::text FROM olp.organizations WHERE lower(name)=lower($1)", *organization).Scan(&desired); err != nil {
+		return "", err
+	}
+	if err := p.Authorize(access.Access); err != nil {
+		return "", err
+	}
+	id, _, err := access.CreateProjectInOrganization(ctx, tx, name, p.UserID(), &desired)
+	return id, err
+}

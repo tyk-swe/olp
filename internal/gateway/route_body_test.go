@@ -157,3 +157,29 @@ func TestRouteBodyLimitCoversGeminiInteractions(t *testing.T) {
 		}
 	}
 }
+func TestRouteBodyLimitCoversMedia(t *testing.T) {
+	edit, editType := mediaMultipart(t, map[string]string{"model": routeSlug, "prompt": strings.Repeat("x", 1024)}, []byte("\x89PNG\r\n\x1a\n"))
+	video, videoType := mediaMultipart(t, map[string]string{"model": routeSlug, "prompt": strings.Repeat("x", 1024)})
+	for _, tc := range []struct {
+		name, path, contentType string
+		body                    []byte
+	}{
+		{"image", "/v1/images/generations", "application/json", []byte(`{"model":"` + routeSlug + `","prompt":"` + strings.Repeat("x", 1024) + `"}`)},
+		{"multipart", "/v1/images/edits", editType, edit},
+		{"video", "/v1/videos", videoType, video},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newMediaHarness(t)
+			routeBodyLimit(t, h.rt, routeSlug, int64(len(tc.body))-1)
+			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, tc.body, map[string]string{"Content-Type": tc.contentType})
+			data, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusRequestEntityTooLarge {
+				t.Fatalf("status=%d: %s", response.StatusCode, data)
+			}
+			if h.mock.count("a")+h.mock.count("b") != 0 {
+				t.Fatal("oversized body dispatched")
+			}
+		})
+	}
+}

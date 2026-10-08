@@ -78,7 +78,7 @@ func (s *Server) createProject(r *http.Request, _ Principal) (Reply, error) {
 	if err = ValidText("name", input.Name, 100); err != nil {
 		return Reply{}, err
 	}
-	id, etag, err := createProjectInOrganization(r.Context(), tx, input.Name, p.UserID(), nullableOrganizationPath(r))
+	id, etag, err := CreateProjectInOrganization(r.Context(), tx, input.Name, p.UserID(), nullableOrganizationPath(r))
 	if err != nil {
 		return Reply{}, err
 	}
