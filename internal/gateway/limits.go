@@ -203,16 +203,15 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 // leases for one settlement. Every refusal refunds earlier reservations. The
 // optional route identifies the ingress route for per-key route policy.
 func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
-	var named string
-	if len(route) > 0 {
-		named = route[0]
-	}
-	if callerCostBudgeted(authority, named) {
+	boundariesOnly := keyBoundariesOnly(authority)
+	// The boundary scan pays for itself only when durable accounting is wired;
+	// a nil Admission admits nothing at all.
+	if a != nil && a.CostAccountingReady != nil && admissionCostBoundaries(authority, route, boundariesOnly) {
 		if e := a.checkCostAccounting(ctx); e != nil {
 			return nil, e
 		}
 	}
-	if keyBoundariesOnly(authority) {
+	if boundariesOnly {
 		return a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold)
 	}
 	aggregate, err := a.reserveAggregateBudgets(ctx, authority, ttl, hold)
@@ -229,6 +228,10 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Auth
 		endUsers = aggregate
 	} else {
 		endUsers.Attach(aggregate)
+	}
+	var named string
+	if len(route) > 0 {
+		named = route[0]
 	}
 	routeLease, refusal := a.reserveRouteLimits(ctx, authority, named, estimate, ttl, hold)
 	if refusal != nil {
@@ -269,6 +272,22 @@ func (a *Admission) checkCostAccounting(ctx context.Context) *Error {
 func keyBoundariesOnly(authority *access.Authority) bool {
 	return authority.InstallationBudget == nil && authority.OrganizationBudget == nil && authority.ProjectBudget == nil && len(authority.ProjectAttributionBudgets) == 0 &&
 		authority.Policy.EndUserPolicy == nil && authority.ProjectEndUserPolicy == nil && len(authority.Policy.RouteLimits) == 0
+}
+
+// admissionCostBoundaries reports whether the request spends against any cost
+// boundary. A key without aggregate, end-user, or route policy can only still
+// spend its own and its budget group's cost allowances, which is all the cheap
+// check has to cover.
+func admissionCostBoundaries(authority *access.Authority, route []string, boundariesOnly bool) bool {
+	if boundariesOnly {
+		return authority.Policy.AdmissionLimits().CostBudgeted() ||
+			authority.BudgetGroupID != nil && authority.GroupLimits().CostBudgeted()
+	}
+	var named string
+	if len(route) > 0 {
+		named = route[0]
+	}
+	return callerCostBudgeted(authority, named)
 }
 
 func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {

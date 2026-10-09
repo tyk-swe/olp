@@ -1,6 +1,6 @@
 module github.com/tyk-swe/olp
 
-go 1.27.1
+go 1.27.2
 
 require (
 	cloud.google.com/go/auth v0.24.0

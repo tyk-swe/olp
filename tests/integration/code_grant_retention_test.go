@@ -58,10 +58,10 @@ func TestCodeAuthRefreshRetainsPublishedConnectionAfterSlotRotation(t *testing.T
 		}
 	}
 	draft := h.want(owner, "GET", path, nil, nil, 200)
-	configuration := draft["configuration"].(map[string]any)
-	configuration["options"] = map[string]any{"network": map[string]any{"proxy_url": "http://127.0.0.1:1"}}
+	// A credential-boundary edit is refused while a grant is live; a benign
+	// rename still proves the refresh survives provider revisions.
 	h.want(owner, "PATCH", path, map[string]any{
-		"name": draft["name"], "configuration": configuration,
+		"name": draft["name"].(string) + " retained", "configuration": draft["configuration"],
 	}, etagHeader(draft), 200)
 	dueNow(t, h, oldCredential)
 	if !pass(t, grantRefresher(t, h)) {

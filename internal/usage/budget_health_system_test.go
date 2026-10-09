@@ -127,3 +127,31 @@ func TestIntegrationBudgetAccountingRefusesStaleEpochWithoutDetector(t *testing.
 		t.Fatalf("resumed healthy heartbeat did not recover: %v", err)
 	}
 }
+
+func TestIntegrationBudgetAccountingRefusesUnconsumedBacklog(t *testing.T) {
+	pool := notificationPool(t)
+	old := time.Now().Add(-2 * EpochStaleAfter)
+	// A live consumer reporting entries pending past the stale window means
+	// durable usage is not reaching accounting; a version this build cannot
+	// decode stays pending until a compatible consumer processes it.
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health VALUES(true,1,0,$1,now())`, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); !errors.Is(err, ErrIncompleteBudgetAccounting) {
+		t.Fatalf("unconsumed backlog admitted: %v", err)
+	}
+	// A fresh pending entry is ordinary in-flight work, not lost usage.
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.request_metadata_consumer_health SET oldest_pending_at=now()`); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); err != nil {
+		t.Fatalf("fresh backlog blocked admission: %v", err)
+	}
+	// A stale check cannot speak for the group's pending entries.
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.request_metadata_consumer_health SET oldest_pending_at=$1, checked_at=$1`, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); err != nil {
+		t.Fatalf("stale health check blocked admission: %v", err)
+	}
+}

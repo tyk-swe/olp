@@ -95,6 +95,12 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 			if e := retainedContract(strict, current.Fidelity, use); e != nil {
 				return nil, nil, e
 			}
+		} else if res.Kind == resources.KindInteraction {
+			// An interaction's contract is the fidelity of the route that
+			// created it, so the pinned route supplies its strict side.
+			if e := retainedContract(route.Fidelity.Strict(), current.Fidelity, use); e != nil {
+				return nil, nil, e
+			}
 		}
 	}
 	if e := x.checkBody(route); e != nil {
@@ -114,7 +120,7 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 		return nil, nil, pinUnavailable()
 	}
 	if use == retainedNewWork {
-		if e := restrictRetainedWork(x.request.release.Snapshot, authority.ID, provider, route, slot, *target, operation); e != nil {
+		if e := restrictRetainedWork(x.request.release.Snapshot, authority.ID, provider, route, slot, target, operation); e != nil {
 			return nil, nil, e
 		}
 		if e := x.checkBody(route); e != nil {
@@ -204,7 +210,7 @@ func (s *Server) authorizeDurable(ctx context.Context, x *execution, authority a
 
 // Historical protocol and credential identity do not grant historical authority
 // to start fresh inference. Intersect that contract with the installed release.
-func restrictRetainedWork(current *runtime.Snapshot, keyID string, provider *runtime.Provider, route *runtime.Route, slot *runtime.Slot, target runtime.Target, operation string) *Error {
+func restrictRetainedWork(current *runtime.Snapshot, keyID string, provider *runtime.Provider, route *runtime.Route, slot *runtime.Slot, target *runtime.Target, operation string) *Error {
 	live, ok := current.Providers[provider.ID]
 	if !ok || !live.Enabled {
 		return pinUnavailable()
@@ -214,8 +220,14 @@ func restrictRetainedWork(current *runtime.Snapshot, keyID string, provider *run
 		return pinUnavailable()
 	}
 	foundTarget := false
-	for _, candidate := range liveRoute.Targets {
+	for i := range liveRoute.Targets {
+		candidate := &liveRoute.Targets[i]
 		if candidate.ProviderID == target.ProviderID && candidate.ProviderModel == target.ProviderModel && candidate.Shadow == nil {
+			// The current target's timeout bounds the retained attempt; the
+			// pinned contract can only tighten it further.
+			if candidate.Timeout > 0 && (target.Timeout <= 0 || candidate.Timeout < target.Timeout) {
+				target.Timeout = candidate.Timeout
+			}
 			foundTarget = true
 			break
 		}

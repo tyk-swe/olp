@@ -46,7 +46,7 @@ func TestRetainedNewWorkUsesCurrentRestrictions(t *testing.T) {
 				replaced.ID = "replacement"
 				snapshot.Routes[route.Slug] = replaced
 			}
-			err := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, target, "generation")
+			err := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, &target, "generation")
 			if (err == nil) != (change == "allowed") {
 				t.Fatalf("restriction %s: %v", change, err)
 			}
@@ -65,7 +65,7 @@ func TestRetainedNewWorkUsesTighterLimitsWithoutChangingCredential(t *testing.T)
 	live.Limits = &runtime.Limits{TokensPerMinute: &current}
 	live.Slots = []runtime.Slot{{ID: "slot", Enabled: true, TokensPerMinute: &current, MaxConcurrency: &old}}
 	snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{"provider": live}, Routes: map[string]runtime.Route{"route": route}}
-	if e := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, target, "generation"); e != nil {
+	if e := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, &target, "generation"); e != nil {
 		t.Fatal(e)
 	}
 	if *provider.Limits.TokensPerMinute != 10 || *slot.TokensPerMinute != 10 || *slot.MaxConcurrency != 10 || *slot.CredentialID != credential {
@@ -97,7 +97,7 @@ func TestRetainedNewWorkUsesCurrentPoliciesAndSupply(t *testing.T) {
 	live := runtime.Provider{ID: provider.ID, Enabled: true, Endpoint: "https://new.example/v1", ParameterDefaults: map[string]json.RawMessage{"max_tokens": json.RawMessage(`999`)}, Limits: &runtime.Limits{Supply: supply}, Slots: []runtime.Slot{{ID: slot.ID, Enabled: true, CredentialID: new("new-secret"), Supply: supply}}}
 	snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{provider.ID: live}, Routes: map[string]runtime.Route{route.Slug: liveRoute}}
 	beforeSnapshot, _ := json.Marshal(snapshot)
-	if e := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, target, "generation"); e != nil {
+	if e := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, &target, "generation"); e != nil {
 		t.Fatal(e)
 	}
 	if provider.Endpoint != "https://old.example/v1" || string(provider.ParameterDefaults["max_tokens"]) != "32" || *slot.CredentialID != credential {
@@ -112,5 +112,31 @@ func TestRetainedNewWorkUsesCurrentPoliciesAndSupply(t *testing.T) {
 	afterSnapshot, _ := json.Marshal(snapshot)
 	if string(beforeSnapshot) != string(afterSnapshot) {
 		t.Fatal("retained restriction mutated the installed snapshot")
+	}
+}
+
+func TestRetainedNewWorkClampsAttemptTimeoutToCurrentTarget(t *testing.T) {
+	target := runtime.Target{ProviderID: "provider", ProviderModel: "model", Timeout: 5000}
+	route := runtime.Route{ID: "route-id", Slug: "route", Operations: []string{"generation"}, Targets: []runtime.Target{target}}
+	liveRoute := route
+	liveRoute.Targets = []runtime.Target{{ProviderID: "provider", ProviderModel: "model", Timeout: 1000}}
+	provider := runtime.Provider{ID: "provider", Enabled: true, Slots: []runtime.Slot{{ID: "slot", Enabled: true}}}
+	slot := provider.Slots[0]
+	snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{"provider": provider}, Routes: map[string]runtime.Route{"route": liveRoute}}
+	if e := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, &target, "generation"); e != nil {
+		t.Fatal(e)
+	}
+	if target.Timeout != 1000 {
+		t.Fatalf("retained timeout not clamped to current target: %d", target.Timeout)
+	}
+	// A relaxed current timeout cannot loosen the pinned contract.
+	target.Timeout = 5000
+	liveRoute.Targets[0].Timeout = 9000
+	snapshot.Routes["route"] = liveRoute
+	if e := restrictRetainedWork(snapshot, "key", &provider, &route, &slot, &target, "generation"); e != nil {
+		t.Fatal(e)
+	}
+	if target.Timeout != 5000 {
+		t.Fatalf("current timeout loosened the pinned contract: %d", target.Timeout)
 	}
 }
