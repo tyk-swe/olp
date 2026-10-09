@@ -26,6 +26,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/signing"
+	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -61,6 +62,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	m.Access.Register(mux)
 	(&branding.Server{Access: m.Access}).Register(mux)
 	(&guardrails.Server{Access: m.Access}).Register(mux)
+	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)
 	catalogue := providers.New(m.Access, m.Egress, m.PluginHost)
 	catalogue.Unconfined = m.Unconfined

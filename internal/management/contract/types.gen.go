@@ -211,6 +211,7 @@ const (
 	BudgetIncreaseTargetKindOrganization   BudgetIncreaseTargetKind = "organization"
 	BudgetIncreaseTargetKindProject        BudgetIncreaseTargetKind = "project"
 	BudgetIncreaseTargetKindProjectEndUser BudgetIncreaseTargetKind = "project_end_user"
+	BudgetIncreaseTargetKindSink           BudgetIncreaseTargetKind = "sink"
 )
 
 // Valid indicates whether the value is a known member of the BudgetIncreaseTargetKind enum.
@@ -235,6 +236,8 @@ func (e BudgetIncreaseTargetKind) Valid() bool {
 	case BudgetIncreaseTargetKindProject:
 		return true
 	case BudgetIncreaseTargetKindProjectEndUser:
+		return true
+	case BudgetIncreaseTargetKindSink:
 		return true
 	default:
 		return false
@@ -794,6 +797,7 @@ const (
 	ConfigurationPlanItemKindProvider           ConfigurationPlanItemKind = "provider"
 	ConfigurationPlanItemKindRoute              ConfigurationPlanItemKind = "route"
 	ConfigurationPlanItemKindRouteTemplate      ConfigurationPlanItemKind = "route_template"
+	ConfigurationPlanItemKindSink               ConfigurationPlanItemKind = "sink"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationPlanItemKind enum.
@@ -820,6 +824,8 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 	case ConfigurationPlanItemKindRoute:
 		return true
 	case ConfigurationPlanItemKindRouteTemplate:
+		return true
+	case ConfigurationPlanItemKindSink:
 		return true
 	default:
 		return false
@@ -883,6 +889,45 @@ func (e ConfigurationSCIMGroupMappingRole) Valid() bool {
 	case ConfigurationSCIMGroupMappingRoleOwner:
 		return true
 	case ConfigurationSCIMGroupMappingRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationSinkStreams.
+const (
+	ConfigurationSinkStreamsAttempts           ConfigurationSinkStreams = "attempts"
+	ConfigurationSinkStreamsAudit              ConfigurationSinkStreams = "audit"
+	ConfigurationSinkStreamsGuardrailDecisions ConfigurationSinkStreams = "guardrail_decisions"
+	ConfigurationSinkStreamsRequests           ConfigurationSinkStreams = "requests"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationSinkStreams enum.
+func (e ConfigurationSinkStreams) Valid() bool {
+	switch e {
+	case ConfigurationSinkStreamsAttempts:
+		return true
+	case ConfigurationSinkStreamsAudit:
+		return true
+	case ConfigurationSinkStreamsGuardrailDecisions:
+		return true
+	case ConfigurationSinkStreamsRequests:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationSinkType.
+const (
+	ConfigurationSinkTypeHttps ConfigurationSinkType = "https"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationSinkType enum.
+func (e ConfigurationSinkType) Valid() bool {
+	switch e {
+	case ConfigurationSinkTypeHttps:
 		return true
 	default:
 		return false
@@ -1015,6 +1060,45 @@ const (
 func (e CreateGuardrailRequestType) Valid() bool {
 	switch e {
 	case CreateGuardrailRequestTypeBuiltinRegex:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateSinkRequestStreams.
+const (
+	CreateSinkRequestStreamsAttempts           CreateSinkRequestStreams = "attempts"
+	CreateSinkRequestStreamsAudit              CreateSinkRequestStreams = "audit"
+	CreateSinkRequestStreamsGuardrailDecisions CreateSinkRequestStreams = "guardrail_decisions"
+	CreateSinkRequestStreamsRequests           CreateSinkRequestStreams = "requests"
+)
+
+// Valid indicates whether the value is a known member of the CreateSinkRequestStreams enum.
+func (e CreateSinkRequestStreams) Valid() bool {
+	switch e {
+	case CreateSinkRequestStreamsAttempts:
+		return true
+	case CreateSinkRequestStreamsAudit:
+		return true
+	case CreateSinkRequestStreamsGuardrailDecisions:
+		return true
+	case CreateSinkRequestStreamsRequests:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateSinkRequestType.
+const (
+	CreateSinkRequestTypeHttps CreateSinkRequestType = "https"
+)
+
+// Valid indicates whether the value is a known member of the CreateSinkRequestType enum.
+func (e CreateSinkRequestType) Valid() bool {
+	switch e {
+	case CreateSinkRequestTypeHttps:
 		return true
 	default:
 		return false
@@ -2722,6 +2806,45 @@ func (e SimulationDialect) Valid() bool {
 	}
 }
 
+// Defines values for SinkResponseStreams.
+const (
+	SinkResponseStreamsAttempts           SinkResponseStreams = "attempts"
+	SinkResponseStreamsAudit              SinkResponseStreams = "audit"
+	SinkResponseStreamsGuardrailDecisions SinkResponseStreams = "guardrail_decisions"
+	SinkResponseStreamsRequests           SinkResponseStreams = "requests"
+)
+
+// Valid indicates whether the value is a known member of the SinkResponseStreams enum.
+func (e SinkResponseStreams) Valid() bool {
+	switch e {
+	case SinkResponseStreamsAttempts:
+		return true
+	case SinkResponseStreamsAudit:
+		return true
+	case SinkResponseStreamsGuardrailDecisions:
+		return true
+	case SinkResponseStreamsRequests:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SinkResponseType.
+const (
+	SinkResponseTypeHttps SinkResponseType = "https"
+)
+
+// Valid indicates whether the value is a known member of the SinkResponseType enum.
+func (e SinkResponseType) Valid() bool {
+	switch e {
+	case SinkResponseTypeHttps:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Surface.
 const (
 	SurfaceAnthropic Surface = "anthropic"
@@ -2788,6 +2911,30 @@ func (e UpdateApiKeyRequestEndUserSource) Valid() bool {
 	case UpdateApiKeyRequestEndUserSourceLessThannil:
 		return true
 	case UpdateApiKeyRequestEndUserSourceNative:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateSinkRequestStreams.
+const (
+	UpdateSinkRequestStreamsAttempts           UpdateSinkRequestStreams = "attempts"
+	UpdateSinkRequestStreamsAudit              UpdateSinkRequestStreams = "audit"
+	UpdateSinkRequestStreamsGuardrailDecisions UpdateSinkRequestStreams = "guardrail_decisions"
+	UpdateSinkRequestStreamsRequests           UpdateSinkRequestStreams = "requests"
+)
+
+// Valid indicates whether the value is a known member of the UpdateSinkRequestStreams enum.
+func (e UpdateSinkRequestStreams) Valid() bool {
+	switch e {
+	case UpdateSinkRequestStreamsAttempts:
+		return true
+	case UpdateSinkRequestStreamsAudit:
+		return true
+	case UpdateSinkRequestStreamsGuardrailDecisions:
+		return true
+	case UpdateSinkRequestStreamsRequests:
 		return true
 	default:
 		return false
@@ -4072,6 +4219,7 @@ type ConfigurationDocument struct {
 
 	// ScimGroupMappings Upsert role and project grants by group display name. Source IDs, external IDs, users and memberships stay local. Missing groups are created empty. Omission preserves destination mappings; an explicit empty grant set clears the named group. Export, plan, apply and replay containing these mappings additionally require installation Access.
 	ScimGroupMappings nullable.Nullable[[]ConfigurationSCIMGroupMapping] `json:"scim_group_mappings,omitempty"`
+	Sinks             *[]ConfigurationSink                               `json:"sinks,omitempty"`
 
 	// Templates Route templates; omitted when the installation declares none
 	Templates *[]ConfigurationTemplateEntry `json:"templates,omitempty"`
@@ -4320,6 +4468,24 @@ type ConfigurationSCIMGroupMappingProjectsRole string
 
 // ConfigurationSCIMGroupMappingRole defines model for ConfigurationSCIMGroupMapping.Role.
 type ConfigurationSCIMGroupMappingRole string
+
+// ConfigurationSink defines model for ConfigurationSink.
+type ConfigurationSink struct {
+	// CredentialRef Deterministic exported logical signing reference; destination bytes are supplied separately.
+	CredentialRef nullable.Nullable[string]  `json:"credential_ref,omitempty"`
+	Destination   string                     `json:"destination"`
+	Enabled       bool                       `json:"enabled"`
+	Name          string                     `json:"name"`
+	Project       nullable.Nullable[string]  `json:"project,omitempty"`
+	Streams       []ConfigurationSinkStreams `json:"streams"`
+	Type          ConfigurationSinkType      `json:"type"`
+}
+
+// ConfigurationSinkStreams defines model for ConfigurationSink.Streams.
+type ConfigurationSinkStreams string
+
+// ConfigurationSinkType defines model for ConfigurationSink.Type.
+type ConfigurationSinkType string
 
 // ConfigurationSlotEntry defines model for ConfigurationSlotEntry.
 type ConfigurationSlotEntry struct {
@@ -4780,6 +4946,24 @@ type CreateRouteDraftRequest struct {
 	Slug      string               `json:"slug"`
 	Targets   []RouteTargetRequest `json:"targets"`
 }
+
+// CreateSinkRequest defines model for CreateSinkRequest.
+type CreateSinkRequest struct {
+	// Credential HMAC signing credential; omitted updates retain it and null removes it.
+	Credential  nullable.Nullable[string]             `json:"credential,omitempty"`
+	Destination string                                `json:"destination"`
+	Enabled     bool                                  `json:"enabled"`
+	Name        string                                `json:"name"`
+	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	Streams     []CreateSinkRequestStreams            `json:"streams"`
+	Type        CreateSinkRequestType                 `json:"type"`
+}
+
+// CreateSinkRequestStreams defines model for CreateSinkRequest.Streams.
+type CreateSinkRequestStreams string
+
+// CreateSinkRequestType defines model for CreateSinkRequest.Type.
+type CreateSinkRequestType string
 
 // CredentialGrant What grant enrollment recorded on a credential version, and when the current access token of the grant beneath it expires. Grant material never leaves OLP.
 type CredentialGrant struct {
@@ -8509,6 +8693,38 @@ type SimulationRequest struct {
 // SimulationSemanticHeaders Profile-owned semantic headers for the hypothetical inference request. Authentication, credentials, routing and arbitrary transport headers are rejected. Values are always redacted in inspection output.
 type SimulationSemanticHeaders map[string]string
 
+// SinkListResponse defines model for SinkListResponse.
+type SinkListResponse struct {
+	Items      []SinkResponse            `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// SinkResponse defines model for SinkResponse.
+type SinkResponse struct {
+	Delivery struct {
+		Delivered       int64                        `json:"delivered"`
+		Expired         int64                        `json:"expired"`
+		Failed          int64                        `json:"failed"`
+		LastDeliveredAt nullable.Nullable[time.Time] `json:"last_delivered_at"`
+	} `json:"delivery"`
+	Destination   string                                `json:"destination"`
+	Enabled       bool                                  `json:"enabled"`
+	Etag          string                                `json:"etag"`
+	HasCredential bool                                  `json:"has_credential"`
+	Id            openapi_types.UUID                    `json:"id"`
+	Name          string                                `json:"name"`
+	ProjectId     nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	RetiredAt     nullable.Nullable[time.Time]          `json:"retired_at"`
+	Streams       []SinkResponseStreams                 `json:"streams"`
+	Type          SinkResponseType                      `json:"type"`
+}
+
+// SinkResponseStreams defines model for SinkResponse.Streams.
+type SinkResponseStreams string
+
+// SinkResponseType defines model for SinkResponse.Type.
+type SinkResponseType string
+
 // SkippedPrice A catalog price this installation cannot store, such as an unknown vendor or operation a newer catalog names.
 type SkippedPrice struct {
 	Model     string `json:"model"`
@@ -8831,6 +9047,19 @@ type UpdateRouteCatalogExposureRequest struct {
 type UpdateSettingRequest struct {
 	Value string `json:"value"`
 }
+
+// UpdateSinkRequest defines model for UpdateSinkRequest.
+type UpdateSinkRequest struct {
+	// Credential HMAC signing credential; omitted updates retain it and null removes it.
+	Credential  nullable.Nullable[string]  `json:"credential,omitempty"`
+	Destination string                     `json:"destination"`
+	Enabled     bool                       `json:"enabled"`
+	Name        string                     `json:"name"`
+	Streams     []UpdateSinkRequestStreams `json:"streams"`
+}
+
+// UpdateSinkRequestStreams defines model for UpdateSinkRequest.Streams.
+type UpdateSinkRequestStreams string
 
 // UpdateUserRoleRequest defines model for UpdateUserRoleRequest.
 type UpdateUserRoleRequest struct {
@@ -10341,6 +10570,32 @@ type SetupParams struct {
 	XOLPSetupToken string `json:"X-OLP-Setup-Token"`
 }
 
+// ListSinksParams defines parameters for ListSinks.
+type ListSinksParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateSinkParams defines parameters for CreateSink.
+type CreateSinkParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteSinkParams defines parameters for DeleteSink.
+type DeleteSinkParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// UpdateSinkParams defines parameters for UpdateSink.
+type UpdateSinkParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
 // UsageBreakdownParams defines parameters for UsageBreakdown.
 type UsageBreakdownParams struct {
 	Start      time.Time           `form:"start" json:"start"`
@@ -10825,6 +11080,12 @@ type UpdateSettingJSONRequestBody = UpdateSettingRequest
 
 // SetupJSONRequestBody defines body for Setup for application/json ContentType.
 type SetupJSONRequestBody = SetupRequest
+
+// CreateSinkJSONRequestBody defines body for CreateSink for application/json ContentType.
+type CreateSinkJSONRequestBody = CreateSinkRequest
+
+// UpdateSinkJSONRequestBody defines body for UpdateSink for application/json ContentType.
+type UpdateSinkJSONRequestBody = UpdateSinkRequest
 
 // PermitUnconfinedPluginJSONRequestBody defines body for PermitUnconfinedPlugin for application/json ContentType.
 type PermitUnconfinedPluginJSONRequestBody = UnconfinedPluginPermitRequest

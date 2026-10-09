@@ -1543,6 +1543,13 @@
             "items": {
               "$ref": "#/components/schemas/ConfigurationGuardrail"
             }
+          },
+          "sinks": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationSink"
+            }
           }
         },
         "required": [
@@ -1633,7 +1640,8 @@
               "route_template",
               "pricing",
               "catalog_publication",
-              "guardrail"
+              "guardrail",
+              "sink"
             ],
             "type": "string"
           }
@@ -17085,7 +17093,8 @@
               "project_end_user",
               "attribution",
               "organization",
-              "guardrail"
+              "guardrail",
+              "sink"
             ]
           },
           "id": {
@@ -19994,6 +20003,345 @@
           "type",
           "policy"
         ]
+      },
+      "CreateSinkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type",
+          "destination",
+          "streams",
+          "enabled"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "streams": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "requests",
+                "attempts",
+                "guardrail_decisions",
+                "audit"
+              ]
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "credential": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "writeOnly": true,
+            "description": "HMAC signing credential; omitted updates retain it and null removes it."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "https"
+            ]
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "UpdateSinkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "destination",
+          "streams",
+          "enabled"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "streams": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "requests",
+                "attempts",
+                "guardrail_decisions",
+                "audit"
+              ]
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "credential": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "writeOnly": true,
+            "description": "HMAC signing credential; omitted updates retain it and null removes it."
+          }
+        }
+      },
+      "SinkResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "type",
+          "destination",
+          "streams",
+          "enabled",
+          "has_credential",
+          "etag",
+          "retired_at",
+          "delivery"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "streams": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "requests",
+                "attempts",
+                "guardrail_decisions",
+                "audit"
+              ]
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "https"
+            ]
+          },
+          "has_credential": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string"
+          },
+          "retired_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delivery": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "delivered",
+              "failed",
+              "expired",
+              "last_delivered_at"
+            ],
+            "properties": {
+              "delivered": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "failed": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "expired": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "last_delivered_at": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "SinkListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SinkResponse"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ConfigurationSink": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type",
+          "destination",
+          "streams",
+          "enabled"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "streams": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "requests",
+                "attempts",
+                "guardrail_decisions",
+                "audit"
+              ]
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "https"
+            ]
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credential_ref": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Deterministic exported logical signing reference; destination bytes are supplied separately."
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -48855,6 +49203,456 @@
           },
           "404": {
             "description": "Not visible"
+          }
+        }
+      }
+    },
+    "/api/v1/sinks": {
+      "get": {
+        "operationId": "list_sinks",
+        "tags": [
+          "export-sinks"
+        ],
+        "summary": "list sinks",
+        "description": "Read visible export sink metadata; credentials are never returned.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SinkListResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller lacks authority"
+          },
+          "404": {
+            "description": "Resource not visible"
+          },
+          "409": {
+            "description": "Conflicting retained state"
+          },
+          "412": {
+            "description": "Stale resource ETag"
+          },
+          "422": {
+            "description": "Invalid sink definition"
+          },
+          "428": {
+            "description": "Observed If-Match required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_sink",
+        "tags": [
+          "export-sinks"
+        ],
+        "summary": "create sink",
+        "description": "Manage a content-free export sink through ordinary scope authority, ETags, idempotency and audit.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SinkResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller lacks authority"
+          },
+          "404": {
+            "description": "Resource not visible"
+          },
+          "409": {
+            "description": "Conflicting retained state"
+          },
+          "412": {
+            "description": "Stale resource ETag"
+          },
+          "422": {
+            "description": "Invalid sink definition"
+          },
+          "428": {
+            "description": "Observed If-Match required"
+          }
+        }
+      }
+    },
+    "/api/v1/sinks/{sink_id}": {
+      "get": {
+        "operationId": "get_sink",
+        "tags": [
+          "export-sinks"
+        ],
+        "summary": "get sink",
+        "description": "Read visible export sink metadata; credentials are never returned.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sink_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SinkResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller lacks authority"
+          },
+          "404": {
+            "description": "Resource not visible"
+          },
+          "409": {
+            "description": "Conflicting retained state"
+          },
+          "412": {
+            "description": "Stale resource ETag"
+          },
+          "422": {
+            "description": "Invalid sink definition"
+          },
+          "428": {
+            "description": "Observed If-Match required"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_sink",
+        "tags": [
+          "export-sinks"
+        ],
+        "summary": "update sink",
+        "description": "Manage a content-free export sink through ordinary scope authority, ETags, idempotency and audit.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sink_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SinkResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller lacks authority"
+          },
+          "404": {
+            "description": "Resource not visible"
+          },
+          "409": {
+            "description": "Conflicting retained state"
+          },
+          "412": {
+            "description": "Stale resource ETag"
+          },
+          "422": {
+            "description": "Invalid sink definition"
+          },
+          "428": {
+            "description": "Observed If-Match required"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_sink",
+        "tags": [
+          "export-sinks"
+        ],
+        "summary": "delete sink",
+        "description": "Manage a content-free export sink through ordinary scope authority, ETags, idempotency and audit.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sink_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful operation"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller lacks authority"
+          },
+          "404": {
+            "description": "Resource not visible"
+          },
+          "409": {
+            "description": "Conflicting retained state"
+          },
+          "412": {
+            "description": "Stale resource ETag"
+          },
+          "422": {
+            "description": "Invalid sink definition"
+          },
+          "428": {
+            "description": "Observed If-Match required"
           }
         }
       }

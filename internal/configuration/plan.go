@@ -309,6 +309,9 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		return nil, access.Fail(422, "unsupported_api_version", "The artifact declares an unsupported api_version.")
 	}
 	normalizeDocument(doc)
+	if err := s.validateSinks(doc); err != nil {
+		return nil, err
+	}
 	if err := validateGuardrails(doc); err != nil {
 		return nil, err
 	}
@@ -657,6 +660,13 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 
 func validateBindings(doc *Document, bindings bindingSet) error {
 	refs, grants := map[string]bool{}, map[string]bool{}
+	sinkRefs := map[string]bool{}
+	for _, entry := range doc.Sinks {
+		if entry.CredentialRef != nil {
+			refs[*entry.CredentialRef] = true
+			sinkRefs[*entry.CredentialRef] = true
+		}
+	}
 	for _, p := range doc.Providers {
 		if p.NetworkCredentialRef != nil {
 			refs[*p.NetworkCredentialRef] = true
@@ -669,6 +679,12 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 		}
 	}
 	for name, secret := range bindings {
+		if sinkRefs[name] {
+			if secret.reference != nil || len(secret.secret) < 1 || len(secret.secret) > 4096 {
+				return access.Invalid("secret_bindings", "Sink signing credentials require 1–4096 sealed bytes.")
+			}
+			continue
+		}
 		if grants[name] {
 			return access.Invalid("secret_bindings."+name, grantBindingRefused)
 		}
@@ -725,6 +741,9 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 	}
 	state, err := loadState(ctx, q)
 	if err != nil {
+		return nil, err
+	}
+	if err = s.planSinks(ctx, q, doc, bindings, result); err != nil {
 		return nil, err
 	}
 	if err = planGuardrails(ctx, q, doc, state, result); err != nil {

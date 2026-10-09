@@ -19,6 +19,7 @@ import (
 const APIVersion = "openllmproxy.dev/config/v1"
 
 type Document struct {
+	Sinks             []SinkEntry            `json:"sinks,omitempty"`
 	Guardrails        []GuardrailEntry       `json:"guardrails,omitempty"`
 	SAML              *access.SAMLDefinition `json:"saml,omitempty"`
 	RequireLocalMFA   *bool                  `json:"require_local_mfa,omitempty"`
@@ -286,6 +287,13 @@ func sortCapabilities(c []CapabilityEntry) {
 }
 
 func (d *Document) canonicalize() {
+	slices.SortFunc(d.Sinks, func(a, b SinkEntry) int {
+		ka, kb := sinkKey(a), sinkKey(b)
+		if c := strings.Compare(ka[0], kb[0]); c != 0 {
+			return c
+		}
+		return strings.Compare(ka[1], kb[1])
+	})
 	slices.SortFunc(d.Guardrails, func(a, b GuardrailEntry) int {
 		if order := strings.Compare(strings.ToLower(a.Project), strings.ToLower(b.Project)); order != 0 {
 			return order

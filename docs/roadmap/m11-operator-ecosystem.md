@@ -295,3 +295,13 @@ policy-copy publication, foreign saved-plan refusal, and history-preserving
 retirement pass. The complete ten-resource SDK-matched disposable acceptance
 suite passes. Sinks and MCP servers remain before the full Terraform exit
 criterion is satisfied.
+
+Content-free sink prerequisites are implemented in `0052_export_sinks.sql`,
+`internal/sinks`, and configuration promotion. Live tests prove atomic source
+queuing, replay suppression, project isolation, signed stable retries, pricing
+correction events, expired-gap counters, audit-field privacy, retirement cleanup,
+and destination-secret promotion with unchanged ETag reuse. The strengthened
+three-test service suite passed under race in 13.759 seconds. Ordinary management,
+isolation, and every generated SDK/CLI/MCP machine-authorization sweep passed in
+188.450 seconds; focused races and the full local gate pass. Terraform sink
+lifecycle qualification is still pending.

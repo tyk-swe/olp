@@ -28,6 +28,7 @@ var WorkerTasks = []WorkerTask{
 	{Name: string(usage.TaskMaintenance), StaleAfter: 180},
 	{Name: string(usage.TaskCostReconciliation), StaleAfter: 180},
 	{Name: string(usage.TaskNotificationDelivery), StaleAfter: 180},
+	{Name: string(usage.TaskExportDelivery), StaleAfter: 180},
 	{Name: string(usage.TaskGrantRefresh), StaleAfter: 20},
 	{Name: string(usage.TaskHealthProbes), StaleAfter: 180},
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -32,6 +33,8 @@ import (
 func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, pluginHost *plugins.Host, prober *gateway.Server, keys *secrets.KeyRing, installation, region string, policy *egress.Policy, log *slog.Logger) func() {
 	ctx = usage.WithWorkerRegion(ctx, region)
 	var wg sync.WaitGroup
+	exporter := &sinks.Worker{Pool: pool, Keys: keys, Installation: installation, Egress: policy}
+	wg.Go(func() { exporter.Run(ctx, log) })
 	wg.Go(func() { mediaService.RunReconciler(ctx) })
 	// Grant refresh needs only PostgreSQL and the providers' network paths.
 	refresher := &grants.Refresher{Pool: pool, Keys: keys, Installation: installation, Plugins: pluginHost, Egress: policy, Log: log}
