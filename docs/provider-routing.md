@@ -282,6 +282,16 @@ when another replica has reclaimed the job.
 
 ## Routes
 
+Automation can create a published route with `POST /api/v1/routes` and replace
+its configuration with `PUT /api/v1/routes/{route_id}`. Both validate and publish
+an immutable revision in one transaction using the same checks as console draft
+activation. Creation refuses an existing slug; replacement requires the observed
+published ETag and retains its slug, project, and routing policy. Each successful
+write retains a revision source draft and leaves independent console drafts
+untouched. Failed validation rolls back the draft, revision and runtime release;
+replaying the same Idempotency-Key returns the original result. Published route
+reads return their own ETag. Retirement preserves revision and accounting history.
+
 Route drafts carry a slug, allowed operations (default `generation`), an overall
 deadline, an attempt budget, and 1–64 targets with priority, weight, and
 timeout. Supported operations also include `token_count`, `embeddings`,

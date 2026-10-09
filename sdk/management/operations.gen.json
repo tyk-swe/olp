@@ -5590,6 +5590,624 @@
     }
   },
   {
+    "name": "create_route",
+    "group": "routes",
+    "method": "POST",
+    "path": "/api/v1/routes",
+    "description": "Create and publish a route atomically",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/CreateRouteDraftRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "CreateRouteDraftRequest": {
+          "properties": {
+            "content_policy": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ContentPolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "max_attempts": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "operations": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "overall_timeout_ms": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "project_id": {
+              "description": "Owning project; omit or null for an installation-wide route. Required for assigned principals.",
+              "format": "uuid",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "slug": {
+              "type": "string"
+            },
+            "targets": {
+              "items": {
+                "$ref": "#/$defs/RouteTargetRequest"
+              },
+              "type": "array"
+            },
+            "fidelity": {
+              "description": "Omit, or send null, to declare a strict route.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/RouteFidelity"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fallbacks": {
+              "description": "Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.",
+              "items": {
+                "$ref": "#/$defs/RouteFallback"
+              },
+              "maxItems": 4,
+              "type": "array"
+            },
+            "selectors": {
+              "description": "Ordered request selectors; the first match wins.",
+              "items": {
+                "$ref": "#/$defs/RouteSelector"
+              },
+              "maxItems": 16,
+              "type": "array"
+            },
+            "retry": {
+              "$ref": "#/$defs/RouteRetry"
+            },
+            "affinity": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/RouteAffinity"
+                }
+              ]
+            },
+            "budget": {
+              "description": "Spend cap of the route itself.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/SpendCap"
+                }
+              ]
+            },
+            "max_body_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 1073741824,
+              "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+            },
+            "caller_cost_exempt": {
+              "type": "boolean",
+              "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+            }
+          },
+          "required": [
+            "slug",
+            "overall_timeout_ms",
+            "max_attempts",
+            "targets"
+          ],
+          "type": "object"
+        },
+        "ContentPolicy": {
+          "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
+          "properties": {
+            "rules": {
+              "items": {
+                "$ref": "#/$defs/ContentPolicyRule"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "rules"
+          ],
+          "type": "object"
+        },
+        "ContentPolicyRule": {
+          "properties": {
+            "action": {
+              "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
+              "enum": [
+                "block",
+                "redact"
+              ],
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "pattern": {
+              "description": "Go RE2 expression; must not match the empty string.",
+              "type": "string"
+            },
+            "phase": {
+              "enum": [
+                "input",
+                "output"
+              ],
+              "type": "string"
+            },
+            "replacement": {
+              "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "phase",
+            "pattern",
+            "action"
+          ],
+          "type": "object"
+        },
+        "RouteTargetRequest": {
+          "properties": {
+            "priority": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "provider_model": {
+              "type": "string"
+            },
+            "timeout_ms": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "weight": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tags": {
+              "description": "Labels selectors choose targets by.",
+              "items": {
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$",
+                "type": "string"
+              },
+              "maxItems": 8,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "shadow": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/ShadowTarget"
+                }
+              ]
+            }
+          },
+          "required": [
+            "provider_id",
+            "provider_model",
+            "priority",
+            "weight",
+            "timeout_ms"
+          ],
+          "type": "object"
+        },
+        "ShadowTarget": {
+          "additionalProperties": false,
+          "description": "Mirrors the sampled share of requests to this target after admission. The caller's response never comes from it.",
+          "properties": {
+            "sample_rate": {
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "type": "number"
+            }
+          },
+          "required": [
+            "sample_rate"
+          ],
+          "type": "object"
+        },
+        "RouteFidelity": {
+          "additionalProperties": false,
+          "description": "Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.",
+          "properties": {
+            "mode": {
+              "default": "strict",
+              "description": "Strict preserves execution, observation, permitted continuation and effects relative to the selected target's native invocation. Transformed permits changing an invocation or its observed result, such as translating between dialects or redacting content. Native identity and qualified interaction are per-plan classes.",
+              "enum": [
+                "strict",
+                "transformed"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "RouteFallback": {
+          "additionalProperties": false,
+          "properties": {
+            "route": {
+              "maxLength": 100,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "type": "string"
+            },
+            "on": {
+              "items": {
+                "$ref": "#/$defs/FallbackCondition"
+              },
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "route",
+            "on"
+          ],
+          "type": "object"
+        },
+        "FallbackCondition": {
+          "description": "exhausted: every attempt failed with a retryable class. context_window, content_filter, rate_limit: the route ended on that failure class. budget: a supply-side spend cap removed or refused the route's targets.",
+          "enum": [
+            "exhausted",
+            "context_window",
+            "content_filter",
+            "rate_limit",
+            "budget"
+          ],
+          "type": "string"
+        },
+        "RouteSelector": {
+          "additionalProperties": false,
+          "description": "The first selector whose predicate matches chooses the targets carrying any of its tags, or delegates the request to another route.",
+          "properties": {
+            "id": {
+              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+              "type": "string"
+            },
+            "when": {
+              "$ref": "#/$defs/SelectorPredicate"
+            },
+            "tags": {
+              "items": {
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$",
+                "type": "string"
+              },
+              "maxItems": 8,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "route": {
+              "description": "Delegates matching requests to this route instead of choosing tags.",
+              "maxLength": 100,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "when"
+          ],
+          "type": "object"
+        },
+        "SelectorPredicate": {
+          "additionalProperties": false,
+          "description": "Conjunction of request features the gateway computes during admission. Every stated condition must hold; attribution labels never take part.",
+          "properties": {
+            "operations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "min_input_tokens": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "max_input_tokens": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "min_output_tokens": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "max_output_tokens": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "streaming": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "tools": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "structured_output": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "modalities": {
+              "description": "Matches when the input carries any of these modalities.",
+              "items": {
+                "enum": [
+                  "text",
+                  "image",
+                  "audio",
+                  "video",
+                  "file"
+                ],
+                "type": "string"
+              },
+              "maxItems": 5,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "reasoning_effort": {
+              "items": {
+                "pattern": "^[a-z]{1,16}$",
+                "type": "string"
+              },
+              "maxItems": 16,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "classifier": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/ClassifierPredicate"
+                }
+              ]
+            },
+            "plugin": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PluginPredicate"
+                }
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "ClassifierPredicate": {
+          "additionalProperties": false,
+          "description": "Sends the request text to another OLP route and tests the label it returns: a classification route's top label, or a generation route's reply. The call is an accounted request with its own deadline; a failure falls through to the next selector.",
+          "properties": {
+            "route": {
+              "maxLength": 100,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "type": "string"
+            },
+            "labels": {
+              "items": {
+                "maxLength": 64,
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "min_score": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "timeout_ms": {
+              "format": "int64",
+              "maximum": 30000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "route",
+            "labels",
+            "timeout_ms"
+          ],
+          "type": "object"
+        },
+        "PluginPredicate": {
+          "additionalProperties": false,
+          "description": "Runs the route_predicate hook of an approved, confined plugin over the request features. It can only narrow the candidate set.",
+          "properties": {
+            "digest": {
+              "description": "SHA-256 digest of an approved confined plugin exporting route_predicate",
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "digest"
+          ],
+          "type": "object"
+        },
+        "RouteRetry": {
+          "additionalProperties": {
+            "$ref": "#/$defs/RetryRule"
+          },
+          "description": "Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.",
+          "propertyNames": {
+            "enum": [
+              "connect",
+              "timeout",
+              "rate_limit",
+              "upstream_server"
+            ]
+          },
+          "type": "object"
+        },
+        "RetryRule": {
+          "additionalProperties": false,
+          "properties": {
+            "max_retries": {
+              "maximum": 10,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "base_backoff_ms": {
+              "format": "int64",
+              "maximum": 60000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "max_backoff_ms": {
+              "format": "int64",
+              "maximum": 60000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "respect_retry_after": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "max_retries",
+            "base_backoff_ms",
+            "max_backoff_ms",
+            "respect_retry_after"
+          ],
+          "type": "object"
+        },
+        "RouteAffinity": {
+          "additionalProperties": false,
+          "description": "Keeps requests that carry the same session key on the same target and slot while it stays eligible, by hashing the key into the rendezvous seed.",
+          "properties": {
+            "source": {
+              "enum": [
+                "label",
+                "cache_key"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "description": "Attribution label carrying the session key when source is label.",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "type": "object"
+        },
+        "SpendCap": {
+          "additionalProperties": false,
+          "description": "Daily and monthly cost caps. An exhausted cap removes its owner from selection.",
+          "properties": {
+            "daily_cost_limit": {
+              "description": "Exact decimal amount in the installation currency.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "monthly_cost_limit": {
+              "description": "Exact decimal amount in the installation currency.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
     "name": "create_route_draft",
     "group": "routes",
     "method": "POST",
@@ -26301,6 +26919,639 @@
           "required": [
             "interval_seconds"
           ],
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "update_route",
+    "group": "routes",
+    "method": "PUT",
+    "path": "/api/v1/routes/{route_id}",
+    "description": "Replace published route configuration atomically",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "route_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "route_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "route_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/UpdatePublishedRouteRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "UpdatePublishedRouteRequest": {
+          "properties": {
+            "content_policy": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ContentPolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "max_attempts": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "operations": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "overall_timeout_ms": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "slug": {
+              "type": "string",
+              "description": "The published slug is immutable."
+            },
+            "targets": {
+              "items": {
+                "$ref": "#/$defs/ReplaceRouteTargetRequest"
+              },
+              "type": "array"
+            },
+            "fidelity": {
+              "description": "Omit, or send null, to declare a strict route.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/RouteFidelity"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fallbacks": {
+              "description": "Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.",
+              "items": {
+                "$ref": "#/$defs/RouteFallback"
+              },
+              "maxItems": 4,
+              "type": "array"
+            },
+            "selectors": {
+              "description": "Ordered request selectors; the first match wins.",
+              "items": {
+                "$ref": "#/$defs/RouteSelector"
+              },
+              "maxItems": 16,
+              "type": "array"
+            },
+            "retry": {
+              "$ref": "#/$defs/RouteRetry"
+            },
+            "affinity": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/RouteAffinity"
+                }
+              ]
+            },
+            "budget": {
+              "description": "Spend cap of the route itself.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/SpendCap"
+                }
+              ]
+            },
+            "max_body_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 1073741824,
+              "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+            },
+            "caller_cost_exempt": {
+              "type": "boolean",
+              "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+            }
+          },
+          "required": [
+            "slug",
+            "operations",
+            "overall_timeout_ms",
+            "max_attempts",
+            "targets"
+          ],
+          "type": "object"
+        },
+        "ContentPolicy": {
+          "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
+          "properties": {
+            "rules": {
+              "items": {
+                "$ref": "#/$defs/ContentPolicyRule"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "rules"
+          ],
+          "type": "object"
+        },
+        "ContentPolicyRule": {
+          "properties": {
+            "action": {
+              "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
+              "enum": [
+                "block",
+                "redact"
+              ],
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "pattern": {
+              "description": "Go RE2 expression; must not match the empty string.",
+              "type": "string"
+            },
+            "phase": {
+              "enum": [
+                "input",
+                "output"
+              ],
+              "type": "string"
+            },
+            "replacement": {
+              "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "phase",
+            "pattern",
+            "action"
+          ],
+          "type": "object"
+        },
+        "ReplaceRouteTargetRequest": {
+          "properties": {
+            "priority": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "provider_model_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "timeout_ms": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "weight": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "tags": {
+              "description": "Labels selectors choose targets by.",
+              "items": {
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$",
+                "type": "string"
+              },
+              "maxItems": 8,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "shadow": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/ShadowTarget"
+                }
+              ]
+            }
+          },
+          "required": [
+            "provider_model_id",
+            "priority",
+            "weight",
+            "timeout_ms"
+          ],
+          "type": "object"
+        },
+        "ShadowTarget": {
+          "additionalProperties": false,
+          "description": "Mirrors the sampled share of requests to this target after admission. The caller's response never comes from it.",
+          "properties": {
+            "sample_rate": {
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "type": "number"
+            }
+          },
+          "required": [
+            "sample_rate"
+          ],
+          "type": "object"
+        },
+        "RouteFidelity": {
+          "additionalProperties": false,
+          "description": "Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.",
+          "properties": {
+            "mode": {
+              "default": "strict",
+              "description": "Strict preserves execution, observation, permitted continuation and effects relative to the selected target's native invocation. Transformed permits changing an invocation or its observed result, such as translating between dialects or redacting content. Native identity and qualified interaction are per-plan classes.",
+              "enum": [
+                "strict",
+                "transformed"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "RouteFallback": {
+          "additionalProperties": false,
+          "properties": {
+            "route": {
+              "maxLength": 100,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "type": "string"
+            },
+            "on": {
+              "items": {
+                "$ref": "#/$defs/FallbackCondition"
+              },
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "route",
+            "on"
+          ],
+          "type": "object"
+        },
+        "FallbackCondition": {
+          "description": "exhausted: every attempt failed with a retryable class. context_window, content_filter, rate_limit: the route ended on that failure class. budget: a supply-side spend cap removed or refused the route's targets.",
+          "enum": [
+            "exhausted",
+            "context_window",
+            "content_filter",
+            "rate_limit",
+            "budget"
+          ],
+          "type": "string"
+        },
+        "RouteSelector": {
+          "additionalProperties": false,
+          "description": "The first selector whose predicate matches chooses the targets carrying any of its tags, or delegates the request to another route.",
+          "properties": {
+            "id": {
+              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+              "type": "string"
+            },
+            "when": {
+              "$ref": "#/$defs/SelectorPredicate"
+            },
+            "tags": {
+              "items": {
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$",
+                "type": "string"
+              },
+              "maxItems": 8,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "route": {
+              "description": "Delegates matching requests to this route instead of choosing tags.",
+              "maxLength": 100,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "when"
+          ],
+          "type": "object"
+        },
+        "SelectorPredicate": {
+          "additionalProperties": false,
+          "description": "Conjunction of request features the gateway computes during admission. Every stated condition must hold; attribution labels never take part.",
+          "properties": {
+            "operations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "min_input_tokens": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "max_input_tokens": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "min_output_tokens": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "max_output_tokens": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "streaming": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "tools": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "structured_output": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "modalities": {
+              "description": "Matches when the input carries any of these modalities.",
+              "items": {
+                "enum": [
+                  "text",
+                  "image",
+                  "audio",
+                  "video",
+                  "file"
+                ],
+                "type": "string"
+              },
+              "maxItems": 5,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "reasoning_effort": {
+              "items": {
+                "pattern": "^[a-z]{1,16}$",
+                "type": "string"
+              },
+              "maxItems": 16,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "classifier": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/ClassifierPredicate"
+                }
+              ]
+            },
+            "plugin": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PluginPredicate"
+                }
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "ClassifierPredicate": {
+          "additionalProperties": false,
+          "description": "Sends the request text to another OLP route and tests the label it returns: a classification route's top label, or a generation route's reply. The call is an accounted request with its own deadline; a failure falls through to the next selector.",
+          "properties": {
+            "route": {
+              "maxLength": 100,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "type": "string"
+            },
+            "labels": {
+              "items": {
+                "maxLength": 64,
+                "type": "string"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "min_score": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "timeout_ms": {
+              "format": "int64",
+              "maximum": 30000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "route",
+            "labels",
+            "timeout_ms"
+          ],
+          "type": "object"
+        },
+        "PluginPredicate": {
+          "additionalProperties": false,
+          "description": "Runs the route_predicate hook of an approved, confined plugin over the request features. It can only narrow the candidate set.",
+          "properties": {
+            "digest": {
+              "description": "SHA-256 digest of an approved confined plugin exporting route_predicate",
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "digest"
+          ],
+          "type": "object"
+        },
+        "RouteRetry": {
+          "additionalProperties": {
+            "$ref": "#/$defs/RetryRule"
+          },
+          "description": "Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.",
+          "propertyNames": {
+            "enum": [
+              "connect",
+              "timeout",
+              "rate_limit",
+              "upstream_server"
+            ]
+          },
+          "type": "object"
+        },
+        "RetryRule": {
+          "additionalProperties": false,
+          "properties": {
+            "max_retries": {
+              "maximum": 10,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "base_backoff_ms": {
+              "format": "int64",
+              "maximum": 60000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "max_backoff_ms": {
+              "format": "int64",
+              "maximum": 60000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "respect_retry_after": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "max_retries",
+            "base_backoff_ms",
+            "max_backoff_ms",
+            "respect_retry_after"
+          ],
+          "type": "object"
+        },
+        "RouteAffinity": {
+          "additionalProperties": false,
+          "description": "Keeps requests that carry the same session key on the same target and slot while it stays eligible, by hashing the key into the rendezvous seed.",
+          "properties": {
+            "source": {
+              "enum": [
+                "label",
+                "cache_key"
+              ],
+              "type": "string"
+            },
+            "label": {
+              "description": "Attribution label carrying the session key when source is label.",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "type": "object"
+        },
+        "SpendCap": {
+          "additionalProperties": false,
+          "description": "Daily and monthly cost caps. An exhausted cap removes its owner from selection.",
+          "properties": {
+            "daily_cost_limit": {
+              "description": "Exact decimal amount in the installation currency.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "monthly_cost_limit": {
+              "description": "Exact decimal amount in the installation currency.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
           "type": "object"
         }
       }

@@ -178,7 +178,7 @@ var sweepRefinements = map[string]bool{
 // would refine assigned callers the route itself admits.
 func sweepBody(pattern, projectID string) any {
 	switch pattern {
-	case "POST /api/v1/route-drafts", "POST /api/v1/route-templates", "POST /api/v1/notifications/destinations", "POST /api/v1/notifications/rules":
+	case "POST /api/v1/routes", "POST /api/v1/route-drafts", "POST /api/v1/route-templates", "POST /api/v1/notifications/destinations", "POST /api/v1/notifications/rules":
 		return map[string]any{"project_id": projectID}
 	}
 	if strings.HasPrefix(pattern, "GET ") {

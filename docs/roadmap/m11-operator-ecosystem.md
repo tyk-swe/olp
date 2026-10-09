@@ -242,3 +242,13 @@ credential validation, and refuse an externally edited provider during a saved
 destruction plan. Atomic parent transition metadata survives idempotent replay.
 The seven-type acceptance suite passes against the SDK-pinned OLP binary; the
 complete twelve-resource exit criterion remains pending.
+
+Published-route automation prerequisites are qualified by
+`TestPublishedRouteWritesAreConditionalAtomicAndPreserveIndependentDrafts` and
+`TestPublishedRouteReplacementPreservesItsPolicy`: create/replace publish through
+the console's validation and promotion in one transaction; missing/stale
+preconditions refuse, failed writes leave no draft/revision/release change,
+replays preserve identity and audit counts, independent drafts remain untouched,
+and the serving snapshot preserves existing policy. Full local checks, focused
+races and the complete management/generated-client/MCP authorization sweeps pass.
+Terraform route qualification remains pending until both engine lifecycles pass.

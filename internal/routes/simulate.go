@@ -393,6 +393,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/route-drafts/{draft_id}/activate", s.activateDraft)
 	s.Access.Route(mux, "POST /api/v1/route-drafts/{draft_id}/simulate", s.simulateDraft, access.MaxBody(1<<20))
 	s.Access.Route(mux, "GET /api/v1/routes", s.routes)
+	s.Access.Route(mux, "POST /api/v1/routes", s.createRoute)
+	s.Access.Route(mux, "PUT /api/v1/routes/{route_id}", s.updateRoute)
 	s.Access.Route(mux, "GET /api/v1/routes/{route_id}", s.route)
 	s.Access.Route(mux, "POST /api/v1/routes/{route_id}/retire", s.retireRoute)
 	s.Access.Route(mux, "GET /api/v1/routes/{route_id}/revisions", s.revisions)

@@ -55,6 +55,13 @@ Key creation and rotation return their one-time secret, matching the API.
 Keep that output out of CI logs, or use `--output` and store the file securely.
 Error messages exclude server-controlled request details.
 
+### Published route lifecycle
+
+`routes create` and `routes update` publish a validated route revision atomically.
+Use `routes create-draft` and `routes update-draft` for editable console drafts.
+Published updates require the observed published ETag and an Idempotency-Key;
+they retain the current routing policy and preserve independent drafts.
+
 ### Provider and credential-slot lifecycle
 
 `olp api delete_provider PROVIDER_ID --if-match ETAG` removes an unused draft

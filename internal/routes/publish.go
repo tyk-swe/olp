@@ -446,7 +446,7 @@ func (s *Server) route(r *http.Request, p access.Principal) (access.Reply, error
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.OK(item), nil
+	return access.Detail(item, row.ETag), nil
 }
 
 func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, error) {

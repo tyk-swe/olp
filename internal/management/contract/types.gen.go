@@ -8665,6 +8665,40 @@ type UpdateProviderRequest struct {
 	Name          string                `json:"name"`
 }
 
+// UpdatePublishedRouteRequest defines model for UpdatePublishedRouteRequest.
+type UpdatePublishedRouteRequest struct {
+	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
+
+	// Budget Spend cap of the route itself.
+	Budget nullable.Nullable[SpendCap] `json:"budget,omitempty"`
+
+	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
+	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
+	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+
+	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
+	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
+
+	// Fidelity Omit, or send null, to declare a strict route.
+	Fidelity    nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	MaxAttempts int32                            `json:"max_attempts"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+	Operations       []string               `json:"operations"`
+	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
+
+	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
+	Retry *RouteRetry `json:"retry,omitempty"`
+
+	// Selectors Ordered request selectors; the first match wins.
+	Selectors *[]RouteSelector `json:"selectors,omitempty"`
+
+	// Slug The published slug is immutable.
+	Slug    string                      `json:"slug"`
+	Targets []ReplaceRouteTargetRequest `json:"targets"`
+}
+
 // UpdateRouteCatalogExposureRequest defines model for UpdateRouteCatalogExposureRequest.
 type UpdateRouteCatalogExposureRequest struct {
 	ExposeUpstreamModels bool `json:"expose_upstream_models"`
@@ -10033,6 +10067,17 @@ type ListRoutesParams struct {
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// CreateRouteParams defines parameters for CreateRoute.
+type CreateRouteParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// UpdateRouteParams defines parameters for UpdateRoute.
+type UpdateRouteParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // PutRouteCatalogExposureParams defines parameters for PutRouteCatalogExposure.
 type PutRouteCatalogExposureParams struct {
 	IfMatch string `json:"If-Match"`
@@ -10579,6 +10624,12 @@ type CreateRouteTemplateJSONRequestBody = RouteTemplateRequest
 
 // ReplaceRouteTemplateJSONRequestBody defines body for ReplaceRouteTemplate for application/json ContentType.
 type ReplaceRouteTemplateJSONRequestBody = RouteTemplateRequest
+
+// CreateRouteJSONRequestBody defines body for CreateRoute for application/json ContentType.
+type CreateRouteJSONRequestBody = CreateRouteDraftRequest
+
+// UpdateRouteJSONRequestBody defines body for UpdateRoute for application/json ContentType.
+type UpdateRouteJSONRequestBody = UpdatePublishedRouteRequest
 
 // PutRouteCatalogExposureJSONRequestBody defines body for PutRouteCatalogExposure for application/json ContentType.
 type PutRouteCatalogExposureJSONRequestBody = UpdateRouteCatalogExposureRequest

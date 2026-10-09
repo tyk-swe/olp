@@ -154,12 +154,14 @@ func commandName(operation management.Operation) string {
 	}
 	if operation.Group == "routes" {
 		switch operation.Name {
+		case "create_route_draft":
+			name = "create-draft"
 		case "get_route_draft":
 			name = "get-draft"
 		case "list_route_drafts":
 			name = "list-drafts"
 		case "replace_route_draft":
-			name = "update"
+			name = "update-draft"
 		default:
 			name = strings.TrimSuffix(name, "-route-draft")
 		}
