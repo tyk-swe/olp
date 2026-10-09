@@ -209,6 +209,9 @@ func configuredFailure(name, detail string) *Error {
 // The shared OIF parser rejects ambiguity anywhere in the document, including
 // nested duplicate names and malformed Unicode that encoding/json would repair.
 func sourceMediaFields(body []byte) (oif.Document, map[string]json.RawMessage, error) {
+	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
+		return oif.Document{}, nil, errors.New("expected media object")
+	}
 	doc, err := oif.ParseJSON(body, oif.Limits{})
 	if err != nil {
 		return oif.Document{}, nil, err

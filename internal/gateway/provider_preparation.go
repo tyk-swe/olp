@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"sync"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -124,7 +125,7 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 		x.preparedProviders[key] = prepared
 		return prepared, nil
 	}
-	invocation, err := providerinvoke.Prepare(x.parsed, provider.Connector(), model, provider.ParameterDefaults)
+	invocation, err := x.prepareTransformed(provider, provider.Connector(), model)
 	if err != nil {
 		return preparedProvider{}, err
 	}
@@ -245,7 +246,7 @@ func encodedKey(provider *runtime.Provider, model string) string {
 // one, and a request that is served for an hour must not hold a copy of itself for
 // each target of its route.
 func (x *execution) encodes(provider *runtime.Provider, cfg connectors.Config, model string) error {
-	invocation, err := providerinvoke.Prepare(x.parsed, cfg, model, provider.ParameterDefaults)
+	invocation, err := x.prepareTransformed(provider, cfg, model)
 	if err != nil {
 		return err
 	}
@@ -279,7 +280,11 @@ func (x *execution) encoding(kept map[string]encodedRequest, provider *runtime.P
 	if request, ok := kept[encodedKey(provider, model)]; ok && request.source == x.parsed.OIF().Document() {
 		return request.body, request.wire, nil
 	}
-	return providerinvoke.Encode(x.parsed, cfg, model, provider.ParameterDefaults)
+	invocation, err := x.prepareTransformed(provider, cfg, model)
+	if err != nil {
+		return nil, "", err
+	}
+	return invocation.Prepared.Document().Bytes(), invocation.Wire, nil
 }
 
 // attemptEstimate prices the request for an attempt on one of a provider's
@@ -355,4 +360,22 @@ func inputPolicyWireGate(route *runtime.Route, compiled *contentpolicy.Compiled,
 		return nil
 	}
 	return policyUnavailable("content_policy_surface_unavailable", "The model `"+route.Slug+"` has an input content policy that cannot be enforced on the `"+string(wire)+"` provider wire.")
+}
+
+// prepareTransformed applies key retention policy after translation and provider
+// defaults/rewrites, to the native dialect that will actually receive the call.
+// Stateless dialects cannot represent store and must keep its omission.
+func (x *execution) prepareTransformed(provider *runtime.Provider, cfg connectors.Config, model string) (providerinvoke.Invocation, error) {
+	invocation, err := providerinvoke.Prepare(x.parsed, cfg, model, provider.ParameterDefaults)
+	if err != nil || invocation.Wire != openai.FamilyResponses || x.authority.Policy.AllowProviderState {
+		return invocation, err
+	}
+	native := openai.NewSourceEnvelope(invocation.Wire, x.parsed.Route, x.parsed.Stream, invocation.Prepared.Document())
+	native.SetField("store", json.RawMessage(`false`))
+	prepared, err := oif.PrepareDestination(invocation.Prepared.Request(), invocation.Prepared.Descriptor(), native.OIF().Document(), oif.ExplicitTransform, "API key forbids provider retention")
+	if err != nil {
+		return providerinvoke.Invocation{}, err
+	}
+	invocation.Prepared = prepared.WithProvenance(invocation.Prepared.Provenance()...)
+	return invocation, nil
 }

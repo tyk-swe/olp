@@ -539,11 +539,29 @@ func grantManifest() abi.Manifest {
 
 func grantCredential(t *testing.T, token string, facts map[string]string) []byte {
 	t.Helper()
-	secret, err := json.Marshal(GrantCredential{AccessToken: token, Facts: facts})
+	secret, err := json.Marshal(GrantCredential{PluginDigest: pluginDigest, ProfileID: "acme-chat", AccessToken: token, Facts: facts})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return secret
+}
+
+func TestPluginGrantCredentialsStayBoundToTheirEnrollingProfileAndBuild(t *testing.T) {
+	c := pluginConfig(t, grantManifest())
+	c.AuthMode, c.PluginOptions = AuthGrant, map[string]string{"region": "eu"}
+	for _, identity := range []struct{ digest, profile string }{
+		{pluginDigest, "other-profile"}, {strings.Repeat("a", 64), c.ProfileID}, {"", c.ProfileID}, {pluginDigest, ""},
+	} {
+		secret, _ := json.Marshal(GrantCredential{PluginDigest: identity.digest, ProfileID: identity.profile, AccessToken: "secret-token",
+			Facts: map[string]string{"account": "account", "project": "project"}})
+		req, _ := http.NewRequest(http.MethodPost, c.Endpoint+"/chat/completions", nil)
+		if _, err := NewAuth(&egress.Policy{}).Apply(t.Context(), req, c, secret, nil); !errors.Is(err, ErrCredentialRejected) {
+			t.Fatalf("accepted grant for %s/%s: %v", identity.digest, identity.profile, err)
+		}
+		if len(req.Header) != 0 || req.URL.RawQuery != "" {
+			t.Fatalf("placed a mismatched grant: %v %s", req.Header, req.URL)
+		}
+	}
 }
 
 // A profile that authenticates with a grant places the grant's current

@@ -15,7 +15,6 @@ func TestStrictNativeResponseContinuationKeepsHistoricalProvider(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	historical := newStrictProviderFixture(t, "azure-v1-responses")
-	replacement := newStrictProviderFixture(t, "azure-v1-responses")
 	options := map[string]any{"operation_defaults": map[string]any{"generation": map[string]any{"dialect": "openai-responses", "values": map[string]any{"max_output_tokens": 32}, "native_options": map[string]any{"historical_marker": "original"}}}}
 	slug, _ := publishStrictProvider(t, h, owner, historical, options, nil, "strict")
 	key := stateKey(t, h, owner, slug, true)
@@ -34,26 +33,27 @@ func TestStrictNativeResponseContinuationKeepsHistoricalProvider(t *testing.T) {
 	if err := h.Pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM olp.provider_resources r JOIN olp.secrets s ON s.id=r.id WHERE r.kind='strict_response' AND r.contract_version='native-responses-v2' AND s.purpose='provider_continuation')`).Scan(&encrypted); err != nil || !encrypted {
 		t.Fatalf("contract not committed: %t %v", encrypted, err)
 	}
-	oldCalls := len(historical.captured())
 	providerPath := "/api/v1/providers/" + historical.providerID
 	detail := h.want(owner, "GET", providerPath, nil, nil, 200)
 	slots := h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, 200)
 	oldCredential := slots["items"].([]any)[0].(map[string]any)["credential_version_id"].(string)
+	// Rotation and serving-default changes create a distinct revision without
+	// redirecting an existing secret to a different destination.
+	h.want(owner, "POST", providerPath+"/credentials", map[string]any{"credential": "rotated-fixture-secret"}, withMatch(detail, idem(uuid.NewString())), 201)
+	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
 	configuration := detail["configuration"].(map[string]any)
-	configuration["endpoint"] = replacement.URL
 	configured := configuration["options"].(map[string]any)
 	defaults := configured["operation_defaults"].(map[string]any)["generation"].(map[string]any)
 	defaults["values"] = map[string]any{"max_output_tokens": 999}
 	defaults["native_options"] = map[string]any{"historical_marker": "replacement"}
 	detail = h.want(owner, "PATCH", providerPath, map[string]any{"name": "Replacement serving config", "configuration": configuration}, etagHeader(detail), 200)
-	// Existing certification is connection-specific; certify the new endpoint
-	// through the public management boundary before publishing the changed config.
+	// Re-certify the revised defaults through the public management boundary.
 	modelID := h.want(owner, "GET", providerPath+"/models", nil, nil, 200)["items"].([]any)[0].(map[string]any)["id"].(string)
 	h.want(owner, "POST", providerPath+"/models/"+modelID+"/certify", nil, etagHeader(detail), 200)
 	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
 	h.want(owner, "POST", providerPath+"/activate", nil, withMatch(detail, idem(uuid.NewString())), 200)
 	h.refresh()
-	beforeNew := len(replacement.captured())
+	oldCalls := len(historical.captured())
 	// Recreate the gateway dependencies and manager against the same durable
 	// authority, without retaining the old runtime/template caches.
 	h = newAccessHarnessOn(t, h.Pool, h.DBURL)
@@ -63,10 +63,14 @@ func TestStrictNativeResponseContinuationKeepsHistoricalProvider(t *testing.T) {
 	if status != 200 {
 		t.Fatalf("historical next: %d %s", status, next)
 	}
-	if len(historical.captured()) != oldCalls+1 || len(replacement.captured()) != beforeNew {
-		t.Fatal("retained response substituted current provider endpoint")
+	if len(historical.captured()) != oldCalls+1 {
+		t.Fatal("retained response did not make exactly one historical invocation")
 	}
-	sent := historical.captured()[oldCalls].body
+	call := historical.captured()[oldCalls]
+	if call.headers.Get("api-key") != vendorSecret {
+		t.Fatalf("retained response substituted rotated credential: %v", call.headers)
+	}
+	sent := call.body
 	if !bytes.Contains(sent, []byte(`"max_output_tokens":32`)) || !bytes.Contains(sent, []byte(`"historical_marker":"original"`)) || bytes.Contains(sent, []byte(response.ID)) {
 		t.Fatalf("historical native invocation changed: %s", sent)
 	}

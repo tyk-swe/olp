@@ -296,6 +296,9 @@ func (s *Server) storeDraft(ctx context.Context, tx pgx.Tx, id, name string, pre
 	if err := next.Validate(s.Egress); err != nil {
 		return err
 	}
+	if err := PreserveCredentialBoundary(ctx, tx, id, previous, next); err != nil {
+		return err
+	}
 	if next.transportFingerprint() != previous.transportFingerprint() {
 		if err := invalidateEvidence(ctx, tx, id); err != nil {
 			return err
@@ -423,6 +426,7 @@ type slotRow struct {
 	// CredentialPlugin is the digest of the plugin build whose grant
 	// enrollment created the credential version, or "" for a pasted one.
 	CredentialPlugin    string
+	CredentialProfile   string
 	CredentialLapsed    bool
 	GrantGeneration     int64
 	CredentialPrincipal string
@@ -442,7 +446,7 @@ type slotRestrictions struct {
 }
 
 func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slotRow, error) {
-	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,coalesce(c.plugin_digest,''),g.lapsed_at IS NOT NULL,coalesce(g.generation,0),coalesce(c.principal,''),coalesce(c.grant_facts,'{}'),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id LEFT JOIN olp.provider_grants g ON g.credential_id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
+	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,coalesce(c.plugin_digest,''),coalesce(c.profile_id,''),g.lapsed_at IS NOT NULL,coalesce(g.generation,0),coalesce(c.principal,''),coalesce(c.grant_facts,'{}'),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id LEFT JOIN olp.provider_grants g ON g.credential_id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -452,7 +456,7 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 		var row slotRow
 		var facts, restrictions, limits []byte
 		var revoked *bool
-		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &row.CredentialPlugin, &row.CredentialLapsed, &row.GrantGeneration, &row.CredentialPrincipal, &facts, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
+		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &row.CredentialPlugin, &row.CredentialProfile, &row.CredentialLapsed, &row.GrantGeneration, &row.CredentialPrincipal, &facts, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
 			return nil, err
 		}
 		row.CredentialRevoked = revoked != nil && *revoked
@@ -473,18 +477,18 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 // credentialFits refuses a slot whose credential version the provider can't
 // authenticate with (Configuration.Authenticates): a version with a grant
 // beneath it for a provider that takes a static credential, a pasted one for
-// a provider that authenticates with a grant, or a grant another build of the
-// plugin enrolled.
+// a provider that authenticates with a grant, or a grant another build or
+// profile of the plugin enrolled.
 func (row *slotRow) credentialFits(cfg *Configuration) error {
 	switch {
-	case row.CredentialID == nil || !cfg.CredentialRequired() || cfg.Authenticates(row.CredentialPlugin):
+	case row.CredentialID == nil || !cfg.CredentialRequired() || cfg.Authenticates(row.CredentialPlugin, row.CredentialProfile):
 		return nil
 	case !cfg.Grant():
 		return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a credential version with a grant, but this provider authenticates with a static credential. Rotate its credential.")
 	case row.CredentialPlugin == "":
 		return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a pasted credential, but a grant authenticates this provider. Enroll a grant for it.")
 	}
-	return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a grant that another build of the plugin enrolled. A grant serves only the plugin build that enrolled it: re-enroll the slot's grant through the build this provider pins.")
+	return access.Fail(422, "credential_mismatch", "Slot "+row.Name+" holds a grant that another build or profile of the plugin enrolled. A grant serves only its enrolling build and profile; re-enroll the slot's grant through this provider's profile.")
 }
 
 // observedPrincipal is the principal the slot observes: the one grant
@@ -906,6 +910,9 @@ func deref[T comparable](v *T) T {
 // restoreDraft rewrites the draft configuration and models from a revision.
 // Credentials are never restored; the draft keeps its current slots.
 func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v *revisionRow) (string, error) {
+	if err := PreserveCredentialBoundary(ctx, tx, current.ID, &current.Configuration, &v.Configuration); err != nil {
+		return "", err
+	}
 	// A revision only ever records evidence gathered against its own
 	// transport, so restoring it restores that evidence unchanged; slot
 	// validation is keyed by fingerprint and re-evaluates itself on read.

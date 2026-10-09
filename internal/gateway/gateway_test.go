@@ -968,6 +968,13 @@ func TestResponsesFamily(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || body["model"] != routeSlug {
 		t.Fatalf("status %d body %v", resp.StatusCode, body)
 	}
+	before := h.mock.count("a")
+	resp = h.do(t.Context(), http.MethodPost, "/v1/responses", fullKey, []byte(`{"model":"`+routeSlug+`","input":"hi","store":true}`), nil)
+	json.NewDecoder(resp.Body).Decode(&body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || h.mock.count("a") != before {
+		t.Fatalf("explicit forbidden retention reached provider: status %d body %v", resp.StatusCode, body)
+	}
 	resp = h.do(t.Context(), http.MethodPost, "/v1/responses", fullKey, []byte(`{"model":"`+routeSlug+`","input":"hi","previous_response_id":"resp_0"}`), nil)
 	defer resp.Body.Close()
 	json.NewDecoder(resp.Body).Decode(&body)
@@ -1022,3 +1029,6 @@ func TestClientWriteFailureIsCancellation(t *testing.T) {
 		t.Fatalf("pre-commit transport failure classified as %q, want %q", got, classConnect)
 	}
 }
+
+// This fixture has no asynchronous publication or external database.
+func (*fakeRuntime) CheckRouteFidelity(context.Context, runtime.Route) error { return nil }

@@ -123,6 +123,11 @@ func (s *Server) reserveSystemBudgets(ctx context.Context, x *execution) *Error 
 	if x.callerCostExempt() {
 		authority = withoutCostBudgets(authority)
 	}
+	if callerCostBudgeted(&authority, x.limitRoute()) {
+		if failure := s.Admission.checkCostAccounting(ctx); failure != nil {
+			return failure
+		}
+	}
 	var failure *Error
 	x.lease, failure = s.Admission.reserveAggregateBudgets(ctx, &authority, time.Duration(x.route.OverallTimeout)*time.Millisecond, s.costReservation(x, authority))
 	return failure

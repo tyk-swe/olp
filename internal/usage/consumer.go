@@ -503,6 +503,10 @@ func (r *consumerRun) processEntry(ctx context.Context, entry StreamEntry) (bool
 	}
 
 	event, err := Decode(entry.Payload)
+	if errors.Is(err, ErrUnsupportedVersion) {
+		r.log.Warn("request metadata awaits a compatible consumer", "stream_id", entry.ID, "error", err)
+		return false, false, true
+	}
 	if err != nil {
 		r.log.Error("discarding malformed request metadata stream event",
 			"stream_id", entry.ID, "error", err)

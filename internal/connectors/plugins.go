@@ -37,11 +37,14 @@ const AuthStaticCredential = "static_credential"
 const AuthGrant = "grant"
 
 // A GrantCredential is the secret of a credential version that has a grant:
-// what the credential source serves for it. It holds the grant's current
-// access token and its grant facts, never refresh material.
+// what the credential source serves for it. It binds the grant's current
+// access token and facts to its enrolling build and profile, never including
+// refresh material.
 type GrantCredential struct {
-	AccessToken string            `json:"access_token"`
-	Facts       map[string]string `json:"facts,omitempty"`
+	PluginDigest string            `json:"plugin_digest"`
+	ProfileID    string            `json:"profile_id"`
+	AccessToken  string            `json:"access_token"`
+	Facts        map[string]string `json:"facts,omitempty"`
 }
 
 // pluginHosting is the hosting of every plugin profile: the plugin's declared
@@ -632,7 +635,8 @@ func (p *PluginProfile) credential(secret []byte) (token string, facts map[strin
 	token = string(secret)
 	if p.declared.Grant != nil {
 		var grant GrantCredential
-		if json.Unmarshal(secret, &grant) != nil {
+		if json.Unmarshal(secret, &grant) != nil || grant.PluginDigest == "" || grant.ProfileID == "" ||
+			grant.PluginDigest != p.profile.Plugin.Digest || grant.ProfileID != p.profile.ID {
 			return "", nil, ErrCredentialRejected
 		}
 		for _, fact := range p.declared.Grant.Facts {

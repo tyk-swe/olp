@@ -38,6 +38,7 @@ import (
 
 const (
 	apiKey           = "olp_clients_key"
+	stateAPIKey      = "olp_clients_state_key"
 	restrictedAPIKey = "olp_clients_restricted_key"
 	// credential is what the scripted upstream accepts; clients never see it.
 	credential = "clients-upstream-credential"
@@ -99,7 +100,7 @@ func run() error {
 		return err
 	}
 	defer upstream.Close()
-	fixture := scripted.New(scripted.Options{Credential: credential, ClientSecrets: []string{apiKey, restrictedAPIKey}})
+	fixture := scripted.New(scripted.Options{Credential: credential, ClientSecrets: []string{apiKey, stateAPIKey, restrictedAPIKey}})
 	upstreamServer := &http.Server{Handler: fixture, ReadHeaderTimeout: 5 * time.Second}
 	go upstreamServer.Serve(upstream)
 	defer upstreamServer.Close()
@@ -110,6 +111,7 @@ func run() error {
 		return err
 	}
 	rt := &staticRuntime{release: release, keys: map[string]access.Authority{
+		stateAPIKey:      {ID: uuid.NewString(), Issuer: uuid.NewString(), Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}, AllowProviderState: true}},
 		apiKey:           {ID: uuid.NewString(), Issuer: uuid.NewString(), Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}},
 		restrictedAPIKey: {ID: uuid.NewString(), Issuer: uuid.NewString(), Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}, AllowedRoutes: []string{"no-such-route"}}},
 	}}
@@ -309,6 +311,7 @@ func environment(origin, upstreamURL string) map[string]string {
 	env := map[string]string{
 		"OLP_CLIENTS_ORIGIN":              origin,
 		"OLP_CLIENTS_API_KEY":             apiKey,
+		"OLP_CLIENTS_STATE_API_KEY":       stateAPIKey,
 		"OLP_CLIENTS_RESTRICTED_API_KEY":  restrictedAPIKey,
 		"OLP_CLIENTS_OPENAI_BASE_URL":     origin + "/v1",
 		"OLP_CLIENTS_ANTHROPIC_BASE_URL":  origin + "/anthropic",
@@ -325,3 +328,6 @@ func environment(origin, upstreamURL string) map[string]string {
 	}
 	return env
 }
+
+// This fixture has no asynchronous publication or external database.
+func (*staticRuntime) CheckRouteFidelity(context.Context, runtime.Route) error { return nil }

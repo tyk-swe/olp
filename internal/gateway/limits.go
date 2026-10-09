@@ -22,6 +22,8 @@ import (
 // *Admission means no limiter was configured at all, which admits keys and
 // targets that bound nothing and fails everything else closed.
 type Admission struct {
+	// CostAccountingReady checks shared loss evidence before cost admission.
+	CostAccountingReady     func(context.Context) error
 	limiter                 *limits.Limiter
 	policy                  func() limits.OutagePolicy
 	log                     *slog.Logger
@@ -201,6 +203,15 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 // leases for one settlement. Every refusal refunds earlier reservations. The
 // optional route identifies the ingress route for per-key route policy.
 func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
+	var named string
+	if len(route) > 0 {
+		named = route[0]
+	}
+	if callerCostBudgeted(authority, named) {
+		if e := a.checkCostAccounting(ctx); e != nil {
+			return nil, e
+		}
+	}
 	if keyBoundariesOnly(authority) {
 		return a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold)
 	}
@@ -218,10 +229,6 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Auth
 		endUsers = aggregate
 	} else {
 		endUsers.Attach(aggregate)
-	}
-	var named string
-	if len(route) > 0 {
-		named = route[0]
 	}
 	routeLease, refusal := a.reserveRouteLimits(ctx, authority, named, estimate, ttl, hold)
 	if refusal != nil {
@@ -242,6 +249,18 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Auth
 	}
 	lease.Attach(endUsers)
 	return lease, nil
+}
+
+func (a *Admission) checkCostAccounting(ctx context.Context) *Error {
+	if a == nil || a.CostAccountingReady == nil {
+		return nil
+	}
+	check, cancel := context.WithTimeout(ctx, reserveTimeout)
+	defer cancel()
+	if err := a.CostAccountingReady(check); err != nil {
+		return serverError(http.StatusServiceUnavailable, "cost_accounting_incomplete", "Cost budgets cannot admit work while accounting is incomplete.")
+	}
+	return nil
 }
 
 // keyBoundariesOnly reports whether an authority configures no aggregate,
@@ -348,8 +367,8 @@ func (a *Admission) outage(keyID string, costBudget bool, cause error) *Error {
 
 // settleKey finishes the key reservation. A request that never dispatched an
 // attempt consumed nothing and is refunded in full; any other request keeps
-// the request and token it spent but must return the concurrency slot, and
-// reports the tokens it actually used when the provider disclosed them. The cost
+// its request and local token allowance, increases tokens for higher reported
+// usage, and returns the concurrency slot. The cost
 // it reserved becomes the cost it recorded. That is settled last, and a cost is
 // settled once, because it is the step whose loss costs least: the reservation
 // then lapses on its own and is removed sooner by the spend accounting records

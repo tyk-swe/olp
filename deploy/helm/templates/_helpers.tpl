@@ -64,7 +64,11 @@ app.kubernetes.io/component: {{ .component }}
 {{- else -}}
 {{- if $egress.dns.enabled -}}
 {{- $dnsPorts := list (dict "port" 53 "protocol" "UDP") (dict "port" 53 "protocol" "TCP") -}}
-{{- $rules = append $rules (dict "ports" $dnsPorts) -}}
+{{- $dnsDestinations := list -}}
+{{- range $cidr := $egress.dns.cidrs -}}
+{{- $dnsDestinations = append $dnsDestinations (dict "ipBlock" (dict "cidr" $cidr)) -}}
+{{- end -}}
+{{- $rules = append $rules (dict "to" $dnsDestinations "ports" $dnsPorts) -}}
 {{- end -}}
 {{- range $peer := list $egress.postgresql $egress.valkey $egress.providers -}}
 {{- if $peer.cidrs -}}

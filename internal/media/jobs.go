@@ -583,23 +583,14 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 // AttachUpstream binds the accepted upstream identity and first state to a
 // creating job. A retry after an ambiguous connection loss still reports
 // success when the stored identity already matches.
-func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, update JobUpdate, nativeSourceID ...string) (JobRecord, error) {
+func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, update JobUpdate) (JobRecord, error) {
 	if upstreamJobID == "" || upstreamJobID != trimSpace(upstreamJobID) {
 		return JobRecord{}, &JobError{Kind: JobErrorInvalid, Message: "upstream job ID cannot be empty"}
 	}
 	if err := validateUpdate(update); err != nil {
 		return JobRecord{}, err
 	}
-	if len(nativeSourceID) > 1 {
-		return JobRecord{}, &JobError{Kind: JobErrorInvalid, Message: "only one native source identity is permitted"}
-	}
-	var source *string
-	if len(nativeSourceID) == 1 {
-		if _, err := uuid.Parse(nativeSourceID[0]); err != nil {
-			return JobRecord{}, &JobError{Kind: JobErrorInvalid, Message: "native source identity is invalid"}
-		}
-		source = &nativeSourceID[0]
-	}
+
 	row, err := scanJob(q.QueryRow(ctx, `WITH attached AS (
 			UPDATE olp.media_jobs SET
 				upstream_job_id = $2,
@@ -614,7 +605,7 @@ func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, up
 				-- The create's dispatch window no longer gates an attached job.
 				next_reconciliation_at = now(),
 				etag = $9,
-				native_source_id = $10::uuid
+				native_source_id = NULL
 			WHERE id = $1 AND lifecycle_state = 'creating'
 			RETURNING *
 		)
@@ -632,7 +623,7 @@ func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, up
 		FROM attached j JOIN olp.providers p ON p.id = j.provider_id`,
 		id, upstreamJobID, string(update.State), update.ProgressPercent,
 		update.ContentAvailable, update.ExpiresAt, update.ErrorClass,
-		update.LastPolledAt, uuid.Must(uuid.NewV7()), source))
+		update.LastPolledAt, uuid.Must(uuid.NewV7())))
 	if err == nil {
 		return row, nil
 	}

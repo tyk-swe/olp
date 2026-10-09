@@ -260,14 +260,19 @@ those addresses are known:
 networkPolicy:
   egress:
     restricted: true
+    dns:
+      cidrs: [10.96.0.10/32] # Replace with your cluster or node-local DNS resolver.
     postgresql:
       cidrs: [10.10.0.0/16]
     valkey:
       cidrs: [10.11.0.0/16]
 ```
 
-`restricted: true` requires both `postgresql.cidrs` and `valkey.cidrs` and
-replaces allow-all with DNS on 53, those two peers on their configured ports,
+`restricted: true` requires both `postgresql.cidrs` and `valkey.cidrs`, plus
+`dns.cidrs` when DNS is enabled. Set DNS CIDRs to the resolver addresses reachable
+from your pods (including node-local DNS when deployed); no resolver address is
+assumed. Restricted egress permits TCP/UDP 53 only to those DNS peers, the two
+database peers on their configured ports,
 and `providers.cidrs` on 443. Narrow `providers.cidrs` from `0.0.0.0/0` only
 when every configured provider endpoint resolves inside a known range;
 `config.providerEgressAllowCidrs` continues to enforce the application-level

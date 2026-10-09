@@ -3,8 +3,10 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -348,8 +350,62 @@ func TestKeysWithoutACostBudgetEstimateNoCost(t *testing.T) {
 	monthly := "50"
 	inGroup := admissionAuthority(access.KeyPolicy{})
 	inGroup.BudgetGroupID, inGroup.BudgetGroupMonthlyCostLimit = &group, &monthly
-	if !costBudgeted(inGroup) || !costBudgeted(budgeted()) {
+	if !(&execution{}).costBudgeted(inGroup) || !(&execution{}).costBudgeted(budgeted()) {
 		t.Fatal("a cost budget on the key or its group was not noticed")
+	}
+}
+
+func TestCostAccountingGrowthUsesOnlyTheNamedRoutesBudget(t *testing.T) {
+	for _, phase := range []string{"fallback", "session"} {
+		for _, budgetRoute := range []string{"other", "team-chat"} {
+			t.Run(phase+"/"+budgetRoute, func(t *testing.T) {
+				x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 1,
+					runtime.Attempt{Price: costPrice()})
+				x.request.id, x.request.minted = uuid.NewString(), true
+				x.authority = admissionAuthority(access.KeyPolicy{RequestsPerMinute: costCount(100), TokensPerMinute: costCount(1000)})
+				client := newAllowing(100, 1000, 18, false)
+				admission := newAdmission(t, client)
+				var refusal *Error
+				x.lease, refusal = admission.reserveKey(t.Context(), x.authority, "openai", 18, time.Minute, "team-chat")
+				if refusal != nil || x.lease == nil || x.lease.HasCostReservation() {
+					t.Fatalf("rate lease: %v %v", x.lease, refusal)
+				}
+				x.authority.Policy.RouteLimits = access.RouteLimits{budgetRoute: {WeeklyCostLimit: costText("1")}}
+				// Fallback dispatch still spends against the ingress policy.
+				x.primary = x.route
+				fallback := *x.route
+				fallback.Slug = "fallback"
+				x.route = &fallback
+				checked := 0
+				admission.CostAccountingReady = func(context.Context) error {
+					checked++
+					return errors.New("lost accounting")
+				}
+				s := &Server{Admission: admission}
+				applicable := budgetRoute == "team-chat"
+				for _, hold := range []costReservation{s.costReservation(x, x.authority), x.attemptCostReservation(x.authority, x.attempts[0])} {
+					if (hold.amount != "") != applicable {
+						t.Fatalf("cost estimate %+v does not match the named route budget", hold)
+					}
+				}
+				before := client.calls.Load()
+				if phase == "fallback" {
+					refusal = s.reserveFallbackCost(t.Context(), x)
+				} else {
+					refusal = s.reserveSessionCost(t.Context(), x, x.authority, x.attempts[0], time.Minute)
+				}
+				if applicable {
+					if refusal == nil || refusal.Code != "cost_accounting_incomplete" || checked != 1 {
+						t.Fatalf("applicable budget bypassed accounting loss: %v checks=%d", refusal, checked)
+					}
+				} else if refusal != nil || checked != 0 {
+					t.Fatalf("another route's budget quarantined this request: %v checks=%d", refusal, checked)
+				}
+				if client.calls.Load() != before {
+					t.Fatal("growth reached the limiter after accounting refusal or without a cost budget")
+				}
+			})
+		}
 	}
 }
 

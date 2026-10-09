@@ -47,7 +47,7 @@ func TestPublishedSlotsUseOnlyCredentialsRequiredByAuthMode(t *testing.T) {
 // name.
 func TestCredentialVersionsFitOnlyProvidersThatAuthenticateWithThem(t *testing.T) {
 	enrolling, other := strings.Repeat("a", 64), strings.Repeat("b", 64)
-	grant := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileRevision: enrolling}
+	grant := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileRevision: enrolling, ProfileID: "profile"}
 	static := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthStaticCredential, ProfileRevision: enrolling}
 	for _, tc := range []struct {
 		cfg     *Configuration
@@ -61,10 +61,23 @@ func TestCredentialVersionsFitOnlyProvidersThatAuthenticateWithThem(t *testing.T
 		{cfg: static, plugin: enrolling, refusal: "Rotate its credential"},
 	} {
 		row := slotRow{Name: "Default", CredentialID: new("credential"), CredentialPlugin: tc.plugin}
+		if tc.plugin != "" {
+			row.CredentialProfile = "profile"
+		}
 		err := row.credentialFits(tc.cfg)
 		problem, refused := errors.AsType[*access.Problem](err)
 		if (err != nil) != (tc.refusal != "") || refused && (problem.Code != "credential_mismatch" || !strings.Contains(problem.Detail, tc.refusal)) {
 			t.Errorf("a %s provider and a version enrolled through %q: %v", tc.cfg.AuthMode, tc.plugin, err)
+		}
+	}
+}
+
+func TestGrantCredentialCannotCrossProfilesWithinTheSameBuild(t *testing.T) {
+	cfg := &Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileRevision: strings.Repeat("a", 64), ProfileID: "receiving-profile"}
+	for _, profile := range []string{"enrolling-profile", "", "receiving-profile"} {
+		row := slotRow{Name: "default", CredentialID: new("credential"), CredentialPlugin: cfg.ProfileRevision, CredentialProfile: profile}
+		if err := row.credentialFits(cfg); (err == nil) != (profile == cfg.ProfileID) {
+			t.Fatalf("profile %q: %v", profile, err)
 		}
 	}
 }

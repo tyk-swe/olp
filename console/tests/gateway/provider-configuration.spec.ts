@@ -315,6 +315,21 @@ test('Automatic provider profile selection, schema fields and write-only network
   expect(created.status, created.source).toBe(201);
   const id = JSON.parse(created.source).id as string;
   const path = `/api/v1/providers/${id}`;
+  // Selecting a different profile must not carry an old credential across its
+  // authentication boundary. Retire the fixture credential before editing;
+  // the network-credential form below remains independently write-only.
+  const credentials = await management(page, 'GET', `${path}/credentials`);
+  expect(credentials.status, credentials.source).toBe(200);
+  for (const credential of JSON.parse(credentials.source).items) {
+    const revoked = await management(
+      page,
+      'POST',
+      `${path}/credentials/${credential.id}/revoke`,
+      undefined,
+      path
+    );
+    expect(revoked.status, revoked.source).toBe(200);
+  }
   await page.goto(`/providers/${id}`);
   await expect(page.getByLabel('API profile')).toHaveValue('');
   await expect(

@@ -90,8 +90,8 @@ jobs:
           outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
           provenance: mode=max
           sbom: true
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache-${{ matrix.arch }}
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache-${{ matrix.arch }},mode=max
+          # Release provenance must not bless layers supplied by mutable registry caches.
+          no-cache: true
       - name: Export platform digest
         shell: bash
         env:

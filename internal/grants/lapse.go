@@ -62,7 +62,7 @@ func lapse(ctx context.Context, tx pgx.Tx, g *dueGrant, reason string) (bool, er
 	return true, usage.NotifyGrantLapsed(ctx, tx, g.credentialID)
 }
 
-// retire retires, in tx, a due grant that no configuration uses any more
+// retire retires, in tx, a due grant that no configuration or retained resource uses any more
 // (using): a superseded credential version that re-enrollment unbound, or
 // one a draft enrolled before moving to another plugin build. Refreshing it
 // would spend the upstream's refresh quota and keep an authorization alive

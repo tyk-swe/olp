@@ -3,7 +3,9 @@ package gateway
 import (
 	"context"
 	"errors"
+	"math/big"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -84,6 +86,11 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 		return nil, nil, notFoundError("not_found", "No "+res.Kind+" with this identifier exists for this key.")
 	}
 	if current, published := x.request.release.Snapshot.Routes[res.RouteSlug]; published {
+		if use != retainedHousekeeping {
+			if e := s.checkRouteFidelity(ctx, &current); e != nil {
+				return nil, nil, e
+			}
+		}
 		if strict, known := strictResourceKind(res.Kind); known {
 			if e := retainedContract(strict, current.Fidelity, use); e != nil {
 				return nil, nil, e
@@ -105,6 +112,14 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 	}
 	if target == nil {
 		return nil, nil, pinUnavailable()
+	}
+	if use == retainedNewWork {
+		if e := restrictRetainedWork(x.request.release.Snapshot, authority.ID, provider, route, slot, *target, operation); e != nil {
+			return nil, nil, e
+		}
+		if e := x.checkBody(route); e != nil {
+			return nil, nil, e
+		}
 	}
 	attempt := runtime.Attempt{
 		TargetID:           target.ID,
@@ -185,4 +200,104 @@ func (s *Server) authorizeDurable(ctx context.Context, x *execution, authority a
 	}
 	_, _, e := s.admitDurable(ctx, x, authority, r, doc, operation, use)
 	return e
+}
+
+// Historical protocol and credential identity do not grant historical authority
+// to start fresh inference. Intersect that contract with the installed release.
+func restrictRetainedWork(current *runtime.Snapshot, keyID string, provider *runtime.Provider, route *runtime.Route, slot *runtime.Slot, target runtime.Target, operation string) *Error {
+	live, ok := current.Providers[provider.ID]
+	if !ok || !live.Enabled {
+		return pinUnavailable()
+	}
+	liveRoute, ok := current.Routes[route.Slug]
+	if !ok || liveRoute.ID != route.ID || !slices.Contains(liveRoute.Operations, operation) {
+		return pinUnavailable()
+	}
+	foundTarget := false
+	for _, candidate := range liveRoute.Targets {
+		if candidate.ProviderID == target.ProviderID && candidate.ProviderModel == target.ProviderModel && candidate.Shadow == nil {
+			foundTarget = true
+			break
+		}
+	}
+	if !foundTarget {
+		return pinUnavailable()
+	}
+	var liveSlot *runtime.Slot
+	for _, candidate := range live.Slots {
+		if candidate.ID == slot.ID {
+			liveSlot = &candidate
+			break
+		}
+	}
+	if liveSlot == nil || !liveSlot.Allows(target.ProviderModel, route.Slug, keyID) || !slot.Allows(target.ProviderModel, route.Slug, keyID) {
+		return pinUnavailable()
+	}
+	slot.RequestsPerMinute = tighterRetainedLimit(slot.RequestsPerMinute, liveSlot.RequestsPerMinute)
+	slot.TokensPerMinute = tighterRetainedLimit(slot.TokensPerMinute, liveSlot.TokensPerMinute)
+	slot.MaxConcurrency = tighterRetainedLimit(slot.MaxConcurrency, liveSlot.MaxConcurrency)
+	slot.Supply = tighterRetainedSupply(slot.Supply, liveSlot.Supply)
+	if live.Limits != nil {
+		prior := runtime.Limits{}
+		if provider.Limits != nil {
+			prior = *provider.Limits
+		}
+		provider.Limits = &runtime.Limits{
+			RequestsPerMinute: tighterRetainedLimit(prior.RequestsPerMinute, live.Limits.RequestsPerMinute),
+			TokensPerMinute:   tighterRetainedLimit(prior.TokensPerMinute, live.Limits.TokensPerMinute),
+			MaxConcurrency:    tighterRetainedLimit(prior.MaxConcurrency, live.Limits.MaxConcurrency),
+			Supply:            tighterRetainedSupply(prior.Supply, live.Limits.Supply),
+		}
+	}
+	route.ContentPolicy = liveRoute.ContentPolicy
+	route.Policy = liveRoute.Policy
+	route.Budget = tighterRetainedCosts(route.Budget, liveRoute.Budget)
+	route.MaxBodyBytes = tighterRetainedLimit(route.MaxBodyBytes, liveRoute.MaxBodyBytes)
+	route.CallerCostExempt = route.CallerCostExempt && liveRoute.CallerCostExempt
+	route.OverallTimeout = min(route.OverallTimeout, liveRoute.OverallTimeout)
+	route.MaxAttempts = min(route.MaxAttempts, liveRoute.MaxAttempts)
+	return nil
+}
+
+func tighterRetainedLimit(old, current *int64) *int64 {
+	if old == nil || current != nil && *current < *old {
+		return current
+	}
+	return old
+}
+
+// Current priority shares govern current capacity allocation. Spend caps stay
+// bounded by both the historical and current contracts, like token windows.
+func tighterRetainedSupply(old, current runtime.Supply) runtime.Supply {
+	current.DailyCostLimit = tighterRetainedCost(old.DailyCostLimit, current.DailyCostLimit)
+	current.MonthlyCostLimit = tighterRetainedCost(old.MonthlyCostLimit, current.MonthlyCostLimit)
+	return current
+}
+
+func tighterRetainedCosts(old, current *runtime.CostLimits) *runtime.CostLimits {
+	if old == nil {
+		return current
+	}
+	if current == nil {
+		return old
+	}
+	return &runtime.CostLimits{
+		DailyCostLimit:   tighterRetainedCost(old.DailyCostLimit, current.DailyCostLimit),
+		MonthlyCostLimit: tighterRetainedCost(old.MonthlyCostLimit, current.MonthlyCostLimit),
+	}
+}
+
+func tighterRetainedCost(old, current *string) *string {
+	if old == nil {
+		return current
+	}
+	if current == nil {
+		return old
+	}
+	before, beforeOK := new(big.Rat).SetString(*old)
+	after, afterOK := new(big.Rat).SetString(*current)
+	if !afterOK || beforeOK && before.Cmp(after) <= 0 {
+		return old
+	}
+	return current
 }

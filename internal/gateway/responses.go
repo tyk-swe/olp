@@ -442,6 +442,14 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
 	}
+	if method == http.MethodPost && res.Kind == resources.KindStrictResponse {
+		current, present := x.request.release.Snapshot.Routes[res.RouteSlug]
+		if !present || retainedContract(true, current.Fidelity, retainedRetrieval) != nil || s.checkRouteFidelity(ctx, &current) != nil {
+			// Cancellation remains available for cleanup, but cannot return content
+			// that the same resource's retrieval guard forbids.
+			out, _ = json.Marshal(map[string]string{"id": res.ID, "object": "response", "status": nativeStatus})
+		}
+	}
 	s.writeStateJSON(w, x, out)
 	return nil
 }

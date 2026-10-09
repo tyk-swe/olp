@@ -35,7 +35,7 @@ RUN npm install --global pnpm@11.24.0
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY console/package.json ./console/package.json
 COPY tests/sdk-smoke/package.json ./tests/sdk-smoke/package.json
-RUN --mount=type=cache,target=/pnpm/store pnpm install --frozen-lockfile --store-dir /pnpm/store
+RUN pnpm install --frozen-lockfile --store-dir /pnpm/store
 COPY console ./console
 COPY openapi/management.json ./openapi/management.json
 RUN pnpm --dir console api:generate && pnpm --dir console build

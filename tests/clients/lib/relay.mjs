@@ -3,12 +3,13 @@
 // addressed; `assertRelayed` then checks the client's side (path, credential,
 // status, framing), the upstream's side (path, rewritten model, upstream
 // credential, no caller credential), and, on a route that keeps the client's
-// dialect, that the body arrived unchanged apart from the model.
+// dialect, that the body arrived unchanged apart from the model and the
+// fixture key's explicit no-retention policy on transformed Responses.
 //
 // The suites use the recording proxy in tap.mjs for the client's side and
 // `recorded()` in harness.mjs for the upstream's.
 import assert from 'node:assert/strict';
-import { apiKey, localFetch, models, baseURLs, recorded, resetRecorded, upstreamModels } from './harness.mjs';
+import { apiKey, stateApiKey, localFetch, models, baseURLs, recorded, resetRecorded, upstreamModels } from './harness.mjs';
 
 function required(name) {
   const value = process.env[name];
@@ -46,9 +47,9 @@ export function upstreamModelOf(slug) {
   return upstreamModels[vendor];
 }
 
-const bearer = { header: 'authorization', value: () => `Bearer ${apiKey}` };
-const anthropicKey = { header: 'x-api-key', value: () => apiKey };
-const googleKey = { header: 'x-goog-api-key', value: () => apiKey };
+const bearer = { header: 'authorization', value: (allowProviderState) => `Bearer ${allowProviderState ? stateApiKey : apiKey}` };
+const anthropicKey = { header: 'x-api-key', value: (allowProviderState) => allowProviderState ? stateApiKey : apiKey };
+const googleKey = { header: 'x-goog-api-key', value: (allowProviderState) => allowProviderState ? stateApiKey : apiKey };
 
 /**
  * The wire APIs a client can speak and the upstream records, by the dialect
@@ -109,10 +110,14 @@ const transportOptions = {
   'openai.chat': ['/stream_options: absent -> {"include_usage":true}']
 };
 
-/** The body the upstream should receive for what the client sent: the model is the only rewrite. */
-function relayedBody(api, body, upstreamModel) {
+/** Model binding and the fixture key's no-retention policy are declared rewrites. */
+function relayedBody(api, body, upstreamModel, route, allowProviderState) {
   const expected = structuredClone(body);
   if (typeof expected?.model === 'string') expected.model = upstreamModel;
+  // tests/clientfixture creates this key without allow_provider_state. Only
+  // transformed Responses can normalize omitted/null storage to false; strict
+  // requests must state false themselves. Require false rather than ignoring it.
+  if (!allowProviderState && api === 'openai.responses' && route !== models.openaiStrict && (expected.store === undefined || expected.store === null)) expected.store = false;
   if (api === 'gemini.batch_embed') {
     for (const request of expected.requests ?? []) request.model = `models/${upstreamModel}`;
   }
@@ -144,7 +149,9 @@ export function differences(before, after, pointer = '') {
  * - `model`: the route slug the client addressed.
  * - `to`: the wire API the upstream should have received; `api` when the route
  *   keeps the client's dialect, in which case the body must also be unchanged
- *   but for the model, and the transport options in `transportOptions`.
+ *   but for the model, the declared no-retention normalization on transformed
+ *   Responses, and the transport options in `transportOptions`.
+ * - `allowProviderState`: use the fixture's state-enabled key and preserve native storage semantics.
  * - `stream`: whether the exchange streams; the API decides when omitted.
  * - `status`: the status the client saw, 200 unless given.
  * - `tools`: the tool names the upstream should have been offered.
@@ -176,7 +183,7 @@ export async function assertRelayed(tap, expected, { upstream: recording } = {})
     assert.equal(s.method, 'POST', label);
     assert.equal(s.path, from.path(want.model), `${label}: client path`);
     assert.equal(s.query, from.query ?? '', `${label}: client query`);
-    assert.equal(s.headers[from.credential.header], from.credential.value(), `${label}: the client authenticates with the OLP key`);
+    assert.equal(s.headers[from.credential.header], from.credential.value(want.allowProviderState), `${label}: the client authenticates with the OLP key`);
     assert.equal(s.status, want.status ?? 200, `${label}: client status: ${s.responseText.slice(0, 300)}`);
     assert.ok(s.responseHeaders['x-request-id'], `${label}: the answer carries the gateway's request id`);
     if ((want.status ?? 200) === 200) {
@@ -196,7 +203,7 @@ export async function assertRelayed(tap, expected, { upstream: recording } = {})
 
     if (want.to === undefined || want.to === want.api) {
       const added = stream ? transportOptions[want.api] ?? [] : [];
-      const unexpected = differences(relayedBody(want.api, s.body, upstreamModel), u.body).filter((d) => !added.includes(d));
+      const unexpected = differences(relayedBody(want.api, s.body, upstreamModel, want.model, want.allowProviderState), u.body).filter((d) => !added.includes(d));
       assert.deepEqual(unexpected, [], `${label}: the gateway changed the request`);
     }
     if (want.tools !== undefined) {

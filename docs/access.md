@@ -348,6 +348,15 @@ oversized responses, and unbounded waits. It applies the provider egress
 address denylist without any operator exceptions and is never built from the
 provider policy, so provider egress settings cannot weaken identity egress.
 
+Saving enabled OIDC configuration binds its validated issuer, authorization,
+token and JWKS endpoints and selected token authentication method. Sign-in and
+callbacks reject changed discovery metadata before reading or sending the
+client secret. An owner must review the identity provider and save the
+configuration again to accept a change. Existing configurations without a saved
+binding also require this resave; keep a local owner sign-in or an existing
+owner session available during the upgrade. The binding is private and does
+not appear in management responses.
+
 Authorization binds a single-use encrypted flow to the browser, configuration
 ETag, state, nonce, PKCE verifier, and initiating session when applicable. ID
 tokens must have a verified email and valid signature, issuer, audience, expiry,
