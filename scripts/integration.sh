@@ -9,7 +9,7 @@ mkdir -p "$OLP_TEST_TLS_DIR"
 chmod 755 "$scratch" "$OLP_TEST_TLS_DIR"
 export OLP_POSTGRES_PORT=0 OLP_VALKEY_PORT=0
 project="olp-test-$$-$RANDOM"
-compose=(docker compose -p "$project" -f deploy/compose.dev.yaml -f deploy/compose.integration.yaml)
+compose=(docker compose -p "$project" -f deploy/compose.dev.yaml -f deploy/compose.integration.yaml -f deploy/compose.replica.yaml)
 cleanup() {
   status=$?
   trap - EXIT INT TERM
@@ -50,6 +50,13 @@ export OLP_TEST_BINARY="$PWD/.local/bin/olp"
 make build
 source scripts/secrets.sh "$scratch/secrets"
 OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
+# The physical standby uses the disposable installation's authenticated TLS
+# connection. Explicitly qualify lag instead of treating successful reads as
+# evidence that revocations have reached a regional gateway.
+"${compose[@]}" exec -T -u postgres postgres bash -ec 'printf "hostssl replication olp all scram-sha-256\n" >> "$PGDATA/pg_hba.conf"; psql -U olp -d olp -c "SELECT pg_reload_conf()" >/dev/null'
+"${compose[@]}" up -d --wait --wait-timeout 90 postgres-replica
+replica=$("${compose[@]}" port postgres-replica 5432)
+export OLP_TEST_DATABASE_READ_URL="postgres://olp:olp-local@$replica/olp?sslmode=disable"
 export OLP_CODEX_BINARY OLP_CLAUDE_CODE_BINARY OLP_OPENCODE_BINARY
 OLP_CODEX_BINARY=$(./scripts/code-mode-qualification.sh install)
 OLP_CLAUDE_CODE_BINARY=$(./scripts/code-mode-qualification.sh install claude-code)

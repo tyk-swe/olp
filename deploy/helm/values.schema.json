@@ -127,6 +127,8 @@
       "properties": {
         "databaseSecretName": { "type": "string", "minLength": 1 },
         "databaseSecretKey": { "type": "string", "minLength": 1 },
+        "databaseReadSecretName": { "type": "string" },
+        "databaseReadSecretKey": { "type": "string", "minLength": 1 },
         "valkeySecretName": { "type": "string", "minLength": 1 },
         "valkeySecretKey": { "type": "string", "minLength": 1 },
         "masterKeySecretName": { "type": "string", "minLength": 1 },

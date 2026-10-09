@@ -54,6 +54,39 @@ runtime grants. See
 [database deadlines](operations.md#database-deadlines-and-privileges) for query
 limits and backup roles.
 
+### Regional read replicas
+
+Set `OLP_DATABASE_READ_URL` (or its mounted-file form) on regional gateways and
+workers to offload runtime release and key/credential authority reads to a
+physical PostgreSQL replica. The Helm chart accepts an optional
+`config.databaseReadSecretName` and `config.databaseReadSecretKey`; all workload
+components in that chart use the named connection. Set `OLP_DATABASE_URL` to
+the single writable primary. Management mutations, accounting, workload-key
+registration, grant refresh requests and historical secret reads use the
+primary. Both connections must name the same installation and schema version.
+
+Each authority poll samples the primary WAL position and the replica replay
+position before opening its read snapshot. A read inherits the local timestamp
+of the newest primary position that the replica has reached. Replica delay and
+time since the last successful poll together consume the existing 60-second
+authority deadline. A reachable replica cannot keep an unreplayed revocation
+fresh; API-key and provider-credential admissions refuse once the deadline is
+exceeded. A healthy idle replica stays fresh without clock synchronization or
+database heartbeat writes. The primary and replica must both remain reachable
+for new freshness proofs. No replica query runs on the inference admission
+path.
+
+Every gateway or worker with a read URL has a separate read pool, bounded by
+the same `OLP_DATABASE_MAX_CONNECTIONS` setting. Budget those connections
+against replica capacity in addition to the primary connection budget. Control
+processes use only the primary and do not open the optional read pool.
+
+Read replicas do not create independent installations. Monitor replication,
+authority age and readiness, apply migrations to the primary, and wait for
+replay before rolling out the new binary. The integration harness runs a
+physical standby, pauses replay after key revocation, verifies deadline
+refusal, then resumes replay and verifies the revoked key remains refused.
+
 ### Shared Valkey and workers
 
 The PostgreSQL installation UUID supplies the Valkey namespace, so independent

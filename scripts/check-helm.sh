@@ -49,7 +49,17 @@ for metric in $metrics; do
     exit 1
   fi
 done
+if helm template olp deploy/helm | grep -q 'name: OLP_DATABASE_READ_URL'; then
+  echo 'Expected the default chart to omit the optional read-replica URL' >&2
+  exit 1
+fi
+if ! helm template olp deploy/helm --set config.databaseReadSecretName=olp-replica,config.databaseReadSecretKey=readonly |
+  grep -q 'name: OLP_DATABASE_READ_URL'; then
+  echo 'Expected the configured read-replica URL in workload environments' >&2
+  exit 1
+fi
 for invalid in 'config.databaseMaxConnections=0' 'config.httpMaxJsonBodyBytes=0' \
+  'config.databaseReadSecretName=olp-replica,config.databaseReadSecretKey=' \
   'gateway.replicas=-1' 'ingress.enabled=true,config.trustedProxyCidrs=' \
   'networkPolicy.enabled=true' 'config.unconfinedPluginDir=plugins' \
   'migration.databaseSecretName=olp-postgresql-migration'; do

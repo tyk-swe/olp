@@ -112,11 +112,16 @@ type Manager struct {
 	workloadKeys         *workload.Cache
 	workloadRegistration sync.Mutex
 	pool                 *pgxpool.Pool
-	installation         string
-	auth                 *secrets.AuthKey
-	keys                 *secrets.KeyRing
-	Mounted              map[string]MountedProvider
-	log                  *slog.Logger
+	// ReadPool, when set before Start, supplies runtime release and authority
+	// reads. Writes and historical secret resolution always use the primary.
+	ReadPool         *pgxpool.Pool
+	authorityRefresh sync.Mutex
+	replica          replicaProgress
+	installation     string
+	auth             *secrets.AuthKey
+	keys             *secrets.KeyRing
+	Mounted          map[string]MountedProvider
+	log              *slog.Logger
 
 	// GrantRefreshed, when set before Start, is told of each credential
 	// version of the installed release whose grant a poll found refreshed,
@@ -207,18 +212,30 @@ func (m *Manager) Refresh(ctx context.Context) error {
 }
 
 func (m *Manager) refreshAuthority(ctx context.Context) error {
-	start := time.Now()
-	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	m.authorityRefresh.Lock()
+	defer m.authorityRefresh.Unlock()
+	start, err := m.authorityReadTime(ctx)
+	if err != nil {
+		return fmt.Errorf("authority replica freshness: %w", err)
+	}
+	tx, err := m.runtimeReadPool().BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	var id string
+	var id, installation string
 	var sequence int64
-	if err = tx.QueryRow(ctx, "SELECT COALESCE(authority_id::text,''),authority_sequence FROM olp.installation WHERE singleton").Scan(&id, &sequence); err != nil {
+	if err = tx.QueryRow(ctx, "SELECT id::text,COALESCE(authority_id::text,''),authority_sequence FROM olp.installation WHERE singleton").Scan(&installation, &id, &sequence); err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
+	if installation != m.installation {
+		return errors.New("runtime read database belongs to another installation")
+	}
 	m.mu.Lock()
+	if m.authority.loaded && m.authority.id == id && sequence < m.authority.sequence {
+		m.mu.Unlock()
+		return ErrStaleAuthority
+	}
 	unchanged := m.authority.loaded && m.authority.id == id && m.authority.sequence == sequence
 	if unchanged {
 		m.authority.readAt = start
@@ -378,15 +395,18 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 }
 
 func (m *Manager) refreshRelease(ctx context.Context) error {
-	var id, digest string
+	var id, digest, installation string
 	var sequence int64
 	var raw []byte
-	err := m.pool.QueryRow(ctx, "SELECT id::text,sequence,sha256,snapshot FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1").Scan(&id, &sequence, &digest, &raw)
+	err := m.runtimeReadPool().QueryRow(ctx, "SELECT r.id::text,r.sequence,r.sha256,r.snapshot,i.id::text FROM olp.runtime_releases r CROSS JOIN olp.installation i WHERE i.singleton ORDER BY r.sequence DESC LIMIT 1").Scan(&id, &sequence, &digest, &raw, &installation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
+	}
+	if installation != m.installation {
+		return errors.New("runtime release database belongs to another installation")
 	}
 	for {
 		current := m.desired.Load()

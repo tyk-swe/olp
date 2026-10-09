@@ -1,0 +1,25 @@
+# Disposable physical standby used by integration qualification.
+services:
+  postgres-replica:
+    image: postgres:18
+    profiles: ['replica']
+    user: postgres
+    entrypoint: ['bash', '-ec']
+    command:
+      - |
+        pg_basebackup -d 'host=postgres user=olp password=olp-local sslmode=verify-full sslrootcert=/tls/ca.crt' -D /var/lib/postgresql/18/docker -R -X stream --checkpoint=fast
+        exec postgres -D /var/lib/postgresql/18/docker
+    tmpfs:
+      - /var/lib/postgresql/18/docker:uid=999,gid=999,mode=0700
+    ports:
+      - '127.0.0.1::5432'
+    volumes:
+      - ${OLP_TEST_TLS_DIR:?}/:/tls:ro
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'olp', '-d', 'olp']
+      interval: 1s
+      timeout: 3s
+      retries: 90
+    depends_on:
+      postgres:
+        condition: service_healthy

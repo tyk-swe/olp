@@ -149,9 +149,30 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		return err
 	}
 	defer pool.Close()
+	var readPool *pgxpool.Pool
+	if c.DatabaseReadURL != "" && (c.Mode.Inference() || c.Mode == config.Worker) {
+		readConfig, err := database.Configuration(c.DatabaseReadURL, c.DatabaseMaxConnections, c.RequestTimeout)
+		if err != nil {
+			return errors.New("invalid OLP_DATABASE_READ_URL")
+		}
+		readPool, err = database.Open(startup, readConfig)
+		if err != nil {
+			return errors.New("runtime read database connection failed")
+		}
+		defer readPool.Close()
+	}
 	installation, err := database.Installation(startup, pool)
 	if err != nil {
 		return err
+	}
+	if readPool != nil {
+		readInstallation, err := database.Installation(startup, readPool)
+		if err != nil {
+			return errors.New("runtime read database is not initialized at the current schema")
+		}
+		if readInstallation != installation {
+			return errors.New("runtime read database belongs to another installation")
+		}
 	}
 	// Shared state comes up before anything that admits or accounts for
 	// traffic, because both the gateway and the console are told at
@@ -205,6 +226,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 		policy = egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
 		rt = runtime.NewManager(pool, installation, auth, keys, log)
+		rt.ReadPool = readPool
 		if c.ConnectorConfigFile != "" {
 			rt.Mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
 			if err != nil {

@@ -166,6 +166,9 @@ config:
   logLevel: info
   databaseSecretName: olp-postgresql
   databaseSecretKey: url
+  # Optional regional read replica; runtime release and authority reads only.
+  databaseReadSecretName: ""
+  databaseReadSecretKey: url
   valkeySecretName: olp-valkey
   valkeySecretKey: url
   masterKeySecretName: olp-master-key

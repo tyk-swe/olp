@@ -16,6 +16,8 @@ bind.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `OLP_DATABASE_URL` | required | PostgreSQL URL. |
+| `OLP_DATABASE_READ_URL` | unset | Optional regional PostgreSQL replica for runtime release and key/credential authority reads. Writes and historical secret reads use the primary. Replica delay consumes the 60-second authority-age budget; see [regional deployment](deployment.md#regional-read-replicas). |
+| `OLP_DATABASE_READ_URL_FILE` | unset | Mounted read-replica URL, mutually exclusive with `OLP_DATABASE_READ_URL`. |
 | `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Pool size (1–10000), excluding detached worker sessions; see [connection budget](deployment.md#production-example-and-connection-budget). |
 | `OLP_DATABASE_URL_FILE`, `OLP_VALKEY_URL_FILE` | unset | Read the corresponding URL from a mounted file; mutually exclusive with its inline setting. |
 | `OLP_VALKEY_TLS_CA_FILE` | unset | PEM trust roots for Valkey TLS; requires `OLP_VALKEY_URL`. |
