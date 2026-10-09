@@ -1,10 +1,14 @@
+import { keyNetworkError } from './keyNetwork';
+
 export type ApiKeyFormValue = {
   name: string;
+  allowedCIDRs?: string;
   requestsPerMinute?: number;
   tokensPerMinute?: number;
   maxConcurrency?: number;
   dailyCostLimit?: string;
   monthlyCostLimit?: string;
+  weeklyCostLimit?: string;
   /** `datetime-local` control value, or an empty string when no expiry is set. */
   expiresAt?: string;
   /** Admission classes; empty means normal, and a ceiling of the default. */
@@ -33,7 +37,11 @@ export function validateApiKey(value: ApiKeyFormValue): Record<string, string> {
     }
   }
 
-  for (const field of ['dailyCostLimit', 'monthlyCostLimit'] as const) {
+  for (const field of [
+    'dailyCostLimit',
+    'weeklyCostLimit',
+    'monthlyCostLimit'
+  ] as const) {
     const limit = value[field]?.trim();
     if (
       limit &&
@@ -60,5 +68,7 @@ export function validateApiKey(value: ApiKeyFormValue): Record<string, string> {
       priorityRank.indexOf(value.maxPriority)
   )
     errors.priority = 'The default priority cannot exceed the highest one.';
+  const networkError = keyNetworkError(value.allowedCIDRs ?? '');
+  if (networkError) errors.allowedCIDRs = networkError;
   return errors;
 }

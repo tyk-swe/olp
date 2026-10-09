@@ -14,6 +14,8 @@ describe('authentication request policy', () => {
     ['GET', '/api/v1/setup/status'],
     ['POST', '/api/v1/setup'],
     ['POST', '/api/v1/sessions'],
+    ['POST', '/api/v1/auth/mfa/verify'],
+    ['POST', '/api/v1/auth/mfa/enroll'],
     ['POST', '/api/v1/invitations/accept'],
     ['GET', '/api/v1/auth/capabilities'],
     ['GET', '/api/v1/oidc/login'],
@@ -29,6 +31,8 @@ describe('authentication request policy', () => {
     ['OPTIONS', '/api/v1/sessions'],
     ['POST', '/api/v1/sessions/'],
     ['POST', '/api/v1/sessions/nested'],
+    ['GET', '/api/v1/auth/mfa/verify'],
+    ['POST', '/api/v1/auth/mfa/verify/nested'],
     ['POST', '/api/v1/oidc/link'],
     ['GET', '/api/v1/oidc/callback/extra']
   ])('rejects a widened public route %s %s', (method, pathname) => {

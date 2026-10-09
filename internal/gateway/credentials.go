@@ -73,7 +73,7 @@ func (s *Server) authenticate(r *http.Request, scope string) (access.Authority, 
 	if e != nil {
 		return access.Authority{}, e
 	}
-	return s.authorizeKey(token, scope)
+	return s.authenticateRequest(r, token, scope)
 }
 
 // bedrockAuthenticate is authenticate for Bedrock's credential locations.
@@ -82,7 +82,25 @@ func (s *Server) bedrockAuthenticate(r *http.Request) (access.Authority, *Error)
 	if e != nil {
 		return access.Authority{}, e
 	}
-	return s.authorizeKey(token, "inference")
+	return s.authenticateRequest(r, token, "inference")
+}
+
+func (s *Server) authenticateRequest(r *http.Request, token, scope string) (access.Authority, *Error) {
+	authority, e := s.authorizeKey(token, scope)
+	if e != nil {
+		return authority, e
+	}
+	if e = s.checkKeyAddress(r, authority); e != nil || scope != "inference" {
+		return authority, e
+	}
+	return s.identifyEndUser(r, authority)
+}
+
+func (s *Server) checkKeyAddress(r *http.Request, authority access.Authority) *Error {
+	if len(authority.Policy.AllowedCIDRs) != 0 && !authority.AllowsClientIP(ClientIP(r, s.cfg.TrustedProxies)) {
+		return permissionError("ip_not_allowed", "This API key does not allow the client address.")
+	}
+	return nil
 }
 
 // authorizeKey resolves a presented key against the pinned key authority,
@@ -102,7 +120,7 @@ func (s *Server) authorizeKey(token, scope string) (access.Authority, *Error) {
 	case !slices.Contains(authority.Policy.Scopes, scope):
 		return access.Authority{}, permissionError("permission_denied", "This API key does not have the "+scope+" scope.")
 	}
-	return authority, nil
+	return *authority, nil
 }
 
 // dropIngressQuery removes the query parameters a client surface sends that

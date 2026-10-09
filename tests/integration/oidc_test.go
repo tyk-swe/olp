@@ -272,8 +272,18 @@ func TestOIDCVerifierFlowBindingLinkingAndEnrollment(t *testing.T) {
 	h.want(owner, "DELETE", "/api/v1/oidc/identities/"+identity, nil, nil, 428)
 	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "oidc_unlink", "resource_id": identity}, nil, 204)
 	h.want(otherOwnerSession, "POST", "/api/v1/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, 201)
+	// Unlinking is no sign-in: the rotated session keeps the method and MFA
+	// state it had, so local MFA enforcement still reaches it.
+	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.sessions SET auth_method='local',mfa_verified=false WHERE user_id=(SELECT id FROM olp.users WHERE email='owner@example.com')"); err != nil {
+		t.Fatal(err)
+	}
 	h.want(owner, "DELETE", "/api/v1/oidc/identities/"+identity, nil, nil, 204)
 	h.want(otherOwnerSession, "GET", "/api/v1/sessions/current", nil, nil, 401)
+	var method string
+	var verified bool
+	if err := h.Pool.QueryRow(t.Context(), "SELECT auth_method,mfa_verified FROM olp.sessions WHERE user_id=(SELECT id FROM olp.users WHERE email='owner@example.com')").Scan(&method, &verified); err != nil || method != "local" || verified {
+		t.Fatalf("unlinked session method=%q mfa=%v err=%v, want local without MFA", method, verified, err)
+	}
 	// Configuration changes invalidate outstanding browser flows.
 	pending := &browser{}
 	authorization = begin(pending, "/api/v1/oidc/login", map[string]any{})

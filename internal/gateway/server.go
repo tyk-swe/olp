@@ -74,7 +74,7 @@ type Config struct {
 // *runtime.Manager implements it; fixtures and tests supply static releases.
 type Runtime interface {
 	Release() *runtime.Release
-	Authenticate(secret string) (access.Authority, error)
+	Authenticate(secret string) (*access.Authority, error)
 	// RoutingInputs returns current price and performance measurements, or
 	// nil when no measurements are available.
 	RoutingInputs() *usage.RoutingInputs
@@ -201,8 +201,10 @@ var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 // request carries per-request identity shared by handlers.
 type request struct {
-	id        string
-	durableID string
+	callerCredential *callerCredential
+	body             *measuredBody
+	id               string
+	durableID        string
 	// minted records that this gateway chose the request id. A caller may name
 	// its own, and nothing stops two callers from naming the same one.
 	minted    bool
@@ -244,7 +246,13 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 	}
 	h.Set("Cache-Control", "no-store")
 	s.cors(w, r)
-	return request{id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: s.Runtime.Release(), trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
+	release := s.Runtime.Release()
+	var measured *measuredBody
+	if release != nil && release.Snapshot.HasBodyLimits() && r.Body != nil && r.Body != http.NoBody {
+		measured = &measuredBody{ReadCloser: r.Body, declared: r.ContentLength}
+		r.Body = measured
+	}
+	return request{callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
 }
 
 // cors permits browser SDK clients only from explicitly configured origins.
@@ -266,7 +274,7 @@ func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 	s.cors(w, r)
 	h := w.Header()
 	h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-	h.Set("Access-Control-Allow-Headers", "Authorization, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-OLP-API-Key, X-OLP-Client-Contract, X-OLP-Route, X-OLP-Attribution, X-OLP-Continuation, X-OLP-Continuation-Handle, X-OLP-Submission-ID, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
+	h.Set("Access-Control-Allow-Headers", "Authorization, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-OLP-API-Key, X-OLP-Client-Contract, X-OLP-Route, X-OLP-Attribution, X-OLP-End-User, X-OLP-Provider-Credential, X-OLP-Continuation, X-OLP-Continuation-Handle, X-OLP-Submission-ID, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
 	h.Set("Access-Control-Max-Age", "600")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -386,6 +394,9 @@ func (s *Server) readBody(r *http.Request) ([]byte, *Error) {
 	}
 	if err != nil {
 		return nil, bodyReadError(err)
+	}
+	if measured, ok := r.Body.(*measuredBody); ok {
+		measured.decoded = int64(len(data))
 	}
 	return data, nil
 }
@@ -543,6 +554,7 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			return
 		}
 		x.keyID, x.affinity, x.mirrors = authority.ID, []byte(authority.ID), true
+		x.endUserDigest = authority.EndUserDigest
 		x.budgetGroupID = authority.BudgetGroupID
 		x.responseMetadata = authority.Policy.ResponseMetadata
 		x.authority = authority
@@ -633,7 +645,8 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			return
 		}
 		reservationEstimate := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
-		if x.lease, e = s.Admission.reserveKeyCosted(ctx, authority, x.clientSurface(), reservationEstimate, overall, s.costReservation(x, authority)); e != nil {
+		admitted := x.admissionAuthority(authority)
+		if x.lease, e = s.Admission.reserveKeyCosted(ctx, &admitted, x.clientSurface(), reservationEstimate, overall, s.costReservation(x, authority), x.limitRoute()); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return

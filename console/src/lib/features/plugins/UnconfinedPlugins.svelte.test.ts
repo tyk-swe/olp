@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { replaceState } from '$app/navigation';
 import { ApiProblem } from '$lib/api/http';
 import {
-  beginOidcReauthentication,
+  beginIdentityReauthentication,
   listOidcIdentities,
   reauthenticateWithPassword,
   type OidcIdentityList
@@ -23,7 +23,7 @@ import UnconfinedPluginsProbe from './test/UnconfinedPluginsProbe.svelte';
 vi.mock('$app/navigation', () => ({ replaceState: vi.fn() }));
 vi.mock('$lib/features/access/profile/api', async (original) => ({
   ...(await original<typeof import('$lib/features/access/profile/api')>()),
-  beginOidcReauthentication: vi.fn(),
+  beginIdentityReauthentication: vi.fn(),
   listOidcIdentities: vi.fn(),
   reauthenticateWithPassword: vi.fn()
 }));
@@ -222,14 +222,14 @@ it('verifies an owner without a password through single sign-on', async () => {
     ...identities,
     has_local_password: false
   });
-  vi.mocked(beginOidcReauthentication).mockResolvedValue(
+  vi.mocked(beginIdentityReauthentication).mockResolvedValue(
     'https://idp.example.com/authorize'
   );
   await reviewReference();
   acknowledge();
   button('Permit unconfined plugin').click();
   await settle();
-  expect(beginOidcReauthentication).toHaveBeenCalledWith('plugin_permit');
+  expect(beginIdentityReauthentication).toHaveBeenCalledWith('plugin_permit');
   expect(assign).toHaveBeenCalledWith('https://idp.example.com/authorize');
   expect(permitUnconfinedPlugin).not.toHaveBeenCalled();
 });

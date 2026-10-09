@@ -125,3 +125,23 @@ it('locks the opt-in for a viewer who cannot manage keys', () => {
   expect(metadataCheckbox().checked).toBe(true);
   expect(metadataCheckbox().disabled).toBe(true);
 });
+
+it('validates route groups and templates against the edited key project', async () => {
+  const onSubmit = render({
+    ...key,
+    project_id: '01980000-0000-7000-8000-000000000304',
+    project_name: 'Checkout',
+    allowed_route_groups: ['support'],
+    limit_template: 'standard'
+  });
+  submit();
+
+  await vi.waitFor(() => expect(onSubmit).toHaveBeenCalled());
+  expect(onSubmit.mock.calls[0]).toEqual([
+    expect.objectContaining({
+      allowed_route_groups: ['support'],
+      limit_template: 'standard'
+    }),
+    undefined
+  ]);
+});

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -54,5 +55,24 @@ func TestAccountResetPasswordArguments(t *testing.T) {
 	err := run(context.Background(), []string{"account", "reset-password", "owner@example.com", "/tmp/password", "stray"})
 	if err == nil || !strings.Contains(err.Error(), "unexpected positional") {
 		t.Fatal("accepted a positional argument after the password file", err)
+	}
+}
+
+func TestAccountResetPasswordFindsResetMFAAmongFlags(t *testing.T) {
+	for name, tc := range map[string]struct {
+		options, kept []string
+		reset         bool
+	}{
+		"first":       {[]string{"--reset-mfa", "--startup-timeout=30s"}, []string{"--startup-timeout=30s"}, true},
+		"after flags": {[]string{"--startup-timeout=30s", "--reset-mfa"}, []string{"--startup-timeout=30s"}, true},
+		"absent":      {[]string{"--startup-timeout=30s"}, []string{"--startup-timeout=30s"}, false},
+		"terminated":  {[]string{"--", "--reset-mfa"}, []string{"--", "--reset-mfa"}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			kept, reset := resetMFA(tc.options)
+			if reset != tc.reset || !slices.Equal(kept, tc.kept) {
+				t.Fatalf("resetMFA(%q) = %q, %v; want %q, %v", tc.options, kept, reset, tc.kept, tc.reset)
+			}
+		})
 	}
 }

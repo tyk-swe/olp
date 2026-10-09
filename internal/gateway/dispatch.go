@@ -180,7 +180,10 @@ func (s *Server) gateSlot(ctx context.Context, provider *runtime.Provider, slot 
 // upstream failure and reports whether the provider's remaining slots should
 // be skipped: credential and rate-limit failures stay slot-scoped while every
 // other failure belongs to the endpoint the siblings share.
-func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *runtime.Slot, generation int64, failure *attemptFailure) bool {
+func (s *Server) cooldownFailure(ctx context.Context, providerID string, slot *runtime.Slot, generation int64, failure *attemptFailure, caller ...bool) bool {
+	if len(caller) != 0 && caller[0] && (failure.class == classCredential || failure.class == classRateLimit || failure.credentialRefused) {
+		return true
+	}
 	if failure.dispatched && slot.CredentialID != nil &&
 		(failure.credentialRefused || failure.class == classCredential || failure.status == http.StatusUnauthorized) {
 		// The upstream refused the credential, whatever rule classified the

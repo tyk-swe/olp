@@ -45,16 +45,20 @@ func strictMediaHarness(t *testing.T, op string, policy *contentpolicy.Policy, d
 
 func TestStrictNativeImageRetainsSourceAndResult(t *testing.T) {
 	h := strictMediaHarness(t, media.OpImageGeneration, nil, map[string]json.RawMessage{"quality": json.RawMessage(`"high"`)})
+	identifyHarness(h, "header")
 	requests := make(chan []byte, 1)
 	want := []byte(`{"created":1,"data":[{"url":"https://asset.example/x","native_rank":9007199254740993}],"future_score":-0}`)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(endUserHeader) != "" {
+			t.Error("media forwarded end-user header")
+		}
 		body, _ := io.ReadAll(r.Body)
 		requests <- body
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(want)
 	})
 	request := []byte(`{"model":"team-chat","native_options":{"rank":9007199254740993,"tiny":-0},"prompt":"photo"}`)
-	resp := h.do(t.Context(), http.MethodPost, "/v1/images/generations", fullKey, request, nil)
+	resp := h.do(t.Context(), http.MethodPost, "/v1/images/generations", fullKey, request, map[string]string{endUserHeader: "media-user"})
 	defer resp.Body.Close()
 	actual, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK || !bytes.Equal(actual, want) {
@@ -65,6 +69,7 @@ func TestStrictNativeImageRetainsSourceAndResult(t *testing.T) {
 	if !bytes.Equal(outbound, expected) {
 		t.Fatalf("outbound source changed: %s", outbound)
 	}
+	assertEndUserEnvelope(t, h.sink.last(t), (endUserRuntime{h.rt}).EndUserDigest(nil, "media-user"), "media-user")
 	if env := h.sink.last(t); len(env.Attempts) != 1 || env.Attempts[0].Interaction == nil || env.Attempts[0].Interaction.PlanClass != "native_identity" || env.Attempts[0].Interaction.UpstreamState != "terminal" || env.Attempts[0].Interaction.ClientState != "terminal" {
 		t.Fatalf("strict media attempt evidence=%+v", env)
 	}
@@ -173,16 +178,20 @@ func TestStrictImageAmbiguousResultDoesNotFailOver(t *testing.T) {
 func TestStrictSpeechBinaryAndTranscriptionJSON(t *testing.T) {
 	t.Run("speech binary", func(t *testing.T) {
 		h := strictMediaHarness(t, media.OpSpeech, nil, nil)
+		identifyHarness(h, "header")
 		outbound := make(chan []byte, 1)
 		payload := []byte{0x52, 0x49, 0x46, 0x46, 0, 0xff, 0x01}
 		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get(endUserHeader) != "" {
+				t.Error("media forwarded end-user header")
+			}
 			body, _ := io.ReadAll(r.Body)
 			outbound <- body
 			w.Header().Set("Content-Type", "audio/wav")
 			w.Write(payload)
 		})
 		resp := h.do(t.Context(), http.MethodPost, "/v1/audio/speech", fullKey,
-			[]byte(`{"model":"team-chat","input":"hello","voice":"alloy","speed":0.500,"future":{"channel_count":9007199254740993}}`), nil)
+			[]byte(`{"model":"team-chat","input":"hello","voice":"alloy","speed":0.500,"future":{"channel_count":9007199254740993}}`), map[string]string{endUserHeader: "media-user"})
 		actual, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "audio/wav" || !bytes.Equal(actual, payload) {
@@ -192,12 +201,17 @@ func TestStrictSpeechBinaryAndTranscriptionJSON(t *testing.T) {
 		if got := <-outbound; string(got) != want {
 			t.Fatalf("native speech changed: %s", got)
 		}
+		assertEndUserEnvelope(t, h.sink.last(t), (endUserRuntime{h.rt}).EndUserDigest(nil, "media-user"), "media-user")
 	})
 	t.Run("transcription JSON", func(t *testing.T) {
 		h := strictMediaHarness(t, media.OpTranscription, nil, nil)
 		want := []byte(`{"text":"hello","duration":1.0000001,"segments":[{"start":0.10000000001,"end":1.0000001,"text":"hello","native_id":9007199254740993}],"future":{"channel":"left"}}`)
+		identifyHarness(h, "header")
 		outbound := make(chan []byte, 1)
 		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get(endUserHeader) != "" {
+				t.Error("media forwarded end-user header")
+			}
 			reader, err := r.MultipartReader()
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
@@ -221,7 +235,7 @@ func TestStrictSpeechBinaryAndTranscriptionJSON(t *testing.T) {
 			w.Write(want)
 		})
 		body, contentType := mediaFormBody(t, map[string]string{"model": routeSlug, "response_format": "verbose_json"}, "file", "audio.wav", []byte{0, 1, 2, 3, 4})
-		resp := h.do(t.Context(), http.MethodPost, "/v1/audio/transcriptions", fullKey, body, map[string]string{"Content-Type": contentType})
+		resp := h.do(t.Context(), http.MethodPost, "/v1/audio/transcriptions", fullKey, body, map[string]string{"Content-Type": contentType, endUserHeader: "media-user"})
 		actual, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != 200 || !bytes.Equal(actual, want) {
@@ -230,6 +244,7 @@ func TestStrictSpeechBinaryAndTranscriptionJSON(t *testing.T) {
 		if got := <-outbound; !bytes.Equal(got, []byte{0, 1, 2, 3, 4}) {
 			t.Fatalf("transcription bytes=%x", got)
 		}
+		assertEndUserEnvelope(t, h.sink.last(t), (endUserRuntime{h.rt}).EndUserDigest(nil, "media-user"), "media-user")
 	})
 }
 

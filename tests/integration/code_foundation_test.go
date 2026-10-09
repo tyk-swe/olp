@@ -31,7 +31,11 @@ type codeFixture struct {
 	store                                                   *resources.CodeStore
 }
 
-func newCodeFixture(t *testing.T) *codeFixture {
+func newCodeFixture(t *testing.T, bodyLimit ...int64) *codeFixture {
+	var maxBody *int64
+	if len(bodyLimit) > 0 {
+		maxBody = &bodyLimit[0]
+	}
 	t.Helper()
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -44,7 +48,7 @@ func newCodeFixture(t *testing.T) *codeFixture {
 	f.account = f.accountRecord["id"].(string)
 	pool := h.want(owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": f.project, "name": "Shared coding", "kind": "shared", "owner_user_id": nil, "account_ids": []string{f.account}, "api_key_ids": []string{f.key}}, idem("pool"), 201)
 	f.pool = pool["id"].(string)
-	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": f.project, "slug": "coding", "pool_id": f.pool, "models": []string{"native-model"}, "enabled": true}, idem("route"), 201)
+	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": f.project, "slug": "coding", "max_body_bytes": maxBody, "pool_id": f.pool, "models": []string{"native-model"}, "enabled": true}, idem("route"), 201)
 	headers := etagHeader(draft)
 	headers["Idempotency-Key"] = "publish"
 	published := h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, headers, 200)
@@ -505,7 +509,7 @@ func TestCodeFoundationTokenReservationsAcrossReplicas(t *testing.T) {
 }
 
 func TestCodeFoundationManagementIsolationPublicationAndPrivacy(t *testing.T) {
-	f := newCodeFixture(t)
+	f := newCodeFixture(t, 1048576)
 	remaining := int64(42)
 	if err := f.store.ObserveAllowance(t.Context(), f.account, codemode.Allowance{RemainingTokens: &remaining, ObservedAt: time.Now()}); err != nil {
 		t.Fatal(err)
@@ -528,6 +532,9 @@ func TestCodeFoundationManagementIsolationPublicationAndPrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	connection, ok := snapshot.CodeConnection(f.route, f.provider)
+	if limit := snapshot.CodeRoutes["coding"].MaxBodyBytes; limit == nil || *limit != 1048576 {
+		t.Fatalf("published code body limit lost: %v", limit)
+	}
 	if !ok || snapshot.CodeRoutes["coding"].RevisionID != f.route.RevisionID || connection.Endpoint != "https://fixture.invalid" {
 		t.Fatal("code publication missing")
 	}
@@ -565,10 +572,10 @@ func TestCodeFoundationManagementIsolationPublicationAndPrivacy(t *testing.T) {
 	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, headers, 200)
 	_, err = f.store.Admit(t.Context(), f.input("disabled", "", nil))
 	codeRefusal(t, err, "code_permission_denied")
-	if err = f.store.RecordRefusal(t.Context(), f.route, f.key, "code_permission_denied"); err != nil {
+	if err = f.store.RecordRefusal(t.Context(), f.route, f.key, "", "code_permission_denied"); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.store.RecordRefusal(t.Context(), f.route, f.key, "prompt: never persist me"); err == nil {
+	if err = f.store.RecordRefusal(t.Context(), f.route, f.key, "", "prompt: never persist me"); err == nil {
 		t.Fatal("unbounded refusal text accepted")
 	}
 	for _, path := range []string{"accounts", "pools", "routes", "budgets", "bindings", "attempts", "refusals", "token-windows"} {

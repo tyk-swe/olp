@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"strconv"
 	"strings"
@@ -1236,13 +1237,21 @@ func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 		t.Fatal(err)
 	}
 	next := limits.BudgetWindows(windows.MonthlyEnd)
+	want := map[string]string{
+		"day:" + strconv.FormatInt(windows.DailyID, 10):     "1.000000000000/0",
+		"week:" + strconv.FormatInt(windows.WeeklyID, 10):   "1.000000000000/0",
+		"month:" + strconv.FormatInt(windows.MonthlyID, 10): "1.000000000000/2",
+		"day:" + strconv.FormatInt(next.DailyID, 10):        "0.100000000000/0",
+		"week:" + strconv.FormatInt(next.WeeklyID, 10):      "0.100000000000/0",
+		"month:" + strconv.FormatInt(next.MonthlyID, 10):    "0.100000000000/0",
+	}
+	if next.WeeklyID == windows.WeeklyID {
+		// The month ends inside this week, so both deltas share its window.
+		want["week:"+strconv.FormatInt(windows.WeeklyID, 10)] = "1.100000000000/0"
+	}
 	rows := limWindowRows(t, pool, idle)
-	if len(rows) != 4 ||
-		rows["day:"+strconv.FormatInt(windows.DailyID, 10)] != "1.000000000000/0" ||
-		rows["month:"+strconv.FormatInt(windows.MonthlyID, 10)] != "1.000000000000/2" ||
-		rows["day:"+strconv.FormatInt(next.DailyID, 10)] != "0.100000000000/0" ||
-		rows["month:"+strconv.FormatInt(next.MonthlyID, 10)] != "0.100000000000/0" {
-		t.Fatalf("windows = %v", rows)
+	if !maps.Equal(rows, want) {
+		t.Fatalf("windows = %v, want %v", rows, want)
 	}
 
 	conn, err := pool.Acquire(t.Context())
@@ -1275,7 +1284,7 @@ func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 	if idled := byKey[idle]; idled.MonthlyAccrued != "1.000000000000" || idled.UnpricedAttempts != 2 {
 		t.Fatalf("snapshot = %+v, want the durable total retained", idled)
 	}
-	if rows = limWindowRows(t, pool, spender); len(rows) != 2 {
+	if rows = limWindowRows(t, pool, spender); len(rows) != 3 {
 		t.Fatalf("windows = %v, want the passed window pruned", rows)
 	}
 
@@ -1480,25 +1489,22 @@ func limPool(t *testing.T, dbURL string) *pgxpool.Pool {
 func limBudgetClock(t *testing.T, sql, placeholder string) string {
 	t.Helper()
 	const clock = "now()"
-	if strings.Count(sql, clock) != 2 {
-		t.Fatalf("budget expression no longer reads the clock twice: %s", sql)
+	if strings.Count(sql, clock) != 1 {
+		t.Fatalf("budget expression no longer reads the clock once: %s", sql)
 	}
 	return strings.ReplaceAll(sql, clock, placeholder+"::timestamptz")
 }
 
-// limBudgetWindowSQL lifts the window subquery out of BudgetSQL verbatim, so
-// the test observes the four boundaries the console query really gates its sums
-// with rather than a copy of them that could drift.
+// limBudgetWindowSQL reads the windows from the same calendar function BudgetSQL
+// gates its sums with, so the test observes the boundaries the console query
+// really uses rather than a copy of them that could drift.
 func limBudgetWindowSQL(t *testing.T) string {
 	t.Helper()
-	const opening, closing = "FROM (SELECT b.day", ") w,"
-	start := strings.Index(limits.BudgetSQL, opening)
-	stop := strings.Index(limits.BudgetSQL, closing)
-	if start < 0 || stop <= start {
-		t.Fatalf("BudgetSQL no longer exposes its window subquery: %s", limits.BudgetSQL)
+	const window = "FROM olp.budget_windows(now()) w"
+	if !strings.Contains(limits.BudgetSQL, window) {
+		t.Fatalf("BudgetSQL no longer reads its windows from the calendar: %s", limits.BudgetSQL)
 	}
-	window := limits.BudgetSQL[start : stop+len(closing)-1]
-	return "SELECT w.daily_start,w.daily_end,w.monthly_start,w.monthly_end " +
+	return "SELECT w.daily_start,w.daily_end,w.weekly_start,w.weekly_end,w.monthly_start,w.monthly_end " +
 		limBudgetClock(t, window, "$1")
 }
 
@@ -1581,9 +1587,9 @@ func TestLimitsBudgetWindowsIgnoreTheSessionTimeZone(t *testing.T) {
 			}
 			windows := limits.BudgetWindows(clock)
 
-			var dailyStart, dailyEnd, monthlyStart, monthlyEnd time.Time
+			var dailyStart, dailyEnd, weeklyStart, weeklyEnd, monthlyStart, monthlyEnd time.Time
 			if err := conn.QueryRow(t.Context(), windowSQL, clock).
-				Scan(&dailyStart, &dailyEnd, &monthlyStart, &monthlyEnd); err != nil {
+				Scan(&dailyStart, &dailyEnd, &weeklyStart, &weeklyEnd, &monthlyStart, &monthlyEnd); err != nil {
 				t.Fatal(err)
 			}
 			for _, boundary := range []struct {
@@ -1592,6 +1598,8 @@ func TestLimitsBudgetWindowsIgnoreTheSessionTimeZone(t *testing.T) {
 			}{
 				{"daily_start", dailyStart, windows.DailyStart},
 				{"daily_end", dailyEnd, windows.DailyEnd},
+				{"weekly_start", weeklyStart, windows.WeeklyStart},
+				{"weekly_end", weeklyEnd, windows.WeeklyEnd},
 				{"monthly_start", monthlyStart, windows.MonthlyStart},
 				{"monthly_end", monthlyEnd, windows.MonthlyEnd},
 			} {

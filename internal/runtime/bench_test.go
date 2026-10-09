@@ -31,12 +31,12 @@ func BenchmarkAuthenticate(b *testing.B) {
 	auth := secrets.NewAuthKey(key, uuid.NewString())
 	m := NewManager(nil, uuid.NewString(), auth, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	// An authority read in the future never goes stale however long the run is.
-	state := authorityState{loaded: true, readAt: time.Now().Add(24 * time.Hour), keys: map[string]keyRecord{}}
+	state := authorityState{loaded: true, readAt: time.Now().Add(24 * time.Hour), keys: map[string]*keyRecord{}}
 	var presented string
 	for i := range 1000 {
 		lookup := fmt.Sprintf("lookup%04d", i)
 		secret := "olp_" + lookup + "_" + uuid.NewString() + uuid.NewString()
-		state.keys[lookup] = keyRecord{authority: access.Authority{ID: uuid.NewString(), LookupID: lookup, Policy: access.KeyPolicy{Scopes: []string{"inference"}}}, digest: auth.Digest(secrets.APIKeyDigest, secret)}
+		state.keys[lookup] = &keyRecord{authority: access.Authority{ID: uuid.NewString(), LookupID: lookup, Policy: access.KeyPolicy{Scopes: []string{"inference"}}}, digest: auth.Digest(secrets.APIKeyDigest, secret)}
 		if i == 500 {
 			presented = secret
 		}

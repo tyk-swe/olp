@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func sseEvents(raw string) [][2]string {
@@ -105,6 +107,9 @@ func TestPlayground(t *testing.T) {
 	}
 	if reply["usage"] == nil || reply["routing"] == nil {
 		t.Fatalf("usage and routing must accompany the reply: %v", reply)
+	}
+	if served := sink.last(); served.Origin != usage.OriginPlayground || served.KeyID != "" || served.Route != slug {
+		t.Fatalf("a Playground call is recorded as the installation's own: %+v", served)
 	}
 
 	reply = h.want(owner, "POST", "/api/v1/playground", map[string]any{

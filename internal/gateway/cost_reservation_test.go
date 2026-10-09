@@ -317,6 +317,17 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 // budget are told apart from those that do not, and that a request with nothing to
 // estimate holds nothing. That such a key is not even priced is proven by
 // TestKeyWithoutCostBudgetEstimatesNothingEvenWhenPriced.
+func TestVideoCreateHoldsItsTargetsPriceAgainstACostBudget(t *testing.T) {
+	attempt := runtime.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{UnitPrice: costText("0.1")}}}
+	x := &execution{media: &media.Request{Op: media.OpVideoCreate, Seconds: costText("8")}, request: request{id: "video-create", minted: true}}
+	if hold := x.attemptCostReservation(budgeted(), attempt); hold != (costReservation{amount: "0.8", requestID: "video-create"}) {
+		t.Fatalf("a budgeted video create holds %+v", hold)
+	}
+	if hold := x.attemptCostReservation(admissionAuthority(access.KeyPolicy{}), attempt); hold != (costReservation{}) {
+		t.Fatalf("a video create without a cost budget holds %+v", hold)
+	}
+}
+
 func TestKeysWithoutACostBudgetEstimateNoCost(t *testing.T) {
 	rpm := int64(10)
 	for _, authority := range []access.Authority{

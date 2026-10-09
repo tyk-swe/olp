@@ -214,6 +214,7 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   });
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByRole('button', { name: 'Edit draft' }).click();
+  await expect(page.getByLabel('Maximum request body (bytes)')).toBeVisible();
   await page.getByLabel('Native models').fill('unsaved-native-model');
   await page
     .getByLabel('Public gateway URL')

@@ -54,7 +54,13 @@ test('renders fixture metadata, unknown usage, cursor filters and whole-tree ret
     return route.fulfill({
       headers,
       json: {
-        items: [attempt],
+        items: [
+          {
+            ...attempt,
+            end_user_digest: 'a'.repeat(64),
+            attribution: { team: 'core' }
+          }
+        ],
         next_cursor: url.searchParams.has('cursor') ? null : 'fixture-next'
       }
     });
@@ -77,14 +83,37 @@ test('renders fixture metadata, unknown usage, cursor filters and whole-tree ret
   await expect(page.getByText('Page 2', { exact: true })).toBeVisible();
   expect(cursors).toContain('fixture-next');
   await page.getByLabel('Binding ID', { exact: true }).fill(binding.id);
+  await page
+    .getByLabel('End-user digest', { exact: true })
+    .fill('a'.repeat(64));
   const filtered = page.waitForRequest(
     (request) =>
       new URL(request.url()).searchParams.get('binding_id') === binding.id
   );
   await page.getByRole('button', { name: 'Apply filters' }).click();
-  expect(new URL((await filtered).url()).searchParams.has('cursor')).toBe(
-    false
-  );
+  const query = new URL((await filtered).url()).searchParams;
+  expect(query.has('cursor')).toBe(false);
+  expect(query.get('end_user_digest')).toBe('a'.repeat(64));
+  await expect(page.getByText('team=core', { exact: true })).toBeVisible();
+  await expect(
+    page
+      .locator('dt')
+      .filter({ hasText: /^End user$/ })
+      .locator('+ dd')
+  ).toHaveText('a'.repeat(64));
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.evaluate(async () => {
+    if (document.activeElement instanceof HTMLElement)
+      document.activeElement.blur();
+    window.scrollTo(0, 0);
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    );
+  });
+  await page.screenshot({
+    path: info.outputPath('code-end-user.png'),
+    fullPage: true
+  });
   await page
     .getByRole('button', { name: 'Conversation trees', exact: true })
     .click();

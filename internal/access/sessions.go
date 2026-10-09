@@ -19,7 +19,25 @@ func (s *Server) sessionBody(r *http.Request, q Queryer, u User, token string) (
 	}
 	return map[string]any{"user": map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "role": u.Role, "access_scope": u.AccessScope}, "installation_name": name, "csrf_token": s.csrf(token), "operations": operations}, err
 }
-func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string) (Reply, error) {
+
+type sessionAuth struct {
+	Method string
+	MFA    bool
+}
+
+// sessionStrength reads how a session was authenticated, which a session
+// rotated without a fresh sign-in keeps.
+func sessionStrength(r *http.Request, q Queryer, sessionID string) (sessionAuth, error) {
+	var strength sessionAuth
+	err := q.QueryRow(r.Context(), "SELECT auth_method,mfa_verified FROM olp.sessions WHERE id=$1", sessionID).Scan(&strength.Method, &strength.MFA)
+	return strength, err
+}
+
+func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string, auth ...sessionAuth) (Reply, error) {
+	strength := sessionAuth{Method: "local"}
+	if len(auth) > 0 {
+		strength = auth[0]
+	}
 	token := secrets.Token()
 	id := NewID()
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id IN(SELECT id FROM olp.sessions WHERE expires_at<=now() LIMIT 100)"); err != nil {
@@ -29,7 +47,7 @@ func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string) (Reply, e
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id IN(SELECT id FROM olp.sessions WHERE user_id=$1 ORDER BY created_at DESC OFFSET 19)", userID); err != nil {
 		return Reply{}, err
 	}
-	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint) VALUES($1,$2,$3,$4,$5)", id, userID, s.Auth.Digest(secrets.SessionDigest, token), time.Now().Add(sessionTTL), browserHint(r.UserAgent())); err != nil {
+	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint,auth_method,mfa_verified) VALUES($1,$2,$3,$4,$5,$6,$7)", id, userID, s.Auth.Digest(secrets.SessionDigest, token), time.Now().Add(sessionTTL), browserHint(r.UserAgent()), strength.Method, strength.MFA); err != nil {
 		return Reply{}, err
 	}
 	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", userID))
@@ -92,11 +110,15 @@ func (s *Server) login(r *http.Request) (Reply, error) {
 		}
 		return Reply{}, Fail(401, "invalid_credentials", "Email or password is invalid, or local sign-in is unavailable.")
 	}
-	response, err := s.newSession(r, tx, id)
+	response, err := s.localSession(r, tx, id)
 	if err != nil {
 		return Reply{}, err
 	}
-	if err = Audit(r.Context(), tx, r, UserActor(id), "session.login", "user", id, "success"); err != nil {
+	action := "session.login"
+	if response.Status == 202 {
+		action = "mfa.challenge"
+	}
+	if err = Audit(r.Context(), tx, r, UserActor(id), action, "user", id, "success"); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, response)
@@ -202,7 +224,7 @@ func (s *Server) profileBody(r *http.Request, q Queryer, p Principal) (Reply, er
 	if p.AllProjects {
 		rows, err = q.Query(r.Context(), "SELECT id::text,name,'manager' FROM olp.projects ORDER BY lower(name)")
 	} else {
-		rows, err = q.Query(r.Context(), "SELECT p.id::text,p.name,m.role FROM olp.project_members m JOIN olp.projects p ON p.id=m.project_id WHERE m.user_id=$1 ORDER BY lower(p.name)", p.ID)
+		rows, err = q.Query(r.Context(), "SELECT p.id::text,p.name,m.role FROM olp.effective_project_members m JOIN olp.projects p ON p.id=m.project_id WHERE m.user_id=$1 ORDER BY lower(p.name)", p.ID)
 	}
 	if err != nil {
 		return Reply{}, err
@@ -327,10 +349,14 @@ func (s *Server) writePassword(r *http.Request, p Principal, enroll bool) (Reply
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.users SET password_hash=$1,etag=$2,updated_at=now() WHERE id=$3", hash, NewID(), p.ID); err != nil {
 		return Reply{}, err
 	}
+	strength, err := sessionStrength(r, tx, p.SessionID)
+	if err != nil {
+		return Reply{}, err
+	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE user_id=$1", p.ID); err != nil {
 		return Reply{}, err
 	}
-	response, err := s.newSession(r, tx, p.ID)
+	response, err := s.newSession(r, tx, p.ID, strength)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -348,15 +374,15 @@ func (s *Server) writePassword(r *http.Request, p Principal, enroll bool) (Reply
 }
 func validatePurpose(purpose, resource string) error {
 	switch purpose {
-	case "password_enrollment", "oidc_link", "plugin_permit":
+	case "password_enrollment", "oidc_link", "saml_link", "plugin_permit", "mfa_manage":
 		if resource == "" {
 			return nil
 		}
-	case "oidc_unlink":
+	case "oidc_unlink", "saml_unlink":
 		_, err := ParseUUID(resource)
 		return err
 	}
-	return Invalid("purpose", "Use password_enrollment, oidc_link, plugin_permit, or oidc_unlink with its identity ID.")
+	return Invalid("purpose", "Use password_enrollment, oidc_link, plugin_permit, mfa_manage, or oidc_unlink with its identity ID.")
 }
 func (s *Server) reauthenticate(r *http.Request, p Principal) (Reply, error) {
 	var err error
@@ -397,7 +423,26 @@ func (s *Server) reauthenticate(r *http.Request, p Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	response, err := s.grantRecent(r, tx, p, input.Purpose, input.Resource)
+	// Recheck the password snapshot after taking the authority lock.
+	var current bool
+	if err = tx.QueryRow(r.Context(), "SELECT COALESCE(password_hash=$2,false) FROM olp.users WHERE id=$1", p.ID, *hash).Scan(&current); err != nil {
+		return Reply{}, err
+	}
+	if !current {
+		return Reply{}, Fail(403, "current_password_invalid", "Authenticate again with the current password.")
+	}
+	configured, err := mfaConfigured(r.Context(), tx, p.ID)
+	if err != nil {
+		return Reply{}, err
+	}
+	if configured {
+		reply, e := s.mfaChallenge(r, tx, p.ID, "reauth", &p.SessionID, mfaFlowData{RecentPurpose: input.Purpose, RecentResource: input.Resource})
+		if e != nil {
+			return Reply{}, e
+		}
+		return Commit(r, tx, reply)
+	}
+	response, err := s.grantRecent(r, tx, p, input.Purpose, input.Resource, false)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -406,7 +451,17 @@ func (s *Server) reauthenticate(r *http.Request, p Principal) (Reply, error) {
 	}
 	return Commit(r, tx, response)
 }
-func (s *Server) grantRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, resource string) (Reply, error) {
+func (s *Server) grantRecent(r *http.Request, tx pgx.Tx, p Principal, purpose, resource string, factorVerified bool) (Reply, error) {
+	if purpose == "mfa_manage" && !factorVerified {
+		configured, e := mfaConfigured(r.Context(), tx, p.ID)
+		if e != nil {
+			return Reply{}, e
+		}
+		if configured {
+			return Reply{}, Fail(403, "mfa_factor_required", "Verify an enrolled factor or recovery code to manage local MFA.")
+		}
+	}
+
 	token := secrets.Token()
 	var target any
 	if resource != "" {

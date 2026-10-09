@@ -372,9 +372,14 @@ local function release_lease(pending_key, expiry_key, lease_id)
 end
 -- END cost_pending
 
-if #KEYS ~= 4 or #ARGV ~= 7 then
+if not ((#KEYS == 4 and #ARGV == 7) or (#KEYS == 5 and (#ARGV == 9 or #ARGV == 15))) then
   return failure("invalid_arguments")
 end
+
+local snapshot_week = parse_safe_unsigned_integer(ARGV[8] or "0")
+local weekly_value = ARGV[9] or ""
+local weekly_accrued = weekly_value ~= "" and normalize_decimal(weekly_value) or nil
+if weekly_value ~= "" and (snapshot_week == nil or weekly_accrued == nil) then return failure("invalid_arguments") end
 
 local snapshot_day = parse_safe_unsigned_integer(ARGV[1])
 local daily_accrued = normalize_decimal(ARGV[2])
@@ -394,8 +399,42 @@ if now_ms == nil then
   return failure("invalid_server_time")
 end
 local day_window, month_window, day_ttl, month_ttl = windows(now_ms)
+local week_window = math.floor((math.floor(now_ms / DAY_MS) + 3) / 7)
+local week_ttl = (week_window * 7 + 4) * DAY_MS - now_ms
 if day_ttl < 1 or month_ttl < 1 then
   return failure("invalid_server_time")
+end
+
+-- Calendar evidence supplies boundaries, not a caller-selected clock. Valkey
+-- TIME decides whether each interval is current. Existing current intervals
+-- cannot be replaced by an overlapping calendar or a legacy UTC snapshot.
+local bounds = {}
+local function interval(key, index, snapshot, fallback, ttl)
+  local existing = redis.pcall("HMGET", key, "starts_at", "ends_at", "window")
+  if #ARGV ~= 15 then
+    return fallback, ttl, existing.err ~= nil or existing[1] == false
+  end
+  local first = parse_safe_unsigned_integer(ARGV[index])
+  local last = parse_safe_unsigned_integer(ARGV[index+1])
+  if first == nil or last == nil or first >= last then return nil end
+  bounds[key] = {first,last}
+  local active = first <= now_ms and now_ms < last
+  if existing.err == nil and existing[1] ~= false then
+    local prior_first = parse_safe_unsigned_integer(existing[1])
+    local prior_last = parse_safe_unsigned_integer(existing[2])
+    local prior_id = parse_safe_unsigned_integer(existing[3])
+    if prior_first ~= nil and prior_last ~= nil and prior_first <= now_ms and now_ms < prior_last
+      and (prior_first ~= first or prior_last ~= last or prior_id ~= snapshot) then active = false end
+  end
+  return snapshot, last-now_ms, active
+end
+local day_active, month_active, week_active
+ day_window, day_ttl, day_active = interval(KEYS[1],10,snapshot_day,day_window,day_ttl)
+ month_window, month_ttl, month_active = interval(KEYS[2],12,snapshot_month,month_window,month_ttl)
+ if #KEYS == 5 then week_window, week_ttl, week_active = interval(KEYS[5],14,snapshot_week,week_window,week_ttl) end
+ if day_window == nil or month_window == nil or week_window == nil then return failure("invalid_arguments") end
+local function record_interval(key)
+ if bounds[key] ~= nil then redis.call("HSET",key,"starts_at",bounds[key][1],"ends_at",bounds[key][2]) end
 end
 
 local daily_state, current_daily = read_state(KEYS[1], {"window", "accrued"}, day_window)
@@ -410,19 +449,20 @@ if monthly_state == nil then
 end
 
 local reconciled_daily = 0
-if snapshot_day == day_window then
+if day_active and snapshot_day == day_window then
   if daily_state ~= "current" then
     redis.call("DEL", KEYS[1])
     redis.call("HSET", KEYS[1], "window", day_window, "accrued", daily_accrued)
   elseif compare_decimal(current_daily, daily_accrued) < 0 then
     redis.call("HSET", KEYS[1], "accrued", daily_accrued)
   end
+  record_interval(KEYS[1])
   redis.call("PEXPIRE", KEYS[1], day_ttl)
   reconciled_daily = 1
 end
 
 local reconciled_monthly = 0
-if snapshot_month == month_window then
+if month_active and snapshot_month == month_window then
   if monthly_state ~= "current" then
     redis.call("DEL", KEYS[2])
     redis.call(
@@ -437,8 +477,23 @@ if snapshot_month == month_window then
       redis.call("HSET", KEYS[2], "unpriced", unpriced)
     end
   end
+  record_interval(KEYS[2])
   redis.call("PEXPIRE", KEYS[2], month_ttl)
   reconciled_monthly = 1
+end
+
+-- Weekly evidence is optional for snapshots produced without that dimension;
+-- absence must never manufacture a zero balance for a newly enabled weekly cap.
+if week_active and weekly_accrued ~= nil and snapshot_week == week_window then
+  local state, accrued = read_state(KEYS[5], {"window", "accrued"}, week_window)
+  if state ~= "current" then
+    redis.call("DEL", KEYS[5])
+    redis.call("HSET", KEYS[5], "window", week_window, "accrued", weekly_accrued)
+  elseif compare_decimal(accrued, weekly_accrued) < 0 then
+    redis.call("HSET", KEYS[5], "accrued", weekly_accrued)
+  end
+  record_interval(KEYS[5])
+  redis.call("PEXPIRE", KEYS[5], week_ttl)
 end
 
 -- The request this snapshot accounts for stops being reserved in the same step

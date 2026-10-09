@@ -47,6 +47,8 @@ type Server struct {
 	// before the first request is served, and never changes afterwards.
 	LimitsEnforced     bool
 	LocalLoginDisabled bool
+	// ManagementNetworkRestricted reports the process's immutable CIDR policy.
+	ManagementNetworkRestricted bool
 	// ClientIP is wired to the shared trusted-proxy resolver by the process.
 	ClientIP func(*http.Request) string
 	// RetentionEnforced is true where this installation is configured with the
@@ -141,7 +143,14 @@ func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, ti
 	r = r.WithContext(context.WithValue(ctx, clientIPKey{}, s.clientIP(r)))
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 	_, machine := managementBearer(r)
-	if machine {
+	// SCIM declares only bearer-token alternatives; cookie origins cannot
+	// grant access there. Unauthenticated SCIM writes still receive a 401.
+	if machine || strings.HasPrefix(r.URL.Path, "/scim/") {
+		return r, cancel, nil
+	}
+	// The SAML POST receiver verifies a signed, solicited response and redirects
+	// to a same-origin completion that requires the initiating browser cookie.
+	if r.Method == "POST" && r.URL.Path == "/api/v1/saml/acs" {
 		return r, cancel, nil
 	}
 	if err := checkCookies(r); err != nil {
@@ -150,7 +159,7 @@ func (s *Server) guard(w http.ResponseWriter, r *http.Request, maxBody int64, ti
 	if r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("Origin") != s.Origin {
 		return r, cancel, Fail(403, "origin_denied", "Use the configured console origin.")
 	}
-	if r.Header.Get("Sec-Fetch-Site") == "cross-site" && r.URL.Path != "/api/v1/oidc/callback" {
+	if r.Header.Get("Sec-Fetch-Site") == "cross-site" && r.URL.Path != "/api/v1/oidc/callback" && r.URL.Path != "/api/v1/saml/complete" {
 		return r, cancel, Fail(403, "origin_denied", "Cross-site access is not allowed.")
 	}
 	return r, cancel, nil

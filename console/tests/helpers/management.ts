@@ -59,6 +59,7 @@ export async function provisionGenerationRoute(
     endpoint: string;
     model: string;
     credential: string;
+    credentialSource?: 'operator' | 'caller';
   }
 ) {
   type Resource = {
@@ -87,7 +88,10 @@ export async function provisionGenerationRoute(
         configuration: {
           kind: 'openai_compatible',
           endpoint: fixture.endpoint,
-          auth_mode: 'api_key'
+          auth_mode: 'api_key',
+          ...(fixture.credentialSource
+            ? { credential_source: fixture.credentialSource }
+            : {})
         },
         model: fixture.model,
         credential: fixture.credential

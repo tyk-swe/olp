@@ -214,6 +214,29 @@ describe('provider editor capability policy', () => {
     ).toBe('Vertex AI requires probe model, credential.');
   });
 
+  it('preserves caller serving mode and the separate operator probe credential', () => {
+    const draft = createProviderDraft(compatibleSpec);
+    draft.name = 'Caller connection';
+    draft.credential = 'operator-probe';
+    draft.document!.set(['credential_source'], 'caller');
+    const input = buildCreateProviderInput(draft, compatibleSpec);
+    expect(input.configuration.credential_source).toBe('caller');
+    expect(input.credential).toBe('operator-probe');
+    const edit = providerEditValues(
+      { name: draft.name, configuration: input.configuration },
+      compatibleSpec
+    );
+    expect(
+      buildUpdateProviderInput(edit, compatibleSpec).configuration
+        .credential_source
+    ).toBe('caller');
+    edit.document!.set(['credential_source'], 'operator');
+    expect(
+      buildUpdateProviderInput(edit, compatibleSpec).configuration
+        .credential_source
+    ).toBe('operator');
+  });
+
   it('resolves a preset to ordinary compatible-provider fields', () => {
     const draft = {
       ...createProviderDraft(compatibleSpec),

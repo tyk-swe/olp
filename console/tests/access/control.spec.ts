@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 
 const password = 'a long browser test password';
@@ -169,17 +170,211 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
     path: info.outputPath('assigned-navigation.png'),
     fullPage: true
   });
+  // Project policy administration is available without installation-wide access.
+  const delegatedProject = await page.evaluate(async (viewerID) => {
+    const session = await (await fetch('/api/v1/sessions/current')).json();
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': session.csrf_token,
+      'Idempotency-Key': crypto.randomUUID()
+    };
+    const created = await fetch('/api/v1/projects', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: 'Delegated policy' })
+    });
+    if (created.status !== 201)
+      throw new Error(`create project: ${created.status}`);
+    const project = await created.json();
+    const member = await fetch(
+      `/api/v1/projects/${project.id}/members/${viewerID}`,
+      {
+        method: 'PUT',
+        headers: { ...headers, 'If-Match': `"${project.etag}"` },
+        body: JSON.stringify({ role: 'manager' })
+      }
+    );
+    if (member.status !== 200)
+      throw new Error(`project membership: ${member.status}`);
+    return project.id as string;
+  }, viewerID);
+  await assigned.getByRole('button', { name: 'Open account menu' }).click();
+  await assigned.getByRole('link', { name: 'Access', exact: true }).click();
+  await assigned
+    .getByRole('link', { name: 'Project policies', exact: true })
+    .click();
+  await expect(
+    assigned.getByRole('heading', { name: 'Project policies' })
+  ).toBeVisible();
+  await expect(assigned.getByLabel('Enable end-user policy')).toBeDisabled();
+  await expect(assigned.getByLabel('Required attribution keys')).toBeDisabled();
+  await expect(
+    assigned.getByRole('button', { name: 'Save end-user policy' })
+  ).toHaveCount(0);
+  await changeRemote(page, `/api/v1/users/${viewerID}`, 'PATCH', {
+    role: 'developer'
+  });
+  await assigned.goto('/login');
+  await signIn(assigned, 'viewer@example.com');
+  await assigned.waitForURL((url) => url.pathname !== '/login');
+  await assigned.goto('/project-policies');
+  await assigned.getByLabel('Enable end-user policy').check();
+  await assigned.getByLabel('Requests per minute', { exact: true }).fill('9');
+  await assigned.getByRole('button', { name: 'Save end-user policy' }).click();
+  await expect(
+    assigned.getByText('End-user policy saved.', { exact: true })
+  ).toBeVisible();
+  const delegatedPolicy = await assigned.evaluate(
+    async (projectId) =>
+      (await fetch(`/api/v1/projects/${projectId}/end-user-policy`)).json(),
+    delegatedProject
+  );
+  expect(delegatedPolicy.policy.defaults.requests_per_minute).toBe(9);
+  const attributionPanel = assigned.getByRole('region', {
+    name: 'Project attribution policy'
+  });
+  await attributionPanel.getByLabel('Required attribution keys').fill('team');
+  await attributionPanel
+    .getByRole('button', { name: 'Add pinned label' })
+    .click();
+  await attributionPanel
+    .getByLabel('Pinned label', { exact: true })
+    .fill('team');
+  await attributionPanel
+    .getByLabel('Pinned value', { exact: true })
+    .fill('core');
+  await attributionPanel
+    .getByRole('button', { name: 'Save attribution policy' })
+    .click();
+  await expect(
+    attributionPanel.getByText('Attribution policy saved.', { exact: true })
+  ).toBeVisible();
+  const savedAttribution = await assigned.evaluate(
+    async (id) =>
+      (await fetch(`/api/v1/projects/${id}/attribution-policy`)).json(),
+    delegatedProject
+  );
+  expect(savedAttribution.policy.attribution_defaults).toEqual({
+    team: 'core'
+  });
+
+  const groupsPanel = assigned.getByRole('region', {
+    name: 'Project route groups'
+  });
+  await groupsPanel.getByRole('button', { name: 'Add route group' }).click();
+  await groupsPanel
+    .getByLabel('Group name', { exact: true })
+    .fill('production');
+  await groupsPanel
+    .getByLabel('Member routes', { exact: true })
+    .fill('future-chat, future-embeddings');
+  await groupsPanel.getByRole('button', { name: 'Save route groups' }).click();
+  await expect(
+    groupsPanel.getByText('Route groups saved.', { exact: true })
+  ).toBeVisible();
+  const savedGroups = await assigned.evaluate(
+    async (id) => (await fetch(`/api/v1/projects/${id}/route-groups`)).json(),
+    delegatedProject
+  );
+  expect(savedGroups.groups.production).toEqual([
+    'future-chat',
+    'future-embeddings'
+  ]);
+  expect(
+    (await new AxeBuilder({ page: assigned }).analyze()).violations
+  ).toEqual([]);
+  await assigned.evaluate(async () => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    window.scrollTo(0, 0);
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    );
+  });
+  await assigned.screenshot({
+    path: info.outputPath('project-end-user-policy.png'),
+    fullPage: true
+  });
+  await changeRemote(page, `/api/v1/users/${viewerID}`, 'PATCH', {
+    role: 'viewer'
+  });
+  await assigned.goto('/login');
+  await signIn(assigned, 'viewer@example.com');
+  await assigned.waitForURL((url) => url.pathname !== '/login');
+  await assigned.goto('/project-policies');
+  await expect(
+    assigned.getByLabel('Requests per minute', { exact: true })
+  ).toBeDisabled();
+  await expect(
+    assigned.getByRole('button', { name: 'Add route group', exact: true })
+  ).toBeDisabled();
+  await expect(
+    assigned.getByLabel('Member routes', { exact: true })
+  ).toBeDisabled();
+  await expect(
+    assigned.getByRole('button', { name: 'Save route groups', exact: true })
+  ).toHaveCount(0);
   await assignedContext.close();
 
   await page.goto('/api-keys/new');
   await page.getByLabel('Key name').fill('Browser application');
+  await page
+    .getByLabel('Project', { exact: true })
+    .selectOption(delegatedProject);
+  await page
+    .getByLabel('Allowed route groups', { exact: true })
+    .fill('production');
+  await page.getByLabel('Required attribution keys').fill('team');
+  await page.getByRole('button', { name: 'Add pinned label' }).click();
+  await page.getByLabel('Pinned label', { exact: true }).fill('team');
+  await page.getByLabel('Pinned value', { exact: true }).fill('core');
+
   await expect(page.getByText('No routes are configured yet.')).toBeVisible();
   await page.getByLabel('Requests per minute').fill('60');
+  await page.getByLabel('Allowed client networks').fill('127.0.0.0/8\n::1/128');
+  await page
+    .getByLabel('Identifier source', { exact: true })
+    .selectOption('header');
+  await page.getByLabel('Rotation reminder interval (days)').fill('30');
+  await page.getByLabel('Enable end-user policy', { exact: true }).check();
+  await page
+    .getByRole('group', { name: 'Per-end-user limits', exact: true })
+    .getByLabel('Requests per minute', { exact: true })
+    .fill('12');
+  await page.evaluate(async () => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    window.scrollTo(0, 0);
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    );
+  });
+  await page.screenshot({
+    path: info.outputPath('key-end-user-policy.png'),
+    fullPage: true
+  });
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  const createdKey = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/v1/api-keys') &&
+      response.request().method() === 'POST'
+  );
   await page
     .getByRole('button', { name: 'Create and show key', exact: true })
     .click();
   const secret = page.getByRole('dialog', { name: 'Copy this secret now.' });
   await expect(secret).toBeVisible();
+  const keyId = (await (await createdKey).json()).id;
+  const savedSource = await page.evaluate(async (id) => {
+    const saved = await fetch(`/api/v1/api-keys/${id}`);
+    return await saved.json();
+  }, keyId);
+  expect(savedSource.end_user_source).toBe('header');
+  expect(savedSource.rotation_interval_days).toBe(30);
+  expect(savedSource.rotation_due_at).toBeTruthy();
+  expect(savedSource.required_attribution_keys).toEqual(['team']);
+  expect(savedSource.attribution_defaults).toEqual({ team: 'core' });
+  expect(savedSource.allowed_route_groups).toEqual(['production']);
+  expect(savedSource.allowed_cidrs).toEqual(['127.0.0.0/8', '::1/128']);
+  expect(savedSource.end_user_policy.defaults.requests_per_minute).toBe(12);
   await expect(
     secret.getByRole('button', { name: 'Run connection test' })
   ).toBeVisible();
@@ -194,6 +389,118 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   // budget state instead of the not-enforced note.
   await expect(page.getByText('No cost budget')).toBeVisible();
   await page.screenshot({ path: info.outputPath('keys.png'), fullPage: true });
+
+  const keyRow = page
+    .getByRole('row')
+    .filter({ hasText: 'Browser application' });
+  await expect(
+    keyRow.getByText('Groups: production', { exact: true })
+  ).toBeVisible();
+  await keyRow.getByRole('button', { name: 'Rotate', exact: true }).click();
+  const rotation = page.getByRole('dialog', {
+    name: 'Rotate Browser application'
+  });
+  await rotation.getByLabel('Previous-secret overlap (seconds)').fill('60');
+  expect(
+    (await new AxeBuilder({ page }).include('.secret-dialog').analyze())
+      .violations
+  ).toEqual([]);
+  await page.screenshot({
+    path: info.outputPath('key-rotation.png'),
+    fullPage: true
+  });
+  const rotationURL = `**/api/v1/api-keys/${keyId}/rotate`;
+  let lostRotationResponse = false;
+  let firstRotationId = '';
+  await page.route(rotationURL, async (route) => {
+    const requestId = route.request().headers()['idempotency-key'];
+    if (!lostRotationResponse) {
+      lostRotationResponse = true;
+      firstRotationId = requestId;
+      expect((await route.fetch()).status()).toBe(200);
+      await route.abort('failed');
+    } else {
+      expect(requestId).toBe(firstRotationId);
+      await route.continue();
+    }
+  });
+  await rotation
+    .getByRole('button', { name: 'Rotate key', exact: true })
+    .click();
+  await expect(rotation.getByRole('alert')).toBeVisible();
+  await expect(
+    rotation.getByLabel('Previous-secret overlap (seconds)')
+  ).toBeDisabled();
+  const rotationResponse = page.waitForResponse(
+    (r) =>
+      r.url().endsWith(`/api/v1/api-keys/${keyId}/rotate`) &&
+      r.request().method() === 'POST'
+  );
+  await rotation
+    .getByRole('button', { name: 'Rotate key', exact: true })
+    .click();
+  expect((await rotationResponse).status()).toBe(200);
+  await page.unroute(rotationURL);
+  const replacement = page.getByRole('dialog', {
+    name: 'Copy this secret now.'
+  });
+  await expect(
+    replacement.getByText(/previous secret remains valid until/)
+  ).toBeVisible();
+  await replacement
+    .getByRole('button', { name: 'I have saved the key' })
+    .click();
+  await expect(keyRow.getByText(/Previous .*valid until/)).toBeVisible();
+
+  const notifications = page.locator(
+    '[aria-labelledby="notifications-heading"]'
+  );
+  await notifications.locator('#dest-name').fill('Rotation reminders');
+  await notifications
+    .getByLabel('Webhook URL', { exact: true })
+    .fill('http://127.0.0.1:4190/key-reminders');
+  await notifications.locator('#dest-project').selectOption(delegatedProject);
+  await notifications
+    .getByRole('button', { name: 'Create destination', exact: true })
+    .click();
+  await expect(
+    notifications.getByText('Destination created.', { exact: true })
+  ).toBeVisible();
+  await notifications.locator('#rule-event').selectOption('key.expiring');
+  await notifications.locator('#rule-project').selectOption(delegatedProject);
+  await notifications.locator('#rule-name').fill('Browser key reminders');
+  await notifications.locator('#rule-subject').selectOption(keyId);
+  await notifications
+    .locator('#rule-destination')
+    .selectOption({ label: 'Rotation reminders' });
+  await notifications
+    .getByRole('button', { name: 'Create rule', exact: true })
+    .click();
+  await expect(
+    notifications.getByText('Rule created.', { exact: true })
+  ).toBeVisible();
+  await expect(
+    notifications.getByRole('row').filter({ hasText: 'Browser key reminders' })
+  ).toContainText('Key expiry or rotation due');
+  expect(
+    (
+      await new AxeBuilder({ page })
+        .include('[aria-labelledby="notifications-heading"]')
+        .analyze()
+    ).violations
+  ).toEqual([]);
+  await page.evaluate(async () => {
+    (document.activeElement as HTMLElement)?.blur();
+    window.scrollTo(0, 0);
+    await new Promise<void>((done) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => done()))
+    );
+  });
+  await page.screenshot({
+    fullPage: true,
+
+    path: info.outputPath('key-reminders.png')
+  });
 
   await page.goto('/settings/profile');
   await page.getByLabel('Display name').fill('Unsaved owner');
@@ -286,6 +593,19 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await sibling.close();
 
   await page.goto('/settings');
+  const networkRestricted = await page.evaluate(
+    async () =>
+      (await (await fetch('/api/v1/auth/capabilities')).json())
+        .management_network_restricted
+  );
+  if (networkRestricted) {
+    await expect(
+      page.getByText('Management access is restricted to client networks', {
+        exact: false
+      })
+    ).toBeVisible();
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  }
   const retention = page
     .locator('.setting-row')
     .filter({ has: page.locator('[id="setting-retention.audit_days"]') });

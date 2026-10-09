@@ -90,6 +90,36 @@
           route: 'GET /api/v1/api-keys'
         },
         {
+          label: 'SCIM',
+          href: resolve('/scim-provisioning'),
+          icon: 'access',
+          route: 'GET /api/v1/scim/groups'
+        },
+        {
+          label: 'Workload identity',
+          href: resolve('/workload-issuers'),
+          icon: 'access',
+          route: 'GET /api/v1/workload-issuers'
+        },
+        {
+          label: 'Organizations',
+          href: resolve('/organizations'),
+          icon: 'access',
+          route: 'GET /api/v1/organizations'
+        },
+        {
+          label: 'Budget increases',
+          icon: 'access',
+          href: resolve('/budget-increases'),
+          route: 'GET /api/v1/budget-increases'
+        },
+        {
+          label: 'Project policies',
+          href: resolve('/project-policies'),
+          icon: 'access',
+          route: 'GET /api/v1/project-memberships'
+        },
+        {
           label: 'Access',
           href: resolve('/access'),
           icon: 'access',

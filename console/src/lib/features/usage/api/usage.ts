@@ -53,6 +53,7 @@ export type UsageDimension =
   | 'model_family'
   | 'estimate_provenance'
   | 'api_key'
+  | 'end_user'
   | 'operation'
   | 'attribution';
 

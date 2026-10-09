@@ -62,6 +62,7 @@ type Config struct {
 	ShutdownTimeout     time.Duration
 	// Inference and provider egress bounds; names mirror the reference settings.
 	TrustedProxyCIDRs             []netip.Prefix
+	ManagementAllowedCIDRs        []netip.Prefix
 	ProviderEgressAllowCIDRs      []netip.Prefix
 	ProviderEgressAllowHTTPHosts  []string
 	MaxConnections                int
@@ -125,13 +126,14 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.DurationVar(&c.RequestTimeout, "dependency-request-timeout", 2*time.Second, "dependency request deadline")
 	f.DurationVar(&c.StartupTimeout, "startup-timeout", 10*time.Second, "startup deadline")
 	f.DurationVar(&c.ShutdownTimeout, "shutdown-timeout", 30*time.Second, "total shutdown deadline")
-	var trustedProxies, egressCIDRs, egressHosts, corsOrigins string
+	var trustedProxies, managementCIDRs, egressCIDRs, egressHosts, corsOrigins string
 	f.BoolVar(&c.LocalLoginEnabled, "local-login-enabled", true, "allow password sign-in")
 	f.StringVar(&corsOrigins, "gateway-cors-allowed-origins", "", "comma-separated origins allowed to call the inference API")
 	f.IntVar(&c.MaxInlineMediaItems, "http-max-inline-media-items", 4, "maximum inline media items")
 	f.Int64Var(&c.MaxInlineMediaItemBytes, "http-max-inline-media-item-bytes", 1048576, "maximum decoded bytes per inline media item")
 	f.Int64Var(&c.MaxInlineMediaTotalBytes, "http-max-inline-media-total-bytes", 2097152, "maximum decoded inline media bytes per request")
 	f.StringVar(&trustedProxies, "trusted-proxy-cidrs", "", "comma-separated CIDRs allowed to supply X-Forwarded-For")
+	f.StringVar(&managementCIDRs, "management-allowed-cidrs", "", "comma-separated client CIDRs allowed to reach management and console; empty allows all")
 	f.StringVar(&egressCIDRs, "provider-egress-allow-cidrs", "", "comma-separated CIDRs exempt from the non-public provider egress denylist")
 	f.StringVar(&egressHosts, "provider-egress-allow-http-hosts", "", "comma-separated hosts whose provider endpoints may use plain HTTP")
 	f.IntVar(&c.MaxConnections, "http-max-connections", 1024, "maximum accepted connections per listener")
@@ -206,6 +208,21 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	}
 	if c.TrustedProxyCIDRs, err = parseCIDRs("OLP_TRUSTED_PROXY_CIDRS", trustedProxies); err != nil {
 		return c, err
+	}
+	if c.ManagementAllowedCIDRs, err = parseCIDRs("OLP_MANAGEMENT_ALLOWED_CIDRS", managementCIDRs); err != nil {
+		return c, err
+	}
+	if len(c.ManagementAllowedCIDRs) == 0 && strings.TrimSpace(managementCIDRs) != "" {
+		return c, errors.New("OLP_MANAGEMENT_ALLOWED_CIDRS must list CIDR prefixes")
+	}
+	if len(c.ManagementAllowedCIDRs) > 64 {
+		return c, errors.New("OLP_MANAGEMENT_ALLOWED_CIDRS accepts at most 64 CIDR ranges")
+	}
+	for item := range strings.SplitSeq(managementCIDRs, ",") {
+		prefix, _ := netip.ParsePrefix(strings.TrimSpace(item))
+		if prefix.Addr().Is4In6() {
+			return c, errors.New("OLP_MANAGEMENT_ALLOWED_CIDRS must express IPv4-mapped ranges as IPv4")
+		}
 	}
 	if c.ProviderEgressAllowCIDRs, err = parseCIDRs("OLP_PROVIDER_EGRESS_ALLOW_CIDRS", egressCIDRs); err != nil {
 		return c, err

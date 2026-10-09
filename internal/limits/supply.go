@@ -237,23 +237,28 @@ VALUES($1,$2,$3::text::numeric,$4::text::numeric) ON CONFLICT (owner_id) DO NOTH
 	return nil
 }
 
-const addSupplyCostDeltaSQL = `WITH deltas (window_kind,window_id,accrued,unpriced_attempts) AS (
- VALUES ('day'::text,$2::bigint,$3::text::numeric,0::bigint),
-        ('month'::text,$4::bigint,$3::text::numeric,$5::bigint)
+const addSupplyCostDeltaSQL = `WITH budget_calendar AS MATERIALIZED (SELECT * FROM olp.budget_windows($4::timestamptz)),
+deltas (window_kind,window_id,accrued,unpriced_attempts) AS (
+ VALUES ('day'::text,(SELECT daily_id FROM budget_calendar),$2::text::numeric,0::bigint),
+        ('month'::text,(SELECT monthly_id FROM budget_calendar),$2::text::numeric,$3::bigint),
+ ('week'::text,(SELECT weekly_id FROM budget_calendar),$2::text::numeric,0::bigint)
 ), applied AS (
  INSERT INTO olp.supply_cost_windows (owner_id,window_kind,window_id,accrued,unpriced_attempts)
  SELECT $1::uuid,window_kind,window_id,accrued,unpriced_attempts FROM deltas
  ON CONFLICT (owner_id,window_kind,window_id) DO UPDATE SET
    accrued=olp.supply_cost_windows.accrued+EXCLUDED.accrued,
    unpriced_attempts=olp.supply_cost_windows.unpriced_attempts+EXCLUDED.unpriced_attempts
- RETURNING owner_id,window_kind,window_id,accrued,unpriced_attempts
+ RETURNING owner_id,window_kind,window_id,accrued,unpriced_attempts,weekly_complete
 ) SELECT owner_id::text,
  MAX(window_id) FILTER (WHERE window_kind='day')::bigint,
  MAX(accrued) FILTER (WHERE window_kind='day')::text,
  MAX(window_id) FILTER (WHERE window_kind='month')::bigint,
  MAX(accrued) FILTER (WHERE window_kind='month')::text,
- MAX(unpriced_attempts) FILTER (WHERE window_kind='month')::bigint
- FROM applied GROUP BY owner_id`
+ MAX(unpriced_attempts) FILTER (WHERE window_kind='month')::bigint,
+ MAX(window_id) FILTER(WHERE window_kind='week')::bigint,
+ CASE WHEN bool_or(weekly_complete) FILTER(WHERE window_kind='week') THEN MAX(accrued) FILTER(WHERE window_kind='week')::text ELSE '' END
+ , (SELECT daily_start FROM budget_calendar), (SELECT daily_end FROM budget_calendar), (SELECT monthly_start FROM budget_calendar), (SELECT monthly_end FROM budget_calendar), (SELECT weekly_start FROM budget_calendar), (SELECT weekly_end FROM budget_calendar)
+FROM applied GROUP BY owner_id`
 
 // AddSupplyCostDelta accumulates one attempt's cost against a supply cap
 // owner, a provider connection, credential slot or route, inside the caller's
@@ -269,24 +274,26 @@ func AddSupplyCostDelta(ctx context.Context, tx pgx.Tx, ownerID string, observed
 // prunes windows that have passed and returns the balances. Supply windows
 // accrue in the transaction that records each attempt, so PostgreSQL already
 // holds the authoritative totals: reconciliation only has to install them.
-const supplySnapshotsSQL = `WITH pruned AS (
+const supplySnapshotsSQL = `WITH budget_calendar AS MATERIALIZED (SELECT * FROM olp.budget_windows($1::timestamptz)),
+pruned AS (
  DELETE FROM olp.supply_cost_windows
- WHERE (window_kind='day' AND window_id<$1::bigint) OR (window_kind='month' AND window_id<$2::bigint) RETURNING 1
+ WHERE (window_kind='day' AND window_id<(SELECT daily_id FROM budget_calendar)) OR (window_kind='month' AND window_id<(SELECT monthly_id FROM budget_calendar)) OR (window_kind='week' AND window_id<(SELECT weekly_id FROM budget_calendar)) RETURNING 1
 ), current AS (
  INSERT INTO olp.supply_cost_windows (owner_id,window_kind,window_id,accrued,unpriced_attempts)
  SELECT b.owner_id,w.kind,w.id,0,0 FROM olp.supply_budgets b
- CROSS JOIN (VALUES ('day'::text,$1::bigint),('month'::text,$2::bigint)) AS w(kind,id)
+ CROSS JOIN (VALUES ('day'::text,(SELECT daily_id FROM budget_calendar)),('month'::text,(SELECT monthly_id FROM budget_calendar))) AS w(kind,id)
  ON CONFLICT (owner_id,window_kind,window_id) DO UPDATE SET accrued=olp.supply_cost_windows.accrued
  RETURNING owner_id,window_kind,window_id,accrued,unpriced_attempts
-) SELECT owner_id::text,$1::bigint,
- MAX(accrued) FILTER (WHERE window_kind='day')::text,$2::bigint,
+) SELECT owner_id::text,(SELECT daily_id FROM budget_calendar),
+ MAX(accrued) FILTER (WHERE window_kind='day')::text,(SELECT monthly_id FROM budget_calendar),
  MAX(accrued) FILTER (WHERE window_kind='month')::text,
- MAX(unpriced_attempts) FILTER (WHERE window_kind='month')::bigint
- FROM current GROUP BY owner_id ORDER BY owner_id`
+ MAX(unpriced_attempts) FILTER (WHERE window_kind='month')::bigint,(SELECT weekly_id FROM budget_calendar),''::text
+ , (SELECT daily_start FROM budget_calendar), (SELECT daily_end FROM budget_calendar), (SELECT monthly_start FROM budget_calendar), (SELECT monthly_end FROM budget_calendar), (SELECT weekly_start FROM budget_calendar), (SELECT weekly_end FROM budget_calendar)
+FROM current GROUP BY owner_id ORDER BY owner_id`
 
 // supplySnapshots returns the durable spend of every capped supply owner.
-func supplySnapshots(ctx context.Context, conn *pgx.Conn, windows Windows) ([]CostSnapshot, error) {
-	rows, err := conn.Query(ctx, supplySnapshotsSQL, windows.DailyID, windows.MonthlyID)
+func supplySnapshots(ctx context.Context, conn *pgx.Conn, now time.Time) ([]CostSnapshot, error) {
+	rows, err := conn.Query(ctx, supplySnapshotsSQL, now)
 	if err != nil {
 		return nil, err
 	}

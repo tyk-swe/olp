@@ -7,14 +7,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/budgetcalendar"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
@@ -106,11 +108,18 @@ type existingDraft struct {
 }
 
 type stateView struct {
-	projects    map[string]string
-	projectName map[string]string
-	providers   map[string]*existingProvider
-	routes      map[string]*existingRoute
-	drafts      map[string]*existingDraft
+	projectAttributionBudgets  map[string]access.AttributionBudgets
+	projectBudgets             map[string]*access.BudgetPolicy
+	projectTemplates           map[string]access.LimitTemplates
+	projectRouteGroups         map[string]access.RouteGroups
+	projects                   map[string]string
+	projectEndUserPolicies     map[string]*access.EndUserPolicy
+	projectAttributionPolicies map[string]*attribution.Policy
+	projectName                map[string]string
+	projectOrganization        map[string]*string
+	providers                  map[string]*existingProvider
+	routes                     map[string]*existingRoute
+	drafts                     map[string]*existingDraft
 }
 
 func (v *stateView) projectOf(id *string) *string {
@@ -128,19 +137,33 @@ func routeKey(slug string, project *string) string {
 }
 
 func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
-	v := &stateView{projects: map[string]string{}, projectName: map[string]string{}, providers: map[string]*existingProvider{}, routes: map[string]*existingRoute{}, drafts: map[string]*existingDraft{}}
-	rows, err := q.Query(ctx, "SELECT id::text,name FROM olp.projects")
+	v := &stateView{projectOrganization: map[string]*string{}, projectAttributionBudgets: map[string]access.AttributionBudgets{}, projectTemplates: map[string]access.LimitTemplates{}, projectBudgets: map[string]*access.BudgetPolicy{}, projectRouteGroups: map[string]access.RouteGroups{}, projects: map[string]string{}, projectName: map[string]string{}, projectEndUserPolicies: map[string]*access.EndUserPolicy{}, projectAttributionPolicies: map[string]*attribution.Policy{}, providers: map[string]*existingProvider{}, routes: map[string]*existingRoute{}, drafts: map[string]*existingDraft{}}
+	rows, err := q.Query(ctx, "SELECT id::text,name,end_user_policy,attribution_policy,route_groups,budget_policy,limit_templates,attribution_budgets,(SELECT name FROM olp.organizations WHERE id=organization_id) FROM olp.projects")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id, name string
-		if err = rows.Scan(&id, &name); err != nil {
+		var organization *string
+		var policy *access.EndUserPolicy
+		var labels *attribution.Policy
+		var groups access.RouteGroups
+		var budget *access.BudgetPolicy
+		var templates access.LimitTemplates
+		var caps access.AttributionBudgets
+		if err = rows.Scan(&id, &name, &policy, &labels, &groups, &budget, &templates, &caps, &organization); err != nil {
 			return nil, err
 		}
 		v.projects[strings.ToLower(name)] = id
 		v.projectName[id] = name
+		v.projectOrganization[id] = organization
+		v.projectEndUserPolicies[id] = policy
+		v.projectAttributionPolicies[id] = labels
+		v.projectRouteGroups[id] = groups
+		v.projectBudgets[id] = budget
+		v.projectTemplates[id] = templates
+		v.projectAttributionBudgets[id] = caps
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
@@ -226,6 +249,10 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 func normalizeDocument(doc *Document) {
 	for i := range doc.Projects {
 		doc.Projects[i].Name = strings.TrimSpace(doc.Projects[i].Name)
+		doc.Projects[i].Budget = normalizedBudget(doc.Projects[i].Budget)
+		for _, members := range doc.Projects[i].RouteGroups {
+			slices.Sort(members)
+		}
 	}
 	for i := range doc.Providers {
 		p := &doc.Providers[i]
@@ -281,11 +308,75 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		return nil, access.Fail(422, "unsupported_api_version", "The artifact declares an unsupported api_version.")
 	}
 	normalizeDocument(doc)
+	if err := validateSCIMMappings(doc); err != nil {
+		return nil, err
+	}
+	if doc.SAML != nil {
+		if err := access.ValidateSAMLDefinition(*doc.SAML); err != nil {
+			return nil, err
+		}
+	}
+	if err := validateWorkloadEntries(doc); err != nil {
+		return nil, err
+	}
+	if err := validateOrganizations(ctx, q, doc); err != nil {
+		return nil, err
+	}
+	if doc.BudgetTimeZone != nil {
+		if _, err := budgetcalendar.New(*doc.BudgetTimeZone); err != nil {
+			return nil, access.Invalid("budget_time_zone", "Use a supported IANA time zone.")
+		}
+	}
+	if err := doc.InstallationBudget.Validate(); err != nil {
+		return nil, err
+	}
 	if len(doc.Projects) > maxProjects {
 		return nil, access.Invalid("projects", "Declare at most "+strconv.Itoa(maxProjects)+" projects.")
 	}
 	seen := map[string]bool{}
 	for i, p := range doc.Projects {
+		if err := p.Budget.Validate(); err != nil {
+			return nil, err
+		}
+		if err := p.AttributionBudgets.Validate(); err != nil {
+			return nil, err
+		}
+		if p.LimitTemplates != nil {
+			if err := p.LimitTemplates.Validate(); err != nil {
+				return nil, err
+			}
+		}
+		if p.EndUserLimitTemplate != nil && !access.RouteSlug.MatchString(*p.EndUserLimitTemplate) {
+			return nil, access.Invalid("end_user_limit_template", "Use a valid template name.")
+		}
+		if err := p.RouteGroups.Validate(); err != nil {
+			return nil, err
+		}
+
+		for _, members := range p.RouteGroups {
+			for _, route := range doc.Routes {
+				if slices.Contains(members, route.Slug) && (route.Project == nil || !strings.EqualFold(*route.Project, p.Name)) {
+					return nil, access.Invalid("route_groups", "Group routes must belong to their project.")
+				}
+			}
+			var foreign bool
+			if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM (SELECT slug,project_id FROM olp.routes UNION ALL SELECT slug,project_id FROM olp.code_routes) r LEFT JOIN olp.projects p ON p.id=r.project_id WHERE r.slug=ANY($1::text[]) AND lower(p.name) IS DISTINCT FROM lower($2::text))`, members, p.Name).Scan(&foreign); err != nil {
+				return nil, err
+			}
+			if foreign {
+				return nil, access.Invalid("route_groups", "Group routes must belong to their project.")
+			}
+		}
+		if p.AttributionPolicy != nil {
+			if err := p.AttributionPolicy.Validate(); err != nil {
+				return nil, access.Invalid("projects.attribution_policy", "Use at most four distinct valid attribution labels.")
+			}
+		}
+		if p.EndUserDefaults != nil {
+			if err := p.EndUserDefaults.Validate(); err != nil {
+				return nil, err
+			}
+		}
 		field := "projects." + strconv.Itoa(i) + ".name"
 		if err := access.ValidText(field, p.Name, 100); err != nil {
 			return nil, err
@@ -618,6 +709,25 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 	if err != nil {
 		return nil, err
 	}
+	if doc.SAML != nil {
+		current, err := loadSAMLDefinition(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		action := "replace"
+		if current == nil {
+			action = "create"
+		} else if reflect.DeepEqual(current, doc.SAML) {
+			action = "reuse"
+		}
+		result.item("configuration", "saml", action, "Identity trust is portable; signing material and linked identities stay local.")
+	}
+	if err := planSCIMMappings(ctx, q, doc, state, result); err != nil {
+		return nil, err
+	}
+	if err := planWorkloadIssuers(ctx, q, doc, state, result); err != nil {
+		return nil, err
+	}
 	if expected != nil {
 		current, err := s.exportDocument(ctx, q)
 		if err != nil {
@@ -631,17 +741,57 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			result.conflict("configuration", "expected_digest", "configuration_changed")
 		}
 	}
+	if doc.BudgetTimeZone != nil {
+		var current string
+		if err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value FROM olp.settings WHERE key='budgets.time_zone'),'UTC')").Scan(&current); err != nil {
+			return nil, err
+		}
+		action := "reuse"
+		if current != *doc.BudgetTimeZone {
+			action = "replace"
+		}
+		result.item("configuration", "budget_time_zone", action, "")
+	}
+
+	if doc.InstallationBudget != nil {
+		var current *access.BudgetPolicy
+		if err := q.QueryRow(ctx, "SELECT budget_policy FROM olp.installation WHERE singleton").Scan(&current); err != nil {
+			return nil, err
+		}
+		action := "reuse"
+		if !reflect.DeepEqual(current, normalizedBudget(doc.InstallationBudget)) {
+			action = "replace"
+		}
+		result.item("configuration", "installation_budget", action, "")
+	}
 	projectNames := map[string]bool{}
 	for name := range state.projects {
 		projectNames[name] = true
+	}
+	if err = planOrganizations(ctx, q, doc, result); err != nil {
+		return nil, err
 	}
 	for _, p := range doc.Projects {
 		key := strings.ToLower(p.Name)
 		projectNames[key] = true
 	}
 	for _, p := range doc.Projects {
-		if _, ok := state.projects[strings.ToLower(p.Name)]; ok {
-			result.item("project", p.Name, "reuse", "")
+		if id, ok := state.projects[strings.ToLower(p.Name)]; ok {
+			action := "reuse"
+			if p.Organization != nil {
+				current := state.projectOrganization[id]
+				if current != nil && !strings.EqualFold(*current, *p.Organization) {
+					return nil, access.Fail(409, "project_organization_immutable", "A project cannot move between organizations.")
+				}
+				if current == nil {
+					action = "replace"
+				}
+			}
+			desired := projectEndUserPolicy(state.projectEndUserPolicies[id], p.EndUserDefaults, p.EndUserLimitTemplate)
+			if !p.AttributionBudgets.Equal(state.projectAttributionBudgets[id]) || (p.LimitTemplates != nil && !reflect.DeepEqual(*p.LimitTemplates, state.projectTemplates[id])) || !reflect.DeepEqual(desired, state.projectEndUserPolicies[id]) || !reflect.DeepEqual(p.AttributionPolicy, state.projectAttributionPolicies[id]) || !p.RouteGroups.Equal(state.projectRouteGroups[id]) || !reflect.DeepEqual(p.Budget, state.projectBudgets[id]) {
+				action = "replace"
+			}
+			result.item("project", p.Name, action, "")
 		} else {
 			result.item("project", p.Name, "create", "")
 		}
@@ -787,6 +937,17 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		}
 	}
 	result.sort()
+	if doc.RequireLocalMFA != nil {
+		var current bool
+		if err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.mfa_required'),false)").Scan(&current); err != nil {
+			return nil, err
+		}
+		action := "reuse"
+		if current != *doc.RequireLocalMFA {
+			action = "replace"
+		}
+		result.item("configuration", "require_local_mfa", action, "Change the local sign-in policy; factors, challenges and recovery codes remain installation-local.")
+	}
 	return result, nil
 }
 

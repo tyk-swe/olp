@@ -474,18 +474,21 @@ func provisionOpenAI(t *testing.T, h *accessHarness, endpoint string, capabiliti
 
 func provisionOpenAIWith(t *testing.T, h *accessHarness, endpoint string, capabilities []any, operations []string, draftFields map[string]any, providerFields ...map[string]any) (*browser, map[string]any, string, string) {
 	t.Helper()
-	owner := h.owner()
-	detail := activeAzureProvider(t, h, owner, "Provider state fixture", endpoint, capabilities, providerFields...)
+	return provisionOpenAIInProject(t, h, h.owner(), nil, endpoint, capabilities, operations, draftFields, providerFields...)
+}
+func provisionOpenAIInProject(t *testing.T, h *accessHarness, owner *browser, project *string, endpoint string, capabilities []any, operations []string, draftFields map[string]any, providerFields ...map[string]any) (*browser, map[string]any, string, string) {
+	t.Helper()
+	detail := activeAzureProviderInProject(t, h, owner, "Provider state fixture", endpoint, project, capabilities, providerFields...)
 	slug := "state-" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
 	// Without a provider profile the route must be transformed; callers that
 	// configure a profile may declare a strict route instead.
-	draftBody := map[string]any{"slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
+	draftBody := map[string]any{"project_id": project, "slug": slug, "operations": operations, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": detail["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}
 	for key, value := range draftFields {
 		draftBody[key] = value
 	}
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", draftBody, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), 200)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "stateful inference", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"project_id": project, "name": "stateful inference", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	h.refresh()
 	return owner, detail, slug, key["secret"].(string)
 }
@@ -495,13 +498,18 @@ func provisionOpenAIWith(t *testing.T, h *accessHarness, endpoint string, capabi
 // detail.
 func activeAzureProvider(t *testing.T, h *accessHarness, owner *browser, name, endpoint string, capabilities []any, providerFields ...map[string]any) map[string]any {
 	t.Helper()
+	return activeAzureProviderInProject(t, h, owner, name, endpoint, nil, capabilities, providerFields...)
+}
+
+func activeAzureProviderInProject(t *testing.T, h *accessHarness, owner *browser, name, endpoint string, projectID *string, capabilities []any, providerFields ...map[string]any) map[string]any {
+	t.Helper()
 	configuration := map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": endpoint, "deployment": vendorModel, "api_version": "2024-10-21"}
 	if len(providerFields) > 0 {
 		for field, value := range providerFields[0] {
 			configuration[field] = value
 		}
 	}
-	create := map[string]any{"name": name, "configuration": configuration, "model": vendorModel, "credential": vendorSecret}
+	create := map[string]any{"name": name, "project_id": projectID, "configuration": configuration, "model": vendorModel, "credential": vendorSecret}
 	detail := h.want(owner, "POST", "/api/v1/providers", create, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	path := "/api/v1/providers/" + detail["id"].(string)
 	probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200)

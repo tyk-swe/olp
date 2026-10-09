@@ -254,7 +254,10 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 	}
 	config := provider.Connector()
 	var secret []byte
-	if connectors.SecretRequired(config.AuthMode) {
+	if config.CredentialSource == "caller" {
+		// Only an explicit gateway request can provide this secret. Background
+		// maintenance must never substitute the retained probe credential.
+	} else if connectors.SecretRequired(config.AuthMode) {
 		if record.CredentialVersionID == nil {
 			return nil, 0, "media_job_runtime_unavailable"
 		}

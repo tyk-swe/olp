@@ -180,7 +180,7 @@ func BudgetReason(reason string) bool {
 // targets when the strategy orders by capacity, and every applicable cap.
 func supplyQuery(route Route, rows []rankedCandidate, s *Snapshot, capacity bool) SupplyQuery {
 	var query SupplyQuery
-	if route.Budget != nil {
+	if route.Budget != nil && !route.CallerCostExempt {
 		query.Caps = append(query.Caps, SpendCap{OwnerID: route.ID, Limits: *route.Budget})
 	}
 	seen := map[string]bool{}
@@ -192,12 +192,12 @@ func supplyQuery(route Route, rows []rankedCandidate, s *Snapshot, capacity bool
 		if !ok {
 			continue
 		}
-		if costs := provider.supply().Costs(); costs != nil && !seen[provider.ID] {
+		if costs := provider.supply().Costs(); costs != nil && !route.CallerCostExempt && !seen[provider.ID] {
 			seen[provider.ID] = true
 			query.Caps = append(query.Caps, SpendCap{OwnerID: provider.ID, Limits: *costs})
 		}
 		for _, slot := range row.slots {
-			if costs := slot.Costs(); costs != nil && !seen[slot.ID] {
+			if costs := slot.Costs(); costs != nil && !route.CallerCostExempt && !seen[slot.ID] {
 				seen[slot.ID] = true
 				query.Caps = append(query.Caps, SpendCap{OwnerID: slot.ID, Limits: *costs})
 			}
@@ -221,7 +221,7 @@ func (p Provider) supply() Supply {
 // every candidate.
 func applySupply(route Route, rows []rankedCandidate, s *Snapshot, state *SupplyState) {
 	routeReason := ""
-	if route.Budget != nil {
+	if route.Budget != nil && !route.CallerCostExempt {
 		routeReason = state.spendReason(route.ID, "route")
 	}
 	for i := range rows {
@@ -230,10 +230,10 @@ func applySupply(route Route, rows []rankedCandidate, s *Snapshot, state *Supply
 			continue
 		}
 		reason := routeReason
-		if reason == "" && s.Providers[row.attempt.ProviderID].supply().Costs() != nil {
+		if !route.CallerCostExempt && reason == "" && s.Providers[row.attempt.ProviderID].supply().Costs() != nil {
 			reason = state.spendReason(row.attempt.ProviderID, "connection")
 		}
-		if reason == "" && len(row.slots) > 0 {
+		if !route.CallerCostExempt && reason == "" && len(row.slots) > 0 {
 			row.slots = slices.DeleteFunc(row.slots, func(slot Slot) bool {
 				if slot.Costs() == nil {
 					return false

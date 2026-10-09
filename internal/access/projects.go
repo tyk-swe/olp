@@ -10,15 +10,18 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-const projectFields = `'id',p.id,'name',p.name,'etag',p.etag,'created_by',p.created_by,'created_by_email',u.email,'created_at',p.created_at,'updated_at',p.updated_at,'member_count',(SELECT count(*) FROM olp.project_members m WHERE m.project_id=p.id)`
+const projectFields = `'organization_id',p.organization_id,'id',p.id,'name',p.name,'etag',p.etag,'created_by',p.created_by,'created_by_email',u.email,'created_at',p.created_at,'updated_at',p.updated_at,'member_count',(SELECT count(*) FROM olp.project_members m WHERE m.project_id=p.id)`
 const projectFrom = " FROM olp.projects p JOIN olp.users u ON u.id=p.created_by"
 
-func (s *Server) projects(r *http.Request, _ Principal) (Reply, error) {
+func (s *Server) projects(r *http.Request, principal Principal) (Reply, error) {
+	if err := organizationProject(r, s.Pool, principal, View); err != nil {
+		return Reply{}, err
+	}
 	p, err := Page(r)
 	if err != nil {
 		return Reply{}, err
 	}
-	rows, err := s.Pool.Query(r.Context(), "SELECT jsonb_build_object("+projectFields+")"+projectFrom+" WHERE p.id<$1 ORDER BY p.id DESC LIMIT $2", p.Before, p.Limit+1)
+	rows, err := s.Pool.Query(r.Context(), "SELECT jsonb_build_object("+projectFields+")"+projectFrom+" WHERE p.id<$1 AND ($3::uuid IS NULL OR p.organization_id=$3) ORDER BY p.id DESC LIMIT $2", p.Before, p.Limit+1, nullableOrganizationPath(r))
 	if err != nil {
 		return Reply{}, err
 	}
@@ -26,9 +29,12 @@ func (s *Server) projects(r *http.Request, _ Principal) (Reply, error) {
 	return ListReply(items, p), err
 }
 
-func (s *Server) project(r *http.Request, _ Principal) (Reply, error) {
+func (s *Server) project(r *http.Request, principal Principal) (Reply, error) {
 	id, err := IDParam(r, "project_id")
 	if err != nil {
+		return Reply{}, err
+	}
+	if err = organizationProject(r, s.Pool, principal, View); err != nil {
 		return Reply{}, err
 	}
 	var data []byte
@@ -58,6 +64,9 @@ func (s *Server) createProject(r *http.Request, _ Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
+	if err = organizationProject(r, tx, p, Change); err != nil {
+		return Reply{}, err
+	}
 	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
 		return Reply{}, err
@@ -69,7 +78,7 @@ func (s *Server) createProject(r *http.Request, _ Principal) (Reply, error) {
 	if err = ValidText("name", input.Name, 100); err != nil {
 		return Reply{}, err
 	}
-	id, etag, err := CreateProject(r.Context(), tx, input.Name, p.UserID())
+	id, etag, err := CreateProjectInOrganization(r.Context(), tx, input.Name, p.UserID(), nullableOrganizationPath(r))
 	if err != nil {
 		return Reply{}, err
 	}
@@ -113,6 +122,9 @@ func (s *Server) updateProject(r *http.Request, _ Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
+	if err = organizationProject(r, tx, p, Change); err != nil {
+		return Reply{}, err
+	}
 	etag, err := loadProject(r, tx, id)
 	if err != nil {
 		return Reply{}, err
@@ -143,9 +155,12 @@ func (s *Server) updateProject(r *http.Request, _ Principal) (Reply, error) {
 const projectMemberFields = `'user_id',m.user_id,'project_role',m.role,'email',u.email,'display_name',u.display_name,'role',u.role,'active',u.active,'added_by',m.added_by,'added_by_email',a.email,'created_at',m.created_at`
 const projectMemberFrom = " FROM olp.project_members m JOIN olp.users u ON u.id=m.user_id JOIN olp.users a ON a.id=m.added_by"
 
-func (s *Server) projectMembers(r *http.Request, _ Principal) (Reply, error) {
+func (s *Server) projectMembers(r *http.Request, principal Principal) (Reply, error) {
 	id, err := IDParam(r, "project_id")
 	if err != nil {
+		return Reply{}, err
+	}
+	if err = organizationProject(r, s.Pool, principal, View); err != nil {
 		return Reply{}, err
 	}
 	var exists bool
@@ -230,6 +245,9 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (Reply, error)
 	if err != nil {
 		return Reply{}, err
 	}
+	if err = organizationProject(r, tx, p, Change); err != nil {
+		return Reply{}, err
+	}
 	etag, err := loadProject(r, tx, projectID)
 	if err != nil {
 		return Reply{}, err
@@ -252,28 +270,22 @@ func (s *Server) writeProjectMember(r *http.Request, remove bool) (Reply, error)
 		if err != nil {
 			return Reply{}, err
 		}
-		if *memberRole == "manager" {
-			var managers int
-			if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.project_members WHERE project_id=$1 AND role='manager'", projectID).Scan(&managers); err != nil {
-				return Reply{}, err
-			}
-			if managers == 0 {
-				return Reply{}, Fail(409, "last_project_manager", "Keep at least one project manager.")
-			}
-		}
+
 	} else {
-		if input.Role == "viewer" {
-			var lastManager bool
-			if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.project_members WHERE project_id=$1 AND user_id=$2 AND role='manager') AND (SELECT count(*) FROM olp.project_members WHERE project_id=$1 AND role='manager')=1", projectID, userID).Scan(&lastManager); err != nil {
-				return Reply{}, err
-			}
-			if lastManager {
-				return Reply{}, Fail(409, "last_project_manager", "Keep at least one project manager.")
-			}
-		}
+
 		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.project_members(project_id,user_id,role,added_by) VALUES($1,$2,$3,$4) ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role", projectID, userID, input.Role, p.UserID()); err != nil {
 			return Reply{}, err
 		}
+	}
+	var hasManager bool
+	if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.effective_project_members WHERE project_id=$1 AND role='manager')", projectID).Scan(&hasManager); err != nil {
+		return Reply{}, err
+	}
+	if !hasManager {
+		return Reply{}, Fail(409, "last_project_manager", "Keep at least one project manager.")
+	}
+	if _, err = AdvanceAuthority(r.Context(), tx); err != nil {
+		return Reply{}, err
 	}
 	if err = s.usableOwner(r, tx); err != nil {
 		return Reply{}, err

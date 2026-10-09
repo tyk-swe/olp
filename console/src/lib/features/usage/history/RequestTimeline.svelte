@@ -53,6 +53,11 @@
     >
   </div>
 {:else if detail.data}
+  {#if detail.data.budget_boundary}
+    <p class="inline-problem" role="status">
+      Cost budget exhausted: {detail.data.budget_boundary.replaceAll('_', ' ')}.
+    </p>
+  {/if}
   <section class="metric-grid" aria-label="Request summary">
     <article class="card metric-card">
       <p>Status</p>
@@ -290,6 +295,18 @@
                   <dt>Transport mode</dt>
                   <dd>{attempt.routing.mode ?? 'Not recorded'}</dd>
                 </div>
+                <div>
+                  <dt>Credential source</dt>
+                  <dd>
+                    {attempt.routing.credential_source === 'caller'
+                      ? 'Caller supplied'
+                      : 'Operator held'}
+                  </dd>
+                </div>
+                {#if attempt.routing.budget_exempt}<div>
+                    <dt>Cost budget accounting</dt>
+                    <dd>Caller paid; priced usage remains recorded</dd>
+                  </div>{/if}
                 <div>
                   <dt>Credential slot</dt>
                   <dd class="mono">

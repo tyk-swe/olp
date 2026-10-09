@@ -13,6 +13,7 @@ const dimensions = [
   'model_family',
   'estimate_provenance',
   'api_key',
+  'end_user',
   'operation',
   'attribution'
 ] as const satisfies readonly UsageDimension[];

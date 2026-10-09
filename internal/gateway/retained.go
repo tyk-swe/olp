@@ -90,6 +90,9 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 			}
 		}
 	}
+	if e := x.checkBody(route); e != nil {
+		return nil, nil, e
+	}
 	var target *runtime.Target
 	for i := range route.Targets {
 		if route.Targets[i].ProviderID != provider.ID || route.Targets[i].ProviderModel != resourceModel(res) {

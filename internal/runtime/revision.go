@@ -40,16 +40,17 @@ type RevisionSlot struct {
 
 // Configuration is the subset of a provider configuration the gateway needs.
 type Configuration struct {
-	ProfileID       string `json:"profile_id,omitempty"`
-	ProfileRevision string `json:"profile_revision,omitempty"`
-	Kind            string `json:"kind"`
-	AuthMode        string `json:"auth_mode"`
-	Endpoint        string `json:"endpoint"`
-	CloudRegion     string `json:"cloud_region"`
-	CloudProject    string `json:"cloud_project"`
-	Deployment      string `json:"deployment"`
-	APIVersion      string `json:"api_version"`
-	Options         struct {
+	CredentialSource string `json:"credential_source,omitempty"`
+	ProfileID        string `json:"profile_id,omitempty"`
+	ProfileRevision  string `json:"profile_revision,omitempty"`
+	Kind             string `json:"kind"`
+	AuthMode         string `json:"auth_mode"`
+	Endpoint         string `json:"endpoint"`
+	CloudRegion      string `json:"cloud_region"`
+	CloudProject     string `json:"cloud_project"`
+	Deployment       string `json:"deployment"`
+	APIVersion       string `json:"api_version"`
+	Options          struct {
 		Network           *egress.ConnectionOptions        `json:"network,omitempty"`
 		SemanticHeaders   map[string]string                `json:"semantic_headers,omitempty"`
 		QuerySettings     map[string]string                `json:"query_settings,omitempty"`
@@ -125,7 +126,7 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 		ProfileID: cfg.ProfileID, ProfileRevision: cfg.ProfileRevision,
 		SemanticHeaders: cfg.Options.SemanticHeaders, QuerySettings: cfg.Options.QuerySettings,
 		OperationDefaults: cfg.Options.OperationDefaults, Bindings: cfg.Options.Bindings,
-		Kind: cfg.Kind, AuthMode: cfg.AuthMode, Endpoint: cfg.Endpoint,
+		CredentialSource: cfg.CredentialSource, Kind: cfg.Kind, AuthMode: cfg.AuthMode, Endpoint: cfg.Endpoint,
 		CloudRegion: cfg.CloudRegion, CloudProject: cfg.CloudProject, Deployment: cfg.Deployment, APIVersion: cfg.APIVersion,
 		Models: cfg.Options.Models, CredentialHeaders: cfg.Options.CredentialHeaders,
 		ParameterDefaults: cfg.Options.ParameterDefaults, VendorID: cfg.Options.VendorID,

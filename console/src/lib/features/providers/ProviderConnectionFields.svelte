@@ -84,6 +84,31 @@
     <input id={`${idPrefix}-auth`} value={values.authMode} disabled />
   {/if}
 </div>
+<div class="form-field full">
+  <label for={`${idPrefix}-credential-source`}>Serving credentials</label>
+  <select
+    id={`${idPrefix}-credential-source`}
+    value={values.document?.text(['credential_source']) || 'operator'}
+    disabled={fieldsDisabled}
+    onchange={(event) => {
+      values.document?.set(['credential_source'], event.currentTarget.value);
+      onChange?.();
+    }}
+  >
+    <option value="operator">Operator-held credentials</option>
+    <option
+      value="caller"
+      disabled={spec.kind === 'plugin' ||
+        !['api_key', 'headers', 'static'].includes(values.authMode)}
+      >Caller supplies each request</option
+    >
+  </select>
+  <small
+    >Caller mode requires X-OLP-Provider-Credential and keeps the endpoint and
+    profile fixed. Keep an operator credential for probes and certification.
+    Caller secrets are never saved or shared between targets.</small
+  >
+</div>
 <!-- A plugin provider's endpoint is its profile's address, which the server sets. -->
 {#if spec.kind !== 'plugin' && (hasCustomEndpoint(spec) || values.profileId)}
   <div class="form-field full">

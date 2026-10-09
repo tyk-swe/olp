@@ -90,6 +90,11 @@
   let poolId = $state(
     initial.kind === 'routes' ? (initial.current?.pool_id ?? '') : ''
   );
+  let maxBodyBytes = $state(
+    initial.kind === 'routes'
+      ? (initial.current?.max_body_bytes?.toString() ?? '')
+      : ''
+  );
   let routeId = $state(
     initial.kind === 'budgets' ? (initial.current?.route_id ?? '') : ''
   );
@@ -201,11 +206,21 @@
             throw new Error(
               'Use a route slug of 1–100 lowercase letters, numbers, dots, underscores or hyphens, starting with a letter or number.'
             );
+          if (
+            maxBodyBytes &&
+            (!/^\d+$/.test(maxBodyBytes) ||
+              Number(maxBodyBytes) < 1 ||
+              Number(maxBodyBytes) > 1073741824)
+          )
+            throw new Error(
+              'Use a body limit from 1 to 1073741824 bytes, or leave it empty.'
+            );
           await saveCodeRoute(
             {
               project_id: projectId,
               slug,
               pool_id: poolId,
+              max_body_bytes: maxBodyBytes ? Number(maxBodyBytes) : null,
               models: nativeModels(models),
               enabled
             },
@@ -453,6 +468,21 @@
         </p>
       {/if}
       {#if editing.kind === 'accounts' || editing.kind === 'routes'}
+        {#if editing.kind === 'routes'}
+          <div class="form-field">
+            <label for="code-max-body">Maximum request body (bytes)</label>
+            <input
+              id="code-max-body"
+              inputmode="numeric"
+              bind:value={maxBodyBytes}
+              placeholder="Installation limit"
+            />
+            <small
+              >Limits encoded and decoded requests and client WebSocket
+              messages; cannot raise installation limits.</small
+            >
+          </div>
+        {/if}
         <label for="code-models">Native models</label><textarea
           id="code-models"
           bind:value={models}

@@ -61,41 +61,7 @@ func canonicalMembers(value oif.Value, shape reflect.Type, fieldName string) err
 		if value.Kind() != oif.Object {
 			return errors.New("object required")
 		}
-		fields := map[string]reflect.Type{}
-		// Anonymous struct fields promote their members, the way encoding/json
-		// flattens them; a name the outer shape declares keeps the shallower
-		// field. json:",omitempty" still counts as no name.
-		var declare func(shape reflect.Type, promoted bool)
-		declare = func(shape reflect.Type, promoted bool) {
-			for i := 0; i < shape.NumField(); i++ {
-				field := shape.Field(i)
-				tag := strings.Split(field.Tag.Get("json"), ",")[0]
-				if tag == "-" {
-					continue
-				}
-				underlying := field.Type
-				for underlying.Kind() == reflect.Pointer {
-					underlying = underlying.Elem()
-				}
-				if field.Anonymous && tag == "" && underlying.Kind() == reflect.Struct {
-					declare(underlying, true)
-					continue
-				}
-				if field.PkgPath != "" {
-					continue
-				}
-				if tag == "" {
-					tag = field.Name
-				}
-				if promoted {
-					if _, taken := fields[tag]; taken {
-						continue
-					}
-				}
-				fields[tag] = field.Type
-			}
-		}
-		declare(shape, false)
+		fields := canonicalFields(shape)
 		for _, member := range value.Members() {
 			field, ok := fields[member.Name]
 			if !ok {
@@ -139,4 +105,68 @@ func canonicalMembers(value oif.Value, shape reflect.Type, fieldName string) err
 		}
 	}
 	return nil
+}
+
+// canonicalFields follows encoding/json's embedded-field selection: shallower
+// fields win, explicit JSON names win at equal depth, and equally dominant
+// names are ambiguous. Anonymous struct carriers are not wire members.
+func canonicalFields(root reflect.Type) map[string]reflect.Type {
+	type level struct {
+		shape reflect.Type
+		depth int
+	}
+	type candidate struct {
+		shape             reflect.Type
+		depth             int
+		tagged, ambiguous bool
+	}
+	queue := []level{{shape: root}}
+	seen := map[reflect.Type]int{root: 0}
+	candidates := map[string]candidate{}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for i := 0; i < current.shape.NumField(); i++ {
+			field := current.shape.Field(i)
+			nested := field.Type
+			if nested.Kind() == reflect.Pointer {
+				nested = nested.Elem()
+			}
+			if field.PkgPath != "" && (!field.Anonymous || nested.Kind() != reflect.Struct) {
+				continue
+			}
+			tag := strings.Split(field.Tag.Get("json"), ",")[0]
+			if tag == "-" {
+				continue
+			}
+			if field.Anonymous && tag == "" && nested.Kind() == reflect.Struct {
+				depth := current.depth + 1
+				if previous, ok := seen[nested]; !ok || previous >= depth {
+					seen[nested] = depth
+					queue = append(queue, level{nested, depth})
+				}
+				continue
+			}
+			name := tag
+			if name == "" {
+				name = field.Name
+			}
+			next := candidate{shape: field.Type, depth: current.depth, tagged: tag != ""}
+			previous, exists := candidates[name]
+			switch {
+			case !exists || next.depth < previous.depth || next.depth == previous.depth && next.tagged && !previous.tagged:
+				candidates[name] = next
+			case next.depth == previous.depth && next.tagged == previous.tagged:
+				previous.ambiguous = true
+				candidates[name] = previous
+			}
+		}
+	}
+	fields := make(map[string]reflect.Type, len(candidates))
+	for name, field := range candidates {
+		if !field.ambiguous {
+			fields[name] = field.shape
+		}
+	}
+	return fields
 }

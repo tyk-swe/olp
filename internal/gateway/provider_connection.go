@@ -11,8 +11,11 @@ import (
 // slotSecret asks for a credential slot's usable secret and remembers its
 // grant generation for this attempt. A slot without a credential version
 // authenticates without one.
-func (s *Server) slotSecret(ctx context.Context, x *execution, slot runtime.Slot) ([]byte, error) {
+func (s *Server) slotSecret(ctx context.Context, x *execution, slot runtime.Slot, provider *runtime.Provider, model string) ([]byte, error) {
 	x.grantGeneration = 0
+	if provider.CredentialSource == "caller" && x.origin != "probe" {
+		return x.callerSecret(provider.ID, model)
+	}
 	if slot.CredentialID == nil {
 		return nil, nil
 	}
@@ -26,8 +29,8 @@ func (s *Server) slotSecret(ctx context.Context, x *execution, slot runtime.Slot
 // authenticates and signs the request. It records the values to redact. The
 // caller classifies a failure of either step alike, so a secret read the
 // context interrupted is not blamed on the credential.
-func (s *Server) applySlotCredential(ctx context.Context, x *execution, req *http.Request, cfg connectors.Config, slot runtime.Slot, body []byte) error {
-	secret, err := s.slotSecret(ctx, x, slot)
+func (s *Server) applySlotCredential(ctx context.Context, x *execution, req *http.Request, cfg connectors.Config, slot runtime.Slot, body []byte, provider *runtime.Provider, model string) error {
+	secret, err := s.slotSecret(ctx, x, slot, provider, model)
 	if err != nil {
 		return err
 	}
@@ -68,6 +71,13 @@ func providerConnectionScope(provider *runtime.Provider, slot runtime.Slot) stri
 }
 
 func (s *Server) providerClient(ctx context.Context, release *runtime.Release, provider *runtime.Provider, slot runtime.Slot) (*http.Client, error) {
+	if provider.CredentialSource == "caller" {
+		secret, err := s.providerNetworkSecret(ctx, release, provider)
+		if err != nil {
+			return nil, err
+		}
+		return s.egress.EphemeralClient(provider.Network, secret, upstreamHeaderTimeout)
+	}
 	if provider.Network == nil && provider.ProfileID == "" {
 		return s.client, nil
 	}

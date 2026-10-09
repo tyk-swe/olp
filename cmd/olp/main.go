@@ -40,14 +40,16 @@ func run(ctx context.Context, args []string) error {
 			fmt.Printf("olp %s\n", process.Version)
 			return nil
 		case "help", "--help", "-h":
-			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt|verify-retirement> [flags]\n       olp account reset-password EMAIL PASSWORD_FILE [flags]")
+			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt|verify-retirement> [flags]\n       olp account reset-password EMAIL PASSWORD_FILE [--reset-mfa] [flags]")
 			return nil
 		case "account":
 			if len(args) < 4 || args[1] != "reset-password" || strings.HasPrefix(args[2], "-") || strings.HasPrefix(args[3], "-") {
-				return errors.New("usage: olp account reset-password EMAIL PASSWORD_FILE [flags]")
+				return errors.New("usage: olp account reset-password EMAIL PASSWORD_FILE [--reset-mfa] [flags]")
 			}
 			maintenance := process.MaintenanceOptions{AccountEmail: args[2], PasswordFile: args[3]}
-			c, err := config.Parse(append([]string{"all"}, args[4:]...), os.Getenv, os.Stderr)
+			var options []string
+			options, maintenance.ResetMFA = resetMFA(args[4:])
+			c, err := config.Parse(append([]string{"all"}, options...), os.Getenv, os.Stderr)
 			if err != nil {
 				return err
 			}
@@ -109,6 +111,25 @@ func run(ctx context.Context, args []string) error {
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: c.LogLevel}))
 	return process.Run(ctx, c, log)
+}
+
+// resetMFA removes the recovery's --reset-mfa option from among the
+// configuration flags that may surround it, up to a "--" terminator.
+func resetMFA(options []string) ([]string, bool) {
+	kept := make([]string, 0, len(options))
+	reset := false
+	for i, option := range options {
+		if option == "--" {
+			kept = append(kept, options[i:]...)
+			break
+		}
+		if option == "--reset-mfa" || option == "-reset-mfa" {
+			reset = true
+			continue
+		}
+		kept = append(kept, option)
+	}
+	return kept, reset
 }
 
 func healthProbe(ctx context.Context) error {

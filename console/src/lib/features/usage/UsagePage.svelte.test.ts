@@ -193,6 +193,7 @@ it('offers the model family and estimate provenance breakdowns', async () => {
   expect([...select.options].map((option) => option.value)).toEqual([
     'route',
     'provider',
+    'end_user',
     'model',
     'model_family',
     'estimate_provenance',

@@ -44,6 +44,16 @@ const key = {
 } satisfies ApiKey;
 
 describe('API key form state', () => {
+  it('round-trips the end-user source and explicitly clears it', () => {
+    const state = createApiKeyFormState({ ...key, end_user_source: 'header' });
+    expect(state.endUserSource).toBe('header');
+    expect(buildApiKeyPolicyInput(state).end_user_source).toBe('header');
+    state.endUserSource = 'native';
+    expect(buildApiKeyPolicyInput(state).end_user_source).toBe('native');
+    state.endUserSource = '';
+    expect(buildApiKeyPolicyInput(state).end_user_source).toBeNull();
+  });
+
   it('starts a new key with optional limits empty', () => {
     expect(createApiKeyFormState()).toEqual({
       name: '',
@@ -51,15 +61,37 @@ describe('API key form state', () => {
       budgetGroupId: '',
       scopes: ['inference'],
       allowedRoutes: [],
+      allowedRouteGroups: '',
+      rotationIntervalDays: '',
+      allowedCIDRs: '',
       requestsPerMinute: '',
       tokensPerMinute: '',
       maxConcurrency: '',
       dailyCostLimit: '',
       monthlyCostLimit: '',
+      weeklyCostLimit: '',
       expiresAt: '',
       allowProviderState: false,
       responseMetadata: false,
+      endUserSource: '',
+      routeLimits: [],
+      limitTemplate: '',
+      endUserPolicy: {
+        enabled: false,
+        limitTemplate: '',
+        defaults: {
+          requests_per_minute: '',
+          tokens_per_minute: '',
+          max_concurrency: '',
+          daily_cost_limit: '',
+          weekly_cost_limit: '',
+          monthly_cost_limit: ''
+        },
+        overrides: [],
+        blocked: ''
+      },
       allowedAttributionKeys: [],
+      attributionPolicy: { required: '', defaults: [] },
       priority: '',
       maxPriority: ''
     });
@@ -139,5 +171,32 @@ describe('API key form state', () => {
       max_concurrency: null,
       expires_at: null
     });
+  });
+});
+
+it('round-trips and clears client network restrictions', () => {
+  const editing = { ...key, allowed_cidrs: ['192.0.2.0/24', '2001:db8::/32'] };
+  const state = createApiKeyFormState(editing);
+  expect(state.allowedCIDRs).toBe('192.0.2.0/24\n2001:db8::/32');
+  expect(buildApiKeyPolicyInput(state, editing).allowed_cidrs).toEqual(
+    editing.allowed_cidrs
+  );
+  state.allowedCIDRs = '';
+  expect(buildApiKeyPolicyInput(state, editing).allowed_cidrs).toEqual([]);
+});
+
+describe('route group references', () => {
+  it('loads, writes and explicitly clears group references', () => {
+    const form = createApiKeyFormState({
+      ...key,
+      allowed_route_groups: ['production', 'backup']
+    });
+    expect(form.allowedRouteGroups).toBe('production, backup');
+    expect(buildApiKeyPolicyInput(form).allowed_route_groups).toEqual([
+      'production',
+      'backup'
+    ]);
+    form.allowedRouteGroups = '';
+    expect(buildApiKeyPolicyInput(form).allowed_route_groups).toEqual([]);
   });
 });

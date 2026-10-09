@@ -12,22 +12,33 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type KeyPolicy struct {
-	Scopes                 []string   `json:"scopes"`
-	AllowedRoutes          []string   `json:"allowed_routes"`
-	AllowedAttributionKeys []string   `json:"allowed_attribution_keys"`
-	RequestsPerMinute      *int64     `json:"requests_per_minute"`
-	TokensPerMinute        *int64     `json:"tokens_per_minute"`
-	MaxConcurrency         *int64     `json:"max_concurrency"`
-	DailyCostLimit         *string    `json:"daily_cost_limit"`
-	MonthlyCostLimit       *string    `json:"monthly_cost_limit"`
-	ExpiresAt              *time.Time `json:"expires_at"`
-	AllowProviderState     bool       `json:"allow_provider_state"`
-	ResponseMetadata       bool       `json:"response_metadata"`
+	LimitTemplate           *string           `json:"limit_template"`
+	RouteLimits             RouteLimits       `json:"route_limits"`
+	RotationIntervalDays    *int              `json:"rotation_interval_days"`
+	AllowedRouteGroups      []string          `json:"allowed_route_groups"`
+	RequiredAttributionKeys []string          `json:"required_attribution_keys"`
+	AttributionDefaults     map[string]string `json:"attribution_defaults"`
+	Scopes                  []string          `json:"scopes"`
+	AllowedRoutes           []string          `json:"allowed_routes"`
+	AllowedCIDRs            []string          `json:"allowed_cidrs"`
+	AllowedAttributionKeys  []string          `json:"allowed_attribution_keys"`
+	RequestsPerMinute       *int64            `json:"requests_per_minute"`
+	TokensPerMinute         *int64            `json:"tokens_per_minute"`
+	MaxConcurrency          *int64            `json:"max_concurrency"`
+	DailyCostLimit          *string           `json:"daily_cost_limit"`
+	MonthlyCostLimit        *string           `json:"monthly_cost_limit"`
+	WeeklyCostLimit         *string           `json:"weekly_cost_limit"`
+	ExpiresAt               *time.Time        `json:"expires_at"`
+	AllowProviderState      bool              `json:"allow_provider_state"`
+	ResponseMetadata        bool              `json:"response_metadata"`
+	EndUserSource           *string           `json:"end_user_source"`
+	EndUserPolicy           *EndUserPolicy    `json:"end_user_policy"`
 	// Priority is the admission class the key's requests queue in, normal
 	// when unset; MaxPriority is the highest class a request may choose
 	// through the routing header, the key's own priority when unset.
@@ -73,6 +84,41 @@ var attributionKey = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,31}$`)
 const maxAttributionKeys = 8
 
 func validateKey(input keyInput, expirationChanged bool) error {
+	if days := input.RotationIntervalDays; days != nil && (*days < 1 || *days > 3650) {
+		return Invalid("rotation_interval_days", "Use a rotation interval of 1–3650 days, or null.")
+	}
+	if len(input.AllowedRouteGroups) > 64 {
+		return Invalid("allowed_route_groups", "Use at most 64 route groups.")
+	}
+	groupNames := map[string]bool{}
+	for _, name := range input.AllowedRouteGroups {
+		if !RouteSlug.MatchString(name) || groupNames[name] {
+			return Invalid("allowed_route_groups", "Use unique valid group names.")
+		}
+		groupNames[name] = true
+	}
+	policy := input.KeyPolicy.AttributionPolicy()
+	if err := validateAttributionPolicy(&policy); err != nil {
+		return err
+	}
+	if err := validTemplateName(input.LimitTemplate); err != nil {
+		return err
+	}
+	if err := input.RouteLimits.Validate(); err != nil {
+		return err
+	}
+	if err := validateKeyCIDRs(input.AllowedCIDRs); err != nil {
+		return err
+	}
+	if input.EndUserPolicy != nil && input.EndUserSource == nil {
+		return Invalid("end_user_source", "An end-user policy requires an identifier source.")
+	}
+	if err := input.EndUserPolicy.validate(); err != nil {
+		return err
+	}
+	if input.EndUserSource != nil && *input.EndUserSource != "header" && *input.EndUserSource != "native" {
+		return Invalid("end_user_source", "Use header, native, or null to disable end-user identification.")
+	}
 	if err := ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
@@ -120,7 +166,7 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	if input.TokensPerMinute != nil && (*input.TokensPerMinute < 1 || *input.TokensPerMinute > limits.MaxCounter) {
 		return Invalid("tokens_per_minute", "Use a positive integer of at most 9007199254740991.")
 	}
-	for field, value := range map[string]*string{"daily_cost_limit": input.DailyCostLimit, "monthly_cost_limit": input.MonthlyCostLimit} {
+	for field, value := range map[string]*string{"daily_cost_limit": input.DailyCostLimit, "monthly_cost_limit": input.MonthlyCostLimit, "weekly_cost_limit": input.WeeklyCostLimit} {
 		if value != nil {
 			amount := strings.TrimSpace(*value)
 			if !decimal.MatchString(amount) || !strings.ContainsAny(amount, "123456789") {
@@ -173,8 +219,12 @@ func AdvanceAuthority(ctx context.Context, tx pgx.Tx) (any, error) {
 	return map[string]any{"id": id, "sequence": sequence}, err
 }
 
-const keyFields = `'id',k.id,'lookup_id',k.lookup_id,'name',k.name,'project_id',k.project_id,'project_name',pr.name,'budget_group_id',k.budget_group_id,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes','requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','allowed_attribution_keys',COALESCE(k.policy->'allowed_attribution_keys','[]'::jsonb),'allow_provider_state',COALESCE(k.policy->'allow_provider_state','false'::jsonb),'response_metadata',COALESCE(k.policy->'response_metadata','false'::jsonb),'priority',k.policy->'priority','max_priority',k.policy->'max_priority'`
-const keyFrom = " FROM olp.api_keys k JOIN olp.users u ON u.id=k.created_by LEFT JOIN olp.projects pr ON pr.id=k.project_id"
+const keyFields = `'workload_issuer_id',k.workload_issuer_id,'workload_digest',k.workload_digest,'workload_mapping',k.workload_mapping,'rotation_interval_days',k.policy->'rotation_interval_days',
+ 'rotation_due_at',CASE WHEN k.policy->>'rotation_interval_days' IS NOT NULL THEN COALESCE(k.rotated_at,k.created_at)+make_interval(secs=>86400.0*(k.policy->>'rotation_interval_days')::int) END,
+ 'active_overlaps',COALESCE((SELECT jsonb_agg(jsonb_build_object('lookup_id',o.lookup_id,'expires_at',LEAST(o.expires_at,k.expires_at)) ORDER BY o.expires_at) FROM olp.api_key_overlaps o WHERE o.api_key_id=k.id AND LEAST(o.expires_at,k.expires_at)>now() AND k.revoked_at IS NULL),'[]'::jsonb),
+ 'id',k.id,'lookup_id',k.lookup_id,'name',k.name,'project_id',k.project_id,'project_name',pr.name,'budget_group_id',k.budget_group_id,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes',
+ 'limit_template',k.policy->'limit_template','route_limits',COALESCE(NULLIF(k.policy->'route_limits','null'::jsonb),'{}'::jsonb),'allowed_route_groups',COALESCE(NULLIF(k.policy->'allowed_route_groups','null'::jsonb),'[]'::jsonb),'allowed_cidrs',COALESCE(NULLIF(k.policy->'allowed_cidrs','null'::jsonb),'[]'::jsonb),'requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','allowed_attribution_keys',COALESCE(k.policy->'allowed_attribution_keys','[]'::jsonb),'allow_provider_state',COALESCE(k.policy->'allow_provider_state','false'::jsonb),'response_metadata',COALESCE(k.policy->'response_metadata','false'::jsonb),'required_attribution_keys',COALESCE(NULLIF(k.policy->'required_attribution_keys','null'::jsonb),'[]'::jsonb),'attribution_defaults',COALESCE(NULLIF(k.policy->'attribution_defaults','null'::jsonb),'{}'::jsonb),'end_user_policy',k.policy->'end_user_policy','end_user_source',k.policy->'end_user_source','priority',k.policy->'priority','max_priority',k.policy->'max_priority','effective_limits',k.effective_limits`
+const keyFrom = " FROM olp.api_keys_with_limits k JOIN olp.users u ON u.id=k.created_by LEFT JOIN olp.projects pr ON pr.id=k.project_id"
 
 // keyJSON renders one API key row, whose alias must be k, as the management
 // contract's key detail. The budget is live accounting: accrued spend and
@@ -187,9 +237,9 @@ func (s *Server) keyJSON() string {
 	if s.LimitsEnforced {
 		enforcement = "true"
 	}
-	return `jsonb_build_object(` + keyFields + `,'budget',jsonb_set(jsonb_set(` + limits.BudgetSQL +
+	return `jsonb_build_object(` + keyFields + `,'budget',olp.budget_allowances(k.id,k.effective_limits,jsonb_set(jsonb_set(jsonb_set(` + limits.BudgetSQL +
 		`||jsonb_build_object('enforcement_active',` + enforcement +
-		`),'{daily,limit}',COALESCE(k.policy->'daily_cost_limit','null'::jsonb)),'{monthly,limit}',COALESCE(k.policy->'monthly_cost_limit','null'::jsonb)))`
+		`),'{daily,limit}',COALESCE(k.policy->'daily_cost_limit','null'::jsonb)),'{monthly,limit}',COALESCE(k.policy->'monthly_cost_limit','null'::jsonb)),'{weekly,limit}',COALESCE(k.policy->'weekly_cost_limit','null'::jsonb))))`
 }
 
 func (s *Server) apiKeys(r *http.Request, principal Principal) (Reply, error) {
@@ -275,6 +325,12 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if err = checkBudgetGroup(r.Context(), tx, input.BudgetGroupID, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
+	if err = checkLimitTemplates(r.Context(), tx, input.ProjectID, input.LimitTemplate, endUserTemplate(input.EndUserPolicy)); err != nil {
+		return Reply{}, err
+	}
+	if err = checkKeyRouteGroups(r, tx, input.AllowedRouteGroups, input.ProjectID); err != nil {
+		return Reply{}, err
+	}
 	if err = checkKeyRoutes(r, tx, input.AllowedRoutes, input.ProjectID); err != nil {
 		return Reply{}, err
 	}
@@ -285,6 +341,9 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.api_keys(id,lookup_id,digest,name,created_by,project_id,budget_group_id,policy,etag,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", id, lookup, s.Auth.Digest(secrets.APIKeyDigest, secret), strings.TrimSpace(input.Name), p.UserID(), input.ProjectID, input.BudgetGroupID, policy, etag, input.ExpiresAt); err != nil {
+		return Reply{}, err
+	}
+	if err = ensureRouteBudgetAccounts(r.Context(), tx, id, input.RouteLimits); err != nil {
 		return Reply{}, err
 	}
 	generation, err := AdvanceAuthority(r.Context(), tx)
@@ -308,7 +367,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if patch == nil {
 		return Reply{}, Invalid("policy", "Send a policy object.")
 	}
-	allowed := []string{"name", "scopes", "allowed_routes", "allowed_attribution_keys", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "expires_at", "budget_group_id", "allow_provider_state", "response_metadata", "priority", "max_priority"}
+	allowed := []string{"route_limits", "limit_template", "name", "scopes", "rotation_interval_days", "allowed_routes", "allowed_route_groups", "allowed_cidrs", "allowed_attribution_keys", "required_attribution_keys", "attribution_defaults", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "expires_at", "budget_group_id", "allow_provider_state", "response_metadata", "end_user_source", "end_user_policy", "priority", "max_priority"}
 	for field, value := range patch {
 		if !slices.Contains(allowed, field) {
 			return Reply{}, Invalid(field, "Unknown policy field.")
@@ -342,6 +401,13 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	}
 	if err := p.Project(projectID, Change); err != nil {
 		return Reply{}, err
+	}
+	var managed bool
+	if err = tx.QueryRow(r.Context(), "SELECT workload_issuer_id IS NOT NULL FROM olp.api_keys WHERE id=$1", id).Scan(&managed); err != nil {
+		return Reply{}, err
+	}
+	if managed {
+		return Reply{}, Fail(409, "workload_managed", "Edit this principal's workload issuer mapping instead.")
 	}
 	if err = Match(r, etag); err != nil {
 		return Reply{}, err
@@ -381,6 +447,12 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 			return Reply{}, err
 		}
 	}
+	if err = checkLimitTemplates(r.Context(), tx, projectID, input.LimitTemplate, endUserTemplate(input.EndUserPolicy)); err != nil {
+		return Reply{}, err
+	}
+	if err = checkKeyRouteGroups(r, tx, input.AllowedRouteGroups, projectID); err != nil {
+		return Reply{}, err
+	}
 	if err = checkKeyRoutes(r, tx, input.AllowedRoutes, projectID); err != nil {
 		return Reply{}, err
 	}
@@ -390,6 +462,9 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	}
 	etag = NewID()
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET name=$1,policy=$2,expires_at=$3,budget_group_id=$4,etag=$5 WHERE id=$6", strings.TrimSpace(input.Name), data, input.ExpiresAt, groupID, etag, id); err != nil {
+		return Reply{}, err
+	}
+	if err = ensureRouteBudgetAccounts(r.Context(), tx, id, input.RouteLimits); err != nil {
 		return Reply{}, err
 	}
 	generation, err := AdvanceAuthority(r.Context(), tx)
@@ -408,15 +483,22 @@ func (s *Server) rotateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	return s.transitionKey(r, true)
 }
 func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
+	var overlapSeconds int
+	var overlapUntil *time.Time
 	var input map[string]json.RawMessage
 	if rotate && r.ContentLength != 0 {
 		if err := Decode(r, &input); err != nil {
 			return Reply{}, err
 		}
 		for field := range input {
-			if field != "daily_cost_limit" && field != "monthly_cost_limit" && field != "budget_group_id" {
-				return Reply{}, Invalid(field, "Only cost budgets may accompany rotation.")
+			if field != "daily_cost_limit" && field != "monthly_cost_limit" && field != "weekly_cost_limit" && field != "budget_group_id" && field != "overlap_seconds" {
+				return Reply{}, Invalid(field, "Only cost budgets and overlap_seconds may accompany rotation.")
 			}
+		}
+	}
+	if raw, ok := input["overlap_seconds"]; ok {
+		if string(raw) == "null" || json.Unmarshal(raw, &overlapSeconds) != nil || overlapSeconds < 0 || overlapSeconds > 86400 {
+			return Reply{}, Invalid("overlap_seconds", "Use 0–86400 seconds of overlap.")
 		}
 	}
 	id, err := IDParam(r, "api_key_id")
@@ -437,13 +519,22 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	var revoked *time.Time
 	var projectID *string
 	var groupID *string
-	if err = tx.QueryRow(r.Context(), "SELECT etag::text,name,policy,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1", id).Scan(&etag, &name, &data, &revoked, &projectID, &groupID); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT etag::text,name,policy,revoked_at,project_id::text,budget_group_id::text FROM olp.api_keys WHERE id=$1 FOR UPDATE", id).Scan(&etag, &name, &data, &revoked, &projectID, &groupID); err != nil {
 		return Reply{}, err
 	}
 	// A stored replay returns the rotated secret, so the caller must still
 	// reach this key's project before it is accepted.
 	if err := p.Project(projectID, Change); err != nil {
 		return Reply{}, err
+	}
+	if rotate {
+		var managed bool
+		if err = tx.QueryRow(r.Context(), "SELECT workload_issuer_id IS NOT NULL FROM olp.api_keys WHERE id=$1", id).Scan(&managed); err != nil {
+			return Reply{}, err
+		}
+		if managed {
+			return Reply{}, Fail(409, "workload_managed", "Workload principals do not have API secrets to rotate.")
+		}
 	}
 	claim, replayed, err := s.Replay(r, tx, p, input)
 	if err != nil {
@@ -478,6 +569,23 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 				return Reply{}, err
 			}
 		}
+		delete(input, "overlap_seconds")
+		if _, err = tx.Exec(r.Context(), "DELETE FROM olp.api_key_overlaps WHERE api_key_id=$1 AND (expires_at<=now() OR $2=0)", id, overlapSeconds); err != nil {
+			return Reply{}, err
+		}
+		if overlapSeconds > 0 {
+			var count int
+			if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.api_key_overlaps WHERE api_key_id=$1", id).Scan(&count); err != nil {
+				return Reply{}, err
+			}
+			if count >= 8 {
+				return Reply{}, Fail(409, "key_overlap_limit", "Eight previous secrets are still active. Wait for an overlap to end, or rotate with zero overlap.")
+			}
+			if err = tx.QueryRow(r.Context(), `INSERT INTO olp.api_key_overlaps(lookup_id,api_key_id,digest,expires_at)
+     SELECT lookup_id,id,digest,LEAST(now()+make_interval(secs=>$2),expires_at) FROM olp.api_keys WHERE id=$1 RETURNING expires_at`, id, overlapSeconds).Scan(&overlapUntil); err != nil {
+				return Reply{}, err
+			}
+		}
 		var policy map[string]json.RawMessage
 		if err = json.Unmarshal(data, &policy); err != nil {
 			return Reply{}, err
@@ -501,7 +609,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		action = "api_key.rotate"
 		lookup = secrets.Token()
 		secret = "olp_" + lookup + "_" + secrets.Token()
-		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET lookup_id=$1,digest=$2,etag=$3,rotated_at=now(),policy=$4,budget_group_id=$5 WHERE id=$6", lookup, s.Auth.Digest(secrets.APIKeyDigest, secret), etag, data, groupID, id)
+		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET limit_lookup_id=COALESCE(limit_lookup_id,lookup_id),lookup_id=$1,digest=$2,etag=$3,rotated_at=now(),policy=$4,budget_group_id=$5 WHERE id=$6", lookup, s.Auth.Digest(secrets.APIKeyDigest, secret), etag, data, groupID, id)
 	} else {
 		_, err = tx.Exec(r.Context(), "UPDATE olp.api_keys SET revoked_at=now(),etag=$1 WHERE id=$2", etag, id)
 	}
@@ -514,7 +622,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 	}
 	result := Detail(generation, etag)
 	if rotate {
-		result.Body = map[string]any{"id": id, "etag": etag, "lookup_id": lookup, "secret": secret, "runtime_generation": generation}
+		result.Body = map[string]any{"id": id, "etag": etag, "lookup_id": lookup, "secret": secret, "runtime_generation": generation, "overlap_expires_at": overlapUntil}
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), action, "api_key", id, "success"); err != nil {
 		return Reply{}, err
@@ -544,13 +652,36 @@ func checkKeyRoutes(r *http.Request, q Queryer, routes []string, projectID *stri
 // LookupID is the public lookup segment of the secret, which identifies the key
 // in shared state that must never carry the key's internal identifier.
 type Authority struct {
-	ID, Issuer, LookupID        string
-	ProjectID                   *string
-	BudgetGroupID               *string
-	BudgetGroupDailyCostLimit   *string
-	BudgetGroupMonthlyCostLimit *string
-	Policy                      KeyPolicy
-	ExpiresAt, RevokedAt        *time.Time
+	WorkloadIssuerID          *string
+	WorkloadDigest            string
+	WorkloadRevision          string
+	WorkloadMapping           string
+	BudgetIncreases           map[string]string
+	OrganizationID            *string
+	OrganizationBudget        *BudgetPolicy
+	InstallationID            string
+	InstallationBudget        *BudgetPolicy
+	ProjectBudget             *BudgetPolicy
+	ProjectAttributionBudgets AttributionBudgets
+	// Attribution is resolved request-local metadata, never cached key authority.
+	Attribution map[string]string
+
+	allowedGroupRoutes       map[string]struct{}
+	ProjectAttributionPolicy attribution.Policy
+	// EndUserDigest is request-local, never part of the cached key authority.
+	EndUserDigest                                          string
+	ProjectEndUserPolicy                                   *EndUserPolicy
+	ID, Issuer, LookupID                                   string
+	LimitLookupID                                          string
+	ProjectID                                              *string
+	BudgetGroupTemplate                                    *string
+	BudgetGroupRPM, BudgetGroupTPM, BudgetGroupConcurrency *int64
+	BudgetGroupID                                          *string
+	BudgetGroupDailyCostLimit                              *string
+	BudgetGroupMonthlyCostLimit                            *string
+	BudgetGroupWeeklyCostLimit                             *string
+	Policy                                                 KeyPolicy
+	ExpiresAt, RevokedAt                                   *time.Time
 }
 
 func (a Authority) Allows(scope, route string, projectID *string, now time.Time) bool {
@@ -564,5 +695,14 @@ func (a Authority) Allows(scope, route string, projectID *string, now time.Time)
 		return false
 	}
 	return slices.Contains(a.Policy.Scopes, scope) &&
-		(len(a.Policy.AllowedRoutes) == 0 || slices.Contains(a.Policy.AllowedRoutes, route))
+		a.allowsRoute(route)
+}
+
+// LimitsLookup remains stable across secret rotations, sharing counters with
+// requests already in flight and every still-valid secret for this key.
+func (a Authority) LimitsLookup() string {
+	if a.LimitLookupID != "" {
+		return a.LimitLookupID
+	}
+	return a.LookupID
 }

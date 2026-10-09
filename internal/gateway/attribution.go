@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -16,6 +17,25 @@ func (s *Server) parseAttribution(r *http.Request, authority access.Authority) (
 }
 
 func parseAttributionValues(values []string, authority access.Authority) (map[string]string, *Error) {
+	labels, err := parseCallerAttribution(values, authority)
+	if err != nil {
+		return nil, err
+	}
+	resolved, problem := authority.ResolveAttribution(labels)
+	if problem != nil {
+		reason := problem.(*attribution.Error).Reason
+		if reason == "missing_attribution" {
+			return nil, invalidRequest(reason, "Required attribution labels are missing.", nil)
+		}
+		if reason == "pinned_attribution_override" {
+			return nil, invalidRequest(reason, "Operator-pinned attribution labels cannot be overridden.", nil)
+		}
+		return nil, invalidRequest("invalid_attribution", "Attribution does not satisfy the key and project policies.", nil)
+	}
+	return resolved, nil
+}
+
+func parseCallerAttribution(values []string, authority access.Authority) (map[string]string, *Error) {
 	if len(values) == 0 {
 		return nil, nil
 	}
@@ -38,7 +58,7 @@ func parseAttributionValues(values []string, authority access.Authority) (map[st
 	}
 	labels := make(map[string]string, len(entries))
 	for key, rawValue := range entries {
-		if !slices.Contains(authority.Policy.AllowedAttributionKeys, key) {
+		if !slices.Contains(authority.Policy.AllowedAttributionKeys, key) && authority.Policy.AttributionDefaults[key] == "" && authority.ProjectAttributionPolicy.Defaults[key] == "" {
 			return nil, invalidRequest("invalid_attribution", "The attribution key `"+key+"` is not allowed for this API key.", nil)
 		}
 		var value string

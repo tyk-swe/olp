@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -125,6 +126,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	// anything left over is answered in the prefix's own error envelope
 	// instead of reaching the console.
 	for _, reserved := range surface.Reserved() {
+		if c.Mode.Management() && reserved.ManagementCatchAll {
+			continue
+		}
 		handler := http.HandlerFunc(http.NotFound)
 		if c.Mode.Inference() {
 			if reserved.GatewayCatchAll {
@@ -329,6 +333,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 			control.LocalLoginDisabled = !c.LocalLoginEnabled
+			control.ManagementNetworkRestricted = len(c.ManagementAllowedCIDRs) != 0
 			control.ClientIP = func(r *http.Request) string { return gateway.ClientIP(r, c.TrustedProxyCIDRs) }
 			control.LimitsEnforced = limiter != nil
 			// The worker plane that applies retention runs only where shared
@@ -431,7 +436,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	private := observability.NewHandler(obsCache, liveMetrics).ServeMux()
 	listenerConfigs := []listenerConfig{{name: "private", address: c.ObservabilityListenAddr, handler: private}}
 	if c.Mode.Public() {
-		// Every public request is charged against its surface's pool before
+		// Network-permitted public requests enter their surface's pool before
 		// routing: a full pool rejects without queueing, and tracing spans
 		// open only for admitted requests.
 		admission := &observability.PublicAdmission{
@@ -445,7 +450,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			request := runtimeConfig.ForInstallation(installation)
 			admission.Tracing = &request
 		}
-		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: Perimeter(c.PublicOrigin, admission.Wrap(public))})
+		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: Perimeter(c.PublicOrigin, managementNetwork(c.ManagementAllowedCIDRs, c.TrustedProxyCIDRs, admission.Wrap(public)))})
 	}
 	requestContext, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelRequests()
@@ -571,7 +576,12 @@ func warnEgressExceptions(log *slog.Logger, c config.Config) {
 // document the console's handlers produce.
 func rejectPublic(w http.ResponseWriter, r *http.Request, surface string) {
 	if surface == "management" {
-		access.WriteProblem(w, access.Fail(http.StatusServiceUnavailable, "request_admission_overloaded", "The service is temporarily overloaded."))
+		problem := access.Fail(http.StatusServiceUnavailable, "request_admission_overloaded", "The service is temporarily overloaded.")
+		if strings.HasPrefix(r.URL.Path, "/scim/") {
+			access.WriteSCIMError(w, problem)
+		} else {
+			access.WriteProblem(w, problem)
+		}
 		return
 	}
 	gateway.WriteAdmissionOverload(w, r)

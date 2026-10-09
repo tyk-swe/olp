@@ -125,6 +125,9 @@ type capCheck struct {
 // cannot be read skips the target, as an unreadable quota does.
 func (s *Server) holdCaps(ctx context.Context, x *execution, attempt runtime.Attempt, provider *runtime.Provider, slot *runtime.Slot, deadline time.Time) capCheck {
 	var check capCheck
+	if x.callerCostExempt() && provider.CredentialSource == "caller" {
+		return check
+	}
 	for _, owner := range attemptCaps(x.route, provider, slot) {
 		if owner.limits == nil {
 			continue

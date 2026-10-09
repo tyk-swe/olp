@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -75,11 +76,13 @@ var (
 // steered to, how a failed attempt is retried, which requests stay together
 // and how much the route may spend. The zero value adds nothing to a route.
 type Behavior struct {
-	Fallbacks []Fallback  `json:"fallbacks,omitempty"`
-	Selectors []Selector  `json:"selectors,omitempty"`
-	Retry     Retry       `json:"retry,omitempty"`
-	Affinity  *Affinity   `json:"affinity,omitempty"`
-	Budget    *CostLimits `json:"budget,omitempty"`
+	CallerCostExempt bool        `json:"caller_cost_exempt,omitempty"`
+	MaxBodyBytes     *int64      `json:"max_body_bytes,omitempty"`
+	Fallbacks        []Fallback  `json:"fallbacks,omitempty"`
+	Selectors        []Selector  `json:"selectors,omitempty"`
+	Retry            Retry       `json:"retry,omitempty"`
+	Affinity         *Affinity   `json:"affinity,omitempty"`
+	Budget           *CostLimits `json:"budget,omitempty"`
 }
 
 // Fallback names another route that serves the request when this one ends
@@ -269,12 +272,15 @@ func DecodeBehavior(raw []byte) (Behavior, error) {
 
 // IsZero reports whether the behavior declares nothing.
 func (b Behavior) IsZero() bool {
-	return len(b.Fallbacks) == 0 && len(b.Selectors) == 0 && len(b.Retry) == 0 && b.Affinity == nil && b.Budget == nil
+	return !b.CallerCostExempt && len(b.Fallbacks) == 0 && len(b.Selectors) == 0 && len(b.Retry) == 0 && b.Affinity == nil && b.Budget == nil && b.MaxBodyBytes == nil
 }
 
 // Validate checks the behavior's own shape. tagged reports whether a primary
 // target of the route carries a tag, so a selector cannot steer to nothing.
 func (b Behavior) Validate(slug string, tagged func(string) bool) error {
+	if !bodylimit.Valid(b.MaxBodyBytes) {
+		return access.Invalid("max_body_bytes", "Use a body limit from 1 to 1073741824 bytes, or null to inherit the installation limit.")
+	}
 	if len(b.Fallbacks) > maxFallbacks {
 		return access.Invalid("fallbacks", "A route declares at most "+strconv.Itoa(maxFallbacks)+" fallbacks")
 	}

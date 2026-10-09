@@ -53,7 +53,15 @@ it('offers installation pages only to installation-wide members', () => {
     expect(global).toContain(page);
     expect(assigned).not.toContain(page);
   }
-  for (const page of ['Providers', 'Routes', 'API Keys', 'Requests']) {
+  for (const page of [
+    'Providers',
+    'Routes',
+    'API Keys',
+    'Organizations',
+    'Budget increases',
+    'Project policies',
+    'Requests'
+  ]) {
     expect(assigned).toContain(page);
   }
 });

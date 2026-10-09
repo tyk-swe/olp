@@ -188,7 +188,7 @@ func seedMediaFixture(t *testing.T, authMode string, withCredential bool) *media
 
 // seedVendorMediaFixture is seedMediaFixture with a provider whose vendor is
 // named, which a job call states to a key that asks to be told.
-func seedVendorMediaFixture(t *testing.T, authMode string, withCredential bool, vendor string) *mediaFixture {
+func seedVendorMediaFixture(t *testing.T, authMode string, withCredential bool, vendor string, caller ...bool) *mediaFixture {
 	t.Helper()
 	f := &mediaFixture{t: t, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	f.pool = systemPool(t)
@@ -251,6 +251,9 @@ func seedVendorMediaFixture(t *testing.T, authMode string, withCredential bool, 
 		version := 1
 		slot["credential_version"] = version
 	}
+	if len(caller) > 0 && caller[0] {
+		configuration["credential_source"] = "caller"
+	}
 	configJSON, _ := json.Marshal(configuration)
 	modelsJSON, _ := json.Marshal(models)
 	slotsJSON, _ := json.Marshal([]map[string]any{slot})
@@ -298,6 +301,9 @@ func seedVendorMediaFixture(t *testing.T, authMode string, withCredential bool, 
 			ID: f.slotID, Name: "Default", Enabled: true, Weight: 1,
 			CredentialID: f.credentialID,
 		}},
+	}
+	if len(caller) > 0 && caller[0] {
+		provider.CredentialSource = "caller"
 	}
 	if withCredential {
 		version := 1
@@ -410,13 +416,18 @@ func hexKey(seed byte) string {
 	return string(b)
 }
 
-func (f *mediaFixture) call(t *testing.T, method, path, contentType string, body io.Reader) *http.Response {
+func (f *mediaFixture) call(t *testing.T, method, path, contentType string, body io.Reader, headers ...map[string]string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, f.server.URL+path, body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Authorization", "Bearer "+f.bearer)
+	for _, values := range headers {
+		for name, value := range values {
+			req.Header.Set(name, value)
+		}
+	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -477,9 +488,20 @@ const videoCreateContentType = "multipart/form-data; boundary=video-boundary"
 // idempotent re-delete, and session-authorized management views.
 func TestIntegrationVideoJobLifecycleEndToEnd(t *testing.T) {
 	f := seedMediaFixture(t, "none", false)
+	source := "header"
+	authority := f.rt.keys[f.bearer]
+	authority.Policy.EndUserSource = &source
+	f.rt.keys[f.bearer] = authority
+	f.gateway.Runtime = endUserRuntime{f.rt}
+	requests := 0
+	call := func(t *testing.T, method, path, contentType string, body io.Reader) *http.Response {
+		requests++
+		response := f.call(t, method, path, contentType, body, map[string]string{endUserHeader: "video-user"})
+		return response
+	}
 	ctx := t.Context()
 
-	resp := f.call(t, http.MethodPost, "/v1/videos", videoCreateContentType, strings.NewReader(videoCreateBody))
+	resp := call(t, http.MethodPost, "/v1/videos", videoCreateContentType, strings.NewReader(videoCreateBody))
 	created := decodeJSON(t, resp)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create: status %d body %v", resp.StatusCode, created)
@@ -498,7 +520,7 @@ func TestIntegrationVideoJobLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("a video creation recorded %d tokens from %q for %q, want no estimate for the other family", a.EstimatedInputTokens, a.EstimateProvenance, a.ModelFamily)
 	}
 
-	resp = f.call(t, http.MethodGet, "/v1/videos?limit=20&order=desc", "", nil)
+	resp = call(t, http.MethodGet, "/v1/videos?limit=20&order=desc", "", nil)
 	listed := decodeJSON(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list: status %d body %v", resp.StatusCode, listed)
@@ -517,7 +539,7 @@ func TestIntegrationVideoJobLifecycleEndToEnd(t *testing.T) {
 		t.Fatal("list entries must stay metadata-only")
 	}
 
-	resp = f.call(t, http.MethodGet, "/v1/videos/"+videoID, "", nil)
+	resp = call(t, http.MethodGet, "/v1/videos/"+videoID, "", nil)
 	got := decodeJSON(t, resp)
 	if resp.StatusCode != http.StatusOK || got["status"] != "completed" {
 		t.Fatalf("get: status %d body %v", resp.StatusCode, got)
@@ -528,7 +550,7 @@ func TestIntegrationVideoJobLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("a job poll recorded %+v, want no estimate for the other family", env.Attempts)
 	}
 
-	resp = f.call(t, http.MethodGet, "/v1/videos/"+videoID+"/content", "", nil)
+	resp = call(t, http.MethodGet, "/v1/videos/"+videoID+"/content", "", nil)
 	content, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "video/mp4" || string(content) != "video-content" {
@@ -536,7 +558,7 @@ func TestIntegrationVideoJobLifecycleEndToEnd(t *testing.T) {
 	}
 
 	// Two-phase delete: durable intent, upstream confirmation, tombstone.
-	resp = f.call(t, http.MethodDelete, "/v1/videos/"+videoID, "", nil)
+	resp = call(t, http.MethodDelete, "/v1/videos/"+videoID, "", nil)
 	deleted := decodeJSON(t, resp)
 	if resp.StatusCode != http.StatusOK || deleted["deleted"] != true {
 		t.Fatalf("delete: status %d body %v", resp.StatusCode, deleted)
@@ -553,7 +575,7 @@ func TestIntegrationVideoJobLifecycleEndToEnd(t *testing.T) {
 	}
 
 	// The tombstone answers idempotently without a second upstream call.
-	resp = f.call(t, http.MethodDelete, "/v1/videos/"+videoID, "", nil)
+	resp = call(t, http.MethodDelete, "/v1/videos/"+videoID, "", nil)
 	again := decodeJSON(t, resp)
 	if resp.StatusCode != http.StatusOK || again["deleted"] != true {
 		t.Fatalf("repeat delete: status %d body %v", resp.StatusCode, again)
@@ -563,7 +585,7 @@ func TestIntegrationVideoJobLifecycleEndToEnd(t *testing.T) {
 	}
 
 	// A deleted job stops being readable through the other verbs.
-	resp = f.call(t, http.MethodGet, "/v1/videos/"+videoID, "", nil)
+	resp = call(t, http.MethodGet, "/v1/videos/"+videoID, "", nil)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("deleted job get: status %d", resp.StatusCode)
@@ -573,12 +595,33 @@ func TestIntegrationVideoJobLifecycleEndToEnd(t *testing.T) {
 		t.Fatalf("spool leaked artifacts: %v", files)
 	}
 
+	var envelopes []Envelope
+	deadline := time.Now().Add(time.Second)
+	for {
+		f.sink.mu.Lock()
+		envelopes = append([]Envelope(nil), f.sink.envs...)
+		f.sink.mu.Unlock()
+		if len(envelopes) == requests {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("video lifecycle terminals = %d, want %d", len(envelopes), requests)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	for _, envelope := range envelopes {
+		assertEndUserEnvelope(t, envelope, (endUserRuntime{f.rt}).EndUserDigest(authority.ProjectID, "video-user"), "video-user")
+	}
+	var identityLeak bool
+	if err := f.pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.media_jobs j WHERE to_jsonb(j)::text LIKE '%video-user%')").Scan(&identityLeak); err != nil || identityLeak {
+		t.Fatalf("video job retained raw identity: %v", err)
+	}
 	// Revoking the API key isolates the client immediately while the durable
 	// job history remains for reconciliation and management views.
 	f.rt.mu.Lock()
 	f.rt.keys = map[string]access.Authority{}
 	f.rt.mu.Unlock()
-	resp = f.call(t, http.MethodGet, "/v1/videos", "", nil)
+	resp = call(t, http.MethodGet, "/v1/videos", "", nil)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("revoked key list: status %d", resp.StatusCode)
@@ -1137,5 +1180,123 @@ func TestIntegrationVideoMultipartBounds(t *testing.T) {
 	}
 	if files := f.spoolFiles(t); len(files) != 0 {
 		t.Fatalf("rejected uploads must stage nothing: %v", files)
+	}
+}
+
+func TestIntegrationRouteBodyLimitIncludesMultipartEpilogue(t *testing.T) {
+	for _, chunked := range []bool{false, true} {
+		t.Run(fmt.Sprint(chunked), func(t *testing.T) {
+			f := seedMediaFixture(t, "none", false)
+			routeBodyLimit(t, f.rt, "video-default", int64(len(videoCreateBody)))
+			body := videoCreateBody + strings.Repeat("epilogue", 64)
+			var reader io.Reader = strings.NewReader(body)
+			if chunked {
+				reader = io.NopCloser(reader)
+			}
+			response := f.call(t, http.MethodPost, "/v1/videos", videoCreateContentType, reader)
+			defer response.Body.Close()
+			if response.StatusCode != 413 {
+				t.Fatalf("multipart bypassed route limit: %d", response.StatusCode)
+			}
+			var jobs int
+			if err := f.pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.media_jobs").Scan(&jobs); err != nil || jobs != 0 {
+				t.Fatalf("oversized creation persisted %d jobs: %v", jobs, err)
+			}
+			if files := f.spoolFiles(t); len(files) != 0 {
+				t.Fatalf("leaked upload artifacts: %v", files)
+			}
+		})
+	}
+}
+
+func TestIntegrationMissingRouteGroupHidesOwnedVideoJobsAndCursors(t *testing.T) {
+	f := seedMediaFixture(t, "none", false)
+	response := f.call(t, "POST", "/v1/videos", videoCreateContentType, strings.NewReader(videoCreateBody))
+	created := decodeJSON(t, response)
+	if response.StatusCode != 201 {
+		t.Fatalf("create: %d %v", response.StatusCode, created)
+	}
+	id := created["id"].(string)
+	// Simulate a reference whose group was removed at authority refresh. The
+	// absent compiled membership must remain restrictive even with no explicit slugs.
+	f.rt.mu.Lock()
+	authority := f.rt.keys[f.bearer]
+	authority.Policy.AllowedRoutes = nil
+	authority.Policy.AllowedRouteGroups = []string{"removed"}
+	f.rt.keys[f.bearer] = authority
+	f.rt.mu.Unlock()
+	response = f.call(t, "GET", "/v1/videos", "", nil)
+	listed := decodeJSON(t, response)
+	if response.StatusCode != 200 || len(listed["data"].([]any)) != 0 {
+		t.Fatalf("removed group exposed jobs: %d %v", response.StatusCode, listed)
+	}
+	response = f.call(t, "GET", "/v1/videos?after="+id, "", nil)
+	data := decodeJSON(t, response)
+	if response.StatusCode != 400 {
+		t.Fatalf("removed group accepted cursor: %d %v", response.StatusCode, data)
+	}
+}
+
+func TestIntegrationCallerVideoRequiresCredentialForEachLifecycleRequest(t *testing.T) {
+	f := seedVendorMediaFixture(t, "api_key", true, "", true)
+	const secret = "video-caller-private"
+	original := f.upstream.srv.Config.Handler
+	f.upstream.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+secret || r.Header.Get(callerCredentialHeader) != "" {
+			t.Error("video used a stored or leaked caller credential")
+		}
+		original.ServeHTTP(w, r)
+	})
+	headers := map[string]string{callerCredentialHeader: secret}
+	response := f.call(t, http.MethodPost, "/v1/videos", videoCreateContentType, strings.NewReader(videoCreateBody), headers)
+	created := decodeJSON(t, response)
+	if response.StatusCode != 201 {
+		t.Fatalf("create=%d %v", response.StatusCode, created)
+	}
+	id := created["id"].(string)
+	if _, err := f.pool.Exec(t.Context(), `UPDATE olp.media_jobs SET next_reconciliation_at=now()-interval '1 minute' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	claims, err := media.ClaimJobs(t.Context(), f.pool, time.Now(), 10)
+	if err != nil || len(claims) != 0 {
+		t.Fatalf("worker claimed caller credentials: %d %v", len(claims), err)
+	}
+	before := f.upstream.getCalls.Load()
+	response = f.call(t, http.MethodGet, "/v1/videos/"+id, "", nil)
+	response.Body.Close()
+	if response.StatusCode < 400 || f.upstream.getCalls.Load() != before {
+		t.Fatal("missing caller credential used the probe")
+	}
+	for _, request := range []struct {
+		method, path string
+		want         int
+	}{{"GET", "/v1/videos/" + id, 200}, {"GET", "/v1/videos/" + id + "/content", 200}, {"DELETE", "/v1/videos/" + id, 200}} {
+		response = f.call(t, request.method, request.path, "", nil, headers)
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != request.want {
+			t.Fatalf("%s=%d %s", request.path, response.StatusCode, body)
+		}
+	}
+	var raw string
+	if err := f.pool.QueryRow(t.Context(), `SELECT to_jsonb(j)::text FROM olp.media_jobs j WHERE id=$1`, id).Scan(&raw); err != nil || strings.Contains(raw, secret) {
+		t.Fatalf("unsafe durable job: %v", err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for f.completed.Load() < 5 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if f.completed.Load() != 5 {
+		t.Fatal("video terminal accounting did not complete")
+	}
+	f.sink.mu.Lock()
+	events := append([]Envelope(nil), f.sink.envs...)
+	f.sink.mu.Unlock()
+	for _, e := range events {
+		for _, a := range e.Attempts {
+			if a.CredentialSource != "caller" || a.CredentialID != "" {
+				t.Fatal("video attempt lost caller credential source")
+			}
+		}
 	}
 }

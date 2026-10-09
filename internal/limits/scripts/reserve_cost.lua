@@ -299,46 +299,59 @@ local function release_lease(pending_key, expiry_key, lease_id)
 end
 -- END cost_pending
 
-local function read_state(key, expected_fields, current_window)
+local function read_state(key, expected_fields, current_window, now_ms, fallback_ttl)
+  local base_window = current_window
+  local count = #expected_fields
+  expected_fields[count+1] = "starts_at"
+  expected_fields[count+2] = "ends_at"
   local values = redis.pcall("HMGET", key, unpack(expected_fields))
   -- A key of another type answers with an error, not an array.
   if values.err ~= nil then
-    return nil
+    return nil,0,0,fallback_ttl,base_window
   end
   local present = 0
-  for index = 1, #values do
+  for index = 1, count do
     if values[index] ~= false then
       present = present + 1
     end
   end
   if present == 0 then
-    return "missing", 0, 0
+    return "missing", 0, 0, fallback_ttl, current_window
   end
-  if present ~= #values then
-    return nil
+  if present ~= count then
+    return nil,0,0,fallback_ttl,base_window
+  end
+  local ttl = fallback_ttl
+  if values[count+1] ~= false or values[count+2] ~= false then
+    local first = parse_safe_unsigned_integer(values[count+1])
+    local last = parse_safe_unsigned_integer(values[count+2])
+    if first == nil or last == nil or first >= last then return nil,0,0,fallback_ttl,base_window end
+    if now_ms < first or now_ms >= last then return "stale", 0, 0, fallback_ttl, current_window end
+    current_window = parse_safe_unsigned_integer(values[1])
+    ttl = last - now_ms
   end
   local stored_window = parse_safe_unsigned_integer(values[1])
   local accrued_hi, accrued_lo = parse_amount(values[2])
   if stored_window == nil or accrued_hi == nil or stored_window > current_window then
-    return nil
+    return nil,0,0,fallback_ttl,base_window
   end
-  if #values == 3 and parse_safe_unsigned_integer(values[3]) == nil then
-    return nil
+  if count == 3 and parse_safe_unsigned_integer(values[3]) == nil then
+    return nil,0,0,fallback_ttl,base_window
   end
   if stored_window ~= current_window then
-    return "stale", 0, 0
+    return "stale", 0, 0, fallback_ttl, current_window
   end
-  return "current", accrued_hi, accrued_lo
+  return "current", accrued_hi, accrued_lo, ttl, current_window
 end
 
--- KEYS: day balance, month balance, pending reservations, reservation expiries
---       (all four carry the cost owner's Valkey Cluster hash tag).
+-- KEYS: day balance, month balance, pending reservations, reservation expiries, week balance
+--       (all five carry the cost owner's Valkey Cluster hash tag).
 -- ARGV: daily_limit, monthly_limit, server time override (tests only), amount,
---       lease_id, lease_ttl_ms. An empty limit disables that window; an amount
+--       lease_id, lease_ttl_ms, weekly_limit. An empty limit disables that window; an amount
 --       of 0 is a request nothing could price, which is judged on accrued spend
 --       alone and leaves nothing pending. "check" reads availability including
 --       pending spend without modifying any key.
-if #KEYS ~= 4 or #ARGV ~= 6 then
+if not ((#KEYS == 4 and #ARGV == 6) or (#KEYS == 5 and (#ARGV == 7 or #ARGV == 8))) then
   return failure("invalid_arguments")
 end
 
@@ -352,13 +365,15 @@ local function parse_limit(raw)
   return hi, lo
 end
 
-local daily_hi, daily_lo, monthly_hi, monthly_lo
+local weekly_limit = ARGV[7] or ""
+local daily_hi, daily_lo, monthly_hi, monthly_lo, weekly_hi, weekly_lo
 if ARGV[1] ~= "" then
   daily_hi, daily_lo = parse_limit(ARGV[1])
 end
 if ARGV[2] ~= "" then
   monthly_hi, monthly_lo = parse_limit(ARGV[2])
 end
+if weekly_limit ~= "" then weekly_hi, weekly_lo = parse_limit(weekly_limit) end
 local override = parse_safe_unsigned_integer(ARGV[3])
 local read_only = ARGV[4] == "check"
 local amount_hi, amount_lo = 0, 0
@@ -370,7 +385,8 @@ local priced = amount_hi ~= nil and (amount_hi > 0 or amount_lo > 0)
 if override == nil or amount_hi == nil or lease_ttl == nil
     or (priced and (lease_ttl < 1 or not valid_lease(ARGV[5])))
     or (ARGV[1] ~= "" and daily_hi == nil)
-    or (ARGV[2] ~= "" and monthly_hi == nil) then
+    or (ARGV[2] ~= "" and monthly_hi == nil)
+    or (weekly_limit ~= "" and weekly_hi == nil) then
   return failure("invalid_arguments")
 end
 
@@ -379,24 +395,60 @@ if now_ms == nil then
   return failure("invalid_server_time")
 end
 local day_window, month_window, day_ttl, month_ttl = windows(now_ms)
+local week_window = math.floor((math.floor(now_ms / DAY_MS) + 3) / 7)
+local week_ttl = (week_window * 7 + 4) * DAY_MS - now_ms
 if day_window == nil then
   return failure("invalid_server_time")
 end
 
 local daily_state, daily_spent_hi, daily_spent_lo = "disabled", 0, 0
 if daily_hi ~= nil then
-  daily_state, daily_spent_hi, daily_spent_lo = read_state(KEYS[1], {"window", "accrued"}, day_window)
+  daily_state, daily_spent_hi, daily_spent_lo, day_ttl, day_window = read_state(KEYS[1], {"window", "accrued"}, day_window, now_ms, day_ttl)
   if daily_state == nil then
     return {RESPONSE_VERSION, -1, "malformed_daily_cost_state", 0, day_window, month_window}
   end
 end
 local monthly_state, monthly_spent_hi, monthly_spent_lo = "disabled", 0, 0
 if monthly_hi ~= nil then
-  monthly_state, monthly_spent_hi, monthly_spent_lo = read_state(
-    KEYS[2], {"window", "accrued", "unpriced"}, month_window
+  monthly_state, monthly_spent_hi, monthly_spent_lo, month_ttl, month_window = read_state(
+    KEYS[2], {"window", "accrued", "unpriced"}, month_window, now_ms, month_ttl
   )
   if monthly_state == nil then
     return {RESPONSE_VERSION, -1, "malformed_monthly_cost_state", 0, day_window, month_window}
+  end
+end
+
+local weekly_state, weekly_spent_hi, weekly_spent_lo = "disabled", 0, 0
+if weekly_hi ~= nil then
+  weekly_state, weekly_spent_hi, weekly_spent_lo, week_ttl, week_window = read_state(
+    KEYS[5], {"window", "accrued"}, week_window, now_ms, week_ttl
+  )
+  if weekly_state == nil then
+    return {RESPONSE_VERSION, -1, "malformed_weekly_cost_state", 0, day_window, month_window}
+  end
+end
+
+-- Optional grants are immutable authority evidence, not caller input. They
+-- add to an existing cap only during their original period and server-time span.
+if ARGV[8] ~= nil then
+  local ok, grants = pcall(cjson.decode, ARGV[8])
+  if not ok or type(grants) ~= "table" or #grants > 24 then return failure("invalid_arguments") end
+  for _, grant in ipairs(grants) do
+    local hi, lo = parse_limit(grant.amount)
+    if hi == nil or type(grant.window_id) ~= "number" or type(grant.starts_at) ~= "number"
+        or type(grant.expires_at) ~= "number" or grant.expires_at <= grant.starts_at
+        or (grant.window ~= "day" and grant.window ~= "week" and grant.window ~= "month") then
+      return failure("invalid_arguments")
+    end
+    if grant.starts_at <= now_ms and now_ms < grant.expires_at then
+      if grant.window == "day" and grant.window_id == day_window and daily_hi ~= nil then
+        daily_hi, daily_lo = add_amount(daily_hi, daily_lo, hi, lo)
+      elseif grant.window == "week" and grant.window_id == week_window and weekly_hi ~= nil then
+        weekly_hi, weekly_lo = add_amount(weekly_hi, weekly_lo, hi, lo)
+      elseif grant.window == "month" and grant.window_id == month_window and monthly_hi ~= nil then
+        monthly_hi, monthly_lo = add_amount(monthly_hi, monthly_lo, hi, lo)
+      end
+    end
   end
 end
 
@@ -406,6 +458,9 @@ end
 if monthly_hi ~= nil and compare_amount(monthly_spent_hi, monthly_spent_lo, monthly_hi, monthly_lo) >= 0 then
   return {RESPONSE_VERSION, 0, "monthly_cost", month_ttl, day_window, month_window}
 end
+if weekly_hi ~= nil and compare_amount(weekly_spent_hi, weekly_spent_lo, weekly_hi, weekly_lo) >= 0 then
+  return {RESPONSE_VERSION, 0, "weekly_cost", week_ttl, day_window, month_window}
+end
 
 -- Only authoritative snapshots may initialize a window. Missing state can
 -- also mean eviction or data loss, even while Valkey itself is reachable.
@@ -414,6 +469,9 @@ if daily_hi ~= nil and daily_state ~= "current" then
 end
 if monthly_hi ~= nil and monthly_state ~= "current" then
   return {RESPONSE_VERSION, -1, "uninitialized_monthly_cost_state", 0, day_window, month_window}
+end
+if weekly_hi ~= nil and weekly_state ~= "current" then
+  return {RESPONSE_VERSION, -1, "uninitialized_weekly_cost_state", 0, day_window, month_window}
 end
 
 if read_only then
@@ -425,6 +483,10 @@ if read_only then
   local monthly_total_hi, monthly_total_lo = add_amount(monthly_spent_hi, monthly_spent_lo, held_hi, held_lo)
   if monthly_hi ~= nil and compare_amount(monthly_total_hi, monthly_total_lo, monthly_hi, monthly_lo) >= 0 then
     return {RESPONSE_VERSION, 0, "monthly_cost", math.min(month_ttl, PENDING_RETRY_MS), day_window, month_window}
+  end
+  local weekly_total_hi, weekly_total_lo = add_amount(weekly_spent_hi, weekly_spent_lo, held_hi, held_lo)
+  if weekly_hi ~= nil and compare_amount(weekly_total_hi, weekly_total_lo, weekly_hi, weekly_lo) >= 0 then
+    return {RESPONSE_VERSION, 0, "weekly_cost", math.min(week_ttl, PENDING_RETRY_MS), day_window, month_window}
   end
   return {RESPONSE_VERSION, 1, "ok", 0, day_window, month_window}
 end
@@ -485,6 +547,12 @@ if priced then
       refused, retry = "monthly_cost", wait
     end
   end
+  if weekly_hi ~= nil then
+    local wait = wait_for(weekly_hi, weekly_lo, weekly_spent_hi, weekly_spent_lo, week_ttl)
+    if wait ~= nil and (refused == nil or wait > retry) then
+      refused, retry = "weekly_cost", wait
+    end
+  end
   if refused ~= nil then
     -- The suffix says the budget is not spent but cannot hold this request beside
     -- what is, which is not the refusal an exhausted budget makes above.
@@ -497,6 +565,9 @@ if daily_hi ~= nil and redis.call("PTTL", KEYS[1]) < 1 then
 end
 if monthly_hi ~= nil and redis.call("PTTL", KEYS[2]) < 1 then
   redis.call("PEXPIRE", KEYS[2], month_ttl)
+end
+if weekly_hi ~= nil and redis.call("PTTL", KEYS[5]) < 1 then
+  redis.call("PEXPIRE", KEYS[5], week_ttl)
 end
 if priced then
   local expires_ms = now_ms + lease_ttl

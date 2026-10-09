@@ -83,7 +83,7 @@ func (s *Server) unaryAttempt(ctx context.Context, x *execution, a runtime.Attem
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "olp/gateway")
-	if err := s.applySlotCredential(actx, x, req, plan.Config(), slot, body); err != nil {
+	if err := s.applySlotCredential(actx, x, req, plan.Config(), slot, body, provider, a.UpstreamModel); err != nil {
 		if actx.Err() != nil {
 			return fail(state.classify(err, false), nil)
 		}

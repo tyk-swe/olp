@@ -62,6 +62,49 @@
   }
 </script>
 
+<fieldset disabled={locked}>
+  <legend>Caller-paid usage</legend>
+  <label
+    ><input
+      type="checkbox"
+      bind:checked={editor.behavior.caller_cost_exempt}
+      onchange={() => editor.touch()}
+    /> Exempt caller-paid attempts from cost budgets</label
+  >
+  <small
+    >All foreground targets must use caller credentials. Usage and prices remain
+    visible; request, token and concurrency limits still apply. Fallback and
+    selector routes must use the same policy.</small
+  >
+</fieldset>
+<fieldset disabled={locked}>
+  <legend>Request size</legend>
+  <div class="form-field">
+    <label for="route-max-body">Maximum request body (bytes)</label>
+    <input
+      id="route-max-body"
+      type="number"
+      min="1"
+      max="1073741824"
+      step="1"
+      placeholder="Installation limit"
+      value={editor.behavior.max_body_bytes ?? ''}
+      oninput={(event) => {
+        editor.behavior.max_body_bytes =
+          event.currentTarget.value === ''
+            ? null
+            : Number(event.currentTarget.value);
+        editor.touch();
+      }}
+      aria-describedby="route-max-body-help"
+    />
+    <small id="route-max-body-help"
+      >Lowers the installation limit for JSON, uploads and client WebSocket
+      messages. Empty inherits the installation limit.</small
+    >
+  </div>
+</fieldset>
+
 <section class="card resilience" aria-labelledby="resilience-heading">
   <p class="eyebrow">Resilience</p>
   <h2 id="resilience-heading">Fallbacks, selectors and retries</h2>

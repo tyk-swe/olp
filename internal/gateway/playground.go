@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/telemetry"
+	"github.com/tyk-swe/olp/internal/usage"
 	"slices"
 )
 
@@ -240,6 +241,7 @@ func (p *Playground) execution(r *http.Request, principal access.Principal, pars
 		preferences: preferences,
 		parsed:      parsed,
 		actor:       "playground",
+		origin:      usage.OriginPlayground,
 		userID:      principal.ID,
 		affinity:    []byte(principal.ID),
 	}
@@ -282,6 +284,14 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 		return access.Reply{}, access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
 	}
 	defer s.release(r.Context())
+	// Playground calls, streamed or not, are charged to the route's project and
+	// installation, so they hold against those caps as probes and shadows do.
+	defer s.settleAdmission(r.Context(), x)
+	if e := s.reserveSystemBudgets(r.Context(), x); e != nil {
+		x.failure = e
+		s.finish(x, nil, e.Status)
+		return access.Reply{}, access.Fail(e.Status, e.Code, e.Message)
+	}
 	out := s.execute(r.Context(), x)
 	if out.err != nil {
 		s.finish(x, out, out.err.Status)
@@ -416,6 +426,12 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 		return access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
 	}
 	defer s.release(r.Context())
+	defer s.settleAdmission(r.Context(), x)
+	if e := s.reserveSystemBudgets(r.Context(), x); e != nil {
+		x.failure = e
+		s.finish(x, nil, e.Status)
+		return access.Fail(e.Status, e.Code, e.Message)
+	}
 	sw := &playgroundStreamWriter{w: w, maxTotal: s.cfg.MaxResponseBytes}
 	x.emit = sw.emit
 	out := s.execute(r.Context(), x)

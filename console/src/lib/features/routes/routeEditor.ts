@@ -525,6 +525,12 @@ export function validateRouteBehavior(
     !attributionLabel.test(behavior.affinity.label ?? '')
   )
     return 'Session affinity by label names an attribution label.';
+  const cap = behavior.max_body_bytes;
+  if (
+    cap != null &&
+    (!Number.isSafeInteger(cap) || cap < 1 || cap > 1073741824)
+  )
+    return 'Use a body limit from 1 to 1073741824 bytes, or leave it empty.';
   const budget = behavior.budget;
   if (budget) {
     const limits = [budget.daily_cost_limit, budget.monthly_cost_limit];
@@ -544,7 +550,13 @@ function behaviorFields(behavior: RouteBehavior | undefined) {
     selectors: value.selectors,
     retry: value.retry,
     affinity: value.affinity,
-    budget: value.budget
+    budget: value.budget,
+    ...(value.caller_cost_exempt !== undefined
+      ? { caller_cost_exempt: value.caller_cost_exempt }
+      : {}),
+    ...(value.max_body_bytes !== undefined
+      ? { max_body_bytes: value.max_body_bytes }
+      : {})
   };
 }
 

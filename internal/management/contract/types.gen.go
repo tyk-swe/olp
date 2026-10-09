@@ -5,6 +5,7 @@ package contract
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/oapi-codegen/nullable"
@@ -30,6 +31,27 @@ func (e AdmissionPriority) Valid() bool {
 	case Low:
 		return true
 	case Normal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApiKeyDetailResponseEndUserSource.
+const (
+	ApiKeyDetailResponseEndUserSourceHeader      ApiKeyDetailResponseEndUserSource = "header"
+	ApiKeyDetailResponseEndUserSourceLessThannil ApiKeyDetailResponseEndUserSource = "<nil>"
+	ApiKeyDetailResponseEndUserSourceNative      ApiKeyDetailResponseEndUserSource = "native"
+)
+
+// Valid indicates whether the value is a known member of the ApiKeyDetailResponseEndUserSource enum.
+func (e ApiKeyDetailResponseEndUserSource) Valid() bool {
+	switch e {
+	case ApiKeyDetailResponseEndUserSourceHeader:
+		return true
+	case ApiKeyDetailResponseEndUserSourceLessThannil:
+		return true
+	case ApiKeyDetailResponseEndUserSourceNative:
 		return true
 	default:
 		return false
@@ -117,6 +139,24 @@ func (e AttemptInteractionMetadataUpstreamState) Valid() bool {
 	}
 }
 
+// Defines values for AttemptRoutingMetadataCredentialSource.
+const (
+	AttemptRoutingMetadataCredentialSourceCaller   AttemptRoutingMetadataCredentialSource = "caller"
+	AttemptRoutingMetadataCredentialSourceOperator AttemptRoutingMetadataCredentialSource = "operator"
+)
+
+// Valid indicates whether the value is a known member of the AttemptRoutingMetadataCredentialSource enum.
+func (e AttemptRoutingMetadataCredentialSource) Valid() bool {
+	switch e {
+	case AttemptRoutingMetadataCredentialSourceCaller:
+		return true
+	case AttemptRoutingMetadataCredentialSourceOperator:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuditEventResponseActorType.
 const (
 	AuditEventResponseActorTypeManagementToken AuditEventResponseActorType = "management_token"
@@ -132,6 +172,66 @@ func (e AuditEventResponseActorType) Valid() bool {
 	case AuditEventResponseActorTypeSystem:
 		return true
 	case AuditEventResponseActorTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BudgetIncreaseWindowKind.
+const (
+	BudgetIncreaseWindowKindDay   BudgetIncreaseWindowKind = "day"
+	BudgetIncreaseWindowKindMonth BudgetIncreaseWindowKind = "month"
+	BudgetIncreaseWindowKindWeek  BudgetIncreaseWindowKind = "week"
+)
+
+// Valid indicates whether the value is a known member of the BudgetIncreaseWindowKind enum.
+func (e BudgetIncreaseWindowKind) Valid() bool {
+	switch e {
+	case BudgetIncreaseWindowKindDay:
+		return true
+	case BudgetIncreaseWindowKindMonth:
+		return true
+	case BudgetIncreaseWindowKindWeek:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BudgetIncreaseTargetKind.
+const (
+	BudgetIncreaseTargetKindApiKey         BudgetIncreaseTargetKind = "api_key"
+	BudgetIncreaseTargetKindAttribution    BudgetIncreaseTargetKind = "attribution"
+	BudgetIncreaseTargetKindBudgetGroup    BudgetIncreaseTargetKind = "budget_group"
+	BudgetIncreaseTargetKindInstallation   BudgetIncreaseTargetKind = "installation"
+	BudgetIncreaseTargetKindKeyEndUser     BudgetIncreaseTargetKind = "key_end_user"
+	BudgetIncreaseTargetKindKeyRoute       BudgetIncreaseTargetKind = "key_route"
+	BudgetIncreaseTargetKindOrganization   BudgetIncreaseTargetKind = "organization"
+	BudgetIncreaseTargetKindProject        BudgetIncreaseTargetKind = "project"
+	BudgetIncreaseTargetKindProjectEndUser BudgetIncreaseTargetKind = "project_end_user"
+)
+
+// Valid indicates whether the value is a known member of the BudgetIncreaseTargetKind enum.
+func (e BudgetIncreaseTargetKind) Valid() bool {
+	switch e {
+	case BudgetIncreaseTargetKindApiKey:
+		return true
+	case BudgetIncreaseTargetKindAttribution:
+		return true
+	case BudgetIncreaseTargetKindBudgetGroup:
+		return true
+	case BudgetIncreaseTargetKindInstallation:
+		return true
+	case BudgetIncreaseTargetKindKeyEndUser:
+		return true
+	case BudgetIncreaseTargetKindKeyRoute:
+		return true
+	case BudgetIncreaseTargetKindOrganization:
+		return true
+	case BudgetIncreaseTargetKindProject:
+		return true
+	case BudgetIncreaseTargetKindProjectEndUser:
 		return true
 	default:
 		return false
@@ -175,6 +275,7 @@ func (e BudgetThresholdEventEvent) Valid() bool {
 const (
 	BudgetWindowKindDay   BudgetWindowKind = "day"
 	BudgetWindowKindMonth BudgetWindowKind = "month"
+	BudgetWindowKindWeek  BudgetWindowKind = "week"
 )
 
 // Valid indicates whether the value is a known member of the BudgetWindowKind enum.
@@ -183,6 +284,8 @@ func (e BudgetWindowKind) Valid() bool {
 	case BudgetWindowKindDay:
 		return true
 	case BudgetWindowKindMonth:
+		return true
+	case BudgetWindowKindWeek:
 		return true
 	default:
 		return false
@@ -514,6 +617,7 @@ func (e CodeRouteAdapters) Valid() bool {
 const (
 	CodeTokenWindowPeriodDay   CodeTokenWindowPeriod = "day"
 	CodeTokenWindowPeriodMonth CodeTokenWindowPeriod = "month"
+	CodeTokenWindowPeriodWeek  CodeTokenWindowPeriod = "week"
 )
 
 // Valid indicates whether the value is a known member of the CodeTokenWindowPeriod enum.
@@ -522,6 +626,8 @@ func (e CodeTokenWindowPeriod) Valid() bool {
 	case CodeTokenWindowPeriodDay:
 		return true
 	case CodeTokenWindowPeriodMonth:
+		return true
+	case CodeTokenWindowPeriodWeek:
 		return true
 	default:
 		return false
@@ -563,37 +669,37 @@ func (e ConfigurationDocumentApiVersion) Valid() bool {
 
 // Defines values for ConfigurationPlanItemAction.
 const (
-	Bind     ConfigurationPlanItemAction = "bind"
-	Blocker  ConfigurationPlanItemAction = "blocker"
-	Conflict ConfigurationPlanItemAction = "conflict"
-	Create   ConfigurationPlanItemAction = "create"
-	Enroll   ConfigurationPlanItemAction = "enroll"
-	Noop     ConfigurationPlanItemAction = "noop"
-	Replace  ConfigurationPlanItemAction = "replace"
-	Reuse    ConfigurationPlanItemAction = "reuse"
-	Stage    ConfigurationPlanItemAction = "stage"
+	ConfigurationPlanItemActionBind     ConfigurationPlanItemAction = "bind"
+	ConfigurationPlanItemActionBlocker  ConfigurationPlanItemAction = "blocker"
+	ConfigurationPlanItemActionConflict ConfigurationPlanItemAction = "conflict"
+	ConfigurationPlanItemActionCreate   ConfigurationPlanItemAction = "create"
+	ConfigurationPlanItemActionEnroll   ConfigurationPlanItemAction = "enroll"
+	ConfigurationPlanItemActionNoop     ConfigurationPlanItemAction = "noop"
+	ConfigurationPlanItemActionReplace  ConfigurationPlanItemAction = "replace"
+	ConfigurationPlanItemActionReuse    ConfigurationPlanItemAction = "reuse"
+	ConfigurationPlanItemActionStage    ConfigurationPlanItemAction = "stage"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationPlanItemAction enum.
 func (e ConfigurationPlanItemAction) Valid() bool {
 	switch e {
-	case Bind:
+	case ConfigurationPlanItemActionBind:
 		return true
-	case Blocker:
+	case ConfigurationPlanItemActionBlocker:
 		return true
-	case Conflict:
+	case ConfigurationPlanItemActionConflict:
 		return true
-	case Create:
+	case ConfigurationPlanItemActionCreate:
 		return true
-	case Enroll:
+	case ConfigurationPlanItemActionEnroll:
 		return true
-	case Noop:
+	case ConfigurationPlanItemActionNoop:
 		return true
-	case Replace:
+	case ConfigurationPlanItemActionReplace:
 		return true
-	case Reuse:
+	case ConfigurationPlanItemActionReuse:
 		return true
-	case Stage:
+	case ConfigurationPlanItemActionStage:
 		return true
 	default:
 		return false
@@ -639,6 +745,108 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 	}
 }
 
+// Defines values for ConfigurationSCIMGroupMappingAccessScope.
+const (
+	ConfigurationSCIMGroupMappingAccessScopeAssigned ConfigurationSCIMGroupMappingAccessScope = "assigned"
+	ConfigurationSCIMGroupMappingAccessScopeGlobal   ConfigurationSCIMGroupMappingAccessScope = "global"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationSCIMGroupMappingAccessScope enum.
+func (e ConfigurationSCIMGroupMappingAccessScope) Valid() bool {
+	switch e {
+	case ConfigurationSCIMGroupMappingAccessScopeAssigned:
+		return true
+	case ConfigurationSCIMGroupMappingAccessScopeGlobal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationSCIMGroupMappingProjectsRole.
+const (
+	ConfigurationSCIMGroupMappingProjectsRoleManager ConfigurationSCIMGroupMappingProjectsRole = "manager"
+	ConfigurationSCIMGroupMappingProjectsRoleViewer  ConfigurationSCIMGroupMappingProjectsRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationSCIMGroupMappingProjectsRole enum.
+func (e ConfigurationSCIMGroupMappingProjectsRole) Valid() bool {
+	switch e {
+	case ConfigurationSCIMGroupMappingProjectsRoleManager:
+		return true
+	case ConfigurationSCIMGroupMappingProjectsRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationSCIMGroupMappingRole.
+const (
+	ConfigurationSCIMGroupMappingRoleDeveloper   ConfigurationSCIMGroupMappingRole = "developer"
+	ConfigurationSCIMGroupMappingRoleLessThannil ConfigurationSCIMGroupMappingRole = "<nil>"
+	ConfigurationSCIMGroupMappingRoleOperator    ConfigurationSCIMGroupMappingRole = "operator"
+	ConfigurationSCIMGroupMappingRoleOwner       ConfigurationSCIMGroupMappingRole = "owner"
+	ConfigurationSCIMGroupMappingRoleViewer      ConfigurationSCIMGroupMappingRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationSCIMGroupMappingRole enum.
+func (e ConfigurationSCIMGroupMappingRole) Valid() bool {
+	switch e {
+	case ConfigurationSCIMGroupMappingRoleDeveloper:
+		return true
+	case ConfigurationSCIMGroupMappingRoleLessThannil:
+		return true
+	case ConfigurationSCIMGroupMappingRoleOperator:
+		return true
+	case ConfigurationSCIMGroupMappingRoleOwner:
+		return true
+	case ConfigurationSCIMGroupMappingRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationWorkloadIssuerAlgorithms.
+const (
+	ConfigurationWorkloadIssuerAlgorithmsES256 ConfigurationWorkloadIssuerAlgorithms = "ES256"
+	ConfigurationWorkloadIssuerAlgorithmsEdDSA ConfigurationWorkloadIssuerAlgorithms = "EdDSA"
+	ConfigurationWorkloadIssuerAlgorithmsRS256 ConfigurationWorkloadIssuerAlgorithms = "RS256"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationWorkloadIssuerAlgorithms enum.
+func (e ConfigurationWorkloadIssuerAlgorithms) Valid() bool {
+	switch e {
+	case ConfigurationWorkloadIssuerAlgorithmsES256:
+		return true
+	case ConfigurationWorkloadIssuerAlgorithmsEdDSA:
+		return true
+	case ConfigurationWorkloadIssuerAlgorithmsRS256:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationWorkloadMappingScopes.
+const (
+	ConfigurationWorkloadMappingScopesInference  ConfigurationWorkloadMappingScopes = "inference"
+	ConfigurationWorkloadMappingScopesModelsRead ConfigurationWorkloadMappingScopes = "models_read"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationWorkloadMappingScopes enum.
+func (e ConfigurationWorkloadMappingScopes) Valid() bool {
+	switch e {
+	case ConfigurationWorkloadMappingScopesInference:
+		return true
+	case ConfigurationWorkloadMappingScopesModelsRead:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ContentPolicyRuleAction.
 const (
 	Block  ContentPolicyRuleAction = "block"
@@ -669,6 +877,48 @@ func (e ContentPolicyRulePhase) Valid() bool {
 	case ContentPolicyRulePhaseInput:
 		return true
 	case ContentPolicyRulePhaseOutput:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateApiKeyRequestEndUserSource.
+const (
+	CreateApiKeyRequestEndUserSourceHeader      CreateApiKeyRequestEndUserSource = "header"
+	CreateApiKeyRequestEndUserSourceLessThannil CreateApiKeyRequestEndUserSource = "<nil>"
+	CreateApiKeyRequestEndUserSourceNative      CreateApiKeyRequestEndUserSource = "native"
+)
+
+// Valid indicates whether the value is a known member of the CreateApiKeyRequestEndUserSource enum.
+func (e CreateApiKeyRequestEndUserSource) Valid() bool {
+	switch e {
+	case CreateApiKeyRequestEndUserSourceHeader:
+		return true
+	case CreateApiKeyRequestEndUserSourceLessThannil:
+		return true
+	case CreateApiKeyRequestEndUserSourceNative:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateBudgetIncreaseRequestWindow.
+const (
+	CreateBudgetIncreaseRequestWindowDay   CreateBudgetIncreaseRequestWindow = "day"
+	CreateBudgetIncreaseRequestWindowMonth CreateBudgetIncreaseRequestWindow = "month"
+	CreateBudgetIncreaseRequestWindowWeek  CreateBudgetIncreaseRequestWindow = "week"
+)
+
+// Valid indicates whether the value is a known member of the CreateBudgetIncreaseRequestWindow enum.
+func (e CreateBudgetIncreaseRequestWindow) Valid() bool {
+	switch e {
+	case CreateBudgetIncreaseRequestWindowDay:
+		return true
+	case CreateBudgetIncreaseRequestWindowMonth:
+		return true
+	case CreateBudgetIncreaseRequestWindowWeek:
 		return true
 	default:
 		return false
@@ -978,22 +1228,152 @@ func (e InteractionInspectionStatus) Valid() bool {
 	}
 }
 
+// Defines values for KeyExpiringEventEvent.
+const (
+	KeyExpiringEventEventKeyExpiring KeyExpiringEventEvent = "key.expiring"
+)
+
+// Valid indicates whether the value is a known member of the KeyExpiringEventEvent enum.
+func (e KeyExpiringEventEvent) Valid() bool {
+	switch e {
+	case KeyExpiringEventEventKeyExpiring:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KeyExpiringEventReason.
+const (
+	KeyExpiringEventReasonExpiry   KeyExpiringEventReason = "expiry"
+	KeyExpiringEventReasonRotation KeyExpiringEventReason = "rotation"
+)
+
+// Valid indicates whether the value is a known member of the KeyExpiringEventReason enum.
+func (e KeyExpiringEventReason) Valid() bool {
+	switch e {
+	case KeyExpiringEventReasonExpiry:
+		return true
+	case KeyExpiringEventReasonRotation:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MFAChallengeMethods.
+const (
+	MFAChallengeMethodsRecovery MFAChallengeMethods = "recovery"
+	MFAChallengeMethodsTotp     MFAChallengeMethods = "totp"
+	MFAChallengeMethodsWebauthn MFAChallengeMethods = "webauthn"
+)
+
+// Valid indicates whether the value is a known member of the MFAChallengeMethods enum.
+func (e MFAChallengeMethods) Valid() bool {
+	switch e {
+	case MFAChallengeMethodsRecovery:
+		return true
+	case MFAChallengeMethodsTotp:
+		return true
+	case MFAChallengeMethodsWebauthn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MFAEnrollmentKind.
+const (
+	MFAEnrollmentKindTotp     MFAEnrollmentKind = "totp"
+	MFAEnrollmentKindWebauthn MFAEnrollmentKind = "webauthn"
+)
+
+// Valid indicates whether the value is a known member of the MFAEnrollmentKind enum.
+func (e MFAEnrollmentKind) Valid() bool {
+	switch e {
+	case MFAEnrollmentKindTotp:
+		return true
+	case MFAEnrollmentKindWebauthn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MFAEnrollmentRequestKind.
+const (
+	MFAEnrollmentRequestKindTotp     MFAEnrollmentRequestKind = "totp"
+	MFAEnrollmentRequestKindWebauthn MFAEnrollmentRequestKind = "webauthn"
+)
+
+// Valid indicates whether the value is a known member of the MFAEnrollmentRequestKind enum.
+func (e MFAEnrollmentRequestKind) Valid() bool {
+	switch e {
+	case MFAEnrollmentRequestKindTotp:
+		return true
+	case MFAEnrollmentRequestKindWebauthn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MFAStatusFactorsKind.
+const (
+	MFAStatusFactorsKindTotp     MFAStatusFactorsKind = "totp"
+	MFAStatusFactorsKindWebauthn MFAStatusFactorsKind = "webauthn"
+)
+
+// Valid indicates whether the value is a known member of the MFAStatusFactorsKind enum.
+func (e MFAStatusFactorsKind) Valid() bool {
+	switch e {
+	case MFAStatusFactorsKindTotp:
+		return true
+	case MFAStatusFactorsKindWebauthn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MFAVerificationRequestMethod.
+const (
+	MFAVerificationRequestMethodRecovery MFAVerificationRequestMethod = "recovery"
+	MFAVerificationRequestMethodTotp     MFAVerificationRequestMethod = "totp"
+	MFAVerificationRequestMethodWebauthn MFAVerificationRequestMethod = "webauthn"
+)
+
+// Valid indicates whether the value is a known member of the MFAVerificationRequestMethod enum.
+func (e MFAVerificationRequestMethod) Valid() bool {
+	switch e {
+	case MFAVerificationRequestMethodRecovery:
+		return true
+	case MFAVerificationRequestMethodTotp:
+		return true
+	case MFAVerificationRequestMethodWebauthn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ManagementOperation.
 const (
-	ManagementOperationAccess         ManagementOperation = "access"
-	ManagementOperationAccessRead     ManagementOperation = "access_read"
-	ManagementOperationConfigure      ManagementOperation = "configure"
-	ManagementOperationKeys           ManagementOperation = "keys"
-	ManagementOperationLocalLogin     ManagementOperation = "local_login"
-	ManagementOperationManagePlugins  ManagementOperation = "manage_plugins"
-	ManagementOperationManageProjects ManagementOperation = "manage_projects"
-	ManagementOperationManageSessions ManagementOperation = "manage_sessions"
-	ManagementOperationManageTokens   ManagementOperation = "manage_tokens"
-	ManagementOperationPlayground     ManagementOperation = "playground"
-	ManagementOperationRead           ManagementOperation = "read"
-	ManagementOperationSelf           ManagementOperation = "self"
-	ManagementOperationSettings       ManagementOperation = "settings"
-	ManagementOperationUsage          ManagementOperation = "usage"
+	ManagementOperationAccess             ManagementOperation = "access"
+	ManagementOperationAccessRead         ManagementOperation = "access_read"
+	ManagementOperationConfigure          ManagementOperation = "configure"
+	ManagementOperationKeys               ManagementOperation = "keys"
+	ManagementOperationLocalLogin         ManagementOperation = "local_login"
+	ManagementOperationManageOrganization ManagementOperation = "manage_organization"
+	ManagementOperationManagePlugins      ManagementOperation = "manage_plugins"
+	ManagementOperationManageProjects     ManagementOperation = "manage_projects"
+	ManagementOperationManageSessions     ManagementOperation = "manage_sessions"
+	ManagementOperationManageTokens       ManagementOperation = "manage_tokens"
+	ManagementOperationPlayground         ManagementOperation = "playground"
+	ManagementOperationRead               ManagementOperation = "read"
+	ManagementOperationSelf               ManagementOperation = "self"
+	ManagementOperationSettings           ManagementOperation = "settings"
+	ManagementOperationUsage              ManagementOperation = "usage"
 )
 
 // Valid indicates whether the value is a known member of the ManagementOperation enum.
@@ -1008,6 +1388,8 @@ func (e ManagementOperation) Valid() bool {
 	case ManagementOperationKeys:
 		return true
 	case ManagementOperationLocalLogin:
+		return true
+	case ManagementOperationManageOrganization:
 		return true
 	case ManagementOperationManagePlugins:
 		return true
@@ -1034,14 +1416,15 @@ func (e ManagementOperation) Valid() bool {
 
 // Defines values for ManagementTokenScope.
 const (
-	ManagementTokenScopeAccess     ManagementTokenScope = "access"
-	ManagementTokenScopeAccessRead ManagementTokenScope = "access_read"
-	ManagementTokenScopeConfigure  ManagementTokenScope = "configure"
-	ManagementTokenScopeKeys       ManagementTokenScope = "keys"
-	ManagementTokenScopePlayground ManagementTokenScope = "playground"
-	ManagementTokenScopeRead       ManagementTokenScope = "read"
-	ManagementTokenScopeSettings   ManagementTokenScope = "settings"
-	ManagementTokenScopeUsage      ManagementTokenScope = "usage"
+	ManagementTokenScopeAccess             ManagementTokenScope = "access"
+	ManagementTokenScopeAccessRead         ManagementTokenScope = "access_read"
+	ManagementTokenScopeConfigure          ManagementTokenScope = "configure"
+	ManagementTokenScopeKeys               ManagementTokenScope = "keys"
+	ManagementTokenScopeManageOrganization ManagementTokenScope = "manage_organization"
+	ManagementTokenScopePlayground         ManagementTokenScope = "playground"
+	ManagementTokenScopeRead               ManagementTokenScope = "read"
+	ManagementTokenScopeSettings           ManagementTokenScope = "settings"
+	ManagementTokenScopeUsage              ManagementTokenScope = "usage"
 )
 
 // Valid indicates whether the value is a known member of the ManagementTokenScope enum.
@@ -1054,6 +1437,8 @@ func (e ManagementTokenScope) Valid() bool {
 	case ManagementTokenScopeConfigure:
 		return true
 	case ManagementTokenScopeKeys:
+		return true
+	case ManagementTokenScopeManageOrganization:
 		return true
 	case ManagementTokenScopePlayground:
 		return true
@@ -1068,8 +1453,30 @@ func (e ManagementTokenScope) Valid() bool {
 	}
 }
 
+// Defines values for NotificationDeliveryReason.
+const (
+	NotificationDeliveryReasonExpiry      NotificationDeliveryReason = "expiry"
+	NotificationDeliveryReasonLessThannil NotificationDeliveryReason = "<nil>"
+	NotificationDeliveryReasonRotation    NotificationDeliveryReason = "rotation"
+)
+
+// Valid indicates whether the value is a known member of the NotificationDeliveryReason enum.
+func (e NotificationDeliveryReason) Valid() bool {
+	switch e {
+	case NotificationDeliveryReasonExpiry:
+		return true
+	case NotificationDeliveryReasonLessThannil:
+		return true
+	case NotificationDeliveryReasonRotation:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NotificationDeliveryStatus.
 const (
+	NotificationDeliveryStatusCancelled NotificationDeliveryStatus = "cancelled"
 	NotificationDeliveryStatusDelivered NotificationDeliveryStatus = "delivered"
 	NotificationDeliveryStatusFailed    NotificationDeliveryStatus = "failed"
 	NotificationDeliveryStatusPending   NotificationDeliveryStatus = "pending"
@@ -1078,6 +1485,8 @@ const (
 // Valid indicates whether the value is a known member of the NotificationDeliveryStatus enum.
 func (e NotificationDeliveryStatus) Valid() bool {
 	switch e {
+	case NotificationDeliveryStatusCancelled:
+		return true
 	case NotificationDeliveryStatusDelivered:
 		return true
 	case NotificationDeliveryStatusFailed:
@@ -1092,6 +1501,7 @@ func (e NotificationDeliveryStatus) Valid() bool {
 // Defines values for NotificationEvent.
 const (
 	NotificationEventBudgetThreshold     NotificationEvent = "budget.threshold"
+	NotificationEventKeyExpiring         NotificationEvent = "key.expiring"
 	NotificationEventProviderGrantLapsed NotificationEvent = "provider.grant.lapsed"
 )
 
@@ -1100,7 +1510,51 @@ func (e NotificationEvent) Valid() bool {
 	switch e {
 	case NotificationEventBudgetThreshold:
 		return true
+	case NotificationEventKeyExpiring:
+		return true
 	case NotificationEventProviderGrantLapsed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrganizationMemberInstallationRole.
+const (
+	OrganizationMemberInstallationRoleDeveloper OrganizationMemberInstallationRole = "developer"
+	OrganizationMemberInstallationRoleOperator  OrganizationMemberInstallationRole = "operator"
+	OrganizationMemberInstallationRoleOwner     OrganizationMemberInstallationRole = "owner"
+	OrganizationMemberInstallationRoleViewer    OrganizationMemberInstallationRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the OrganizationMemberInstallationRole enum.
+func (e OrganizationMemberInstallationRole) Valid() bool {
+	switch e {
+	case OrganizationMemberInstallationRoleDeveloper:
+		return true
+	case OrganizationMemberInstallationRoleOperator:
+		return true
+	case OrganizationMemberInstallationRoleOwner:
+		return true
+	case OrganizationMemberInstallationRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrganizationMemberRole.
+const (
+	OrganizationMemberRoleManager OrganizationMemberRole = "manager"
+	OrganizationMemberRoleViewer  OrganizationMemberRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the OrganizationMemberRole enum.
+func (e OrganizationMemberRole) Valid() bool {
+	switch e {
+	case OrganizationMemberRoleManager:
+		return true
+	case OrganizationMemberRoleViewer:
 		return true
 	default:
 		return false
@@ -1380,6 +1834,24 @@ func (e ProviderCatalogSuggestionMatchedBy) Valid() bool {
 	}
 }
 
+// Defines values for ProviderConfigurationCredentialSource.
+const (
+	ProviderConfigurationCredentialSourceCaller   ProviderConfigurationCredentialSource = "caller"
+	ProviderConfigurationCredentialSourceOperator ProviderConfigurationCredentialSource = "operator"
+)
+
+// Valid indicates whether the value is a known member of the ProviderConfigurationCredentialSource enum.
+func (e ProviderConfigurationCredentialSource) Valid() bool {
+	switch e {
+	case ProviderConfigurationCredentialSourceCaller:
+		return true
+	case ProviderConfigurationCredentialSourceOperator:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProviderConfigurationField.
 const (
 	ProviderConfigurationFieldApiVersion   ProviderConfigurationField = "api_version"
@@ -1584,24 +2056,105 @@ func (e PutProjectMemberRequestRole) Valid() bool {
 	}
 }
 
+// Defines values for RequestDetailResponseBudgetBoundary.
+const (
+	RequestDetailResponseBudgetBoundaryApiKey         RequestDetailResponseBudgetBoundary = "api_key"
+	RequestDetailResponseBudgetBoundaryAttribution    RequestDetailResponseBudgetBoundary = "attribution"
+	RequestDetailResponseBudgetBoundaryBudgetGroup    RequestDetailResponseBudgetBoundary = "budget_group"
+	RequestDetailResponseBudgetBoundaryInstallation   RequestDetailResponseBudgetBoundary = "installation"
+	RequestDetailResponseBudgetBoundaryKeyEndUser     RequestDetailResponseBudgetBoundary = "key_end_user"
+	RequestDetailResponseBudgetBoundaryKeyRoute       RequestDetailResponseBudgetBoundary = "key_route"
+	RequestDetailResponseBudgetBoundaryOrganization   RequestDetailResponseBudgetBoundary = "organization"
+	RequestDetailResponseBudgetBoundaryProject        RequestDetailResponseBudgetBoundary = "project"
+	RequestDetailResponseBudgetBoundaryProjectEndUser RequestDetailResponseBudgetBoundary = "project_end_user"
+)
+
+// Valid indicates whether the value is a known member of the RequestDetailResponseBudgetBoundary enum.
+func (e RequestDetailResponseBudgetBoundary) Valid() bool {
+	switch e {
+	case RequestDetailResponseBudgetBoundaryApiKey:
+		return true
+	case RequestDetailResponseBudgetBoundaryAttribution:
+		return true
+	case RequestDetailResponseBudgetBoundaryBudgetGroup:
+		return true
+	case RequestDetailResponseBudgetBoundaryInstallation:
+		return true
+	case RequestDetailResponseBudgetBoundaryKeyEndUser:
+		return true
+	case RequestDetailResponseBudgetBoundaryKeyRoute:
+		return true
+	case RequestDetailResponseBudgetBoundaryOrganization:
+		return true
+	case RequestDetailResponseBudgetBoundaryProject:
+		return true
+	case RequestDetailResponseBudgetBoundaryProjectEndUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RequestOrigin.
 const (
-	Caller     RequestOrigin = "caller"
-	Classifier RequestOrigin = "classifier"
-	Probe      RequestOrigin = "probe"
-	Shadow     RequestOrigin = "shadow"
+	RequestOriginCaller     RequestOrigin = "caller"
+	RequestOriginClassifier RequestOrigin = "classifier"
+	RequestOriginPlayground RequestOrigin = "playground"
+	RequestOriginProbe      RequestOrigin = "probe"
+	RequestOriginShadow     RequestOrigin = "shadow"
 )
 
 // Valid indicates whether the value is a known member of the RequestOrigin enum.
 func (e RequestOrigin) Valid() bool {
 	switch e {
-	case Caller:
+	case RequestOriginCaller:
 		return true
-	case Classifier:
+	case RequestOriginClassifier:
 		return true
-	case Probe:
+	case RequestOriginPlayground:
 		return true
-	case Shadow:
+	case RequestOriginProbe:
+		return true
+	case RequestOriginShadow:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RequestSummaryBudgetBoundary.
+const (
+	RequestSummaryBudgetBoundaryApiKey         RequestSummaryBudgetBoundary = "api_key"
+	RequestSummaryBudgetBoundaryAttribution    RequestSummaryBudgetBoundary = "attribution"
+	RequestSummaryBudgetBoundaryBudgetGroup    RequestSummaryBudgetBoundary = "budget_group"
+	RequestSummaryBudgetBoundaryInstallation   RequestSummaryBudgetBoundary = "installation"
+	RequestSummaryBudgetBoundaryKeyEndUser     RequestSummaryBudgetBoundary = "key_end_user"
+	RequestSummaryBudgetBoundaryKeyRoute       RequestSummaryBudgetBoundary = "key_route"
+	RequestSummaryBudgetBoundaryOrganization   RequestSummaryBudgetBoundary = "organization"
+	RequestSummaryBudgetBoundaryProject        RequestSummaryBudgetBoundary = "project"
+	RequestSummaryBudgetBoundaryProjectEndUser RequestSummaryBudgetBoundary = "project_end_user"
+)
+
+// Valid indicates whether the value is a known member of the RequestSummaryBudgetBoundary enum.
+func (e RequestSummaryBudgetBoundary) Valid() bool {
+	switch e {
+	case RequestSummaryBudgetBoundaryApiKey:
+		return true
+	case RequestSummaryBudgetBoundaryAttribution:
+		return true
+	case RequestSummaryBudgetBoundaryBudgetGroup:
+		return true
+	case RequestSummaryBudgetBoundaryInstallation:
+		return true
+	case RequestSummaryBudgetBoundaryKeyEndUser:
+		return true
+	case RequestSummaryBudgetBoundaryKeyRoute:
+		return true
+	case RequestSummaryBudgetBoundaryOrganization:
+		return true
+	case RequestSummaryBudgetBoundaryProject:
+		return true
+	case RequestSummaryBudgetBoundaryProjectEndUser:
 		return true
 	default:
 		return false
@@ -1728,6 +2281,138 @@ func (e RoutingStrategy) Valid() bool {
 	}
 }
 
+// Defines values for SCIMGroupAccessAccessScope.
+const (
+	SCIMGroupAccessAccessScopeAssigned SCIMGroupAccessAccessScope = "assigned"
+	SCIMGroupAccessAccessScopeGlobal   SCIMGroupAccessAccessScope = "global"
+)
+
+// Valid indicates whether the value is a known member of the SCIMGroupAccessAccessScope enum.
+func (e SCIMGroupAccessAccessScope) Valid() bool {
+	switch e {
+	case SCIMGroupAccessAccessScopeAssigned:
+		return true
+	case SCIMGroupAccessAccessScopeGlobal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SCIMGroupAccessProjectsRole.
+const (
+	SCIMGroupAccessProjectsRoleManager SCIMGroupAccessProjectsRole = "manager"
+	SCIMGroupAccessProjectsRoleViewer  SCIMGroupAccessProjectsRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the SCIMGroupAccessProjectsRole enum.
+func (e SCIMGroupAccessProjectsRole) Valid() bool {
+	switch e {
+	case SCIMGroupAccessProjectsRoleManager:
+		return true
+	case SCIMGroupAccessProjectsRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SCIMGroupAccessRole.
+const (
+	SCIMGroupAccessRoleDeveloper SCIMGroupAccessRole = "developer"
+	SCIMGroupAccessRoleOperator  SCIMGroupAccessRole = "operator"
+	SCIMGroupAccessRoleOwner     SCIMGroupAccessRole = "owner"
+	SCIMGroupAccessRoleViewer    SCIMGroupAccessRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the SCIMGroupAccessRole enum.
+func (e SCIMGroupAccessRole) Valid() bool {
+	switch e {
+	case SCIMGroupAccessRoleDeveloper:
+		return true
+	case SCIMGroupAccessRoleOperator:
+		return true
+	case SCIMGroupAccessRoleOwner:
+		return true
+	case SCIMGroupAccessRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SCIMPatchOperationsOp.
+const (
+	SCIMPatchOperationsOpAdd      SCIMPatchOperationsOp = "add"
+	SCIMPatchOperationsOpAdd1     SCIMPatchOperationsOp = "Add"
+	SCIMPatchOperationsOpRemove   SCIMPatchOperationsOp = "remove"
+	SCIMPatchOperationsOpRemove1  SCIMPatchOperationsOp = "Remove"
+	SCIMPatchOperationsOpReplace  SCIMPatchOperationsOp = "replace"
+	SCIMPatchOperationsOpReplace1 SCIMPatchOperationsOp = "Replace"
+)
+
+// Valid indicates whether the value is a known member of the SCIMPatchOperationsOp enum.
+func (e SCIMPatchOperationsOp) Valid() bool {
+	switch e {
+	case SCIMPatchOperationsOpAdd:
+		return true
+	case SCIMPatchOperationsOpAdd1:
+		return true
+	case SCIMPatchOperationsOpRemove:
+		return true
+	case SCIMPatchOperationsOpRemove1:
+		return true
+	case SCIMPatchOperationsOpReplace:
+		return true
+	case SCIMPatchOperationsOpReplace1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SCIMUserAccessAccessScope.
+const (
+	SCIMUserAccessAccessScopeAssigned SCIMUserAccessAccessScope = "assigned"
+	SCIMUserAccessAccessScopeGlobal   SCIMUserAccessAccessScope = "global"
+)
+
+// Valid indicates whether the value is a known member of the SCIMUserAccessAccessScope enum.
+func (e SCIMUserAccessAccessScope) Valid() bool {
+	switch e {
+	case SCIMUserAccessAccessScopeAssigned:
+		return true
+	case SCIMUserAccessAccessScopeGlobal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SCIMUserAccessRole.
+const (
+	SCIMUserAccessRoleDeveloper SCIMUserAccessRole = "developer"
+	SCIMUserAccessRoleOperator  SCIMUserAccessRole = "operator"
+	SCIMUserAccessRoleOwner     SCIMUserAccessRole = "owner"
+	SCIMUserAccessRoleViewer    SCIMUserAccessRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the SCIMUserAccessRole enum.
+func (e SCIMUserAccessRole) Valid() bool {
+	switch e {
+	case SCIMUserAccessRoleDeveloper:
+		return true
+	case SCIMUserAccessRoleOperator:
+		return true
+	case SCIMUserAccessRoleOwner:
+		return true
+	case SCIMUserAccessRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SelectorPredicateModalities.
 const (
 	SelectorPredicateModalitiesAudio SelectorPredicateModalities = "audio"
@@ -1749,6 +2434,27 @@ func (e SelectorPredicateModalities) Valid() bool {
 	case SelectorPredicateModalitiesText:
 		return true
 	case SelectorPredicateModalitiesVideo:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SettingResponseCalendarWindowKind.
+const (
+	SettingResponseCalendarWindowKindDay   SettingResponseCalendarWindowKind = "day"
+	SettingResponseCalendarWindowKindMonth SettingResponseCalendarWindowKind = "month"
+	SettingResponseCalendarWindowKindWeek  SettingResponseCalendarWindowKind = "week"
+)
+
+// Valid indicates whether the value is a known member of the SettingResponseCalendarWindowKind enum.
+func (e SettingResponseCalendarWindowKind) Valid() bool {
+	switch e {
+	case SettingResponseCalendarWindowKindDay:
+		return true
+	case SettingResponseCalendarWindowKindMonth:
+		return true
+	case SettingResponseCalendarWindowKindWeek:
 		return true
 	default:
 		return false
@@ -1929,6 +2635,27 @@ func (e TransportMode) Valid() bool {
 	}
 }
 
+// Defines values for UpdateApiKeyRequestEndUserSource.
+const (
+	UpdateApiKeyRequestEndUserSourceHeader      UpdateApiKeyRequestEndUserSource = "header"
+	UpdateApiKeyRequestEndUserSourceLessThannil UpdateApiKeyRequestEndUserSource = "<nil>"
+	UpdateApiKeyRequestEndUserSourceNative      UpdateApiKeyRequestEndUserSource = "native"
+)
+
+// Valid indicates whether the value is a known member of the UpdateApiKeyRequestEndUserSource enum.
+func (e UpdateApiKeyRequestEndUserSource) Valid() bool {
+	switch e {
+	case UpdateApiKeyRequestEndUserSourceHeader:
+		return true
+	case UpdateApiKeyRequestEndUserSourceLessThannil:
+		return true
+	case UpdateApiKeyRequestEndUserSourceNative:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UpdateUserRoleRequestAccessScope.
 const (
 	UpdateUserRoleRequestAccessScopeAssigned UpdateUserRoleRequestAccessScope = "assigned"
@@ -1977,6 +2704,66 @@ func (e UserResponseAccessScope) Valid() bool {
 	case UserResponseAccessScopeAssigned:
 		return true
 	case UserResponseAccessScopeGlobal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkloadIssuerAlgorithms.
+const (
+	WorkloadIssuerAlgorithmsES256 WorkloadIssuerAlgorithms = "ES256"
+	WorkloadIssuerAlgorithmsEdDSA WorkloadIssuerAlgorithms = "EdDSA"
+	WorkloadIssuerAlgorithmsRS256 WorkloadIssuerAlgorithms = "RS256"
+)
+
+// Valid indicates whether the value is a known member of the WorkloadIssuerAlgorithms enum.
+func (e WorkloadIssuerAlgorithms) Valid() bool {
+	switch e {
+	case WorkloadIssuerAlgorithmsES256:
+		return true
+	case WorkloadIssuerAlgorithmsEdDSA:
+		return true
+	case WorkloadIssuerAlgorithmsRS256:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkloadIssuerWriteAlgorithms.
+const (
+	WorkloadIssuerWriteAlgorithmsES256 WorkloadIssuerWriteAlgorithms = "ES256"
+	WorkloadIssuerWriteAlgorithmsEdDSA WorkloadIssuerWriteAlgorithms = "EdDSA"
+	WorkloadIssuerWriteAlgorithmsRS256 WorkloadIssuerWriteAlgorithms = "RS256"
+)
+
+// Valid indicates whether the value is a known member of the WorkloadIssuerWriteAlgorithms enum.
+func (e WorkloadIssuerWriteAlgorithms) Valid() bool {
+	switch e {
+	case WorkloadIssuerWriteAlgorithmsES256:
+		return true
+	case WorkloadIssuerWriteAlgorithmsEdDSA:
+		return true
+	case WorkloadIssuerWriteAlgorithmsRS256:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkloadMappingScopes.
+const (
+	WorkloadMappingScopesInference  WorkloadMappingScopes = "inference"
+	WorkloadMappingScopesModelsRead WorkloadMappingScopes = "models_read"
+)
+
+// Valid indicates whether the value is a known member of the WorkloadMappingScopes enum.
+func (e WorkloadMappingScopes) Valid() bool {
+	switch e {
+	case WorkloadMappingScopesInference:
+		return true
+	case WorkloadMappingScopesModelsRead:
 		return true
 	default:
 		return false
@@ -2099,47 +2886,106 @@ type AcceptInvitationRequest struct {
 // AdmissionPriority Admission class of a request. A saturated gateway dequeues critical, high, normal and low 8:4:2:1, and capacity shares divide provider quotas between them.
 type AdmissionPriority string
 
+// AggregateBudget defines model for AggregateBudget.
+type AggregateBudget struct {
+	Etag   openapi_types.UUID              `json:"etag"`
+	Policy nullable.Nullable[BudgetPolicy] `json:"policy"`
+	Usage  AggregateBudgetUsage            `json:"usage"`
+}
+
+// AggregateBudgetUsage defines model for AggregateBudgetUsage.
+type AggregateBudgetUsage struct {
+	Daily struct {
+		Accrued      string    `json:"accrued"`
+		WindowEndsAt time.Time `json:"window_ends_at"`
+	} `json:"daily"`
+	Monthly struct {
+		Accrued      string    `json:"accrued"`
+		WindowEndsAt time.Time `json:"window_ends_at"`
+	} `json:"monthly"`
+	UnpricedAttempts int `json:"unpriced_attempts"`
+	Weekly           *struct {
+		Accrued      string    `json:"accrued"`
+		WindowEndsAt time.Time `json:"window_ends_at"`
+	} `json:"weekly,omitempty"`
+}
+
 // ApiKeyBudgetResponse defines model for ApiKeyBudgetResponse.
 type ApiKeyBudgetResponse struct {
 	Daily ApiKeyBudgetWindowResponse `json:"daily"`
 
 	// EnforcementActive False when the amounts are stored policy only; accrued values are not live accounting.
-	EnforcementActive *bool                      `json:"enforcement_active,omitempty"`
-	Monthly           ApiKeyBudgetWindowResponse `json:"monthly"`
-	UnpricedAttempts  int64                      `json:"unpriced_attempts"`
+	EnforcementActive *bool                       `json:"enforcement_active,omitempty"`
+	Monthly           ApiKeyBudgetWindowResponse  `json:"monthly"`
+	UnpricedAttempts  int64                       `json:"unpriced_attempts"`
+	Weekly            *ApiKeyBudgetWindowResponse `json:"weekly,omitempty"`
 }
 
 // ApiKeyBudgetWindowResponse defines model for ApiKeyBudgetWindowResponse.
 type ApiKeyBudgetWindowResponse struct {
-	Accrued      string                    `json:"accrued"`
-	Limit        nullable.Nullable[string] `json:"limit"`
-	WindowEndsAt time.Time                 `json:"window_ends_at"`
+	Accrued string `json:"accrued"`
+
+	// EffectiveLimit Effective template/inline cap plus active temporary increases. Permanent editable limit remains separate.
+	EffectiveLimit nullable.Nullable[string] `json:"effective_limit,omitempty"`
+
+	// IncreaseExpiresAt Earliest expiration among active increases.
+	IncreaseExpiresAt nullable.Nullable[time.Time] `json:"increase_expires_at,omitempty"`
+	Limit             nullable.Nullable[string]    `json:"limit"`
+
+	// TemporaryIncrease Active extra USD for this window; never changes accrued spend.
+	TemporaryIncrease *string   `json:"temporary_increase,omitempty"`
+	WindowEndsAt      time.Time `json:"window_ends_at"`
 }
 
 // ApiKeyDetailResponse defines model for ApiKeyDetailResponse.
 type ApiKeyDetailResponse struct {
+	// ActiveOverlaps Previous secret lookup segments and their remaining authentication deadlines. Digests and secrets are never returned.
+	ActiveOverlaps *[]struct {
+		ExpiresAt time.Time `json:"expires_at"`
+		LookupId  string    `json:"lookup_id"`
+	} `json:"active_overlaps,omitempty"`
+
 	// AllowProviderState Permits stateful provider resources (stored responses, background
 	// jobs, previous_response_id chains) under this key. Provider state may
 	// retain user content.
 	AllowProviderState bool `json:"allow_provider_state"`
 
 	// AllowedAttributionKeys Attribution keys this key may report via the X-OLP-Attribution header; at most 8, each a short machine token.
-	AllowedAttributionKeys []string             `json:"allowed_attribution_keys"`
-	AllowedRoutes          []string             `json:"allowed_routes"`
-	Budget                 ApiKeyBudgetResponse `json:"budget"`
+	AllowedAttributionKeys []string `json:"allowed_attribution_keys"`
+
+	// AllowedCidrs Allowed IPv4 or IPv6 client CIDR ranges. Omitted, null or empty means unrestricted. The gateway uses its trusted-proxy resolver; forwarded addresses from untrusted peers cannot grant access. IPv4-mapped IPv6 ranges must use IPv4 syntax. Host bits do not narrow a network prefix.
+	AllowedCidrs nullable.Nullable[[]string] `json:"allowed_cidrs,omitempty"`
+
+	// AllowedRouteGroups Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing.
+	AllowedRouteGroups nullable.Nullable[[]string] `json:"allowed_route_groups,omitempty"`
+	AllowedRoutes      []string                    `json:"allowed_routes"`
+
+	// AttributionDefaults Operator-pinned labels added to accounting. Callers may omit them or supply the same value; overriding them is refused. Project pins also apply.
+	AttributionDefaults nullable.Nullable[map[string]string] `json:"attribution_defaults,omitempty"`
+	Budget              ApiKeyBudgetResponse                 `json:"budget"`
 
 	// BudgetGroupId Shared budget group this key spends against; null means key-only budgets.
 	BudgetGroupId nullable.Nullable[openapi_types.UUID] `json:"budget_group_id"`
 	CreatedAt     time.Time                             `json:"created_at"`
 
 	// CreatedBy The operator who issued this installation-scoped key.
-	CreatedBy      openapi_types.UUID           `json:"created_by"`
-	CreatedByEmail string                       `json:"created_by_email"`
-	Etag           openapi_types.UUID           `json:"etag"`
-	ExpiresAt      nullable.Nullable[time.Time] `json:"expires_at,omitempty"`
-	Id             openapi_types.UUID           `json:"id"`
-	LookupId       string                       `json:"lookup_id"`
-	MaxConcurrency nullable.Nullable[int32]     `json:"max_concurrency,omitempty"`
+	CreatedBy      openapi_types.UUID `json:"created_by"`
+	CreatedByEmail string             `json:"created_by_email"`
+
+	// EffectiveLimits Rate and cost limits the gateway enforces, after the key's limit template fills dimensions the key leaves unset. Edit the key's own fields; present these.
+	EffectiveLimits *EndUserLimits                   `json:"effective_limits,omitempty"`
+	EndUserPolicy   nullable.Nullable[EndUserPolicy] `json:"end_user_policy,omitempty"`
+
+	// EndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
+	EndUserSource nullable.Nullable[ApiKeyDetailResponseEndUserSource] `json:"end_user_source,omitempty"`
+	Etag          openapi_types.UUID                                   `json:"etag"`
+	ExpiresAt     nullable.Nullable[time.Time]                         `json:"expires_at,omitempty"`
+	Id            openapi_types.UUID                                   `json:"id"`
+
+	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
+	LimitTemplate  nullable.Nullable[string] `json:"limit_template,omitempty"`
+	LookupId       string                    `json:"lookup_id"`
+	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 
 	// MaxPriority Highest class a request may choose through X-OLP-Routing; defaults to priority.
 	MaxPriority nullable.Nullable[AdmissionPriority] `json:"max_priority,omitempty"`
@@ -2153,13 +2999,33 @@ type ApiKeyDetailResponse struct {
 	ProjectName       nullable.Nullable[string]             `json:"project_name"`
 	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
 
+	// RequiredAttributionKeys Required attribution labels, in addition to project requirements. Missing labels return 400 missing_attribution before dispatch.
+	RequiredAttributionKeys nullable.Nullable[[]string] `json:"required_attribution_keys,omitempty"`
+
 	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.
 	ResponseMetadata bool                         `json:"response_metadata"`
 	RevokedAt        nullable.Nullable[time.Time] `json:"revoked_at,omitempty"`
 	RotatedAt        nullable.Nullable[time.Time] `json:"rotated_at,omitempty"`
-	Scopes           []string                     `json:"scopes"`
-	TokensPerMinute  nullable.Nullable[int64]     `json:"tokens_per_minute,omitempty"`
+	RotationDueAt    nullable.Nullable[time.Time] `json:"rotation_due_at,omitempty"`
+
+	// RotationIntervalDays Declared rotation reminder interval from creation or the last explicit rotation. Does not expire or automatically rotate the secret. Null disables rotation reminders.
+	RotationIntervalDays nullable.Nullable[int]               `json:"rotation_interval_days,omitempty"`
+	RouteLimits          nullable.Nullable[ApiKeyRouteLimits] `json:"route_limits,omitempty"`
+	Scopes               []string                             `json:"scopes"`
+	TokensPerMinute      nullable.Nullable[int64]             `json:"tokens_per_minute,omitempty"`
+
+	// WorkloadDigest Present for a digest-only workload principal. Its permissions belong to the issuer mapping and it has no static secret.
+	WorkloadDigest nullable.Nullable[string] `json:"workload_digest,omitempty"`
+
+	// WorkloadIssuerId Present for a digest-only workload principal. Its permissions belong to the issuer mapping and it has no static secret.
+	WorkloadIssuerId nullable.Nullable[string] `json:"workload_issuer_id,omitempty"`
+
+	// WorkloadMapping Present for a digest-only workload principal. Its permissions belong to the issuer mapping and it has no static secret.
+	WorkloadMapping nullable.Nullable[string] `json:"workload_mapping,omitempty"`
 }
+
+// ApiKeyDetailResponseEndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
+type ApiKeyDetailResponseEndUserSource string
 
 // ApiKeyListResponse defines model for ApiKeyListResponse.
 type ApiKeyListResponse struct {
@@ -2172,6 +3038,9 @@ type ApiKeyMutationResponse struct {
 	Etag              openapi_types.UUID        `json:"etag"`
 	RuntimeGeneration RuntimeGenerationResponse `json:"runtime_generation"`
 }
+
+// ApiKeyRouteLimits Additional per-key limits by ingress route slug. All ordinary key and hierarchy limits still apply. No entry or an empty entry adds no limit. Fallback costs and retries accrue to the original named route; classifier requests use their own route. Subscription routes enforce rates and concurrency but remain exempt from USD budgets. Clearing entries never resets accrued spend.
+type ApiKeyRouteLimits map[string]EndUserLimits
 
 // AppliedRoutingPolicy defines model for AppliedRoutingPolicy.
 type AppliedRoutingPolicy struct {
@@ -2235,9 +3104,15 @@ type AttemptResponse struct {
 
 // AttemptRoutingMetadata defines model for AttemptRoutingMetadata.
 type AttemptRoutingMetadata struct {
+	// BudgetExempt Caller-paid usage remains priced and reported but is excluded from cost budgets.
+	BudgetExempt *bool `json:"budget_exempt,omitempty"`
+
 	// Budgets Route, connection and slot whose spend caps this attempt spent from.
-	Budgets             nullable.Nullable[[]openapi_types.UUID] `json:"budgets,omitempty"`
-	CredentialSlotId    nullable.Nullable[openapi_types.UUID]   `json:"credential_slot_id,omitempty"`
+	Budgets          nullable.Nullable[[]openapi_types.UUID] `json:"budgets,omitempty"`
+	CredentialSlotId nullable.Nullable[openapi_types.UUID]   `json:"credential_slot_id,omitempty"`
+
+	// CredentialSource Absent means operator credentials. Caller attempts do not name an operator credential version.
+	CredentialSource    *AttemptRoutingMetadataCredentialSource `json:"credential_source,omitempty"`
 	CredentialVersionId nullable.Nullable[openapi_types.UUID]   `json:"credential_version_id,omitempty"`
 	FirstOutputMs       nullable.Nullable[int64]                `json:"first_output_ms,omitempty"`
 
@@ -2255,6 +3130,18 @@ type AttemptRoutingMetadata struct {
 	Retry                nullable.Nullable[int]    `json:"retry,omitempty"`
 	Selector             nullable.Nullable[string] `json:"selector,omitempty"`
 	StreamedOutputTokens nullable.Nullable[int64]  `json:"streamed_output_tokens,omitempty"`
+}
+
+// AttemptRoutingMetadataCredentialSource Absent means operator credentials. Caller attempts do not name an operator credential version.
+type AttemptRoutingMetadataCredentialSource string
+
+// AttributionBudgets At most 64 project label/value pairs in total, each with at least one positive day/week/month cap. Caps apply to resolved labels across all keys and system work carrying those labels. Unpinned caller-selected labels are allocation controls; pin or require labels to prevent omission or reassignment. Removing/readding caps preserves current-window spend.
+type AttributionBudgets map[string]map[string]BudgetPolicy
+
+// AttributionPolicy Required labels accumulate across key and project boundaries. Pinned defaults fill omitted labels and cannot be overridden. Conflicting pins fail closed. At most four distinct required or pinned keys.
+type AttributionPolicy struct {
+	AttributionDefaults     *map[string]string `json:"attribution_defaults,omitempty"`
+	RequiredAttributionKeys *[]string          `json:"required_attribution_keys,omitempty"`
 }
 
 // AuditEventResponse defines model for AuditEventResponse.
@@ -2298,12 +3185,16 @@ type AuthenticationCapabilities struct {
 	LimitsEnforced    *bool `json:"limits_enforced,omitempty"`
 	LocalLoginEnabled bool  `json:"local_login_enabled"`
 
+	// ManagementNetworkRestricted Whether deployment CIDRs restrict console and management access before authentication.
+	ManagementNetworkRestricted *bool `json:"management_network_restricted,omitempty"`
+
 	// NotificationsActive Whether the installation runs the notification delivery worker, so stored rules actually notify.
 	NotificationsActive bool `json:"notifications_active"`
 	OidcLoginEnabled    bool `json:"oidc_login_enabled"`
 
 	// RetentionEnforced Whether stored retention policies are applied by workers.
 	RetentionEnforced *bool `json:"retention_enforced,omitempty"`
+	SamlLoginEnabled  *bool `json:"saml_login_enabled,omitempty"`
 }
 
 // BTreeMap defines model for BTreeMap.
@@ -2317,35 +3208,57 @@ type BudgetGroupBudgetResponse struct {
 	Daily BudgetGroupBudgetWindowResponse `json:"daily"`
 
 	// EnforcementActive False when the amounts are stored policy only; accrued values are not live accounting.
-	EnforcementActive *bool                           `json:"enforcement_active,omitempty"`
-	Monthly           BudgetGroupBudgetWindowResponse `json:"monthly"`
-	UnpricedAttempts  int64                           `json:"unpriced_attempts"`
+	EnforcementActive *bool                            `json:"enforcement_active,omitempty"`
+	Monthly           BudgetGroupBudgetWindowResponse  `json:"monthly"`
+	UnpricedAttempts  int64                            `json:"unpriced_attempts"`
+	Weekly            *BudgetGroupBudgetWindowResponse `json:"weekly,omitempty"`
 }
 
 // BudgetGroupBudgetWindowResponse defines model for BudgetGroupBudgetWindowResponse.
 type BudgetGroupBudgetWindowResponse struct {
-	Accrued   string                    `json:"accrued"`
-	Limit     nullable.Nullable[string] `json:"limit"`
-	Remaining nullable.Nullable[string] `json:"remaining"`
-	ResetAt   time.Time                 `json:"reset_at"`
+	Accrued string `json:"accrued"`
+
+	// EffectiveLimit Effective template/inline cap plus active temporary increases. Permanent editable limit remains separate.
+	EffectiveLimit nullable.Nullable[string] `json:"effective_limit,omitempty"`
+
+	// IncreaseExpiresAt Earliest expiration among active increases.
+	IncreaseExpiresAt nullable.Nullable[time.Time] `json:"increase_expires_at,omitempty"`
+	Limit             nullable.Nullable[string]    `json:"limit"`
+	Remaining         nullable.Nullable[string]    `json:"remaining"`
+	ResetAt           time.Time                    `json:"reset_at"`
+
+	// TemporaryIncrease Active extra USD for this window; never changes accrued spend.
+	TemporaryIncrease *string `json:"temporary_increase,omitempty"`
 }
 
 // BudgetGroupDetailResponse defines model for BudgetGroupDetailResponse.
 type BudgetGroupDetailResponse struct {
-	Budget           BudgetGroupBudgetResponse `json:"budget"`
-	CreatedAt        time.Time                 `json:"created_at"`
-	CreatedBy        openapi_types.UUID        `json:"created_by"`
-	CreatedByEmail   string                    `json:"created_by_email"`
-	DailyCostLimit   nullable.Nullable[string] `json:"daily_cost_limit"`
-	Etag             openapi_types.UUID        `json:"etag"`
-	Id               openapi_types.UUID        `json:"id"`
+	Budget         BudgetGroupBudgetResponse `json:"budget"`
+	CreatedAt      time.Time                 `json:"created_at"`
+	CreatedBy      openapi_types.UUID        `json:"created_by"`
+	CreatedByEmail string                    `json:"created_by_email"`
+	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit"`
+
+	// EffectiveLimits A complete limit set. Null or omitted dimensions are unlimited.
+	EffectiveLimits *EndUserLimits     `json:"effective_limits,omitempty"`
+	Etag            openapi_types.UUID `json:"etag"`
+	Id              openapi_types.UUID `json:"id"`
+
+	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
+	LimitTemplate    nullable.Nullable[string] `json:"limit_template,omitempty"`
+	MaxConcurrency   nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 	MonthlyCostLimit nullable.Nullable[string] `json:"monthly_cost_limit"`
 	Name             string                    `json:"name"`
 
 	// ProjectId Owning project; null means installation-wide.
-	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
-	ProjectName nullable.Nullable[string]             `json:"project_name"`
-	UpdatedAt   time.Time                             `json:"updated_at"`
+	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName       nullable.Nullable[string]             `json:"project_name"`
+	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
+	TokensPerMinute   nullable.Nullable[int64]              `json:"tokens_per_minute,omitempty"`
+	UpdatedAt         time.Time                             `json:"updated_at"`
+
+	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
+	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
 // BudgetGroupListResponse defines model for BudgetGroupListResponse.
@@ -2357,6 +3270,60 @@ type BudgetGroupListResponse struct {
 // BudgetGroupMutationResponse defines model for BudgetGroupMutationResponse.
 type BudgetGroupMutationResponse struct {
 	Etag openapi_types.UUID `json:"etag"`
+}
+
+// BudgetIncrease Auditable, installation-local exception. Applies only to its original period, and Valkey server time enforces expiration even without another authority refresh. Revocation follows normal authority freshness. Clearing a permanent cap makes the increase irrelevant; restoring it within this period retains the exception. This record and encrypted mutation replay contain only administrative metadata.
+type BudgetIncrease struct {
+	Amount         string                                `json:"amount"`
+	CreatedAt      time.Time                             `json:"created_at"`
+	CreatedBy      openapi_types.UUID                    `json:"created_by"`
+	Etag           openapi_types.UUID                    `json:"etag"`
+	ExpiresAt      time.Time                             `json:"expires_at"`
+	Id             openapi_types.UUID                    `json:"id"`
+	OrganizationId nullable.Nullable[openapi_types.UUID] `json:"organization_id,omitempty"`
+	OwnerId        openapi_types.UUID                    `json:"owner_id"`
+	ProjectId      nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	Reason         string                                `json:"reason"`
+	RevokedAt      nullable.Nullable[time.Time]          `json:"revoked_at"`
+	RevokedBy      nullable.Nullable[openapi_types.UUID] `json:"revoked_by"`
+	StartsAt       time.Time                             `json:"starts_at"`
+
+	// Target Identifies one caller/aggregate cost owner. id is the key, group or project UUID; installation has no id. key_route requires route; end-user targets require an existing project-scoped digest; attribution requires label and value. Extra target selectors are rejected. Supply connection/slot/route policies are not caller budget targets.
+	Target       BudgetIncreaseTarget     `json:"target"`
+	WindowEndsAt time.Time                `json:"window_ends_at"`
+	WindowId     int                      `json:"window_id"`
+	WindowKind   BudgetIncreaseWindowKind `json:"window_kind"`
+}
+
+// BudgetIncreaseWindowKind defines model for BudgetIncrease.WindowKind.
+type BudgetIncreaseWindowKind string
+
+// BudgetIncreaseTarget Identifies one caller/aggregate cost owner. id is the key, group or project UUID; installation has no id. key_route requires route; end-user targets require an existing project-scoped digest; attribution requires label and value. Extra target selectors are rejected. Supply connection/slot/route policies are not caller budget targets.
+type BudgetIncreaseTarget struct {
+	EndUserDigest *string                  `json:"end_user_digest,omitempty"`
+	Id            *openapi_types.UUID      `json:"id,omitempty"`
+	Kind          BudgetIncreaseTargetKind `json:"kind"`
+	Label         *string                  `json:"label,omitempty"`
+	Route         *string                  `json:"route,omitempty"`
+	Value         *string                  `json:"value,omitempty"`
+}
+
+// BudgetIncreaseTargetKind defines model for BudgetIncreaseTarget.Kind.
+type BudgetIncreaseTargetKind string
+
+// BudgetIncreasesResponse defines model for BudgetIncreasesResponse.
+type BudgetIncreasesResponse struct {
+	Items      []BudgetIncrease          `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// BudgetPolicy Aggregate inference cost caps. Each configured boundary applies independently. Omitted or null dimensions are unlimited.
+type BudgetPolicy struct {
+	DailyCostLimit   nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	MonthlyCostLimit nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
+
+	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
+	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
 // BudgetSubjectKind Whose spend a budget.threshold rule watches.
@@ -2531,12 +3498,16 @@ type CodeAllowanceWindowWindow string
 
 // CodeAttempt Metadata only. No request or response body, tools, headers or secrets are retained. Reserved tokens are conservative bounds, not reported usage; unreported consumption remains uncertain indefinitely. Cached and reasoning tokens are subsets.
 type CodeAttempt struct {
-	AccountId     openapi_types.UUID           `json:"account_id"`
-	ApiKeyId      openapi_types.UUID           `json:"api_key_id"`
-	BindingId     openapi_types.UUID           `json:"binding_id"`
-	BoundEvidence nullable.Nullable[string]    `json:"bound_evidence"`
-	CachedTokens  nullable.Nullable[int64]     `json:"cached_tokens"`
-	CreatedAt     time.Time                    `json:"created_at"`
+	AccountId     openapi_types.UUID        `json:"account_id"`
+	ApiKeyId      openapi_types.UUID        `json:"api_key_id"`
+	Attribution   *map[string]string        `json:"attribution,omitempty"`
+	BindingId     openapi_types.UUID        `json:"binding_id"`
+	BoundEvidence nullable.Nullable[string] `json:"bound_evidence"`
+	CachedTokens  nullable.Nullable[int64]  `json:"cached_tokens"`
+	CreatedAt     time.Time                 `json:"created_at"`
+
+	// EndUserDigest Project-scoped end-user HMAC, or empty when identification was not configured. Raw identifiers are never retained.
+	EndUserDigest string                       `json:"end_user_digest"`
 	FinishedAt    nullable.Nullable[time.Time] `json:"finished_at"`
 	Id            openapi_types.UUID           `json:"id"`
 	InputTokens   nullable.Nullable[int64]     `json:"input_tokens"`
@@ -2735,12 +3706,15 @@ type CodePoolWriteKind string
 
 // CodeRefusal defines model for CodeRefusal.
 type CodeRefusal struct {
-	ApiKeyId   openapi_types.UUID `json:"api_key_id"`
-	Code       string             `json:"code"`
-	Id         openapi_types.UUID `json:"id"`
-	OccurredAt time.Time          `json:"occurred_at"`
-	ProjectId  openapi_types.UUID `json:"project_id"`
-	RouteId    openapi_types.UUID `json:"route_id"`
+	ApiKeyId openapi_types.UUID `json:"api_key_id"`
+	Code     string             `json:"code"`
+
+	// EndUserDigest Project-scoped end-user HMAC, or empty when identification was not configured. Raw identifiers are never retained.
+	EndUserDigest string             `json:"end_user_digest"`
+	Id            openapi_types.UUID `json:"id"`
+	OccurredAt    time.Time          `json:"occurred_at"`
+	ProjectId     openapi_types.UUID `json:"project_id"`
+	RouteId       openapi_types.UUID `json:"route_id"`
 }
 
 // CodeRefusalList defines model for CodeRefusalList.
@@ -2766,17 +3740,20 @@ type CodeRevisionList struct {
 // CodeRoute Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
 type CodeRoute struct {
 	// Adapters The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan serves `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.
-	Adapters    []CodeRouteAdapters          `json:"adapters"`
-	Enabled     bool                         `json:"enabled"`
-	Etag        openapi_types.UUID           `json:"etag"`
-	Id          openapi_types.UUID           `json:"id"`
-	Models      []string                     `json:"models"`
-	PoolId      openapi_types.UUID           `json:"pool_id"`
-	ProjectId   openapi_types.UUID           `json:"project_id"`
-	PublishedAt nullable.Nullable[time.Time] `json:"published_at"`
-	Revision    int32                        `json:"revision"`
-	RevisionId  string                       `json:"revision_id"`
-	Slug        string                       `json:"slug"`
+	Adapters []CodeRouteAdapters `json:"adapters"`
+	Enabled  bool                `json:"enabled"`
+	Etag     openapi_types.UUID  `json:"etag"`
+	Id       openapi_types.UUID  `json:"id"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes nullable.Nullable[int]       `json:"max_body_bytes,omitempty"`
+	Models       []string                     `json:"models"`
+	PoolId       openapi_types.UUID           `json:"pool_id"`
+	ProjectId    openapi_types.UUID           `json:"project_id"`
+	PublishedAt  nullable.Nullable[time.Time] `json:"published_at"`
+	Revision     int32                        `json:"revision"`
+	RevisionId   string                       `json:"revision_id"`
+	Slug         string                       `json:"slug"`
 }
 
 // CodeRouteAdapters defines model for CodeRoute.Adapters.
@@ -2790,11 +3767,14 @@ type CodeRouteList struct {
 
 // CodeRouteWrite defines model for CodeRouteWrite.
 type CodeRouteWrite struct {
-	Enabled   bool               `json:"enabled"`
-	Models    []string           `json:"models"`
-	PoolId    openapi_types.UUID `json:"pool_id"`
-	ProjectId openapi_types.UUID `json:"project_id"`
-	Slug      string             `json:"slug"`
+	Enabled bool `json:"enabled"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+	Models       []string               `json:"models"`
+	PoolId       openapi_types.UUID     `json:"pool_id"`
+	ProjectId    openapi_types.UUID     `json:"project_id"`
+	Slug         string                 `json:"slug"`
 }
 
 // CodeTokenWindow defines model for CodeTokenWindow.
@@ -2835,15 +3815,36 @@ type ConfigurationCapabilityEntryMode string
 type ConfigurationDocument struct {
 	ApiVersion ConfigurationDocumentApiVersion `json:"api_version"`
 
+	// BudgetTimeZone Requested IANA budget time zone. Export includes it. Omission/null preserves the destination. Changes require settings permission and activate independently at the next existing day/week/month boundary; current spend and calendar history remain intact.
+	BudgetTimeZone nullable.Nullable[string] `json:"budget_time_zone,omitempty"`
+
 	// ExportedAt Informational only; excluded from the artifact digest
-	ExportedAt *time.Time                                   `json:"exported_at,omitempty"`
-	Pricing    nullable.Nullable[ConfigurationPricingEntry] `json:"pricing"`
-	Projects   []ConfigurationProjectEntry                  `json:"projects"`
-	Providers  []ConfigurationProviderEntry                 `json:"providers"`
-	Routes     []ConfigurationRouteEntry                    `json:"routes"`
+	ExportedAt *time.Time `json:"exported_at,omitempty"`
+
+	// InstallationBudget Installation cap. Omitted or null preserves destination policy; an empty policy clears it. Exports always include the current policy. Changes require settings permission.
+	InstallationBudget nullable.Nullable[BudgetPolicy] `json:"installation_budget,omitempty"`
+
+	// Organizations Portable organization names and budgets. Memberships remain destination-local. Creation requires access; changing a budget additionally requires manage_organization and authority over that organization.
+	Organizations *[]ConfigurationOrganizationEntry            `json:"organizations,omitempty"`
+	Pricing       nullable.Nullable[ConfigurationPricingEntry] `json:"pricing"`
+	Projects      []ConfigurationProjectEntry                  `json:"projects"`
+	Providers     []ConfigurationProviderEntry                 `json:"providers"`
+
+	// RequireLocalMfa Local sign-in second-factor requirement. Omitted/null preserves destination policy. Changes additionally require installation access authority; factors, recovery codes, challenges and sessions are never portable.
+	RequireLocalMfa nullable.Nullable[bool]   `json:"require_local_mfa,omitempty"`
+	Routes          []ConfigurationRouteEntry `json:"routes"`
+
+	// Saml Omission/null preserves SAML. Export, plan, apply and replay containing SAML additionally require installation access authority. Set enabled=false explicitly to disable; the usable-owner safeguard still applies.
+	Saml nullable.Nullable[ConfigurationSAML] `json:"saml,omitempty"`
+
+	// ScimGroupMappings Upsert role and project grants by group display name. Source IDs, external IDs, users and memberships stay local. Missing groups are created empty. Omission preserves destination mappings; an explicit empty grant set clears the named group. Export, plan, apply and replay containing these mappings additionally require installation Access.
+	ScimGroupMappings nullable.Nullable[[]ConfigurationSCIMGroupMapping] `json:"scim_group_mappings,omitempty"`
 
 	// Templates Route templates; omitted when the installation declares none
 	Templates *[]ConfigurationTemplateEntry `json:"templates,omitempty"`
+
+	// WorkloadIssuers Upserts workload trust by exact issuer URL and remaps project names. Omitted or empty preserves destination issuers; disable explicitly. Subjects, digests and signing keys are not portable. Export containing issuers, plan with issuers and apply with issuers additionally require installation access, including replay and unchanged definitions.
+	WorkloadIssuers nullable.Nullable[[]ConfigurationWorkloadIssuer] `json:"workload_issuers,omitempty"`
 }
 
 // ConfigurationDocumentApiVersion defines model for ConfigurationDocument.ApiVersion.
@@ -2864,6 +3865,12 @@ type ConfigurationModelEntry struct {
 	DisplayName   string                         `json:"display_name"`
 	Enabled       bool                           `json:"enabled"`
 	UpstreamModel string                         `json:"upstream_model"`
+}
+
+// ConfigurationOrganizationEntry defines model for ConfigurationOrganizationEntry.
+type ConfigurationOrganizationEntry struct {
+	Budget nullable.Nullable[BudgetPolicy] `json:"budget,omitempty"`
+	Name   string                          `json:"name"`
 }
 
 // ConfigurationPlanItem defines model for ConfigurationPlanItem.
@@ -2920,7 +3927,30 @@ type ConfigurationPricingEntry struct {
 
 // ConfigurationProjectEntry defines model for ConfigurationProjectEntry.
 type ConfigurationProjectEntry struct {
-	Name string `json:"name"`
+	// AttributionBudgets Portable project label/value caps. Omitted/null/empty clears caps without resetting accounting. Changes additionally require keys permission.
+	AttributionBudgets nullable.Nullable[AttributionBudgets] `json:"attribution_budgets,omitempty"`
+
+	// AttributionPolicy Portable project attribution requirements and pinned defaults. Changing this policy additionally requires keys authorization.
+	AttributionPolicy *AttributionPolicy `json:"attribution_policy,omitempty"`
+
+	// Budget Aggregate project cap. Omitted or null clears caps without resetting spend; changes require keys permission.
+	Budget nullable.Nullable[BudgetPolicy] `json:"budget,omitempty"`
+
+	// EndUserDefaults Portable per-end-user defaults. Destination-local digest overrides and blocks are preserved.
+	EndUserDefaults *EndUserLimits `json:"end_user_defaults,omitempty"`
+
+	// EndUserLimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
+	EndUserLimitTemplate nullable.Nullable[string] `json:"end_user_limit_template,omitempty"`
+
+	// LimitTemplates Omitted/null preserves destination templates; an empty object clears unused templates. Changes require keys as well as configure. Referenced templates cannot be removed.
+	LimitTemplates nullable.Nullable[LimitTemplates] `json:"limit_templates,omitempty"`
+	Name           string                            `json:"name"`
+
+	// Organization Organization name. Omitted/null preserves destination membership. First assignment requires installation access authority; existing membership cannot change.
+	Organization nullable.Nullable[string] `json:"organization,omitempty"`
+
+	// RouteGroups Portable project route groups. Omitted, null or empty removes groups. Changes require keys permission as well as configure.
+	RouteGroups nullable.Nullable[RouteGroups] `json:"route_groups,omitempty"`
 }
 
 // ConfigurationPromotionRequest defines model for ConfigurationPromotionRequest.
@@ -2954,17 +3984,23 @@ type ConfigurationRouteEntry struct {
 	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
 
 	// Budget Spend cap of the route itself.
-	Budget        nullable.Nullable[SpendCap]      `json:"budget,omitempty"`
-	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy"`
+	Budget nullable.Nullable[SpendCap] `json:"budget,omitempty"`
+
+	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
+	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
+	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
 
 	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
 	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
 
 	// Fidelity Omit, or send null, to declare a strict route.
-	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
-	MaxAttempts      int32                            `json:"max_attempts"`
-	Operations       []string                         `json:"operations"`
-	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
+	Fidelity    nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	MaxAttempts int32                            `json:"max_attempts"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+	Operations       []string               `json:"operations"`
+	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
 
 	// Project Project name, or null for an installation-wide route
 	Project nullable.Nullable[string] `json:"project"`
@@ -2994,6 +4030,38 @@ type ConfigurationRouteTarget struct {
 	TimeoutMs int32     `json:"timeout_ms"`
 	Weight    int32     `json:"weight"`
 }
+
+// ConfigurationSAML Portable public SAML trust and role mappings. Promotion creates or preserves a destination-local SP signing key and certificate; link state, subjects, flows, sessions and private material never travel.
+type ConfigurationSAML struct {
+	DefaultRole       nullable.Nullable[string] `json:"default_role"`
+	EmailAttribute    string                    `json:"email_attribute"`
+	EmailRoleMappings []OidcRoleMappingRequest  `json:"email_role_mappings"`
+	Enabled           bool                      `json:"enabled"`
+	GroupRoleMappings []OidcRoleMappingRequest  `json:"group_role_mappings"`
+	GroupsAttribute   string                    `json:"groups_attribute"`
+	MetadataXml       string                    `json:"metadata_xml"`
+	NameAttribute     string                    `json:"name_attribute"`
+}
+
+// ConfigurationSCIMGroupMapping defines model for ConfigurationSCIMGroupMapping.
+type ConfigurationSCIMGroupMapping struct {
+	AccessScope ConfigurationSCIMGroupMappingAccessScope `json:"access_scope"`
+	Name        string                                   `json:"name"`
+	Projects    []struct {
+		Project string                                    `json:"project"`
+		Role    ConfigurationSCIMGroupMappingProjectsRole `json:"role"`
+	} `json:"projects"`
+	Role nullable.Nullable[ConfigurationSCIMGroupMappingRole] `json:"role,omitempty"`
+}
+
+// ConfigurationSCIMGroupMappingAccessScope defines model for ConfigurationSCIMGroupMapping.AccessScope.
+type ConfigurationSCIMGroupMappingAccessScope string
+
+// ConfigurationSCIMGroupMappingProjectsRole defines model for ConfigurationSCIMGroupMapping.Projects.Role.
+type ConfigurationSCIMGroupMappingProjectsRole string
+
+// ConfigurationSCIMGroupMappingRole defines model for ConfigurationSCIMGroupMapping.Role.
+type ConfigurationSCIMGroupMappingRole string
 
 // ConfigurationSlotEntry defines model for ConfigurationSlotEntry.
 type ConfigurationSlotEntry struct {
@@ -3047,6 +4115,41 @@ type ConfigurationTemplateEntry struct {
 	RoutingPolicy    nullable.Nullable[RoutingPolicy] `json:"routing_policy"`
 	SlugPattern      string                           `json:"slug_pattern"`
 }
+
+// ConfigurationWorkloadIssuer defines model for ConfigurationWorkloadIssuer.
+type ConfigurationWorkloadIssuer struct {
+	Algorithms         []ConfigurationWorkloadIssuerAlgorithms `json:"algorithms"`
+	Audiences          []string                                `json:"audiences"`
+	DisabledKeyIds     []string                                `json:"disabled_key_ids"`
+	Enabled            bool                                    `json:"enabled"`
+	Issuer             string                                  `json:"issuer"`
+	JwksUrl            string                                  `json:"jwks_url"`
+	Mappings           []ConfigurationWorkloadMapping          `json:"mappings"`
+	MaxLifetimeSeconds int                                     `json:"max_lifetime_seconds"`
+	Name               string                                  `json:"name"`
+}
+
+// ConfigurationWorkloadIssuerAlgorithms defines model for ConfigurationWorkloadIssuer.Algorithms.
+type ConfigurationWorkloadIssuerAlgorithms string
+
+// ConfigurationWorkloadMapping Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project.
+type ConfigurationWorkloadMapping struct {
+	AllowProviderState *bool                     `json:"allow_provider_state,omitempty"`
+	EndUserClaim       nullable.Nullable[string] `json:"end_user_claim,omitempty"`
+	LimitTemplate      string                    `json:"limit_template"`
+
+	// Match Exact string matches at JSON pointers. The first matching mapping wins; an empty object matches all verified subjects.
+	Match map[string]string `json:"match"`
+	Name  string            `json:"name"`
+
+	// Project Project name in the document or destination.
+	Project     string                               `json:"project"`
+	RouteGroups []string                             `json:"route_groups"`
+	Scopes      []ConfigurationWorkloadMappingScopes `json:"scopes"`
+}
+
+// ConfigurationWorkloadMappingScopes defines model for ConfigurationWorkloadMapping.Scopes.
+type ConfigurationWorkloadMappingScopes string
 
 // ConnectionLimits defines model for ConnectionLimits.
 type ConnectionLimits struct {
@@ -3132,13 +4235,29 @@ type CreateApiKeyRequest struct {
 
 	// AllowedAttributionKeys Attribution keys this key may report via the X-OLP-Attribution header; at most 8, each a short machine token.
 	AllowedAttributionKeys *[]string `json:"allowed_attribution_keys,omitempty"`
-	AllowedRoutes          *[]string `json:"allowed_routes,omitempty"`
+
+	// AllowedCidrs Allowed IPv4 or IPv6 client CIDR ranges. Omitted, null or empty means unrestricted. The gateway uses its trusted-proxy resolver; forwarded addresses from untrusted peers cannot grant access. IPv4-mapped IPv6 ranges must use IPv4 syntax. Host bits do not narrow a network prefix.
+	AllowedCidrs nullable.Nullable[[]string] `json:"allowed_cidrs,omitempty"`
+
+	// AllowedRouteGroups Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing.
+	AllowedRouteGroups nullable.Nullable[[]string] `json:"allowed_route_groups,omitempty"`
+	AllowedRoutes      *[]string                   `json:"allowed_routes,omitempty"`
+
+	// AttributionDefaults Operator-pinned labels added to accounting. Callers may omit them or supply the same value; overriding them is refused. Project pins also apply.
+	AttributionDefaults nullable.Nullable[map[string]string] `json:"attribution_defaults,omitempty"`
 
 	// BudgetGroupId Shared budget group; must belong to the same project as the key (both may be null).
 	BudgetGroupId  nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
 	DailyCostLimit nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
-	ExpiresAt      nullable.Nullable[time.Time]          `json:"expires_at,omitempty"`
-	MaxConcurrency nullable.Nullable[int32]              `json:"max_concurrency,omitempty"`
+	EndUserPolicy  nullable.Nullable[EndUserPolicy]      `json:"end_user_policy,omitempty"`
+
+	// EndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
+	EndUserSource nullable.Nullable[CreateApiKeyRequestEndUserSource] `json:"end_user_source,omitempty"`
+	ExpiresAt     nullable.Nullable[time.Time]                        `json:"expires_at,omitempty"`
+
+	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
+	LimitTemplate  nullable.Nullable[string] `json:"limit_template,omitempty"`
+	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 
 	// MaxPriority Highest class a request may choose through X-OLP-Routing; defaults to priority.
 	MaxPriority      nullable.Nullable[AdmissionPriority] `json:"max_priority,omitempty"`
@@ -3152,11 +4271,24 @@ type CreateApiKeyRequest struct {
 	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
 	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
 
+	// RequiredAttributionKeys Required attribution labels, in addition to project requirements. Missing labels return 400 missing_attribution before dispatch.
+	RequiredAttributionKeys nullable.Nullable[[]string] `json:"required_attribution_keys,omitempty"`
+
 	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.
-	ResponseMetadata *bool                    `json:"response_metadata,omitempty"`
-	Scopes           *[]string                `json:"scopes,omitempty"`
-	TokensPerMinute  nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`
+	ResponseMetadata *bool `json:"response_metadata,omitempty"`
+
+	// RotationIntervalDays Declared rotation reminder interval from creation or the last explicit rotation. Does not expire or automatically rotate the secret. Null disables rotation reminders.
+	RotationIntervalDays nullable.Nullable[int]               `json:"rotation_interval_days,omitempty"`
+	RouteLimits          nullable.Nullable[ApiKeyRouteLimits] `json:"route_limits,omitempty"`
+	Scopes               *[]string                            `json:"scopes,omitempty"`
+	TokensPerMinute      nullable.Nullable[int64]             `json:"tokens_per_minute,omitempty"`
+
+	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
+	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// CreateApiKeyRequestEndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
+type CreateApiKeyRequestEndUserSource string
 
 // CreateApiKeyResponse defines model for CreateApiKeyResponse.
 type CreateApiKeyResponse struct {
@@ -3170,12 +4302,21 @@ type CreateApiKeyResponse struct {
 
 // CreateBudgetGroupRequest defines model for CreateBudgetGroupRequest.
 type CreateBudgetGroupRequest struct {
-	DailyCostLimit   nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+
+	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
+	LimitTemplate    nullable.Nullable[string] `json:"limit_template,omitempty"`
+	MaxConcurrency   nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 	MonthlyCostLimit nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
 	Name             string                    `json:"name"`
 
 	// ProjectId Owning project; omit or null for an installation-wide group. Required for assigned principals.
-	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
+	TokensPerMinute   nullable.Nullable[int64]              `json:"tokens_per_minute,omitempty"`
+
+	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
+	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
 // CreateBudgetGroupResponse defines model for CreateBudgetGroupResponse.
@@ -3183,6 +4324,20 @@ type CreateBudgetGroupResponse struct {
 	Etag openapi_types.UUID `json:"etag"`
 	Id   openapi_types.UUID `json:"id"`
 }
+
+// CreateBudgetIncreaseRequest Adds a positive exact USD amount to an existing effective cap. Reason must be a single line. Default expiry is the current calendar-window end; later requested expiries are clipped to that end. At most eight active increases per owner/window; concurrent grants add together. Existing accrued and in-flight costs are unchanged. Authorization is keys plus project-manager access, or installation settings for the installation target.
+type CreateBudgetIncreaseRequest struct {
+	Amount    string                       `json:"amount"`
+	ExpiresAt nullable.Nullable[time.Time] `json:"expires_at,omitempty"`
+	Reason    string                       `json:"reason"`
+
+	// Target Identifies one caller/aggregate cost owner. id is the key, group or project UUID; installation has no id. key_route requires route; end-user targets require an existing project-scoped digest; attribution requires label and value. Extra target selectors are rejected. Supply connection/slot/route policies are not caller budget targets.
+	Target BudgetIncreaseTarget              `json:"target"`
+	Window CreateBudgetIncreaseRequestWindow `json:"window"`
+}
+
+// CreateBudgetIncreaseRequestWindow defines model for CreateBudgetIncreaseRequest.Window.
+type CreateBudgetIncreaseRequestWindow string
 
 // CreateInvitationRequest defines model for CreateInvitationRequest.
 type CreateInvitationRequest struct {
@@ -3253,26 +4408,30 @@ type CreateNotificationDestinationRequest struct {
 	Url string `json:"url"`
 }
 
-// CreateNotificationRuleRequest A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent, and its subject and destination belong to its project. A provider event rule takes none of them and is installation-wide: project_id is null or omitted, and its destination is installation-wide.
+// CreateNotificationRuleRequest A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent, and its subject and destination belong to its project. A provider event rule takes none of them and is installation-wide: project_id is null or omitted, and its destination is installation-wide. A key.expiring rule requires subject_kind=api_key and subject_id, no window or threshold, and a subject/destination in the rule project.
 type CreateNotificationRuleRequest struct {
 	DestinationId openapi_types.UUID `json:"destination_id"`
 
 	// Enabled Defaults to true.
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation. key.expiring: an API key expires or reaches its declared rotation date within 24 hours, or is overdue. One metadata-only delivery per rule, key, reason and date; never creates or transmits a secret.
 	Event NotificationEvent `json:"event"`
 	Name  string            `json:"name"`
 
 	// ProjectId Owning project; subject and destination must belong to the same project.
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
-	SubjectId *openapi_types.UUID                   `json:"subject_id,omitempty"`
 
-	// SubjectKind Whose spend a budget.threshold rule watches.
-	SubjectKind      *BudgetSubjectKind `json:"subject_kind,omitempty"`
-	ThresholdPercent *int32             `json:"threshold_percent,omitempty"`
+	// SubjectId  For key.expiring, set only subject_kind=api_key and subject_id.
+	SubjectId *openapi_types.UUID `json:"subject_id,omitempty"`
 
-	// WindowKind The UTC window a budget.threshold rule watches.
+	// SubjectKind  For key.expiring, set only subject_kind=api_key and subject_id.
+	SubjectKind *BudgetSubjectKind `json:"subject_kind,omitempty"`
+
+	// ThresholdPercent  For key.expiring, set only subject_kind=api_key and subject_id.
+	ThresholdPercent *int32 `json:"threshold_percent,omitempty"`
+
+	// WindowKind  For key.expiring, set only subject_kind=api_key and subject_id.
 	WindowKind *BudgetWindowKind `json:"window_kind,omitempty"`
 }
 
@@ -3315,17 +4474,23 @@ type CreateRouteDraftRequest struct {
 	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
 
 	// Budget Spend cap of the route itself.
-	Budget        nullable.Nullable[SpendCap]      `json:"budget,omitempty"`
-	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+	Budget nullable.Nullable[SpendCap] `json:"budget,omitempty"`
+
+	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
+	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
+	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
 
 	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
 	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
 
 	// Fidelity Omit, or send null, to declare a strict route.
-	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
-	MaxAttempts      int32                            `json:"max_attempts"`
-	Operations       *[]string                        `json:"operations,omitempty"`
-	OverallTimeoutMs int64                            `json:"overall_timeout_ms"`
+	Fidelity    nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	MaxAttempts int32                            `json:"max_attempts"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+	Operations       *[]string              `json:"operations,omitempty"`
+	OverallTimeoutMs int64                  `json:"overall_timeout_ms"`
 
 	// ProjectId Owning project; omit or null for an installation-wide route. Required for assigned principals.
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
@@ -3424,6 +4589,32 @@ type DiscoverModelsRequest struct {
 type DiscoveredModelRequest struct {
 	DisplayName   string `json:"display_name"`
 	UpstreamModel string `json:"upstream_model"`
+}
+
+// EndUserLimits A complete limit set. Null or omitted dimensions are unlimited.
+type EndUserLimits struct {
+	DailyCostLimit    nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	MaxConcurrency    nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
+	MonthlyCostLimit  nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]  `json:"requests_per_minute,omitempty"`
+	TokensPerMinute   nullable.Nullable[int64]  `json:"tokens_per_minute,omitempty"`
+
+	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
+	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
+}
+
+// EndUserPolicy defines model for EndUserPolicy.
+type EndUserPolicy struct {
+	Blocked *[]string `json:"blocked,omitempty"`
+
+	// Defaults A complete limit set. Null or omitted dimensions are unlimited.
+	Defaults *EndUserLimits `json:"defaults,omitempty"`
+
+	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
+	LimitTemplate nullable.Nullable[string] `json:"limit_template,omitempty"`
+
+	// Overrides Project-scoped digests. Each entry replaces the complete default limit set at this boundary; policies at other boundaries still apply.
+	Overrides *map[string]EndUserLimits `json:"overrides,omitempty"`
 }
 
 // EnrollPasswordRequest defines model for EnrollPasswordRequest.
@@ -3740,11 +4931,120 @@ type InvitationResponse struct {
 	Status         string                    `json:"status"`
 }
 
+// KeyExpiringEvent defines model for KeyExpiringEvent.
+type KeyExpiringEvent struct {
+	ApiKeyId   openapi_types.UUID                    `json:"api_key_id"`
+	ApiKeyName string                                `json:"api_key_name"`
+	DueAt      time.Time                             `json:"due_at"`
+	Event      KeyExpiringEventEvent                 `json:"event"`
+	ProjectId  nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	Reason     KeyExpiringEventReason                `json:"reason"`
+	RuleId     openapi_types.UUID                    `json:"rule_id"`
+	RuleName   string                                `json:"rule_name"`
+}
+
+// KeyExpiringEventEvent defines model for KeyExpiringEvent.Event.
+type KeyExpiringEventEvent string
+
+// KeyExpiringEventReason defines model for KeyExpiringEvent.Reason.
+type KeyExpiringEventReason string
+
+// LimitTemplates Project-scoped policy ceilings; each referencing boundary keeps separate counters. Empty limits add no ceilings. Referenced templates cannot be removed.
+type LimitTemplates map[string]EndUserLimits
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	Email    string  `json:"email"`
 	Password *string `json:"password,omitempty"`
 }
+
+// MFABootstrapSession defines model for MFABootstrapSession.
+type MFABootstrapSession struct {
+	RecoveryCodes []string        `json:"recovery_codes"`
+	Session       SessionResponse `json:"session"`
+}
+
+// MFAChallenge defines model for MFAChallenge.
+type MFAChallenge struct {
+	Challenge          string                                    `json:"challenge"`
+	EnrollmentRequired bool                                      `json:"enrollment_required"`
+	ExpiresAt          time.Time                                 `json:"expires_at"`
+	Methods            []MFAChallengeMethods                     `json:"methods"`
+	PublicKey          nullable.Nullable[map[string]interface{}] `json:"public_key"`
+
+	// WebauthnAvailable Whether the configured public origin supports a DNS WebAuthn relying-party ID and a secure browser context. HTTPS is required outside localhost development.
+	WebauthnAvailable *bool `json:"webauthn_available,omitempty"`
+}
+
+// MFAChallengeMethods defines model for MFAChallenge.Methods.
+type MFAChallengeMethods string
+
+// MFAEnrollment defines model for MFAEnrollment.
+type MFAEnrollment struct {
+	Challenge  string                  `json:"challenge"`
+	ExpiresAt  time.Time               `json:"expires_at"`
+	Kind       MFAEnrollmentKind       `json:"kind"`
+	OtpauthUrl *string                 `json:"otpauth_url,omitempty"`
+	PublicKey  *map[string]interface{} `json:"public_key,omitempty"`
+	QrCode     *string                 `json:"qr_code,omitempty"`
+	Secret     *string                 `json:"secret,omitempty"`
+}
+
+// MFAEnrollmentKind defines model for MFAEnrollment.Kind.
+type MFAEnrollmentKind string
+
+// MFAEnrollmentComplete defines model for MFAEnrollmentComplete.
+type MFAEnrollmentComplete struct {
+	Enrolled      bool                        `json:"enrolled"`
+	RecoveryCodes nullable.Nullable[[]string] `json:"recovery_codes"`
+}
+
+// MFAEnrollmentRequest defines model for MFAEnrollmentRequest.
+type MFAEnrollmentRequest struct {
+	// Challenge Required only for password-verified first-factor enrollment.
+	Challenge *string                  `json:"challenge,omitempty"`
+	Kind      MFAEnrollmentRequestKind `json:"kind"`
+	Name      string                   `json:"name"`
+}
+
+// MFAEnrollmentRequestKind defines model for MFAEnrollmentRequest.Kind.
+type MFAEnrollmentRequestKind string
+
+// MFARecoveryCodes defines model for MFARecoveryCodes.
+type MFARecoveryCodes struct {
+	RecoveryCodes nullable.Nullable[[]string] `json:"recovery_codes"`
+}
+
+// MFAStatus defines model for MFAStatus.
+type MFAStatus struct {
+	Etag    openapi_types.UUID `json:"etag"`
+	Factors []struct {
+		CreatedAt  time.Time                    `json:"created_at"`
+		Id         openapi_types.UUID           `json:"id"`
+		Kind       MFAStatusFactorsKind         `json:"kind"`
+		LastUsedAt nullable.Nullable[time.Time] `json:"last_used_at"`
+		Name       string                       `json:"name"`
+	} `json:"factors"`
+	RecoveryCodesRemaining int  `json:"recovery_codes_remaining"`
+	Required               bool `json:"required"`
+
+	// WebauthnAvailable Whether the configured public origin supports a DNS WebAuthn relying-party ID and a secure browser context. HTTPS is required outside localhost development.
+	WebauthnAvailable *bool `json:"webauthn_available,omitempty"`
+}
+
+// MFAStatusFactorsKind defines model for MFAStatus.Factors.Kind.
+type MFAStatusFactorsKind string
+
+// MFAVerificationRequest defines model for MFAVerificationRequest.
+type MFAVerificationRequest struct {
+	Challenge  string                       `json:"challenge"`
+	Code       *string                      `json:"code,omitempty"`
+	Credential *map[string]interface{}      `json:"credential,omitempty"`
+	Method     MFAVerificationRequestMethod `json:"method"`
+}
+
+// MFAVerificationRequestMethod defines model for MFAVerificationRequest.Method.
+type MFAVerificationRequestMethod string
 
 // ManagementOperation A management operation the authorization policy decides. Security requirement scopes name these, and a session lists the ones its member may perform.
 type ManagementOperation string
@@ -3873,9 +5173,11 @@ type NetworkCredentialResponse struct {
 // NotificationDelivery Metadata of one event's delivery to a rule's destination, with the event's evidence: a budget threshold's spend as claimed, or the credential version whose grant lapsed.
 type NotificationDelivery struct {
 	// Accrued The exact accrual that crossed the threshold, preserved from claim time. Set for budget.threshold deliveries only; null for other events.
-	Accrued   nullable.Nullable[string] `json:"accrued"`
-	Attempts  int32                     `json:"attempts"`
-	CreatedAt time.Time                 `json:"created_at"`
+	Accrued    nullable.Nullable[string]             `json:"accrued"`
+	ApiKeyId   nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
+	ApiKeyName nullable.Nullable[string]             `json:"api_key_name,omitempty"`
+	Attempts   int32                                 `json:"attempts"`
+	CreatedAt  time.Time                             `json:"created_at"`
 
 	// CredentialVersion The number of the credential version whose grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.
 	CredentialVersion nullable.Nullable[int32] `json:"credential_version"`
@@ -3884,8 +5186,9 @@ type NotificationDelivery struct {
 	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id"`
 	Currency            nullable.Nullable[string]             `json:"currency"`
 	DeliveredAt         nullable.Nullable[time.Time]          `json:"delivered_at"`
+	DueAt               nullable.Nullable[time.Time]          `json:"due_at,omitempty"`
 
-	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation. key.expiring: an API key expires or reaches its declared rotation date within 24 hours, or is overdue. One metadata-only delivery per rule, key, reason and date; never creates or transmits a secret.
 	Event         NotificationEvent            `json:"event"`
 	Id            openapi_types.UUID           `json:"id"`
 	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at"`
@@ -3901,10 +5204,11 @@ type NotificationDelivery struct {
 	ProviderId nullable.Nullable[openapi_types.UUID] `json:"provider_id"`
 
 	// ProviderName The provider's name when its grant lapsed. Set for provider.grant.lapsed deliveries only; null for other events.
-	ProviderName nullable.Nullable[string]  `json:"provider_name"`
-	RuleId       openapi_types.UUID         `json:"rule_id"`
-	RuleName     string                     `json:"rule_name"`
-	Status       NotificationDeliveryStatus `json:"status"`
+	ProviderName nullable.Nullable[string]                     `json:"provider_name"`
+	Reason       nullable.Nullable[NotificationDeliveryReason] `json:"reason,omitempty"`
+	RuleId       openapi_types.UUID                            `json:"rule_id"`
+	RuleName     string                                        `json:"rule_name"`
+	Status       NotificationDeliveryStatus                    `json:"status"`
 
 	// ThresholdPercent Set for budget.threshold deliveries only; null for other events.
 	ThresholdPercent nullable.Nullable[int32] `json:"threshold_percent"`
@@ -3912,6 +5216,9 @@ type NotificationDelivery struct {
 	// WindowId Set for budget.threshold deliveries only; null for other events.
 	WindowId nullable.Nullable[int64] `json:"window_id"`
 }
+
+// NotificationDeliveryReason defines model for NotificationDelivery.Reason.
+type NotificationDeliveryReason string
 
 // NotificationDeliveryStatus defines model for NotificationDelivery.Status.
 type NotificationDeliveryStatus string
@@ -3943,7 +5250,7 @@ type NotificationDestinationListResponse struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
-// NotificationEvent What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.
+// NotificationEvent What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation. key.expiring: an API key expires or reaches its declared rotation date within 24 hours, or is overdue. One metadata-only delivery per rule, key, reason and date; never creates or transmits a secret.
 type NotificationEvent string
 
 // NotificationRule A notification rule subscribes a destination to an event. A budget.threshold rule names the subject, window and threshold it watches; a provider event rule names none of them and is installation-wide.
@@ -3956,7 +5263,7 @@ type NotificationRule struct {
 	Enabled         bool               `json:"enabled"`
 	Etag            openapi_types.UUID `json:"etag"`
 
-	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation.
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation. key.expiring: an API key expires or reaches its declared rotation date within 24 hours, or is overdue. One metadata-only delivery per rule, key, reason and date; never creates or transmits a secret.
 	Event NotificationEvent  `json:"event"`
 	Id    openapi_types.UUID `json:"id"`
 	Name  string             `json:"name"`
@@ -4094,6 +5401,45 @@ type OperationDialect struct {
 // OperationDialectList defines model for OperationDialectList.
 type OperationDialectList struct {
 	Items []OperationDialect `json:"items"`
+}
+
+// Organization defines model for Organization.
+type Organization struct {
+	CreatedAt    time.Time          `json:"created_at"`
+	CreatedBy    openapi_types.UUID `json:"created_by"`
+	Etag         openapi_types.UUID `json:"etag"`
+	Id           openapi_types.UUID `json:"id"`
+	Name         string             `json:"name"`
+	ProjectCount int                `json:"project_count"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+}
+
+// OrganizationList defines model for OrganizationList.
+type OrganizationList struct {
+	Items      []Organization            `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// OrganizationMember defines model for OrganizationMember.
+type OrganizationMember struct {
+	Active           bool                               `json:"active"`
+	DisplayName      string                             `json:"display_name"`
+	Email            string                             `json:"email"`
+	InstallationRole OrganizationMemberInstallationRole `json:"installation_role"`
+	Role             OrganizationMemberRole             `json:"role"`
+	UserId           openapi_types.UUID                 `json:"user_id"`
+}
+
+// OrganizationMemberInstallationRole defines model for OrganizationMember.InstallationRole.
+type OrganizationMemberInstallationRole string
+
+// OrganizationMemberRole defines model for OrganizationMember.Role.
+type OrganizationMemberRole string
+
+// OrganizationMembers defines model for OrganizationMembers.
+type OrganizationMembers struct {
+	Items      []OrganizationMember      `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
 // OverviewResponse Aggregate counts the console overview needs; one round-trip instead of paginating every collection.
@@ -4701,6 +6047,20 @@ type Problem struct {
 	Type     string                    `json:"type"`
 }
 
+// ProjectAttributionBudgets defines model for ProjectAttributionBudgets.
+type ProjectAttributionBudgets struct {
+	// Budgets At most 64 project label/value pairs in total, each with at least one positive day/week/month cap. Caps apply to resolved labels across all keys and system work carrying those labels. Unpinned caller-selected labels are allocation controls; pin or require labels to prevent omission or reassignment. Removing/readding caps preserves current-window spend.
+	Budgets AttributionBudgets                         `json:"budgets"`
+	Etag    openapi_types.UUID                         `json:"etag"`
+	Usage   map[string]map[string]AggregateBudgetUsage `json:"usage"`
+}
+
+// ProjectAttributionPolicy defines model for ProjectAttributionPolicy.
+type ProjectAttributionPolicy struct {
+	Etag   openapi_types.UUID                   `json:"etag"`
+	Policy nullable.Nullable[AttributionPolicy] `json:"policy"`
+}
+
 // ProjectDetailResponse defines model for ProjectDetailResponse.
 type ProjectDetailResponse struct {
 	CreatedAt      time.Time          `json:"created_at"`
@@ -4710,7 +6070,24 @@ type ProjectDetailResponse struct {
 	Id             openapi_types.UUID `json:"id"`
 	MemberCount    int64              `json:"member_count"`
 	Name           string             `json:"name"`
-	UpdatedAt      time.Time          `json:"updated_at"`
+
+	// OrganizationId Single-level organization membership. Once assigned, this project cannot move between organizations.
+	OrganizationId nullable.Nullable[openapi_types.UUID] `json:"organization_id,omitempty"`
+	UpdatedAt      time.Time                             `json:"updated_at"`
+}
+
+// ProjectEndUserPolicy defines model for ProjectEndUserPolicy.
+type ProjectEndUserPolicy struct {
+	Etag   openapi_types.UUID               `json:"etag"`
+	Policy nullable.Nullable[EndUserPolicy] `json:"policy"`
+}
+
+// ProjectLimitTemplates defines model for ProjectLimitTemplates.
+type ProjectLimitTemplates struct {
+	Etag openapi_types.UUID `json:"etag"`
+
+	// Templates Project-scoped policy ceilings; each referencing boundary keeps separate counters. Empty limits add no ceilings. Referenced templates cannot be removed.
+	Templates LimitTemplates `json:"templates"`
 }
 
 // ProjectListResponse defines model for ProjectListResponse.
@@ -4754,6 +6131,14 @@ type ProjectMembershipItemRole string
 // ProjectMembershipsResponse defines model for ProjectMembershipsResponse.
 type ProjectMembershipsResponse struct {
 	Items []ProjectMembershipItem `json:"items"`
+}
+
+// ProjectRouteGroups defines model for ProjectRouteGroups.
+type ProjectRouteGroups struct {
+	Etag openapi_types.UUID `json:"etag"`
+
+	// Groups Project-local named sets of ordinary or subscription route slugs. Empty groups grant no routes. Unknown slugs may be declared ahead of route creation; project isolation still applies.
+	Groups RouteGroups `json:"groups"`
 }
 
 // ProviderActivationResponse defines model for ProviderActivationResponse.
@@ -4831,7 +6216,10 @@ type ProviderConfiguration struct {
 	AuthMode     ProviderAuthMode          `json:"auth_mode"`
 	CloudProject nullable.Nullable[string] `json:"cloud_project,omitempty"`
 	CloudRegion  nullable.Nullable[string] `json:"cloud_region,omitempty"`
-	Deployment   nullable.Nullable[string] `json:"deployment,omitempty"`
+
+	// CredentialSource Operator credentials are the default. Caller mode requires X-OLP-Provider-Credential for serving through the fixed endpoint/profile; retained operator credentials remain for probes and certification. Supported with built-in API-key, declared-header, or static AWS authentication. Caller secrets are request-local and never reused across targets.
+	CredentialSource *ProviderConfigurationCredentialSource `json:"credential_source,omitempty"`
+	Deployment       nullable.Nullable[string]              `json:"deployment,omitempty"`
 
 	// Endpoint Base URL of the API. OLP sets a plugin provider's endpoint to its profile's declared address, with the provider's plugin options in place.
 	Endpoint nullable.Nullable[string] `json:"endpoint,omitempty"`
@@ -4846,6 +6234,9 @@ type ProviderConfiguration struct {
 	// ProfileRevision Immutable provider profile composition revision selected with profile_id. A plugin provider's profile revision is the digest of the plugin module that supplies the profile, which the provider pins.
 	ProfileRevision *string `json:"profile_revision,omitempty"`
 }
+
+// ProviderConfigurationCredentialSource Operator credentials are the default. Caller mode requires X-OLP-Provider-Credential for serving through the fixed endpoint/profile; retained operator credentials remain for probes and certification. Supported with built-in API-key, declared-header, or static AWS authentication. Caller secrets are request-local and never reused across targets.
+type ProviderConfigurationCredentialSource string
 
 // ProviderConfigurationField defines model for ProviderConfigurationField.
 type ProviderConfigurationField string
@@ -5393,17 +6784,23 @@ type ReplaceRouteDraftRequest struct {
 	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
 
 	// Budget Spend cap of the route itself.
-	Budget        nullable.Nullable[SpendCap]      `json:"budget,omitempty"`
-	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+	Budget nullable.Nullable[SpendCap] `json:"budget,omitempty"`
+
+	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
+	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
+	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
 
 	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
 	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
 
 	// Fidelity Omit, or send null, to declare a strict route.
-	Fidelity         nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
-	MaxAttempts      int32                            `json:"max_attempts"`
-	Operations       []string                         `json:"operations"`
-	OverallTimeoutMs int32                            `json:"overall_timeout_ms"`
+	Fidelity    nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	MaxAttempts int32                            `json:"max_attempts"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+	Operations       []string               `json:"operations"`
+	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`
@@ -5434,21 +6831,27 @@ type RequestDetailResponse struct {
 	Attempts     []AttemptResponse                     `json:"attempts"`
 
 	// Attribution Bounded allowlisted labels reported with this request; never content.
-	Attribution             map[string]string            `json:"attribution"`
-	CacheWrite1hInputTokens nullable.Nullable[int64]     `json:"cache_write_1h_input_tokens,omitempty"`
-	CacheWrite5mInputTokens nullable.Nullable[int64]     `json:"cache_write_5m_input_tokens,omitempty"`
-	CacheWriteInputTokens   nullable.Nullable[int64]     `json:"cache_write_input_tokens,omitempty"`
-	CachedInputTokens       nullable.Nullable[int64]     `json:"cached_input_tokens,omitempty"`
-	CompletedAt             nullable.Nullable[time.Time] `json:"completed_at,omitempty"`
-	Currency                nullable.Nullable[string]    `json:"currency,omitempty"`
-	ErrorClass              nullable.Nullable[string]    `json:"error_class,omitempty"`
-	EstimatedCost           nullable.Nullable[string]    `json:"estimated_cost,omitempty"`
-	FirstByteMs             nullable.Nullable[int64]     `json:"first_byte_ms,omitempty"`
-	Id                      openapi_types.UUID           `json:"id"`
-	InputTokens             nullable.Nullable[int64]     `json:"input_tokens,omitempty"`
-	Operation               string                       `json:"operation"`
+	Attribution map[string]string `json:"attribution"`
 
-	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. Shadow and probe requests belong to the installation and carry no key.
+	// BudgetBoundary Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs.
+	BudgetBoundary          *RequestDetailResponseBudgetBoundary `json:"budget_boundary,omitempty"`
+	CacheWrite1hInputTokens nullable.Nullable[int64]             `json:"cache_write_1h_input_tokens,omitempty"`
+	CacheWrite5mInputTokens nullable.Nullable[int64]             `json:"cache_write_5m_input_tokens,omitempty"`
+	CacheWriteInputTokens   nullable.Nullable[int64]             `json:"cache_write_input_tokens,omitempty"`
+	CachedInputTokens       nullable.Nullable[int64]             `json:"cached_input_tokens,omitempty"`
+	CompletedAt             nullable.Nullable[time.Time]         `json:"completed_at,omitempty"`
+	Currency                nullable.Nullable[string]            `json:"currency,omitempty"`
+
+	// EndUserDigest Project-scoped HMAC-SHA256 identity, or empty when not identified. Never the raw identifier.
+	EndUserDigest *string                   `json:"end_user_digest,omitempty"`
+	ErrorClass    nullable.Nullable[string] `json:"error_class,omitempty"`
+	EstimatedCost nullable.Nullable[string] `json:"estimated_cost,omitempty"`
+	FirstByteMs   nullable.Nullable[int64]  `json:"first_byte_ms,omitempty"`
+	Id            openapi_types.UUID        `json:"id"`
+	InputTokens   nullable.Nullable[int64]  `json:"input_tokens,omitempty"`
+	Operation     string                    `json:"operation"`
+
+	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 	Origin       RequestOrigin            `json:"origin"`
 	OutputTokens nullable.Nullable[int64] `json:"output_tokens,omitempty"`
 
@@ -5466,6 +6869,9 @@ type RequestDetailResponse struct {
 	Unpriced            nullable.Nullable[bool]  `json:"unpriced,omitempty"`
 	UsageComplete       nullable.Nullable[bool]  `json:"usage_complete,omitempty"`
 }
+
+// RequestDetailResponseBudgetBoundary Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs.
+type RequestDetailResponseBudgetBoundary string
 
 // RequestListResponse defines model for RequestListResponse.
 type RequestListResponse struct {
@@ -5520,7 +6926,7 @@ type RequestMetadataGatewayEpochResponse struct {
 	WriterClosed     bool                                  `json:"writer_closed"`
 }
 
-// RequestOrigin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. Shadow and probe requests belong to the installation and carry no key.
+// RequestOrigin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 type RequestOrigin string
 
 // RequestSummary defines model for RequestSummary.
@@ -5530,21 +6936,27 @@ type RequestSummary struct {
 	AttemptCount int32                                 `json:"attempt_count"`
 
 	// Attribution Bounded allowlisted labels reported with this request; never content.
-	Attribution             map[string]string            `json:"attribution"`
-	CacheWrite1hInputTokens nullable.Nullable[int64]     `json:"cache_write_1h_input_tokens,omitempty"`
-	CacheWrite5mInputTokens nullable.Nullable[int64]     `json:"cache_write_5m_input_tokens,omitempty"`
-	CacheWriteInputTokens   nullable.Nullable[int64]     `json:"cache_write_input_tokens,omitempty"`
-	CachedInputTokens       nullable.Nullable[int64]     `json:"cached_input_tokens,omitempty"`
-	CompletedAt             nullable.Nullable[time.Time] `json:"completed_at,omitempty"`
-	Currency                nullable.Nullable[string]    `json:"currency,omitempty"`
-	ErrorClass              nullable.Nullable[string]    `json:"error_class,omitempty"`
-	EstimatedCost           nullable.Nullable[string]    `json:"estimated_cost,omitempty"`
-	FirstByteMs             nullable.Nullable[int64]     `json:"first_byte_ms,omitempty"`
-	Id                      openapi_types.UUID           `json:"id"`
-	InputTokens             nullable.Nullable[int64]     `json:"input_tokens,omitempty"`
-	Operation               string                       `json:"operation"`
+	Attribution map[string]string `json:"attribution"`
 
-	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. Shadow and probe requests belong to the installation and carry no key.
+	// BudgetBoundary Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs.
+	BudgetBoundary          *RequestSummaryBudgetBoundary `json:"budget_boundary,omitempty"`
+	CacheWrite1hInputTokens nullable.Nullable[int64]      `json:"cache_write_1h_input_tokens,omitempty"`
+	CacheWrite5mInputTokens nullable.Nullable[int64]      `json:"cache_write_5m_input_tokens,omitempty"`
+	CacheWriteInputTokens   nullable.Nullable[int64]      `json:"cache_write_input_tokens,omitempty"`
+	CachedInputTokens       nullable.Nullable[int64]      `json:"cached_input_tokens,omitempty"`
+	CompletedAt             nullable.Nullable[time.Time]  `json:"completed_at,omitempty"`
+	Currency                nullable.Nullable[string]     `json:"currency,omitempty"`
+
+	// EndUserDigest Project-scoped HMAC-SHA256 identity, or empty when not identified. Never the raw identifier.
+	EndUserDigest *string                   `json:"end_user_digest,omitempty"`
+	ErrorClass    nullable.Nullable[string] `json:"error_class,omitempty"`
+	EstimatedCost nullable.Nullable[string] `json:"estimated_cost,omitempty"`
+	FirstByteMs   nullable.Nullable[int64]  `json:"first_byte_ms,omitempty"`
+	Id            openapi_types.UUID        `json:"id"`
+	InputTokens   nullable.Nullable[int64]  `json:"input_tokens,omitempty"`
+	Operation     string                    `json:"operation"`
+
+	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 	Origin       RequestOrigin            `json:"origin"`
 	OutputTokens nullable.Nullable[int64] `json:"output_tokens,omitempty"`
 
@@ -5562,6 +6974,9 @@ type RequestSummary struct {
 	Unpriced            nullable.Nullable[bool]  `json:"unpriced,omitempty"`
 	UsageComplete       nullable.Nullable[bool]  `json:"usage_complete,omitempty"`
 }
+
+// RequestSummaryBudgetBoundary Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs.
+type RequestSummaryBudgetBoundary string
 
 // RetryRule defines model for RetryRule.
 type RetryRule struct {
@@ -5585,15 +7000,24 @@ type RotateApiKeyRequest struct {
 	BudgetGroupId    nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
 	DailyCostLimit   nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
 	MonthlyCostLimit nullable.Nullable[string]             `json:"monthly_cost_limit,omitempty"`
+
+	// OverlapSeconds Allow the previous secret for this many seconds, bounded by key expiry. Zero (default) immediately ends all prior overlaps on authority refresh. At most eight previous secrets may overlap; every version shares current policy, counters and budgets. Replay never extends an overlap.
+	OverlapSeconds *int `json:"overlap_seconds,omitempty"`
+
+	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
+	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
 // RotateApiKeyResponse defines model for RotateApiKeyResponse.
 type RotateApiKeyResponse struct {
-	Etag              openapi_types.UUID        `json:"etag"`
-	Id                openapi_types.UUID        `json:"id"`
-	LookupId          string                    `json:"lookup_id"`
-	RuntimeGeneration RuntimeGenerationResponse `json:"runtime_generation"`
-	Secret            string                    `json:"secret"`
+	Etag     openapi_types.UUID `json:"etag"`
+	Id       openapi_types.UUID `json:"id"`
+	LookupId string             `json:"lookup_id"`
+
+	// OverlapExpiresAt Previous secret authentication deadline; null for immediate replacement.
+	OverlapExpiresAt  nullable.Nullable[time.Time] `json:"overlap_expires_at,omitempty"`
+	RuntimeGeneration RuntimeGenerationResponse    `json:"runtime_generation"`
+	Secret            string                       `json:"secret"`
 }
 
 // RotateCredentialRequest defines model for RotateCredentialRequest.
@@ -5624,9 +7048,15 @@ type RouteAffinitySource string
 
 // RouteBehavior defines model for RouteBehavior.
 type RouteBehavior struct {
-	Affinity  nullable.Nullable[RouteAffinity] `json:"affinity"`
-	Budget    nullable.Nullable[SpendCap]      `json:"budget"`
-	Fallbacks []RouteFallback                  `json:"fallbacks"`
+	Affinity nullable.Nullable[RouteAffinity] `json:"affinity"`
+	Budget   nullable.Nullable[SpendCap]      `json:"budget"`
+
+	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
+	CallerCostExempt *bool           `json:"caller_cost_exempt,omitempty"`
+	Fallbacks        []RouteFallback `json:"fallbacks"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry     RouteRetry      `json:"retry"`
@@ -5668,9 +7098,12 @@ type RouteDraftDetailResponse struct {
 	BasedOnRevisionId nullable.Nullable[openapi_types.UUID] `json:"based_on_revision_id,omitempty"`
 
 	// Budget Spend cap of the route itself.
-	Budget        nullable.Nullable[SpendCap]      `json:"budget"`
-	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy"`
-	CreatedAt     time.Time                        `json:"created_at"`
+	Budget nullable.Nullable[SpendCap] `json:"budget"`
+
+	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
+	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
+	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
+	CreatedAt        time.Time                        `json:"created_at"`
 
 	// CreatedByEmail Email of the operator who created the draft.
 	CreatedByEmail nullable.Nullable[string] `json:"created_by_email,omitempty"`
@@ -5678,11 +7111,14 @@ type RouteDraftDetailResponse struct {
 	Fallbacks      []RouteFallback           `json:"fallbacks"`
 
 	// Fidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
-	Fidelity         RouteFidelity      `json:"fidelity"`
-	Id               openapi_types.UUID `json:"id"`
-	MaxAttempts      int32              `json:"max_attempts"`
-	Operations       []string           `json:"operations"`
-	OverallTimeoutMs int32              `json:"overall_timeout_ms"`
+	Fidelity    RouteFidelity      `json:"fidelity"`
+	Id          openapi_types.UUID `json:"id"`
+	MaxAttempts int32              `json:"max_attempts"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+	Operations       []string               `json:"operations"`
+	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
 
 	// ProjectId Owning project; null means installation-wide.
 	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
@@ -5705,7 +7141,9 @@ type RouteDraftListResponse struct {
 
 // RouteDraftResponse defines model for RouteDraftResponse.
 type RouteDraftResponse struct {
-	Etag openapi_types.UUID `json:"etag"`
+	// CallerCostExempt Caller-paid ingress route. Requires caller credentials on every target and equal policy on fallback/selector routes. Preserve usage and prices, rates and concurrency, but exclude caller attempts from USD budget admission and accrual. Probes/classifiers retain their own accounting policy.
+	CallerCostExempt *bool              `json:"caller_cost_exempt,omitempty"`
+	Etag             openapi_types.UUID `json:"etag"`
 
 	// Fidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
 	Fidelity RouteFidelity      `json:"fidelity"`
@@ -5731,6 +7169,9 @@ type RouteFidelity struct {
 
 // RouteFidelityMode Strict preserves execution, observation, permitted continuation and effects relative to the selected target's native invocation. Transformed permits changing an invocation or its observed result, such as translating between dialects or redacting content. Native identity and qualified interaction are per-plan classes.
 type RouteFidelityMode string
+
+// RouteGroups Project-local named sets of ordinary or subscription route slugs. Empty groups grant no routes. Unknown slugs may be declared ahead of route creation; project isolation still applies.
+type RouteGroups map[string][]string
 
 // RouteLeg The route that served an attempt when it is not the route the caller named.
 type RouteLeg struct {
@@ -5799,16 +7240,22 @@ type RouteRevisionResponse struct {
 	Affinity    nullable.Nullable[RouteAffinity] `json:"affinity"`
 
 	// Budget Spend cap of the route itself.
-	Budget        nullable.Nullable[SpendCap]      `json:"budget"`
-	ContentPolicy nullable.Nullable[ContentPolicy] `json:"content_policy"`
-	Fallbacks     []RouteFallback                  `json:"fallbacks"`
+	Budget nullable.Nullable[SpendCap] `json:"budget"`
+
+	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
+	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
+	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
+	Fallbacks        []RouteFallback                  `json:"fallbacks"`
 
 	// Fidelity Route fidelity declaration. An omitted or null declaration, and an object without a mode, declare a strict route; nothing is inherited from an earlier draft or revision. Every stored draft, revision and exported route states its mode.
-	Fidelity         RouteFidelity      `json:"fidelity"`
-	Id               openapi_types.UUID `json:"id"`
-	MaxAttempts      int32              `json:"max_attempts"`
-	Operations       []string           `json:"operations"`
-	OverallTimeoutMs int32              `json:"overall_timeout_ms"`
+	Fidelity    RouteFidelity      `json:"fidelity"`
+	Id          openapi_types.UUID `json:"id"`
+	MaxAttempts int32              `json:"max_attempts"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+	Operations       []string               `json:"operations"`
+	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry         RouteRetry            `json:"retry"`
@@ -6165,6 +7612,228 @@ type RuntimeGenerationResponse struct {
 	Sequence int64              `json:"sequence"`
 }
 
+// SAMLConfiguration defines model for SAMLConfiguration.
+type SAMLConfiguration struct {
+	DefaultRole        nullable.Nullable[string] `json:"default_role"`
+	EmailAttribute     string                    `json:"email_attribute"`
+	EmailRoleMappings  []OidcRoleMappingRequest  `json:"email_role_mappings"`
+	Enabled            bool                      `json:"enabled"`
+	Etag               openapi_types.UUID        `json:"etag"`
+	GroupRoleMappings  []OidcRoleMappingRequest  `json:"group_role_mappings"`
+	GroupsAttribute    string                    `json:"groups_attribute"`
+	Id                 openapi_types.UUID        `json:"id"`
+	IdpEntityId        string                    `json:"idp_entity_id"`
+	MetadataXml        string                    `json:"metadata_xml"`
+	NameAttribute      string                    `json:"name_attribute"`
+	ServiceProviderId  string                    `json:"service_provider_id"`
+	SigningCertificate string                    `json:"signing_certificate"`
+}
+
+// SAMLConfigurationWrite defines model for SAMLConfigurationWrite.
+type SAMLConfigurationWrite struct {
+	DefaultRole       nullable.Nullable[string] `json:"default_role"`
+	EmailAttribute    string                    `json:"email_attribute"`
+	EmailRoleMappings []OidcRoleMappingRequest  `json:"email_role_mappings"`
+	Enabled           bool                      `json:"enabled"`
+	GroupRoleMappings []OidcRoleMappingRequest  `json:"group_role_mappings"`
+	GroupsAttribute   string                    `json:"groups_attribute"`
+	MetadataXml       string                    `json:"metadata_xml"`
+	NameAttribute     string                    `json:"name_attribute"`
+	RotateSigningKey  *bool                     `json:"rotate_signing_key,omitempty"`
+}
+
+// SAMLIdentities defines model for SAMLIdentities.
+type SAMLIdentities struct {
+	Items                     []SAMLIdentity `json:"items"`
+	LinkingAvailable          *bool          `json:"linking_available,omitempty"`
+	ReauthenticationAvailable *bool          `json:"reauthentication_available,omitempty"`
+}
+
+// SAMLIdentity defines model for SAMLIdentity.
+type SAMLIdentity struct {
+	CreatedAt   time.Time                    `json:"created_at"`
+	EmailAtLink openapi_types.Email          `json:"email_at_link"`
+	Id          openapi_types.UUID           `json:"id"`
+	Issuer      string                       `json:"issuer"`
+	LastLoginAt nullable.Nullable[time.Time] `json:"last_login_at"`
+	Subject     string                       `json:"subject"`
+}
+
+// SAMLImportedMetadata defines model for SAMLImportedMetadata.
+type SAMLImportedMetadata struct {
+	IdpEntityId string `json:"idp_entity_id"`
+	MetadataXml string `json:"metadata_xml"`
+}
+
+// SAMLMetadataImport defines model for SAMLMetadataImport.
+type SAMLMetadataImport struct {
+	Url string `json:"url"`
+}
+
+// SCIMDocument defines model for SCIMDocument.
+type SCIMDocument struct {
+	Schemas              []string               `json:"schemas"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// SCIMError defines model for SCIMError.
+type SCIMError struct {
+	Detail   string   `json:"detail"`
+	Schemas  []string `json:"schemas"`
+	ScimType *string  `json:"scimType,omitempty"`
+	Status   string   `json:"status"`
+}
+
+// SCIMGroup Flat group of SCIM users. Group role/scope grants combine with base user grants; project grants are inherited independently of direct membership.
+type SCIMGroup struct {
+	DisplayName string              `json:"displayName"`
+	ExternalId  *string             `json:"externalId,omitempty"`
+	Id          *openapi_types.UUID `json:"id,omitempty"`
+	Members     *[]struct {
+		Ref     *string `json:"$ref,omitempty"`
+		Display *string `json:"display,omitempty"`
+		Primary *bool   `json:"primary,omitempty"`
+		Type    *string `json:"type,omitempty"`
+		Value   *string `json:"value,omitempty"`
+	} `json:"members,omitempty"`
+	Meta                                             *SCIMMeta              `json:"meta,omitempty"`
+	Schemas                                          []string               `json:"schemas"`
+	UrnOpenllmproxyParamsScimSchemasExtension20Group *SCIMGroupAccess       `json:"urn:openllmproxy:params:scim:schemas:extension:2.0:Group,omitempty"`
+	AdditionalProperties                             map[string]interface{} `json:"-"`
+}
+
+// SCIMGroupAccess defines model for SCIMGroupAccess.
+type SCIMGroupAccess struct {
+	AccessScope *SCIMGroupAccessAccessScope `json:"accessScope,omitempty"`
+	Projects    *[]struct {
+		Role  SCIMGroupAccessProjectsRole `json:"role"`
+		Value openapi_types.UUID          `json:"value"`
+	} `json:"projects,omitempty"`
+	Role *SCIMGroupAccessRole `json:"role,omitempty"`
+}
+
+// SCIMGroupAccessAccessScope defines model for SCIMGroupAccess.AccessScope.
+type SCIMGroupAccessAccessScope string
+
+// SCIMGroupAccessProjectsRole defines model for SCIMGroupAccess.Projects.Role.
+type SCIMGroupAccessProjectsRole string
+
+// SCIMGroupAccessRole defines model for SCIMGroupAccess.Role.
+type SCIMGroupAccessRole string
+
+// SCIMList defines model for SCIMList.
+type SCIMList struct {
+	Resources    []SCIMDocument `json:"Resources"`
+	ItemsPerPage int            `json:"itemsPerPage"`
+	Schemas      []string       `json:"schemas"`
+	StartIndex   int            `json:"startIndex"`
+	TotalResults int            `json:"totalResults"`
+}
+
+// SCIMManagedGroup defines model for SCIMManagedGroup.
+type SCIMManagedGroup struct {
+	DisplayName string                    `json:"display_name"`
+	Etag        openapi_types.UUID        `json:"etag"`
+	ExternalId  nullable.Nullable[string] `json:"external_id"`
+	Id          openapi_types.UUID        `json:"id"`
+	Mapping     SCIMGroupAccess           `json:"mapping"`
+	MemberCount int                       `json:"member_count"`
+}
+
+// SCIMManagedGroupList defines model for SCIMManagedGroupList.
+type SCIMManagedGroupList struct {
+	Items      []SCIMManagedGroup        `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// SCIMMeta defines model for SCIMMeta.
+type SCIMMeta struct {
+	Created      *time.Time `json:"created,omitempty"`
+	LastModified *time.Time `json:"lastModified,omitempty"`
+	Location     *string    `json:"location,omitempty"`
+	ResourceType *string    `json:"resourceType,omitempty"`
+	Version      *string    `json:"version,omitempty"`
+}
+
+// SCIMPatch defines model for SCIMPatch.
+type SCIMPatch struct {
+	Operations []struct {
+		Op    SCIMPatchOperationsOp `json:"op"`
+		Path  *string               `json:"path,omitempty"`
+		Value interface{}           `json:"value,omitempty"`
+	} `json:"Operations"`
+	Schemas []string `json:"schemas"`
+}
+
+// SCIMPatchOperationsOp defines model for SCIMPatch.Operations.Op.
+type SCIMPatchOperationsOp string
+
+// SCIMSearch defines model for SCIMSearch.
+type SCIMSearch struct {
+	Attributes         *[]string `json:"attributes,omitempty"`
+	Count              *int      `json:"count,omitempty"`
+	ExcludedAttributes *[]string `json:"excludedAttributes,omitempty"`
+	Filter             *string   `json:"filter,omitempty"`
+	Schemas            []string  `json:"schemas"`
+	SortBy             *string   `json:"sortBy,omitempty"`
+	SortOrder          *string   `json:"sortOrder,omitempty"`
+	StartIndex         *int      `json:"startIndex,omitempty"`
+}
+
+// SCIMUser SCIM-managed federated user. Attribute names are case-insensitive; ambiguous duplicates are refused. userName is a unique email. Roles/groups are computed read-only values. The OLP extension provides base grants; groups add grants. Password provisioning is unsupported. Local takeover prevents subsequent SCIM writes.
+type SCIMUser struct {
+	Active      *bool   `json:"active,omitempty"`
+	DisplayName *string `json:"displayName,omitempty"`
+	Emails      *[]struct {
+		Ref     *string `json:"$ref,omitempty"`
+		Display *string `json:"display,omitempty"`
+		Primary *bool   `json:"primary,omitempty"`
+		Type    *string `json:"type,omitempty"`
+		Value   *string `json:"value,omitempty"`
+	} `json:"emails,omitempty"`
+	ExternalId *string `json:"externalId,omitempty"`
+	Groups     *[]struct {
+		Ref     *string `json:"$ref,omitempty"`
+		Display *string `json:"display,omitempty"`
+		Primary *bool   `json:"primary,omitempty"`
+		Type    *string `json:"type,omitempty"`
+		Value   *string `json:"value,omitempty"`
+	} `json:"groups,omitempty"`
+	Id   *openapi_types.UUID `json:"id,omitempty"`
+	Meta *SCIMMeta           `json:"meta,omitempty"`
+	Name *struct {
+		FamilyName      *string `json:"familyName,omitempty"`
+		Formatted       *string `json:"formatted,omitempty"`
+		GivenName       *string `json:"givenName,omitempty"`
+		HonorificPrefix *string `json:"honorificPrefix,omitempty"`
+		HonorificSuffix *string `json:"honorificSuffix,omitempty"`
+		MiddleName      *string `json:"middleName,omitempty"`
+	} `json:"name,omitempty"`
+	Roles *[]struct {
+		Ref     *string `json:"$ref,omitempty"`
+		Display *string `json:"display,omitempty"`
+		Primary *bool   `json:"primary,omitempty"`
+		Type    *string `json:"type,omitempty"`
+		Value   *string `json:"value,omitempty"`
+	} `json:"roles,omitempty"`
+	Schemas                                         []string               `json:"schemas"`
+	UrnOpenllmproxyParamsScimSchemasExtension20User *SCIMUserAccess        `json:"urn:openllmproxy:params:scim:schemas:extension:2.0:User,omitempty"`
+	UserName                                        openapi_types.Email    `json:"userName"`
+	AdditionalProperties                            map[string]interface{} `json:"-"`
+}
+
+// SCIMUserAccess defines model for SCIMUserAccess.
+type SCIMUserAccess struct {
+	AccessScope *SCIMUserAccessAccessScope `json:"accessScope,omitempty"`
+	Role        *SCIMUserAccessRole        `json:"role,omitempty"`
+}
+
+// SCIMUserAccessAccessScope defines model for SCIMUserAccess.AccessScope.
+type SCIMUserAccessAccessScope string
+
+// SCIMUserAccessRole defines model for SCIMUserAccess.Role.
+type SCIMUserAccessRole string
+
 // SelectorOutcome How one selector judged the request. The first matched selector wins; the ones after it are not evaluated.
 type SelectorOutcome struct {
 	Id string `json:"id"`
@@ -6259,12 +7928,24 @@ type SetModelRequest struct {
 
 // SettingResponse defines model for SettingResponse.
 type SettingResponse struct {
+	// Calendar Only on budgets.time_zone: current periods and pending zone changes. Each period finishes before switching; no active spend resets.
+	Calendar *[]struct {
+		EffectiveAt     nullable.Nullable[time.Time]      `json:"effective_at"`
+		EndsAt          time.Time                         `json:"ends_at"`
+		PendingTimeZone nullable.Nullable[string]         `json:"pending_time_zone"`
+		StartsAt        time.Time                         `json:"starts_at"`
+		TimeZone        string                            `json:"time_zone"`
+		WindowKind      SettingResponseCalendarWindowKind `json:"window_kind"`
+	} `json:"calendar,omitempty"`
 	Etag      openapi_types.UUID `json:"etag"`
 	Key       string             `json:"key"`
 	UpdatedAt time.Time          `json:"updated_at"`
 	UpdatedBy openapi_types.UUID `json:"updated_by"`
 	Value     string             `json:"value"`
 }
+
+// SettingResponseCalendarWindowKind defines model for SettingResponse.Calendar.WindowKind.
+type SettingResponseCalendarWindowKind string
 
 // SettingsResponse defines model for SettingsResponse.
 type SettingsResponse struct {
@@ -6555,15 +8236,31 @@ type UpdateApiKeyRequest struct {
 	// AllowedAttributionKeys Attribution keys this key may report via the X-OLP-Attribution header; at most 8, each a short machine token.
 	AllowedAttributionKeys *[]string `json:"allowed_attribution_keys,omitempty"`
 
+	// AllowedCidrs Allowed IPv4 or IPv6 client CIDR ranges. Omitted, null or empty means unrestricted. The gateway uses its trusted-proxy resolver; forwarded addresses from untrusted peers cannot grant access. IPv4-mapped IPv6 ranges must use IPv4 syntax. Host bits do not narrow a network prefix.
+	AllowedCidrs nullable.Nullable[[]string] `json:"allowed_cidrs,omitempty"`
+
+	// AllowedRouteGroups Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing.
+	AllowedRouteGroups nullable.Nullable[[]string] `json:"allowed_route_groups,omitempty"`
+
 	// AllowedRoutes Omit to keep the stored allowlist. Send `[]` to clear it; an empty
 	// allowlist places no route restriction on the key.
 	AllowedRoutes *[]string `json:"allowed_routes,omitempty"`
 
+	// AttributionDefaults Operator-pinned labels added to accounting. Callers may omit them or supply the same value; overriding them is refused. Project pins also apply.
+	AttributionDefaults nullable.Nullable[map[string]string] `json:"attribution_defaults,omitempty"`
+
 	// BudgetGroupId Omit to keep the stored group; send null to clear it.
 	BudgetGroupId  nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
 	DailyCostLimit nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
-	ExpiresAt      nullable.Nullable[time.Time]          `json:"expires_at,omitempty"`
-	MaxConcurrency nullable.Nullable[int32]              `json:"max_concurrency,omitempty"`
+	EndUserPolicy  nullable.Nullable[EndUserPolicy]      `json:"end_user_policy,omitempty"`
+
+	// EndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
+	EndUserSource nullable.Nullable[UpdateApiKeyRequestEndUserSource] `json:"end_user_source,omitempty"`
+	ExpiresAt     nullable.Nullable[time.Time]                        `json:"expires_at,omitempty"`
+
+	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
+	LimitTemplate  nullable.Nullable[string] `json:"limit_template,omitempty"`
+	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 
 	// MaxPriority Highest class a request may choose through X-OLP-Routing; defaults to priority.
 	MaxPriority      nullable.Nullable[AdmissionPriority] `json:"max_priority,omitempty"`
@@ -6574,18 +8271,39 @@ type UpdateApiKeyRequest struct {
 	Priority          nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
 	RequestsPerMinute nullable.Nullable[int32]             `json:"requests_per_minute,omitempty"`
 
+	// RequiredAttributionKeys Required attribution labels, in addition to project requirements. Missing labels return 400 missing_attribution before dispatch.
+	RequiredAttributionKeys nullable.Nullable[[]string] `json:"required_attribution_keys,omitempty"`
+
 	// ResponseMetadata Opts this key into the X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider and X-OLP-Cost response headers on inference responses (X-OLP-Cost on unary responses only). The gateway names the serving provider in a header only with this opt-in; the message of an upstream rejection is relayed after credential redaction whatever the policy. Defaults to false.
-	ResponseMetadata *bool                    `json:"response_metadata,omitempty"`
-	Scopes           *[]string                `json:"scopes,omitempty"`
-	TokensPerMinute  nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`
+	ResponseMetadata *bool `json:"response_metadata,omitempty"`
+
+	// RotationIntervalDays Declared rotation reminder interval from creation or the last explicit rotation. Does not expire or automatically rotate the secret. Null disables rotation reminders.
+	RotationIntervalDays nullable.Nullable[int]               `json:"rotation_interval_days,omitempty"`
+	RouteLimits          nullable.Nullable[ApiKeyRouteLimits] `json:"route_limits,omitempty"`
+	Scopes               *[]string                            `json:"scopes,omitempty"`
+	TokensPerMinute      nullable.Nullable[int64]             `json:"tokens_per_minute,omitempty"`
+
+	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
+	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
-// UpdateBudgetGroupRequest A merge patch: every field is optional, an omitted field keeps the stored
-// value, and an explicit null clears a cost limit. project_id is immutable.
+// UpdateApiKeyRequestEndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
+type UpdateApiKeyRequestEndUserSource string
+
+// UpdateBudgetGroupRequest Merge patch; omitted fields retain values, null clears a limit or template reference. project_id is immutable. Inline limits and a project template intersect; at least one limit or a template reference is required.
 type UpdateBudgetGroupRequest struct {
-	DailyCostLimit   nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
-	MonthlyCostLimit nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
-	Name             *string                   `json:"name,omitempty"`
+	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+
+	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
+	LimitTemplate     nullable.Nullable[string] `json:"limit_template,omitempty"`
+	MaxConcurrency    nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
+	MonthlyCostLimit  nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
+	Name              *string                   `json:"name,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]  `json:"requests_per_minute,omitempty"`
+	TokensPerMinute   nullable.Nullable[int64]  `json:"tokens_per_minute,omitempty"`
+
+	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
+	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
 // UpdateNotificationDestinationRequest defines model for UpdateNotificationDestinationRequest.
@@ -6832,6 +8550,66 @@ type Vendor struct {
 	UnsupportedParameters []string `json:"unsupported_parameters"`
 }
 
+// WorkloadIssuer defines model for WorkloadIssuer.
+type WorkloadIssuer struct {
+	Algorithms         []WorkloadIssuerAlgorithms `json:"algorithms"`
+	Audiences          []string                   `json:"audiences"`
+	CreatedAt          time.Time                  `json:"created_at"`
+	CreatedBy          openapi_types.UUID         `json:"created_by"`
+	DisabledKeyIds     []string                   `json:"disabled_key_ids"`
+	Enabled            bool                       `json:"enabled"`
+	Etag               openapi_types.UUID         `json:"etag"`
+	Id                 openapi_types.UUID         `json:"id"`
+	Issuer             string                     `json:"issuer"`
+	JwksUrl            string                     `json:"jwks_url"`
+	Mappings           []WorkloadMapping          `json:"mappings"`
+	MaxLifetimeSeconds int                        `json:"max_lifetime_seconds"`
+	Name               string                     `json:"name"`
+	UpdatedAt          time.Time                  `json:"updated_at"`
+}
+
+// WorkloadIssuerAlgorithms defines model for WorkloadIssuer.Algorithms.
+type WorkloadIssuerAlgorithms string
+
+// WorkloadIssuerList defines model for WorkloadIssuerList.
+type WorkloadIssuerList struct {
+	Items      []WorkloadIssuer          `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// WorkloadIssuerWrite defines model for WorkloadIssuerWrite.
+type WorkloadIssuerWrite struct {
+	Algorithms         []WorkloadIssuerWriteAlgorithms `json:"algorithms"`
+	Audiences          []string                        `json:"audiences"`
+	DisabledKeyIds     []string                        `json:"disabled_key_ids"`
+	Enabled            bool                            `json:"enabled"`
+	Issuer             string                          `json:"issuer"`
+	JwksUrl            string                          `json:"jwks_url"`
+	Mappings           []WorkloadMapping               `json:"mappings"`
+	MaxLifetimeSeconds int                             `json:"max_lifetime_seconds"`
+	Name               string                          `json:"name"`
+}
+
+// WorkloadIssuerWriteAlgorithms defines model for WorkloadIssuerWrite.Algorithms.
+type WorkloadIssuerWriteAlgorithms string
+
+// WorkloadMapping Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project.
+type WorkloadMapping struct {
+	AllowProviderState *bool                     `json:"allow_provider_state,omitempty"`
+	EndUserClaim       nullable.Nullable[string] `json:"end_user_claim,omitempty"`
+	LimitTemplate      string                    `json:"limit_template"`
+
+	// Match Exact string matches at JSON pointers. The first matching mapping wins; an empty object matches all verified subjects.
+	Match       map[string]string       `json:"match"`
+	Name        string                  `json:"name"`
+	ProjectId   openapi_types.UUID      `json:"project_id"`
+	RouteGroups []string                `json:"route_groups"`
+	Scopes      []WorkloadMappingScopes `json:"scopes"`
+}
+
+// WorkloadMappingScopes defines model for WorkloadMapping.Scopes.
+type WorkloadMappingScopes string
+
 // ListApiKeysParams defines parameters for ListApiKeys.
 type ListApiKeysParams struct {
 	Cursor    *string             `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -6849,6 +8627,11 @@ type CreateApiKeyParams struct {
 type UpdateApiKeyParams struct {
 	// IfMatch Current API-key ETag
 	IfMatch string `json:"If-Match"`
+}
+
+// LookupEndUserJSONBody defines parameters for LookupEndUser.
+type LookupEndUserJSONBody struct {
+	Identifier string `json:"identifier"`
 }
 
 // RevokeApiKeyParams defines parameters for RevokeApiKey.
@@ -6899,6 +8682,11 @@ type ListAuditEventsParams struct {
 	OccurredBefore *time.Time `form:"occurred_before,omitempty" json:"occurred_before,omitempty"`
 }
 
+// MfaVerify201JSONResponseBody defines parameters for MfaVerify.
+type MfaVerify201JSONResponseBody struct {
+	union json.RawMessage
+}
+
 // ListBudgetGroupsParams defines parameters for ListBudgetGroups.
 type ListBudgetGroupsParams struct {
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -6914,6 +8702,35 @@ type CreateBudgetGroupParams struct {
 // UpdateBudgetGroupParams defines parameters for UpdateBudgetGroup.
 type UpdateBudgetGroupParams struct {
 	// IfMatch Current budget group ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// ListBudgetIncreasesParams defines parameters for ListBudgetIncreases.
+type ListBudgetIncreasesParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateBudgetIncreaseParams defines parameters for CreateBudgetIncrease.
+type CreateBudgetIncreaseParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// RevokeBudgetIncreaseParams defines parameters for RevokeBudgetIncrease.
+type RevokeBudgetIncreaseParams struct {
+	// IfMatch Quoted project etag from GET.
+	IfMatch string `json:"If-Match"`
+}
+
+// PutInstallationBudgetJSONBody defines parameters for PutInstallationBudget.
+type PutInstallationBudgetJSONBody struct {
+	Policy nullable.Nullable[BudgetPolicy] `json:"policy"`
+}
+
+// PutInstallationBudgetParams defines parameters for PutInstallationBudget.
+type PutInstallationBudgetParams struct {
+	// IfMatch Quoted project etag from GET.
 	IfMatch string `json:"If-Match"`
 }
 
@@ -6943,6 +8760,9 @@ type ListCodeAttemptsParams struct {
 	ApiKeyId  *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	AccountId *openapi_types.UUID `form:"account_id,omitempty" json:"account_id,omitempty"`
 	BindingId *openapi_types.UUID `form:"binding_id,omitempty" json:"binding_id,omitempty"`
+
+	// EndUserDigest Filter by a project-scoped digest, or unidentified for requests without one.
+	EndUserDigest *string `form:"end_user_digest,omitempty" json:"end_user_digest,omitempty"`
 }
 
 // ListCodeBindingsParams defines parameters for ListCodeBindings.
@@ -7001,6 +8821,9 @@ type ListCodeRefusalsParams struct {
 	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
 	RouteId   *openapi_types.UUID `form:"route_id,omitempty" json:"route_id,omitempty"`
 	ApiKeyId  *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+
+	// EndUserDigest Filter by a project-scoped digest, or unidentified for requests without one.
+	EndUserDigest *string `form:"end_user_digest,omitempty" json:"end_user_digest,omitempty"`
 }
 
 // ListCodeRoutesParams defines parameters for ListCodeRoutes.
@@ -7222,6 +9045,89 @@ type BeginLoginParams struct {
 	ReturnTo *string `form:"return_to,omitempty" json:"return_to,omitempty"`
 }
 
+// ListOrganizationsParams defines parameters for ListOrganizations.
+type ListOrganizationsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateOrganizationParams defines parameters for CreateOrganization.
+type CreateOrganizationParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// UpdateOrganizationParams defines parameters for UpdateOrganization.
+type UpdateOrganizationParams struct {
+	// IfMatch Current project ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// PutOrganizationBudgetJSONBody defines parameters for PutOrganizationBudget.
+type PutOrganizationBudgetJSONBody struct {
+	Policy nullable.Nullable[BudgetPolicy] `json:"policy"`
+}
+
+// PutOrganizationBudgetParams defines parameters for PutOrganizationBudget.
+type PutOrganizationBudgetParams struct {
+	// IfMatch Quoted project etag from GET.
+	IfMatch string `json:"If-Match"`
+}
+
+// ListOrganizationMembersParams defines parameters for ListOrganizationMembers.
+type ListOrganizationMembersParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// DeleteOrganizationMemberParams defines parameters for DeleteOrganizationMember.
+type DeleteOrganizationMemberParams struct {
+	// IfMatch Current project ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// PutOrganizationMemberParams defines parameters for PutOrganizationMember.
+type PutOrganizationMemberParams struct {
+	// IfMatch Current project ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// OrganizationListProjectsParams defines parameters for OrganizationListProjects.
+type OrganizationListProjectsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// OrganizationCreateProjectParams defines parameters for OrganizationCreateProject.
+type OrganizationCreateProjectParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// OrganizationUpdateProjectParams defines parameters for OrganizationUpdateProject.
+type OrganizationUpdateProjectParams struct {
+	// IfMatch Current project ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// OrganizationListProjectMembersParams defines parameters for OrganizationListProjectMembers.
+type OrganizationListProjectMembersParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// OrganizationDeleteProjectMemberParams defines parameters for OrganizationDeleteProjectMember.
+type OrganizationDeleteProjectMemberParams struct {
+	// IfMatch Current project ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// OrganizationPutProjectMemberParams defines parameters for OrganizationPutProjectMember.
+type OrganizationPutProjectMemberParams struct {
+	// IfMatch Current project ETag
+	IfMatch string `json:"If-Match"`
+}
+
 // UninstallPluginParams defines parameters for UninstallPlugin.
 type UninstallPluginParams struct {
 	// IfMatch Current plugin ETag
@@ -7291,6 +9197,18 @@ type UpdateProfileParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// MfaRemoveParams defines parameters for MfaRemove.
+type MfaRemoveParams struct {
+	// IfMatch Quoted MFA status ETag.
+	IfMatch string `json:"If-Match"`
+}
+
+// MfaRecoveryCodesParams defines parameters for MfaRecoveryCodes.
+type MfaRecoveryCodesParams struct {
+	// IfMatch Quoted MFA status ETag.
+	IfMatch string `json:"If-Match"`
+}
+
 // ChangePasswordParams defines parameters for ChangePassword.
 type ChangePasswordParams struct {
 	// IfMatch Current profile ETag
@@ -7321,6 +9239,63 @@ type UpdateProjectParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// PutProjectAttributionBudgetsJSONBody defines parameters for PutProjectAttributionBudgets.
+type PutProjectAttributionBudgetsJSONBody struct {
+	// Budgets At most 64 project label/value pairs in total, each with at least one positive day/week/month cap. Caps apply to resolved labels across all keys and system work carrying those labels. Unpinned caller-selected labels are allocation controls; pin or require labels to prevent omission or reassignment. Removing/readding caps preserves current-window spend.
+	Budgets AttributionBudgets `json:"budgets"`
+}
+
+// PutProjectAttributionBudgetsParams defines parameters for PutProjectAttributionBudgets.
+type PutProjectAttributionBudgetsParams struct {
+	// IfMatch Quoted project etag from GET.
+	IfMatch string `json:"If-Match"`
+}
+
+// PutProjectAttributionPolicyJSONBody defines parameters for PutProjectAttributionPolicy.
+type PutProjectAttributionPolicyJSONBody struct {
+	Policy nullable.Nullable[AttributionPolicy] `json:"policy"`
+}
+
+// PutProjectAttributionPolicyParams defines parameters for PutProjectAttributionPolicy.
+type PutProjectAttributionPolicyParams struct {
+	// IfMatch Quoted project etag from GET.
+	IfMatch string `json:"If-Match"`
+}
+
+// PutProjectBudgetJSONBody defines parameters for PutProjectBudget.
+type PutProjectBudgetJSONBody struct {
+	Policy nullable.Nullable[BudgetPolicy] `json:"policy"`
+}
+
+// PutProjectBudgetParams defines parameters for PutProjectBudget.
+type PutProjectBudgetParams struct {
+	// IfMatch Quoted project etag from GET.
+	IfMatch string `json:"If-Match"`
+}
+
+// PutProjectEndUserPolicyJSONBody defines parameters for PutProjectEndUserPolicy.
+type PutProjectEndUserPolicyJSONBody struct {
+	Policy nullable.Nullable[EndUserPolicy] `json:"policy"`
+}
+
+// PutProjectEndUserPolicyParams defines parameters for PutProjectEndUserPolicy.
+type PutProjectEndUserPolicyParams struct {
+	// IfMatch Quoted project etag from GET.
+	IfMatch string `json:"If-Match"`
+}
+
+// PutProjectLimitTemplatesJSONBody defines parameters for PutProjectLimitTemplates.
+type PutProjectLimitTemplatesJSONBody struct {
+	// Templates Project-scoped policy ceilings; each referencing boundary keeps separate counters. Empty limits add no ceilings. Referenced templates cannot be removed.
+	Templates LimitTemplates `json:"templates"`
+}
+
+// PutProjectLimitTemplatesParams defines parameters for PutProjectLimitTemplates.
+type PutProjectLimitTemplatesParams struct {
+	// IfMatch Quoted project etag from GET.
+	IfMatch string `json:"If-Match"`
+}
+
 // ListProjectMembersParams defines parameters for ListProjectMembers.
 type ListProjectMembersParams struct {
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -7336,6 +9311,18 @@ type DeleteProjectMemberParams struct {
 // PutProjectMemberParams defines parameters for PutProjectMember.
 type PutProjectMemberParams struct {
 	// IfMatch Current project ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// PutProjectRouteGroupsJSONBody defines parameters for PutProjectRouteGroups.
+type PutProjectRouteGroupsJSONBody struct {
+	// Groups Project-local named sets of ordinary or subscription route slugs. Empty groups grant no routes. Unknown slugs may be declared ahead of route creation; project isolation still applies.
+	Groups RouteGroups `json:"groups"`
+}
+
+// PutProjectRouteGroupsParams defines parameters for PutProjectRouteGroups.
+type PutProjectRouteGroupsParams struct {
+	// IfMatch Quoted project etag from GET.
 	IfMatch string `json:"If-Match"`
 }
 
@@ -7702,6 +9689,40 @@ type ListRuntimeGenerationsParams struct {
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ReceiveSamlResponseFormdataBody defines parameters for ReceiveSamlResponse.
+type ReceiveSamlResponseFormdataBody struct {
+	RelayState   string `form:"RelayState" json:"RelayState"`
+	SAMLResponse string `form:"SAMLResponse" json:"SAMLResponse"`
+}
+
+// CompleteSamlLoginParams defines parameters for CompleteSamlLogin.
+type CompleteSamlLoginParams struct {
+	State string `form:"state" json:"state"`
+}
+
+// PutSamlConfigurationParams defines parameters for PutSamlConfiguration.
+type PutSamlConfigurationParams struct {
+	// IfMatch Required UUID ETag when updating
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
+// ListScimGroupsParams defines parameters for ListScimGroups.
+type ListScimGroupsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// UpdateScimGroupMappingJSONBody defines parameters for UpdateScimGroupMapping.
+type UpdateScimGroupMappingJSONBody struct {
+	Mapping SCIMGroupAccess `json:"mapping"`
+}
+
+// UpdateScimGroupMappingParams defines parameters for UpdateScimGroupMapping.
+type UpdateScimGroupMappingParams struct {
+	// IfMatch Current budget group ETag
+	IfMatch string `json:"If-Match"`
+}
+
 // ListSessionsParams defines parameters for ListSessions.
 type ListSessionsParams struct {
 	// Cursor Opaque cursor returned by the previous page
@@ -7736,7 +9757,7 @@ type UsageBreakdownParams struct {
 	ApiKeyId   *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	Operation  *string             `form:"operation,omitempty" json:"operation,omitempty"`
 
-	// Dimension Break down by route, provider, model, model_family, estimate_provenance, api_key, operation, or attribution (requires attribution_key). model_family and estimate_provenance group by the tokenizer family of each attempt's model and the method behind its input estimate. An attempt that was never estimated, such as a stored-response call, a realtime session or a job poll, still has its model's family and appears as none under estimate_provenance; unknown appears only for attempts recorded before families were. A request counts once, under its first attempt, while token totals follow each attempt.
+	// Dimension Break down by route, provider, model, model_family, estimate_provenance, api_key, end_user, operation, or attribution (requires attribution_key). model_family and estimate_provenance group by the tokenizer family of each attempt's model and the method behind its input estimate. An attempt that was never estimated, such as a stored-response call, a realtime session or a job poll, still has its model's family and appears as none under estimate_provenance; unknown appears only for attempts recorded before families were. A request counts once, under its first attempt, while token totals follow each attempt. end_user groups by a project-scoped HMAC digest; unidentified requests appear as unidentified.
 	Dimension string `form:"dimension" json:"dimension"`
 
 	// Limit Maximum number of breakdown rows
@@ -7826,8 +9847,102 @@ type UpdateUserRoleParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// GetWorkloadIssuersParams defines parameters for GetWorkloadIssuers.
+type GetWorkloadIssuersParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostWorkloadIssuersParams defines parameters for PostWorkloadIssuers.
+type PostWorkloadIssuersParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// PutWorkloadIssuerParams defines parameters for PutWorkloadIssuer.
+type PutWorkloadIssuerParams struct {
+	// IfMatch Current budget group ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// ScimGroupsListParams defines parameters for ScimGroupsList.
+type ScimGroupsListParams struct {
+	Filter             *string `form:"filter,omitempty" json:"filter,omitempty"`
+	StartIndex         *int    `form:"startIndex,omitempty" json:"startIndex,omitempty"`
+	Count              *int    `form:"count,omitempty" json:"count,omitempty"`
+	Attributes         *string `form:"attributes,omitempty" json:"attributes,omitempty"`
+	ExcludedAttributes *string `form:"excludedAttributes,omitempty" json:"excludedAttributes,omitempty"`
+	SortBy             *string `form:"sortBy,omitempty" json:"sortBy,omitempty"`
+	SortOrder          *string `form:"sortOrder,omitempty" json:"sortOrder,omitempty"`
+}
+
+// ScimGroupsDeleteParams defines parameters for ScimGroupsDelete.
+type ScimGroupsDeleteParams struct {
+	// IfMatch Optional strong or weak resource ETag; stale versions fail atomically.
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
+// ScimGroupsGetParams defines parameters for ScimGroupsGet.
+type ScimGroupsGetParams struct {
+	Attributes         *string `form:"attributes,omitempty" json:"attributes,omitempty"`
+	ExcludedAttributes *string `form:"excludedAttributes,omitempty" json:"excludedAttributes,omitempty"`
+}
+
+// ScimGroupsPatchParams defines parameters for ScimGroupsPatch.
+type ScimGroupsPatchParams struct {
+	// IfMatch Optional strong or weak resource ETag; stale versions fail atomically.
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
+// ScimGroupsReplaceParams defines parameters for ScimGroupsReplace.
+type ScimGroupsReplaceParams struct {
+	// IfMatch Optional strong or weak resource ETag; stale versions fail atomically.
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
+// ScimUsersListParams defines parameters for ScimUsersList.
+type ScimUsersListParams struct {
+	Filter             *string `form:"filter,omitempty" json:"filter,omitempty"`
+	StartIndex         *int    `form:"startIndex,omitempty" json:"startIndex,omitempty"`
+	Count              *int    `form:"count,omitempty" json:"count,omitempty"`
+	Attributes         *string `form:"attributes,omitempty" json:"attributes,omitempty"`
+	ExcludedAttributes *string `form:"excludedAttributes,omitempty" json:"excludedAttributes,omitempty"`
+	SortBy             *string `form:"sortBy,omitempty" json:"sortBy,omitempty"`
+	SortOrder          *string `form:"sortOrder,omitempty" json:"sortOrder,omitempty"`
+}
+
+// ScimUsersDeleteParams defines parameters for ScimUsersDelete.
+type ScimUsersDeleteParams struct {
+	// IfMatch Optional strong or weak resource ETag; stale versions fail atomically.
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
+// ScimUsersGetParams defines parameters for ScimUsersGet.
+type ScimUsersGetParams struct {
+	Attributes         *string `form:"attributes,omitempty" json:"attributes,omitempty"`
+	ExcludedAttributes *string `form:"excludedAttributes,omitempty" json:"excludedAttributes,omitempty"`
+}
+
+// ScimUsersPatchParams defines parameters for ScimUsersPatch.
+type ScimUsersPatchParams struct {
+	// IfMatch Optional strong or weak resource ETag; stale versions fail atomically.
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
+// ScimUsersReplaceParams defines parameters for ScimUsersReplace.
+type ScimUsersReplaceParams struct {
+	// IfMatch Optional strong or weak resource ETag; stale versions fail atomically.
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
 // BudgetThresholdWebhookParams defines parameters for BudgetThresholdWebhook.
 type BudgetThresholdWebhookParams struct {
+	// XOLPSignature sha256=<hex HMAC-SHA256 of the exact body>, keyed by the destination's signing secret; absent when the destination has none.
+	XOLPSignature *string `json:"X-OLP-Signature,omitempty"`
+}
+
+// KeyExpiringWebhookParams defines parameters for KeyExpiringWebhook.
+type KeyExpiringWebhookParams struct {
 	// XOLPSignature sha256=<hex HMAC-SHA256 of the exact body>, keyed by the destination's signing secret; absent when the destination has none.
 	XOLPSignature *string `json:"X-OLP-Signature,omitempty"`
 }
@@ -7844,14 +9959,29 @@ type CreateApiKeyJSONRequestBody = CreateApiKeyRequest
 // UpdateApiKeyJSONRequestBody defines body for UpdateApiKey for application/json ContentType.
 type UpdateApiKeyJSONRequestBody = UpdateApiKeyRequest
 
+// LookupEndUserJSONRequestBody defines body for LookupEndUser for application/json ContentType.
+type LookupEndUserJSONRequestBody LookupEndUserJSONBody
+
 // RotateApiKeyJSONRequestBody defines body for RotateApiKey for application/json ContentType.
 type RotateApiKeyJSONRequestBody = RotateApiKeyJSONBody
+
+// MfaBootstrapEnrollJSONRequestBody defines body for MfaBootstrapEnroll for application/json ContentType.
+type MfaBootstrapEnrollJSONRequestBody = MFAEnrollmentRequest
+
+// MfaVerifyJSONRequestBody defines body for MfaVerify for application/json ContentType.
+type MfaVerifyJSONRequestBody = MFAVerificationRequest
 
 // CreateBudgetGroupJSONRequestBody defines body for CreateBudgetGroup for application/json ContentType.
 type CreateBudgetGroupJSONRequestBody = CreateBudgetGroupRequest
 
 // UpdateBudgetGroupJSONRequestBody defines body for UpdateBudgetGroup for application/json ContentType.
 type UpdateBudgetGroupJSONRequestBody = UpdateBudgetGroupRequest
+
+// CreateBudgetIncreaseJSONRequestBody defines body for CreateBudgetIncrease for application/json ContentType.
+type CreateBudgetIncreaseJSONRequestBody = CreateBudgetIncreaseRequest
+
+// PutInstallationBudgetJSONRequestBody defines body for PutInstallationBudget for application/json ContentType.
+type PutInstallationBudgetJSONRequestBody PutInstallationBudgetJSONBody
 
 // CreateCodeAccountJSONRequestBody defines body for CreateCodeAccount for application/json ContentType.
 type CreateCodeAccountJSONRequestBody = CodeAccountWrite
@@ -7913,6 +10043,27 @@ type BeginLoginPostJSONRequestBody = OidcLoginRequest
 // BeginReauthenticationJSONRequestBody defines body for BeginReauthentication for application/json ContentType.
 type BeginReauthenticationJSONRequestBody = OidcReauthenticationRequest
 
+// CreateOrganizationJSONRequestBody defines body for CreateOrganization for application/json ContentType.
+type CreateOrganizationJSONRequestBody = CreateProjectRequest
+
+// UpdateOrganizationJSONRequestBody defines body for UpdateOrganization for application/json ContentType.
+type UpdateOrganizationJSONRequestBody = UpdateProjectRequest
+
+// PutOrganizationBudgetJSONRequestBody defines body for PutOrganizationBudget for application/json ContentType.
+type PutOrganizationBudgetJSONRequestBody PutOrganizationBudgetJSONBody
+
+// PutOrganizationMemberJSONRequestBody defines body for PutOrganizationMember for application/json ContentType.
+type PutOrganizationMemberJSONRequestBody = PutProjectMemberRequest
+
+// OrganizationCreateProjectJSONRequestBody defines body for OrganizationCreateProject for application/json ContentType.
+type OrganizationCreateProjectJSONRequestBody = CreateProjectRequest
+
+// OrganizationUpdateProjectJSONRequestBody defines body for OrganizationUpdateProject for application/json ContentType.
+type OrganizationUpdateProjectJSONRequestBody = UpdateProjectRequest
+
+// OrganizationPutProjectMemberJSONRequestBody defines body for OrganizationPutProjectMember for application/json ContentType.
+type OrganizationPutProjectMemberJSONRequestBody = PutProjectMemberRequest
+
 // ExecutePlaygroundJSONRequestBody defines body for ExecutePlayground for application/json ContentType.
 type ExecutePlaygroundJSONRequestBody = PlaygroundRequest
 
@@ -7937,6 +10088,9 @@ type UpdatePricingSourceJSONRequestBody = UpdatePricingSourceRequest
 // UpdateProfileJSONRequestBody defines body for UpdateProfile for application/json ContentType.
 type UpdateProfileJSONRequestBody = UpdateProfileRequest
 
+// MfaEnrollJSONRequestBody defines body for MfaEnroll for application/json ContentType.
+type MfaEnrollJSONRequestBody = MFAEnrollmentRequest
+
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody = ChangePasswordRequest
 
@@ -7946,14 +10100,35 @@ type EnrollPasswordJSONRequestBody = EnrollPasswordRequest
 // RecentAuthenticationJSONRequestBody defines body for RecentAuthentication for application/json ContentType.
 type RecentAuthenticationJSONRequestBody = RecentAuthenticationRequest
 
+// BeginSamlReauthenticationJSONRequestBody defines body for BeginSamlReauthentication for application/json ContentType.
+type BeginSamlReauthenticationJSONRequestBody = OidcReauthenticationRequest
+
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody = CreateProjectRequest
 
 // UpdateProjectJSONRequestBody defines body for UpdateProject for application/json ContentType.
 type UpdateProjectJSONRequestBody = UpdateProjectRequest
 
+// PutProjectAttributionBudgetsJSONRequestBody defines body for PutProjectAttributionBudgets for application/json ContentType.
+type PutProjectAttributionBudgetsJSONRequestBody PutProjectAttributionBudgetsJSONBody
+
+// PutProjectAttributionPolicyJSONRequestBody defines body for PutProjectAttributionPolicy for application/json ContentType.
+type PutProjectAttributionPolicyJSONRequestBody PutProjectAttributionPolicyJSONBody
+
+// PutProjectBudgetJSONRequestBody defines body for PutProjectBudget for application/json ContentType.
+type PutProjectBudgetJSONRequestBody PutProjectBudgetJSONBody
+
+// PutProjectEndUserPolicyJSONRequestBody defines body for PutProjectEndUserPolicy for application/json ContentType.
+type PutProjectEndUserPolicyJSONRequestBody PutProjectEndUserPolicyJSONBody
+
+// PutProjectLimitTemplatesJSONRequestBody defines body for PutProjectLimitTemplates for application/json ContentType.
+type PutProjectLimitTemplatesJSONRequestBody PutProjectLimitTemplatesJSONBody
+
 // PutProjectMemberJSONRequestBody defines body for PutProjectMember for application/json ContentType.
 type PutProjectMemberJSONRequestBody = PutProjectMemberRequest
+
+// PutProjectRouteGroupsJSONRequestBody defines body for PutProjectRouteGroups for application/json ContentType.
+type PutProjectRouteGroupsJSONRequestBody PutProjectRouteGroupsJSONBody
 
 // CreateProviderJSONRequestBody defines body for CreateProvider for application/json ContentType.
 type CreateProviderJSONRequestBody = CreateProviderRequest
@@ -8009,6 +10184,21 @@ type PutRoutingPolicyJSONRequestBody = RoutingPolicy
 // SimulateRoutingJSONRequestBody defines body for SimulateRouting for application/json ContentType.
 type SimulateRoutingJSONRequestBody = SimulationRequest
 
+// ReceiveSamlResponseFormdataRequestBody defines body for ReceiveSamlResponse for application/x-www-form-urlencoded ContentType.
+type ReceiveSamlResponseFormdataRequestBody ReceiveSamlResponseFormdataBody
+
+// PutSamlConfigurationJSONRequestBody defines body for PutSamlConfiguration for application/json ContentType.
+type PutSamlConfigurationJSONRequestBody = SAMLConfigurationWrite
+
+// ImportSamlMetadataJSONRequestBody defines body for ImportSamlMetadata for application/json ContentType.
+type ImportSamlMetadataJSONRequestBody = SAMLMetadataImport
+
+// BeginSamlLoginJSONRequestBody defines body for BeginSamlLogin for application/json ContentType.
+type BeginSamlLoginJSONRequestBody = OidcLoginRequest
+
+// UpdateScimGroupMappingJSONRequestBody defines body for UpdateScimGroupMapping for application/json ContentType.
+type UpdateScimGroupMappingJSONRequestBody UpdateScimGroupMappingJSONBody
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
@@ -8024,11 +10214,523 @@ type PermitUnconfinedPluginJSONRequestBody = UnconfinedPluginPermitRequest
 // UpdateUserRoleJSONRequestBody defines body for UpdateUserRole for application/json ContentType.
 type UpdateUserRoleJSONRequestBody = UpdateUserRoleRequest
 
+// PostWorkloadIssuersJSONRequestBody defines body for PostWorkloadIssuers for application/json ContentType.
+type PostWorkloadIssuersJSONRequestBody = WorkloadIssuerWrite
+
+// PutWorkloadIssuerJSONRequestBody defines body for PutWorkloadIssuer for application/json ContentType.
+type PutWorkloadIssuerJSONRequestBody = WorkloadIssuerWrite
+
+// ScimGroupsCreateJSONRequestBody defines body for ScimGroupsCreate for application/json ContentType.
+type ScimGroupsCreateJSONRequestBody = SCIMGroup
+
+// ScimGroupsCreateApplicationScimPlusJSONRequestBody defines body for ScimGroupsCreate for application/scim+json ContentType.
+type ScimGroupsCreateApplicationScimPlusJSONRequestBody = SCIMGroup
+
+// ScimGroupsSearchJSONRequestBody defines body for ScimGroupsSearch for application/json ContentType.
+type ScimGroupsSearchJSONRequestBody = SCIMSearch
+
+// ScimGroupsSearchApplicationScimPlusJSONRequestBody defines body for ScimGroupsSearch for application/scim+json ContentType.
+type ScimGroupsSearchApplicationScimPlusJSONRequestBody = SCIMSearch
+
+// ScimGroupsPatchJSONRequestBody defines body for ScimGroupsPatch for application/json ContentType.
+type ScimGroupsPatchJSONRequestBody = SCIMPatch
+
+// ScimGroupsPatchApplicationScimPlusJSONRequestBody defines body for ScimGroupsPatch for application/scim+json ContentType.
+type ScimGroupsPatchApplicationScimPlusJSONRequestBody = SCIMPatch
+
+// ScimGroupsReplaceJSONRequestBody defines body for ScimGroupsReplace for application/json ContentType.
+type ScimGroupsReplaceJSONRequestBody = SCIMGroup
+
+// ScimGroupsReplaceApplicationScimPlusJSONRequestBody defines body for ScimGroupsReplace for application/scim+json ContentType.
+type ScimGroupsReplaceApplicationScimPlusJSONRequestBody = SCIMGroup
+
+// ScimUsersCreateJSONRequestBody defines body for ScimUsersCreate for application/json ContentType.
+type ScimUsersCreateJSONRequestBody = SCIMUser
+
+// ScimUsersCreateApplicationScimPlusJSONRequestBody defines body for ScimUsersCreate for application/scim+json ContentType.
+type ScimUsersCreateApplicationScimPlusJSONRequestBody = SCIMUser
+
+// ScimUsersSearchJSONRequestBody defines body for ScimUsersSearch for application/json ContentType.
+type ScimUsersSearchJSONRequestBody = SCIMSearch
+
+// ScimUsersSearchApplicationScimPlusJSONRequestBody defines body for ScimUsersSearch for application/scim+json ContentType.
+type ScimUsersSearchApplicationScimPlusJSONRequestBody = SCIMSearch
+
+// ScimUsersPatchJSONRequestBody defines body for ScimUsersPatch for application/json ContentType.
+type ScimUsersPatchJSONRequestBody = SCIMPatch
+
+// ScimUsersPatchApplicationScimPlusJSONRequestBody defines body for ScimUsersPatch for application/scim+json ContentType.
+type ScimUsersPatchApplicationScimPlusJSONRequestBody = SCIMPatch
+
+// ScimUsersReplaceJSONRequestBody defines body for ScimUsersReplace for application/json ContentType.
+type ScimUsersReplaceJSONRequestBody = SCIMUser
+
+// ScimUsersReplaceApplicationScimPlusJSONRequestBody defines body for ScimUsersReplace for application/scim+json ContentType.
+type ScimUsersReplaceApplicationScimPlusJSONRequestBody = SCIMUser
+
 // BudgetThresholdWebhookJSONRequestBody defines body for BudgetThresholdWebhook for application/json ContentType.
 type BudgetThresholdWebhookJSONRequestBody = BudgetThresholdEvent
 
+// KeyExpiringWebhookJSONRequestBody defines body for KeyExpiringWebhook for application/json ContentType.
+type KeyExpiringWebhookJSONRequestBody = KeyExpiringEvent
+
 // ProviderGrantLapsedWebhookJSONRequestBody defines body for ProviderGrantLapsedWebhook for application/json ContentType.
 type ProviderGrantLapsedWebhookJSONRequestBody = ProviderGrantLapsedEvent
+
+// Getter for additional properties for SCIMDocument. Returns the specified
+// element and whether it was found
+func (a SCIMDocument) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for SCIMDocument
+func (a *SCIMDocument) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for SCIMDocument to handle AdditionalProperties
+func (a *SCIMDocument) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["schemas"]; found {
+		err = json.Unmarshal(raw, &a.Schemas)
+		if err != nil {
+			return fmt.Errorf("error reading 'schemas': %w", err)
+		}
+		delete(object, "schemas")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for SCIMDocument to handle AdditionalProperties
+func (a SCIMDocument) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.Schemas != nil {
+		object["schemas"], err = json.Marshal(a.Schemas)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'schemas': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for SCIMGroup. Returns the specified
+// element and whether it was found
+func (a SCIMGroup) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for SCIMGroup
+func (a *SCIMGroup) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for SCIMGroup to handle AdditionalProperties
+func (a *SCIMGroup) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["displayName"]; found {
+		err = json.Unmarshal(raw, &a.DisplayName)
+		if err != nil {
+			return fmt.Errorf("error reading 'displayName': %w", err)
+		}
+		delete(object, "displayName")
+	}
+
+	if raw, found := object["externalId"]; found {
+		err = json.Unmarshal(raw, &a.ExternalId)
+		if err != nil {
+			return fmt.Errorf("error reading 'externalId': %w", err)
+		}
+		delete(object, "externalId")
+	}
+
+	if raw, found := object["id"]; found {
+		err = json.Unmarshal(raw, &a.Id)
+		if err != nil {
+			return fmt.Errorf("error reading 'id': %w", err)
+		}
+		delete(object, "id")
+	}
+
+	if raw, found := object["members"]; found {
+		err = json.Unmarshal(raw, &a.Members)
+		if err != nil {
+			return fmt.Errorf("error reading 'members': %w", err)
+		}
+		delete(object, "members")
+	}
+
+	if raw, found := object["meta"]; found {
+		err = json.Unmarshal(raw, &a.Meta)
+		if err != nil {
+			return fmt.Errorf("error reading 'meta': %w", err)
+		}
+		delete(object, "meta")
+	}
+
+	if raw, found := object["schemas"]; found {
+		err = json.Unmarshal(raw, &a.Schemas)
+		if err != nil {
+			return fmt.Errorf("error reading 'schemas': %w", err)
+		}
+		delete(object, "schemas")
+	}
+
+	if raw, found := object["urn:openllmproxy:params:scim:schemas:extension:2.0:Group"]; found {
+		err = json.Unmarshal(raw, &a.UrnOpenllmproxyParamsScimSchemasExtension20Group)
+		if err != nil {
+			return fmt.Errorf("error reading 'urn:openllmproxy:params:scim:schemas:extension:2.0:Group': %w", err)
+		}
+		delete(object, "urn:openllmproxy:params:scim:schemas:extension:2.0:Group")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for SCIMGroup to handle AdditionalProperties
+func (a SCIMGroup) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["displayName"], err = json.Marshal(a.DisplayName)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'displayName': %w", err)
+	}
+
+	if a.ExternalId != nil {
+		object["externalId"], err = json.Marshal(a.ExternalId)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'externalId': %w", err)
+		}
+	}
+
+	if a.Id != nil {
+		object["id"], err = json.Marshal(a.Id)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'id': %w", err)
+		}
+	}
+
+	if a.Members != nil {
+		object["members"], err = json.Marshal(a.Members)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'members': %w", err)
+		}
+	}
+
+	if a.Meta != nil {
+		object["meta"], err = json.Marshal(a.Meta)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'meta': %w", err)
+		}
+	}
+
+	if a.Schemas != nil {
+		object["schemas"], err = json.Marshal(a.Schemas)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'schemas': %w", err)
+		}
+	}
+
+	if a.UrnOpenllmproxyParamsScimSchemasExtension20Group != nil {
+		object["urn:openllmproxy:params:scim:schemas:extension:2.0:Group"], err = json.Marshal(a.UrnOpenllmproxyParamsScimSchemasExtension20Group)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'urn:openllmproxy:params:scim:schemas:extension:2.0:Group': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for SCIMUser. Returns the specified
+// element and whether it was found
+func (a SCIMUser) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for SCIMUser
+func (a *SCIMUser) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for SCIMUser to handle AdditionalProperties
+func (a *SCIMUser) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["active"]; found {
+		err = json.Unmarshal(raw, &a.Active)
+		if err != nil {
+			return fmt.Errorf("error reading 'active': %w", err)
+		}
+		delete(object, "active")
+	}
+
+	if raw, found := object["displayName"]; found {
+		err = json.Unmarshal(raw, &a.DisplayName)
+		if err != nil {
+			return fmt.Errorf("error reading 'displayName': %w", err)
+		}
+		delete(object, "displayName")
+	}
+
+	if raw, found := object["emails"]; found {
+		err = json.Unmarshal(raw, &a.Emails)
+		if err != nil {
+			return fmt.Errorf("error reading 'emails': %w", err)
+		}
+		delete(object, "emails")
+	}
+
+	if raw, found := object["externalId"]; found {
+		err = json.Unmarshal(raw, &a.ExternalId)
+		if err != nil {
+			return fmt.Errorf("error reading 'externalId': %w", err)
+		}
+		delete(object, "externalId")
+	}
+
+	if raw, found := object["groups"]; found {
+		err = json.Unmarshal(raw, &a.Groups)
+		if err != nil {
+			return fmt.Errorf("error reading 'groups': %w", err)
+		}
+		delete(object, "groups")
+	}
+
+	if raw, found := object["id"]; found {
+		err = json.Unmarshal(raw, &a.Id)
+		if err != nil {
+			return fmt.Errorf("error reading 'id': %w", err)
+		}
+		delete(object, "id")
+	}
+
+	if raw, found := object["meta"]; found {
+		err = json.Unmarshal(raw, &a.Meta)
+		if err != nil {
+			return fmt.Errorf("error reading 'meta': %w", err)
+		}
+		delete(object, "meta")
+	}
+
+	if raw, found := object["name"]; found {
+		err = json.Unmarshal(raw, &a.Name)
+		if err != nil {
+			return fmt.Errorf("error reading 'name': %w", err)
+		}
+		delete(object, "name")
+	}
+
+	if raw, found := object["roles"]; found {
+		err = json.Unmarshal(raw, &a.Roles)
+		if err != nil {
+			return fmt.Errorf("error reading 'roles': %w", err)
+		}
+		delete(object, "roles")
+	}
+
+	if raw, found := object["schemas"]; found {
+		err = json.Unmarshal(raw, &a.Schemas)
+		if err != nil {
+			return fmt.Errorf("error reading 'schemas': %w", err)
+		}
+		delete(object, "schemas")
+	}
+
+	if raw, found := object["urn:openllmproxy:params:scim:schemas:extension:2.0:User"]; found {
+		err = json.Unmarshal(raw, &a.UrnOpenllmproxyParamsScimSchemasExtension20User)
+		if err != nil {
+			return fmt.Errorf("error reading 'urn:openllmproxy:params:scim:schemas:extension:2.0:User': %w", err)
+		}
+		delete(object, "urn:openllmproxy:params:scim:schemas:extension:2.0:User")
+	}
+
+	if raw, found := object["userName"]; found {
+		err = json.Unmarshal(raw, &a.UserName)
+		if err != nil {
+			return fmt.Errorf("error reading 'userName': %w", err)
+		}
+		delete(object, "userName")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for SCIMUser to handle AdditionalProperties
+func (a SCIMUser) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.Active != nil {
+		object["active"], err = json.Marshal(a.Active)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'active': %w", err)
+		}
+	}
+
+	if a.DisplayName != nil {
+		object["displayName"], err = json.Marshal(a.DisplayName)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'displayName': %w", err)
+		}
+	}
+
+	if a.Emails != nil {
+		object["emails"], err = json.Marshal(a.Emails)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'emails': %w", err)
+		}
+	}
+
+	if a.ExternalId != nil {
+		object["externalId"], err = json.Marshal(a.ExternalId)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'externalId': %w", err)
+		}
+	}
+
+	if a.Groups != nil {
+		object["groups"], err = json.Marshal(a.Groups)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'groups': %w", err)
+		}
+	}
+
+	if a.Id != nil {
+		object["id"], err = json.Marshal(a.Id)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'id': %w", err)
+		}
+	}
+
+	if a.Meta != nil {
+		object["meta"], err = json.Marshal(a.Meta)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'meta': %w", err)
+		}
+	}
+
+	if a.Name != nil {
+		object["name"], err = json.Marshal(a.Name)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'name': %w", err)
+		}
+	}
+
+	if a.Roles != nil {
+		object["roles"], err = json.Marshal(a.Roles)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'roles': %w", err)
+		}
+	}
+
+	if a.Schemas != nil {
+		object["schemas"], err = json.Marshal(a.Schemas)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'schemas': %w", err)
+		}
+	}
+
+	if a.UrnOpenllmproxyParamsScimSchemasExtension20User != nil {
+		object["urn:openllmproxy:params:scim:schemas:extension:2.0:User"], err = json.Marshal(a.UrnOpenllmproxyParamsScimSchemasExtension20User)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'urn:openllmproxy:params:scim:schemas:extension:2.0:User': %w", err)
+		}
+	}
+
+	object["userName"], err = json.Marshal(a.UserName)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'userName': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
 
 // AsPlaygroundResponseFormat0 returns the union data inside the PlaygroundResponseFormat as a PlaygroundResponseFormat0
 func (t PlaygroundResponseFormat) AsPlaygroundResponseFormat0() (PlaygroundResponseFormat0, error) {
@@ -8186,6 +10888,68 @@ func (t RoutingPolicy_Defaults) MarshalJSON() ([]byte, error) {
 }
 
 func (t *RoutingPolicy_Defaults) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsSessionResponse returns the union data inside the MfaVerify201JSONResponseBody as a SessionResponse
+func (t MfaVerify201JSONResponseBody) AsSessionResponse() (SessionResponse, error) {
+	var body SessionResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSessionResponse overwrites any union data inside the MfaVerify201JSONResponseBody as the provided SessionResponse
+func (t *MfaVerify201JSONResponseBody) FromSessionResponse(v SessionResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeSessionResponse performs a merge with any union data inside the MfaVerify201JSONResponseBody, using the provided SessionResponse
+func (t *MfaVerify201JSONResponseBody) MergeSessionResponse(v SessionResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsMFABootstrapSession returns the union data inside the MfaVerify201JSONResponseBody as a MFABootstrapSession
+func (t MfaVerify201JSONResponseBody) AsMFABootstrapSession() (MFABootstrapSession, error) {
+	var body MFABootstrapSession
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMFABootstrapSession overwrites any union data inside the MfaVerify201JSONResponseBody as the provided MFABootstrapSession
+func (t *MfaVerify201JSONResponseBody) FromMFABootstrapSession(v MFABootstrapSession) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMFABootstrapSession performs a merge with any union data inside the MfaVerify201JSONResponseBody, using the provided MFABootstrapSession
+func (t *MfaVerify201JSONResponseBody) MergeMFABootstrapSession(v MFABootstrapSession) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t MfaVerify201JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *MfaVerify201JSONResponseBody) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }

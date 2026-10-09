@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { manage } from '../helpers/management';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
 import { expect, test, type APIRequestContext, type Page } from '../playwright';
@@ -210,11 +211,20 @@ test('a browser user configures an OpenAI-compatible route and reaches unary and
     page.getByLabel('Provider model').first().locator('option:checked')
   ).toContainText(upstream.model);
   await page.getByLabel('Maximum attempts').fill('2');
+  await page.getByLabel('Maximum request body (bytes)').fill('65536');
   // This provider has no profile, so the route is declared transformed.
   await page.getByLabel('Fidelity mode').selectOption('transformed');
   await page.getByRole('button', { name: 'Create draft' }).click();
   await expect(page).toHaveURL(/\/routes\/[0-9a-f-]+$/);
   await verifyDraftSave(page, 'route', route);
+  await expect(page.getByLabel('Maximum request body (bytes)')).toHaveValue(
+    '65536'
+  );
+  await page
+    .locator('fieldset')
+    .filter({ has: page.getByLabel('Maximum request body (bytes)') })
+    .screenshot({ path: info.outputPath('route-body-limit.png') });
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   const providerPath = `/api/v1/providers/${providerId}`;
   const disabled = await manage(page, 'POST', `${providerPath}/disable`, {

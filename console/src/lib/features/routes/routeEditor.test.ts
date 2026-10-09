@@ -817,3 +817,35 @@ describe('route resilience', () => {
     expect(parseSelectors(JSON.stringify(selectors))).toEqual(selectors);
   });
 });
+
+it('validates, retains and clears the published ingress body bound', () => {
+  const values = {
+    ...validEditor,
+    behavior: { ...emptyBehavior(), max_body_bytes: 1024 }
+  };
+  expect(validateRouteEditor(values)).toBeNull();
+  expect(buildCreateRouteDraftInput(values, modelOptions).max_body_bytes).toBe(
+    1024
+  );
+  for (const size of [0, -1, 1.5, 1073741825]) {
+    values.behavior.max_body_bytes = size;
+    expect(validateRouteEditor(values)).toContain('body limit');
+  }
+  const cleared = {
+    ...values,
+    behavior: { ...values.behavior, max_body_bytes: null }
+  };
+  expect(
+    buildCreateRouteDraftInput(cleared, modelOptions).max_body_bytes
+  ).toBeNull();
+});
+
+it('round-trips and explicitly disables caller-paid budget policy', () => {
+  for (const exempt of [true, false]) {
+    const values = {
+      ...validEditor,
+      behavior: { ...emptyBehavior(), caller_cost_exempt: exempt }
+    };
+    expect(buildReplaceRouteDraftInput(values).caller_cost_exempt).toBe(exempt);
+  }
+});

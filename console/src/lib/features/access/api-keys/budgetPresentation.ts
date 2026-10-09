@@ -3,7 +3,7 @@ import type { components } from '$lib/api/schema';
 type Schemas = components['schemas'];
 
 export type ApiKeyBudget = Schemas['ApiKeyBudgetResponse'];
-export type BudgetWindowName = 'daily' | 'monthly';
+export type BudgetWindowName = 'daily' | 'weekly' | 'monthly';
 
 /**
  * What the console is allowed to claim about one budget window.
@@ -49,6 +49,16 @@ export function compareDecimalStrings(
   return firstFraction < secondFraction ? -1 : 1;
 }
 
+/** Current allowance is separate from the permanent editable policy. */
+export function currentBudgetLimit(
+  window: { limit: string | null; effective_limit?: string | null } | undefined
+): string | null {
+  if (!window) return null;
+  return window.effective_limit !== undefined
+    ? window.effective_limit
+    : window.limit;
+}
+
 /** The state of one window of a key's cost budget. */
 export function budgetWindowState(
   budget: ApiKeyBudget,
@@ -58,8 +68,13 @@ export function budgetWindowState(
   // stored policy instead of live accounting.
   if (budget.enforcement_active === false) return 'policy';
   const window = budget[name];
-  if (window.limit === null) return 'unlimited';
-  const order = compareDecimalStrings(window.accrued, window.limit);
+  if (!window) return 'unknown';
+  const limit =
+    window.effective_limit !== undefined
+      ? window.effective_limit
+      : window.limit;
+  if (limit === null) return 'unlimited';
+  const order = compareDecimalStrings(window.accrued, limit);
   if (order === null) return 'unknown';
   // The gateway refuses a request once the window has reached its limit, so
   // equality is already exhaustion rather than the last spendable moment.
@@ -72,7 +87,8 @@ const WORST_FIRST: BudgetState[] = ['policy', 'exhausted', 'unknown', 'within'];
 export function budgetState(budget: ApiKeyBudget): BudgetState {
   const windows = [
     budgetWindowState(budget, 'daily'),
-    budgetWindowState(budget, 'monthly')
+    budgetWindowState(budget, 'monthly'),
+    ...(budget.weekly ? [budgetWindowState(budget, 'weekly')] : [])
   ];
   return WORST_FIRST.find((state) => windows.includes(state)) ?? 'unlimited';
 }

@@ -1,3 +1,4 @@
+import { confirmMFA } from '$lib/features/access/mfa/prompt.svelte';
 import type { components } from '$lib/api/schema';
 import { withAuthenticationDeadline } from './requestDeadline';
 import { apiClient } from '$lib/api/client';
@@ -120,24 +121,22 @@ export async function login(
   password: string,
   signal?: AbortSignal
 ): Promise<CurrentSession> {
-  return sessionResult(
-    await apiClient.POST('/api/v1/sessions', {
-      body: { email, password },
-      signal
-    })
-  );
+  const fetched = await apiClient.POST('/api/v1/sessions', {
+    body: { email, password },
+    signal
+  });
+  return completeAuthentication(fetched, signal);
 }
 
 export async function acceptInvitation(
   input: Schemas['AcceptInvitationRequest'],
   signal?: AbortSignal
 ): Promise<CurrentSession> {
-  return sessionResult(
-    await apiClient.POST('/api/v1/invitations/accept', {
-      body: input,
-      signal
-    })
-  );
+  const fetched = await apiClient.POST('/api/v1/invitations/accept', {
+    body: input,
+    signal
+  });
+  return completeAuthentication(fetched, signal);
 }
 
 export async function logout(signal?: AbortSignal): Promise<void> {
@@ -148,4 +147,25 @@ export async function logout(signal?: AbortSignal): Promise<void> {
   // lifecycle boundary has already hidden protected content and cleared its
   // local authority before this request is sent.
   if (fetched.response.status !== 401) ensureOk(fetched);
+}
+
+async function completeAuthentication(
+  fetched: {
+    data?: Schemas['SessionResponse'] | Schemas['MFAChallenge'];
+    error?: unknown;
+    response: Response;
+  },
+  signal?: AbortSignal
+): Promise<CurrentSession> {
+  if (fetched.response.status === 202) {
+    const data = unwrap(fetched);
+    if (!('challenge' in data))
+      throw new Error('Invalid authentication challenge.');
+    await confirmMFA({ challenge: data }, signal);
+    return currentSession(signal);
+  }
+  return sessionResult({
+    ...fetched,
+    data: fetched.data as Schemas['SessionResponse'] | undefined
+  });
 }

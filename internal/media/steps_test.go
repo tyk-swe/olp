@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,12 @@ import (
 // stand-in: the submission names a polling URL, the poll is pending once and
 // then ready, and the signed image is fetched without the credential.
 func TestBFLWorkIsPolledThenFetched(t *testing.T) {
+	for _, caller := range []bool{false, true} {
+		t.Run(fmt.Sprint(caller), func(t *testing.T) { testBFLWorkIsPolledThenFetched(t, caller) })
+	}
+}
+
+func testBFLWorkIsPolledThenFetched(t *testing.T, caller bool) {
 	var polls atomic.Int32
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +67,10 @@ func TestBFLWorkIsPolledThenFetched(t *testing.T) {
 	target := Target{Config: connectors.Config{Kind: "openai_compatible", AuthMode: "api_key", Endpoint: server.URL + "/v1", VendorID: "bfl"}, Model: "flux-2-pro", Secret: []byte("bfl-key-0123456789")}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if caller {
+		target.CallerCredential = true
+		target.Config.CredentialSource = "caller"
+	}
 	result, transportFailure := transport.Do(ctx, target, call, imageRequest(1, "1024x1024", "b64_json"))
 	if transportFailure != nil {
 		t.Fatalf("BFL work failed: %+v", transportFailure)
@@ -161,5 +172,17 @@ func TestAssemblyAITranscriptIsPolledThenDeleted(t *testing.T) {
 	rendered, _ := EncodeTranscriptionJSON(transcript)
 	if !strings.Contains(string(rendered), `"start":0.1`) || !strings.Contains(string(rendered), `"duration":3`) {
 		t.Fatalf("verbose_json client receives %s", rendered)
+	}
+}
+
+func TestCallerStepsCannotForwardCredentialsToAnotherOrigin(t *testing.T) {
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	transport := &Transport{Egress: policy}
+	for _, address := range []string{"http://127.0.0.1:9002/poll", "https://vendor.example/poll"} {
+		called := false
+		_, failure := transport.step(t.Context(), &Step{URL: address, Credentials: true}, &UpstreamCall{StepDomains: []string{"vendor.example"}}, func(*http.Request) (*http.Response, error) { called = true; return nil, nil }, Target{CallerCredential: true, Config: connectors.Config{Endpoint: "http://127.0.0.1:9001/api"}, Secret: []byte("caller-private")})
+		if failure == nil || called || strings.Contains(failure.Detail, "caller-private") {
+			t.Fatalf("forwarded across origins: %+v", failure)
+		}
 	}
 }

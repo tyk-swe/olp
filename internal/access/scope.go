@@ -2,6 +2,7 @@ package access
 
 import (
 	"context"
+	"net/http"
 	"slices"
 
 	"github.com/jackc/pgx/v5"
@@ -89,4 +90,28 @@ func CreateProject(ctx context.Context, tx pgx.Tx, name, creator string) (id, et
 		return "", "", err
 	}
 	return id, etag, nil
+}
+
+func nullableOrganizationPath(r *http.Request) *string {
+	if id := r.PathValue("organization_id"); id != "" {
+		return &id
+	}
+	return nil
+}
+
+// CreateProjectInOrganization creates a project its organization manages, or
+// one managed by its creator when it belongs to no organization.
+func CreateProjectInOrganization(ctx context.Context, tx pgx.Tx, name, creator string, organization *string) (string, string, error) {
+	if organization == nil {
+		return CreateProject(ctx, tx, name, creator)
+	}
+	id, etag := NewID(), NewID()
+	_, err := tx.Exec(ctx, "INSERT INTO olp.projects(id,name,etag,created_by,organization_id) VALUES($1,$2,$3,$4,$5)", id, name, etag, creator, organization)
+	if duplicateName(err) {
+		err = Fail(409, "project_name_taken", "A project with this name already exists.")
+	}
+	if err == nil {
+		_, err = AdvanceAuthority(ctx, tx)
+	}
+	return id, etag, err
 }

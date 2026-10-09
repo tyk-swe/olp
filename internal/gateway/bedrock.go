@@ -86,6 +86,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 		return
 	}
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
+	x.endUserDigest = authority.EndUserDigest
 	x.budgetGroupID = authority.BudgetGroupID
 	x.responseMetadata = authority.Policy.ResponseMetadata
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
@@ -190,7 +191,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 }
 
 func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint string, body []byte, stream bool) (*http.Response, *attemptFailure) {
-	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1)
+	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
 	fact.Mode = x.mode
 	if p.hold != nil {
 		fact.Budgets = p.hold.budgets
@@ -217,7 +218,7 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 		req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 	}
 	req.Header.Set("User-Agent", "olp/gateway")
-	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, body); err != nil {
+	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, body, &p.provider, p.model); err != nil {
 		if ctx.Err() != nil {
 			return nil, finish(classCancelled, nil)
 		}

@@ -55,8 +55,7 @@ and [gateway execution](../gateway.md) describe it.
 
 The [parity matrix](parity.md) is exhaustive. The largest gaps are provider and
 media breadth, a model catalog, response caching, a guardrail ecosystem,
-observability integrations, an MCP and agent gateway, end-user budgets,
-enterprise identity (SAML, SCIM, workload JWTs), cost management for
+observability integrations, an MCP and agent gateway, cost management for
 chargeback, and published performance evidence: the [M1](m01-measured-advantage.md)
 benchmark harness and regression gate exist, but no full-rate results are
 published yet.
@@ -78,16 +77,24 @@ commitments, and its exit criteria include the evidence named here.
 
 ## Milestones
 
+M1–M4 implementation is complete. Long-running qualification is handed to the
+human PR reviewer at the owner's request; each milestone retains the original
+acceptance criteria and identifies evidence that has not been collected. The
+[implementation review](m01-m04-implementation-review.md) maps delivered changes
+to their tests and records the remaining qualification work. The reviewer owns
+qualification and merge; implementation status is not a claim that unrun
+reference-hardware, live-provider or external conformance checks passed.
+
 Milestones are numbered in recommended order. The dependency graph is the
 binding constraint: milestones without a path between them may proceed in
 parallel.
 
 | ID | Milestone | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- |
-| M1 | [Measured advantage](m01-measured-advantage.md) | Published, regression-gated overhead and client compatibility; accurate admission token estimates; standard response metadata. | None | In progress |
-| M2 | [Provider and catalog breadth](m02-provider-catalog.md) | LiteLLM's production provider families reachable through certified tiers; media providers; a signed reference catalog of model facts and prices. | None | In progress |
-| M3 | [Adaptive routing and resilience](m03-routing-resilience.md) | Cross-route fallbacks, capacity-aware selection, priority admission, supply-side budgets, active and fleet-shared health, shadow traffic, explainable request selectors. | M1 | In progress |
-| M4 | [Tenancy, identity and budgets](m04-tenancy-identity.md) | End users, a budget hierarchy with flexible windows, limit templates, route groups, workload JWTs, SAML, SCIM, MFA, organizations and caller-supplied credentials. | None | Planned |
+| M1 | [Measured advantage](m01-measured-advantage.md) | Published, regression-gated overhead and client compatibility; accurate admission token estimates; standard response metadata. | None | Implemented |
+| M2 | [Provider and catalog breadth](m02-provider-catalog.md) | LiteLLM's production provider families reachable through certified tiers; media providers; a signed reference catalog of model facts and prices. | None | Implemented |
+| M3 | [Adaptive routing and resilience](m03-routing-resilience.md) | Cross-route fallbacks, capacity-aware selection, priority admission, supply-side budgets, active and fleet-shared health, shadow traffic, explainable request selectors. | M1 | Implemented |
+| M4 | [Tenancy, identity and budgets](m04-tenancy-identity.md) | End users, a budget hierarchy with flexible windows, limit templates, route groups, workload JWTs, SAML, SCIM, MFA, organizations and caller-supplied credentials. | None | Implemented |
 | M5 | [Observability, export and alerting](m05-observability.md) | Durable export sinks, opt-in payload capture, OpenTelemetry GenAI conventions, business metrics, alert channels and events. | M4 | Planned |
 | M6 | [Cost management and chargeback](m06-cost-management.md) | Complete pricing dimensions, rate cards, cost estimation, FOCUS and billing exports, invoice reconciliation. | M2, M4, M5 | Planned |
 | M7 | [Guardrails platform](m07-guardrails.md) | One guardrail engine with built-in detectors, vendor adapters, webhook and WebAssembly guardrails, streaming inspection and tool governance. | M1 | Planned |
@@ -127,10 +134,11 @@ recomputed whenever a milestone closes:
 | Authorization coverage | Management operations exercised by the authorization and isolation sweeps (must stay 100%). |
 
 At the 0.1.0 baseline the matrix has 150 rows: 15 `Ahead`, 33 `Parity`, 30
-`Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 48 of 148 (32%). Rows
-that an in-progress milestone has since moved are not recounted until it closes;
-the matrix itself already shows the two rows M1 has moved from `Gap` to
-`Partial` (15 `Ahead`, 33 `Parity`, 32 `Partial`, 68 `Gap` and 2 `Excluded`).
+`Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 48 of 148 (32%). This historical scorecard remains unchanged until milestones close.
+The matrix also records ongoing implementation, including M4 end-user controls,
+network restrictions, route groups and explicit rotation with reminders; later tenancy requirements remain
+unfinished.
+Its current counts are 20 `Ahead`, 65 `Parity`, 16 `Partial`, 47 `Gap`, 2 `Excluded`.
 
 ## Definition of done
 
@@ -184,9 +192,11 @@ upstream. The parity matrix marks them `Excluded`.
 
 ## Maintaining this roadmap
 
-- **Status.** Each milestone file carries `Planned`, `In progress` or
-  `Shipped`. A change that moves a status also updates the table above and the
-  affected parity rows.
+- **Status.** Each milestone file carries `Planned`, `In progress`,
+  `Implemented` or `Shipped`. `Implemented` records completed code and focused
+  verification with any explicit qualification handoff; `Shipped` additionally
+  records completed release qualification. A status change also updates the
+  table above and affected parity rows.
 - **Decisions.** Each milestone lists the decisions to settle before
   implementation. Record the outcome in the milestone file, with its rationale,
   before the first implementation change lands.

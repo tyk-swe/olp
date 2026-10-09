@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { beginSAMLLogin } from '../saml/api';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { onDestroy, onMount } from 'svelte';
@@ -91,6 +92,20 @@
     }
   }
 
+  async function samlLogin() {
+    if (busy || oidcBusy) return;
+    oidcBusy = true;
+    message = '';
+    try {
+      window.location.assign(
+        await beginSAMLLogin(destination(), publicAuthController.signal)
+      );
+    } catch (e) {
+      message = errorMessage(e, 'SAML sign-in could not be started.');
+    } finally {
+      oidcBusy = false;
+    }
+  }
   async function loadCapabilities() {
     capabilitiesLoading = true;
     capabilitiesError = '';
@@ -194,11 +209,16 @@
         ? 'Starting single sign-on…'
         : 'Continue with single sign-on'}</a
     >
-  {:else if !capabilitiesLoading && !capabilitiesError && !capabilities.local_login_enabled}
+  {:else if !capabilitiesLoading && !capabilitiesError && !capabilities.local_login_enabled && !capabilities.saml_login_enabled}
     <div class="form-alert" role="alert">
       No sign-in method is currently available.
     </div>
   {/if}
+  {#if !capabilitiesLoading && !capabilitiesError && capabilities.saml_login_enabled}<button
+      class="button button-secondary oidc"
+      disabled={busy || oidcBusy}
+      onclick={samlLogin}>Continue with SAML</button
+    >{/if}
 </SetupFrame>
 
 <style>

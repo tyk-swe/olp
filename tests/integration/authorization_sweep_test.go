@@ -72,6 +72,14 @@ func (h *accessHarness) call(c sweepCaller, method, path string, body any, heade
 }
 
 func codeOf(raw []byte) string {
+	var scimError struct {
+		Schemas []string `json:"schemas"`
+		Status  string   `json:"status"`
+	}
+	if json.Unmarshal(raw, &scimError) == nil && slices.Contains(scimError.Schemas, "urn:ietf:params:scim:api:messages:2.0:Error") && scimError.Status == "403" {
+		return "permission_denied"
+	}
+
 	var problem struct {
 		Type string `json:"type"`
 	}
@@ -125,6 +133,12 @@ func sweepCallers(h *accessHarness, owner *browser, golden routeGolden, projectA
 				id, profile := userID(member)
 				h.want(owner, "PATCH", "/api/v1/users/"+id, map[string]any{"access_scope": "assigned"}, etagHeader(profile), 200)
 				addMember(h, owner, projectA, id, "manager")
+				var org string
+				if err := h.Pool.QueryRow(h.t.Context(), "SELECT organization_id::text FROM olp.projects WHERE id=$1", projectA).Scan(&org); err != nil {
+					h.t.Fatal(err)
+				}
+				detail := h.want(owner, "GET", "/api/v1/organizations/"+org, nil, nil, 200)
+				h.want(owner, "PUT", "/api/v1/organizations/"+org+"/members/"+id, map[string]any{"role": "manager"}, etagHeader(detail), 204)
 				member = login(h, email)
 			}
 			callers[archetype.Name] = sweepCaller{name: archetype.Name, browser: member}
@@ -191,7 +205,8 @@ func TestManagementAuthorizationSweep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	projectA := createProject(h, owner, "Sweep")
+	orgA := h.want(owner, "POST", "/api/v1/organizations", map[string]any{"name": "Sweep organization"}, idem("sweep-org"), 201)["id"].(string)
+	projectA := h.want(owner, "POST", "/api/v1/organizations/"+orgA+"/projects", map[string]any{"name": "Sweep"}, idem("sweep-project"), 201)["id"].(string)
 	callers := sweepCallers(h, owner, golden, projectA)
 	patterns := slices.Sorted(func(yield func(string) bool) {
 		for pattern := range golden.Routes {
@@ -211,7 +226,12 @@ func TestManagementAuthorizationSweep(t *testing.T) {
 		if requirements[pattern].Public {
 			continue
 		}
-		method, path := sweepPath(pattern, nil)
+		ids := map[string]string{}
+		if strings.HasPrefix(pattern, "GET /api/v1/organizations") {
+			ids["organization_id"] = orgA
+			ids["project_id"] = projectA
+		}
+		method, path := sweepPath(pattern, ids)
 		body := sweepBody(pattern, projectA)
 		if status, code, _ := h.call(sweepCaller{browser: &browser{}}, method, path, body, headers()); status != 401 {
 			t.Errorf("%s without credentials: %d %s, want 401", pattern, status, code)
@@ -241,7 +261,8 @@ func TestManagementIsolationSweep(t *testing.T) {
 	owner := h.owner()
 	up := newVendor(t)
 	projectA := createProject(h, owner, "Isolated")
-	projectB := createProject(h, owner, "canary-project")
+	orgB := h.want(owner, "POST", "/api/v1/organizations", map[string]any{"name": "canary-organization"}, idem("canary-org"), 201)["id"].(string)
+	projectB := h.want(owner, "POST", "/api/v1/organizations/"+orgB+"/projects", map[string]any{"name": "canary-project"}, idem("canary-project"), 201)["id"].(string)
 	providerB := createScopedProvider(h, owner, "canary-provider", up.URL+"/v1", projectB, 201)
 	activateScopedProvider(h, owner, providerB)
 	draftB := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
@@ -252,8 +273,11 @@ func TestManagementIsolationSweep(t *testing.T) {
 	activated := h.want(owner, "POST", "/api/v1/route-drafts/"+draftB["id"].(string)+"/activate", nil, withMatch(draftB, idem("activate-canary")), 200)
 	keyB := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "canary-key", "scopes": []string{"inference"}, "project_id": projectB}, idem("key-canary"), 201)
 	groupB := h.want(owner, "POST", "/api/v1/budget-groups", map[string]any{"name": "canary-budget", "monthly_cost_limit": "5.00", "project_id": projectB}, idem("group-canary"), 201)
+	increaseB := h.want(owner, "POST", "/api/v1/budget-increases", map[string]any{"target": map[string]any{"kind": "budget_group", "id": groupB["id"]}, "window": "month", "amount": "1", "reason": "canary increase"}, idem("canary-increase"), 201)
 	canary := map[string]string{
-		"project_id": projectB, "provider_id": providerB["id"].(string), "draft_id": draftB["id"].(string),
+		"organization_id": orgB,
+		"increase_id":     increaseB["id"].(string),
+		"project_id":      projectB, "provider_id": providerB["id"].(string), "draft_id": draftB["id"].(string),
 		"route_id": activated["route_id"].(string), "api_key_id": keyB["id"].(string), "budget_group_id": groupB["id"].(string),
 	}
 

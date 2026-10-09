@@ -102,7 +102,7 @@ func newAccessHarness(t *testing.T) *accessHarness {
 	return newAccessHarnessOn(t, pool, dbURL)
 }
 
-func newAccessHarnessOn(t *testing.T, pool *pgxpool.Pool, dbURL string) *accessHarness {
+func newAccessHarnessOn(t *testing.T, pool *pgxpool.Pool, dbURL string, loggers ...*slog.Logger) *accessHarness {
 	t.Helper()
 	if err := database.Migrate(t.Context(), pool); err != nil {
 		t.Fatal(err)
@@ -111,7 +111,7 @@ func newAccessHarnessOn(t *testing.T, pool *pgxpool.Pool, dbURL string) *accessH
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newAccessHarnessAtInstallation(t, pool, dbURL, installation, "")
+	return newAccessHarnessAtInstallation(t, pool, dbURL, installation, "", loggers...)
 }
 
 // newUnconfinedHarness is newAccessHarnessOn for a deployment that enables
@@ -128,7 +128,7 @@ func newUnconfinedHarness(t *testing.T, pool *pgxpool.Pool, dbURL, dir string) *
 // newAccessHarnessAtInstallation composes the harness over an already migrated
 // database and its installation identity. A deployment whose unconfinedDir
 // is set enables unconfined plugins.
-func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, installation, unconfinedDir string) *accessHarness {
+func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, installation, unconfinedDir string, loggers ...*slog.Logger) *accessHarness {
 	t.Helper()
 	key := strings.Repeat("ab", 32)
 	ringJSON := `{"active_version":1,"keys":[{"version":1,"key":"` + key + `"}]}`
@@ -147,6 +147,9 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	// "all" mode does; provider egress is opened to loopback for the mock vendor.
 	policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if len(loggers) > 0 {
+		log = loggers[0]
+	}
 	rt := runtime.NewManager(pool, installation, secrets.NewAuthKey(auth, installation), ring, log)
 	// The race detector slows wazero's compiler tenfold, so the harness
 	// interprets plugins, for installing and for signing alike.

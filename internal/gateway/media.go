@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -172,6 +173,7 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution,
 		return x, access.Authority{}, true
 	}
 	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
+	x.endUserDigest = authority.EndUserDigest
 	x.budgetGroupID = authority.BudgetGroupID
 	x.responseMetadata = authority.Policy.ResponseMetadata
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
@@ -212,7 +214,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execu
 	ctx, cancel := x.routeContext(ctx)
 	defer cancel()
 	var e *Error
-	if x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, overall); e != nil {
+	if x.lease, e = s.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, overall, x.limitRoute()); e != nil {
 		s.mediaFail(x, w, e)
 		return
 	}
@@ -648,7 +650,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 	actx, cancel := context.WithTimeout(attemptCtx, timeout)
 	defer cancel()
 
-	secret, err := s.slotSecret(actx, x, slot)
+	secret, err := s.slotSecret(actx, x, slot, provider, a.UpstreamModel)
 	if err != nil {
 		return fail(classCredential, nil)
 	}
@@ -660,7 +662,7 @@ func (s *Server) mediaAttempt(ctx context.Context, w http.ResponseWriter, x *exe
 	if err != nil {
 		return fail(classCredential, nil)
 	}
-	target := media.Target{Config: cfg, Model: cfg.Model(a.UpstreamModel), Secret: secret, NetworkSecret: networkSecret, ConnectionScope: providerConnectionScope(provider, slot)}
+	target := media.Target{Sensitive: &x.sensitive, CallerCredential: provider.CredentialSource == "caller" && x.origin != "probe", Config: cfg, Model: cfg.Model(a.UpstreamModel), Secret: secret, NetworkSecret: networkSecret, ConnectionScope: providerConnectionScope(provider, slot)}
 	result, failure := s.Media.Jobs.Transport.Do(actx, target, call, effective)
 	if failure != nil {
 		fact.Status = failure.Status
@@ -768,7 +770,14 @@ func mediaUsage(request *media.Request, result *media.Result) *openai.Usage {
 		if result.Transcription == nil || result.Transcription.DurationSeconds == nil {
 			return nil
 		}
-		units := strconv.FormatFloat(*result.Transcription.DurationSeconds, 'f', -1, 64)
+		duration := *result.Transcription.DurationSeconds
+		if duration < 0 || duration >= 1e18 || math.IsNaN(duration) || math.IsInf(duration, 0) {
+			return nil
+		}
+		// Accounting stores numeric(24,6). Preserve native response precision,
+		// but quantize its separate billing observation to microseconds so a
+		// more precise vendor duration cannot invalidate the entire event.
+		units := strconv.FormatFloat(duration, 'f', 6, 64)
 		return &openai.Usage{MediaUnits: &units}
 	case media.ResponseVideoJob:
 		if request == nil || request.Op != media.OpVideoCreate || result.Video == nil || result.Video.Seconds == nil {

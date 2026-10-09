@@ -180,6 +180,9 @@ config:
   # Comma-separated CIDRs for the ingress/controller peers allowed to provide
   # X-Forwarded-For. Required when this chart's Ingress is enabled.
   trustedProxyCidrs: ""
+  # Comma-separated client CIDRs allowed to reach the console and management
+  # API. Empty allows all. Uses trustedProxyCidrs to resolve forwarded clients.
+  managementAllowedCidrs: ""
   # Comma-separated browser origins allowed to call the inference gateway
   # cross-origin. Empty disables CORS; wildcards are refused.
   gatewayCorsAllowedOrigins: ""

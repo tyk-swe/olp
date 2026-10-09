@@ -131,6 +131,13 @@
         >{copied === 'secret' ? 'Copied' : 'Copy key'}</button
       >
     </div>
+    {#if 'overlap_expires_at' in secret && secret.overlap_expires_at}<p
+        class="section-help"
+      >
+        The previous secret remains valid until {new Date(
+          secret.overlap_expires_at
+        ).toLocaleString()}.
+      </p>{/if}
     {#if copyError}<div class="inline-problem" role="alert">
         {copyError}
       </div>{/if}

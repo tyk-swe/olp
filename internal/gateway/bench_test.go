@@ -161,7 +161,7 @@ func BenchmarkAdmission(b *testing.B) {
 			var operations int64
 			b.ReportAllocs()
 			for b.Loop() {
-				lease, e := admission.reserveKeyCosted(ctx, tc.authority, "openai", benchEstimate, 30*time.Second, tc.hold)
+				lease, e := admission.reserveKeyCosted(ctx, &tc.authority, "openai", benchEstimate, 30*time.Second, tc.hold)
 				if e != nil {
 					b.Fatal(e)
 				}
@@ -224,7 +224,23 @@ func TestUnconfiguredFeaturesAddNoAllocations(t *testing.T) {
 		runtime.Attempt{Price: costPrice()})
 	priced.request.id, priced.request.minted = uuid.NewString(), true
 
+	headers := http.Header{"Content-Type": []string{"application/json"}}
 	runs := map[string]func(){
+		"absent caller credential": func() {
+			if readCallerCredential(headers) != nil {
+				t.Fatal("invented caller credentials")
+			}
+		},
+		"route without a body limit": func() {
+			if failure := priced.checkBody(priced.route); failure != nil {
+				t.Fatal(failure)
+			}
+		},
+		"key without network restrictions": func() {
+			if failure := server.checkKeyAddress(nil, free); failure != nil {
+				t.Fatal(failure)
+			}
+		},
 		"key admission": func() {
 			lease, e := admission.reserveKey(ctx, free, "openai", benchEstimate, time.Minute)
 			if lease != nil || e != nil {

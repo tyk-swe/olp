@@ -19,6 +19,12 @@ export function useServiceCapabilities() {
           capabilities.data.gateway_available !== false)
       );
     },
+    get managementNetworkRestricted() {
+      return (
+        capabilities.isSuccess &&
+        capabilities.data.management_network_restricted === true
+      );
+    },
     get limitsEnforced() {
       return (
         capabilities.isSuccess &&

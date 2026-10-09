@@ -136,16 +136,17 @@ type Pool struct {
 }
 
 type Route struct {
-	ID          string     `json:"id"`
-	ProjectID   string     `json:"project_id"`
-	Slug        string     `json:"slug"`
-	PoolID      string     `json:"pool_id"`
-	Models      []string   `json:"models"`
-	Enabled     bool       `json:"enabled"`
-	RevisionID  string     `json:"revision_id"`
-	Revision    int        `json:"revision"`
-	ETag        string     `json:"etag"`
-	PublishedAt *time.Time `json:"published_at"`
+	MaxBodyBytes *int64     `json:"max_body_bytes,omitempty"`
+	ID           string     `json:"id"`
+	ProjectID    string     `json:"project_id"`
+	Slug         string     `json:"slug"`
+	PoolID       string     `json:"pool_id"`
+	Models       []string   `json:"models"`
+	Enabled      bool       `json:"enabled"`
+	RevisionID   string     `json:"revision_id"`
+	Revision     int        `json:"revision"`
+	ETag         string     `json:"etag"`
+	PublishedAt  *time.Time `json:"published_at"`
 }
 
 func (r Route) BasePath() string { return BasePath + r.Slug }
@@ -229,30 +230,32 @@ func (b *TokenBound) Validate() error {
 }
 
 type Attempt struct {
-	UpstreamStatus    *int       `json:"upstream_status"`
-	OutcomeOrigin     *string    `json:"outcome_origin"`
-	Outcome           *string    `json:"outcome"`
-	OutcomeObservedAt *time.Time `json:"outcome_observed_at"`
-	ID                string     `json:"id"`
-	ProjectID         string     `json:"project_id"`
-	RouteID           string     `json:"route_id"`
-	RouteRevisionID   string     `json:"route_revision_id"`
-	APIKeyID          string     `json:"api_key_id"`
-	BindingID         string     `json:"binding_id"`
-	AccountID         string     `json:"account_id"`
-	Operation         string     `json:"operation"`
-	Model             string     `json:"model"`
-	State             string     `json:"state"`
-	ReservedTokens    int64      `json:"reserved_tokens"`
-	ReportedTokens    *int64     `json:"reported_tokens"`
-	InputTokens       *int64     `json:"input_tokens"`
-	OutputTokens      *int64     `json:"output_tokens"`
-	CachedTokens      *int64     `json:"cached_tokens"`
-	ReasoningTokens   *int64     `json:"reasoning_tokens"`
-	BoundEvidence     *string    `json:"bound_evidence"`
-	Refusal           *string    `json:"refusal"`
-	CreatedAt         time.Time  `json:"created_at"`
-	FinishedAt        *time.Time `json:"finished_at"`
+	Attribution       map[string]string `json:"attribution,omitempty"`
+	EndUserDigest     string            `json:"end_user_digest"`
+	UpstreamStatus    *int              `json:"upstream_status"`
+	OutcomeOrigin     *string           `json:"outcome_origin"`
+	Outcome           *string           `json:"outcome"`
+	OutcomeObservedAt *time.Time        `json:"outcome_observed_at"`
+	ID                string            `json:"id"`
+	ProjectID         string            `json:"project_id"`
+	RouteID           string            `json:"route_id"`
+	RouteRevisionID   string            `json:"route_revision_id"`
+	APIKeyID          string            `json:"api_key_id"`
+	BindingID         string            `json:"binding_id"`
+	AccountID         string            `json:"account_id"`
+	Operation         string            `json:"operation"`
+	Model             string            `json:"model"`
+	State             string            `json:"state"`
+	ReservedTokens    int64             `json:"reserved_tokens"`
+	ReportedTokens    *int64            `json:"reported_tokens"`
+	InputTokens       *int64            `json:"input_tokens"`
+	OutputTokens      *int64            `json:"output_tokens"`
+	CachedTokens      *int64            `json:"cached_tokens"`
+	ReasoningTokens   *int64            `json:"reasoning_tokens"`
+	BoundEvidence     *string           `json:"bound_evidence"`
+	Refusal           *string           `json:"refusal"`
+	CreatedAt         time.Time         `json:"created_at"`
+	FinishedAt        *time.Time        `json:"finished_at"`
 }
 
 // Usage's total includes cached input and reasoning output; the breakdowns

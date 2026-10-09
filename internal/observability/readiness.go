@@ -24,7 +24,7 @@ type State struct {
 	// Limiter probes the Valkey limiter. Configured is false when the
 	// installation has no shared state backend at all.
 	Limiter       func(ctx context.Context) (configured, healthy bool)
-	LimiterCounts func() (failOpen, dailyRejections, monthlyRejections int64)
+	LimiterCounts func() (failOpen, dailyRejections, weeklyRejections, monthlyRejections int64)
 	// Circuits counts currently open upstream circuits.
 	Circuits func() int64
 	// Shadows counts mirrored shadow attempts and those dropped for want of

@@ -46,6 +46,7 @@ func (s *Server) beginGeminiInteraction(w http.ResponseWriter, r *http.Request, 
 	if e == nil {
 		x.authority = authority
 		x.keyID, x.affinity = authority.ID, []byte(authority.ID)
+		x.endUserDigest = authority.EndUserDigest
 		x.budgetGroupID = authority.BudgetGroupID
 		x.responseMetadata = authority.Policy.ResponseMetadata
 		x.attribution, e = s.parseAttribution(r, authority)
@@ -75,6 +76,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			s.settlePinHold(r.Context(), x, p.hold, totalTokens(x.usage()))
 		}
 		s.settleCaps(r.Context(), x)
+		x.recordCost()
 		settleKey(r.Context(), x.lease, x.dispatched, x.settledTokens(), s.log)
 	}()
 	fail := func(e *Error) {
@@ -135,6 +137,10 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		fail(e)
 		return
 	}
+	if e := x.checkBody(&route); e != nil {
+		fail(e)
+		return
+	}
 	if input.Store || input.Previous != "" || input.Background {
 		if !authority.Policy.AllowProviderState {
 			fail(invalidRequest("policy_conflict", "This API key does not allow provider-retained Interaction state.", nil))
@@ -153,7 +159,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	sized := int64(len(body)) / 4
 	x.estimate, x.sizedInput = max(resourceEstimate, sized), &sized
-	x.lease, e = s.Admission.reserveKey(ctx, authority, x.clientSurface(), x.estimate, time.Duration(route.OverallTimeout)*time.Millisecond)
+	x.lease, e = s.Admission.reserveKey(ctx, x.admissionAuthority(authority), x.clientSurface(), x.estimate, time.Duration(route.OverallTimeout)*time.Millisecond, x.limitRoute())
 	if e != nil {
 		fail(e)
 		return
@@ -194,6 +200,12 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			fail(e)
 			return
 		}
+	}
+	// Admission ran before the target was known, so the cost hold follows the
+	// target's selection, before anything is dispatched.
+	if e = s.reserveFallbackCost(ctx, x); e != nil {
+		fail(e)
+		return
 	}
 	endpoint, err := p.provider.Connector().InteractionsURL("", "")
 	if err != nil {

@@ -434,7 +434,8 @@ caller sees. Only stateless generation, embeddings and rerank are mirrored, neve
 requests with provider state, continuations, pinned resources, files, batches,
 realtime or media. Shadow requests are recorded with origin `shadow` and the
 caller's request as their parent, and accounted to the route, never to the
-caller's key or its budgets. `GET /api/v1/usage/shadow-experiments` compares
+caller's key, budget group or end-user budgets. Aggregate installation and project
+caps also apply. `GET /api/v1/usage/shadow-experiments` compares
 each shadow target with the primary path of the requests it mirrored by status,
 latency, time to first byte, token usage and cost, from metadata only. A route
 needs at least one serving target.

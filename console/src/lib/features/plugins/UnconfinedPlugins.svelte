@@ -8,7 +8,7 @@
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import ReauthenticateDialog from '$lib/components/ReauthenticateDialog.svelte';
   import {
-    beginOidcReauthentication,
+    beginIdentityReauthentication,
     listOidcIdentities,
     reauthenticateWithPassword
   } from '$lib/features/access/profile/api';
@@ -107,7 +107,9 @@
         reauthenticating = true;
         return;
       }
-      window.location.assign(await beginOidcReauthentication('plugin_permit'));
+      window.location.assign(
+        await beginIdentityReauthentication('plugin_permit')
+      );
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -134,7 +136,9 @@
     reauthenticationBusy = true;
     reauthenticationError = '';
     try {
-      window.location.assign(await beginOidcReauthentication('plugin_permit'));
+      window.location.assign(
+        await beginIdentityReauthentication('plugin_permit')
+      );
     } catch (cause) {
       reauthenticationError = errorMessage(cause);
     } finally {

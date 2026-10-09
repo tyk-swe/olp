@@ -118,8 +118,10 @@ ingress:
 `config.publicOrigin` and `ingress.host` must identify the same trusted origin.
 Production uses OIDC and sets `config.localLoginEnabled: false` after the OIDC
 login path has been verified. Local login remains available for bootstrap and
-small installations; MFA for that surface is deferred until a deployment
-requests it. For Gateway API or a mesh, leave chart Ingress disabled and
+small installations. [Local MFA](access.md#local-multi-factor-authentication)
+supports TOTP, WebAuthn and one-use recovery codes; installation owners can
+require it with `auth.mfa_required`. Use an HTTPS DNS public origin for security
+keys and keep recovery codes outside the browser. For Gateway API or a mesh, leave chart Ingress disabled and
 reproduce the same routing table. Disable buffering for SSE and do not lower
 request-size or idle-timeout bounds. Enable WebSocket upgrades for
 `/v1/realtime` and the Gemini Live paths under `/gemini/ws` and `/ws` when they

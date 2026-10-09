@@ -42,7 +42,7 @@ type stubQueryer struct {
 
 func (q stubQueryer) QueryRow(context.Context, string, ...any) pgx.Row { return q.row }
 func (q stubQueryer) Query(context.Context, string, ...any) (pgx.Rows, error) {
-	return nil, nil
+	return emptyMembershipRows{}, nil
 }
 
 func machineServer(t *testing.T) *Server {
@@ -325,3 +325,9 @@ func authorize(s *Server, r *http.Request, q Queryer, op Operation) (Principal, 
 	}
 	return p, p.Authorize(op)
 }
+
+type emptyMembershipRows struct{ pgx.Rows }
+
+func (emptyMembershipRows) Next() bool { return false }
+func (emptyMembershipRows) Err() error { return nil }
+func (emptyMembershipRows) Close()     {}

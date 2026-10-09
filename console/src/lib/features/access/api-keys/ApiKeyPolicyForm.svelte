@@ -1,4 +1,12 @@
 <script lang="ts">
+  import { currentBudgetLimit } from './budgetPresentation';
+  import RouteLimitFields from '../route-limits/RouteLimitFields.svelte';
+  import { routeLimitsError } from '../route-limits/policy';
+  import { groupNames, groupNamesError } from '../route-groups/policy';
+  import AttributionFields from '../attribution/AttributionFields.svelte';
+  import { attributionError } from '../attribution/policy';
+  import PolicyFields from '../end-users/PolicyFields.svelte';
+  import { policyError } from '../end-users/policy';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   const services = useServiceCapabilities();
   import { focusFormError, focusErrorSummary } from '$lib/forms/focusError';
@@ -32,7 +40,7 @@
     editing,
     busy,
     submitError,
-    canManage,
+    canManage: permissionToManage,
     publicationBlocked = false,
     onSubmit,
     onCancel,
@@ -50,6 +58,10 @@
     onCancel: () => void;
     onClearError: () => void;
   } = $props();
+
+  const canManage = $derived(
+    permissionToManage && !editing?.workload_issuer_id
+  );
 
   let form = $state(createApiKeyFormState());
   let errors = $state<Record<string, string>>({});
@@ -113,19 +125,56 @@
       (event.currentTarget as HTMLFormElement);
     if (!canManage || busy || publicationBlocked) return;
     onClearError();
+    if (
+      form.rotationIntervalDays.trim() &&
+      (!/^\d+$/.test(form.rotationIntervalDays) ||
+        Number(form.rotationIntervalDays) < 1 ||
+        Number(form.rotationIntervalDays) > 3650)
+    ) {
+      formError =
+        'Rotation interval must be a whole number of days from 1 to 3650.';
+      await focusErrorSummary(root);
+      return;
+    }
     formError = '';
     errors = validateApiKey({
       name: form.name,
+      allowedCIDRs: form.allowedCIDRs,
       requestsPerMinute: numberValue(form.requestsPerMinute),
       tokensPerMinute: numberValue(form.tokensPerMinute),
       maxConcurrency: numberValue(form.maxConcurrency),
       dailyCostLimit: form.dailyCostLimit,
       monthlyCostLimit: form.monthlyCostLimit,
+      weeklyCostLimit: form.weeklyCostLimit,
       // An untouched expiry is not re-sent, so it needs no future check.
       expiresAt: expiryUnchanged(form, editing) ? undefined : form.expiresAt,
       priority: form.priority,
       maxPriority: form.maxPriority
     });
+    formError =
+      routeLimitsError(form.routeLimits) ||
+      policyError(form.endUserPolicy) ||
+      attributionError(form.attributionPolicy) ||
+      groupNamesError(groupNames(form.allowedRouteGroups));
+    if (
+      !formError &&
+      groupNames(form.allowedRouteGroups).length &&
+      !formProject
+    )
+      formError = 'Route groups require a project-scoped key.';
+    if (form.endUserPolicy.enabled && !form.endUserSource)
+      formError =
+        'Choose an identifier source before enabling end-user limits.';
+    if (
+      form.limitTemplate &&
+      (!formProject ||
+        !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(form.limitTemplate.trim()))
+    )
+      formError = 'Choose a project and a valid limit template name.';
+    if (formError) {
+      await focusFormError(root);
+      return;
+    }
     if (Object.keys(errors).length) {
       await focusFormError(root);
       return;
@@ -285,6 +334,104 @@
         this opt-in; an upstream's own error message is relayed as it is.
       </p>
     </fieldset>
+    <fieldset class="checks">
+      <legend>End-user identity</legend>
+      <div class="form-field full">
+        <label for="key-end-user-source">Identifier source</label>
+        <select
+          id="key-end-user-source"
+          bind:value={form.endUserSource}
+          disabled={!canManage}
+          aria-describedby="key-end-user-help"
+        >
+          <option value="">Not required</option>
+          <option value="header">X-OLP-End-User header</option>
+          <option value="native">Native JSON field</option>
+        </select>
+        <small id="key-end-user-help">
+          Requires a machine token of up to 128 characters. Native fields are
+          OpenAI safety_identifier (preferred) or user, and Anthropic
+          metadata.user_id. Other surfaces require the header. Reports retain
+          only a project-scoped digest; the header is never sent upstream.
+        </small>
+      </div>
+    </fieldset>
+    <PolicyFields
+      bind:form={form.endUserPolicy}
+      prefix="key-end-user"
+      disabled={!canManage || Boolean(busy) || publicationBlocked}
+    />
+    <div class="form-field full">
+      <label for="key-allowed-cidrs">Allowed client networks</label>
+      <textarea
+        id="key-allowed-cidrs"
+        rows="3"
+        bind:value={form.allowedCIDRs}
+        disabled={!canManage || Boolean(busy)}
+        aria-invalid={!!errors.allowedCIDRs}
+        aria-describedby={errors.allowedCIDRs
+          ? 'key-allowed-cidrs-help key-allowed-cidrs-error'
+          : 'key-allowed-cidrs-help'}
+        placeholder="192.0.2.0/24&#10;2001:db8::/32"></textarea>
+      <small id="key-allowed-cidrs-help"
+        >One IPv4 or IPv6 CIDR range per line. Leave empty to allow any client
+        address. Forwarded addresses are accepted only through configured
+        trusted proxies.</small
+      >
+      {#if errors.allowedCIDRs}<p
+          id="key-allowed-cidrs-error"
+          class="field-error"
+          role="alert"
+        >
+          {errors.allowedCIDRs}
+        </p>{/if}
+    </div>
+    <div class="form-field full">
+      <label for="key-route-groups">Allowed route groups</label>
+      <input
+        id="key-route-groups"
+        bind:value={form.allowedRouteGroups}
+        disabled={!canManage || Boolean(busy)}
+        aria-describedby="key-route-groups-help"
+      />
+      <small id="key-route-groups-help"
+        >Existing group names in the selected project, separated by commas.
+        Explicit routes and group members are combined. Both lists empty allow
+        every route in the project; an empty or missing referenced group grants
+        nothing.</small
+      >
+    </div>
+    <div class="form-field full">
+      <label for="rotation-interval">Rotation reminder interval (days)</label>
+      <input
+        id="rotation-interval"
+        inputmode="numeric"
+        bind:value={form.rotationIntervalDays}
+        placeholder="No scheduled reminder"
+        disabled={!canManage || Boolean(busy)}
+        aria-describedby="rotation-interval-help"
+      />
+      <small id="rotation-interval-help"
+        >Declare 1–3650 days from creation or the last rotation. Subscribe to
+        key.expiring in Notifications to receive reminders. Secrets rotate only
+        when explicitly requested.</small
+      >
+    </div>
+    <div class="form-field full">
+      <label for="key-limit-template">Limit template</label><input
+        id="key-limit-template"
+        bind:value={form.limitTemplate}
+        maxlength="100"
+        disabled={!canManage || Boolean(busy)}
+      /><small
+        >Optional template in this key’s project. The stricter template or
+        inline limit applies. Manage templates in Project policies.</small
+      >
+    </div>
+    <RouteLimitFields
+      bind:form={form.routeLimits}
+      disabled={!canManage || Boolean(busy) || publicationBlocked}
+    />
     <fieldset class="checks routes">
       <legend>Allowed route slugs</legend>
       <p>
@@ -341,12 +488,16 @@
             >No routes are configured yet.</span
           >{/if}{/if}
     </fieldset>
+    <AttributionFields
+      bind:form={form.attributionPolicy}
+      prefix="key-attribution"
+      disabled={!canManage || Boolean(busy)}
+    />
     <fieldset class="checks">
       <legend>Allowed attribution keys</legend>
       <p>
         Callers may attach short machine-token labels under these keys in the
-        X-OLP-Attribution header. Labels are metadata only; leave blank to
-        reject every label.
+        X-OLP-Attribution header. Leave blank to reject every label.
       </p>
       <label for="allowed-attribution-keys"
         >Attribution keys (comma separated)</label
@@ -520,6 +671,22 @@
           >{/if}
       </div>
       <div class="form-field">
+        <label for="weekly-budget">Weekly cost budget (optional)</label><input
+          id="weekly-budget"
+          inputmode="decimal"
+          placeholder="100.00"
+          bind:value={form.weeklyCostLimit}
+          disabled={!canManage}
+          aria-invalid={errors.weeklyCostLimit ? 'true' : undefined}
+          aria-describedby={errors.weeklyCostLimit
+            ? 'weekly-budget-error'
+            : undefined}
+        />{#if errors.weeklyCostLimit}<small
+            class="field-error"
+            id="weekly-budget-error">{errors.weeklyCostLimit}</small
+          >{/if}
+      </div>
+      <div class="form-field">
         <label for="monthly-budget">Monthly cost budget (optional)</label><input
           id="monthly-budget"
           inputmode="decimal"
@@ -552,7 +719,7 @@
             >{formatBudget(editing.budget.daily.accrued)} / {editing.budget
               .daily.limit === null
               ? 'No limit'
-              : formatBudget(editing.budget.daily.limit)}</strong
+              : formatBudget(currentBudgetLimit(editing.budget.daily))}</strong
           >
           <small
             >Window ends (local time) {formatDate(
@@ -563,13 +730,38 @@
               >{dailyNote}</small
             >{/if}
         </div>
+        {#if editing.budget.weekly}{@const weekly = budgetWindowState(
+            editing.budget,
+            'weekly'
+          )}{@const weeklyNote = budgetStateNote(weekly)}
+          <div>
+            <span>Weekly accrued / limit</span>
+            <strong class:danger-text={weekly === 'exhausted'}
+              >{formatBudget(editing.budget.weekly.accrued)} / {editing.budget
+                .weekly.limit === null
+                ? 'No limit'
+                : formatBudget(
+                    currentBudgetLimit(editing.budget.weekly)
+                  )}</strong
+            >
+            <small
+              >Window ends (local time) {formatDate(
+                editing.budget.weekly.window_ends_at
+              )}</small
+            >
+            {#if weeklyNote}<small class:danger-text={weekly === 'exhausted'}
+                >{weeklyNote}</small
+              >{/if}
+          </div>{/if}
         <div>
           <span>Monthly accrued / limit</span>
           <strong class:danger-text={monthly === 'exhausted'}
             >{formatBudget(editing.budget.monthly.accrued)} / {editing.budget
               .monthly.limit === null
               ? 'No limit'
-              : formatBudget(editing.budget.monthly.limit)}</strong
+              : formatBudget(
+                  currentBudgetLimit(editing.budget.monthly)
+                )}</strong
           >
           <small
             >Window ends (local time) {formatDate(
@@ -583,7 +775,7 @@
         <div>
           <span>Unpriced attempts this UTC month</span>
           <strong>{formatInteger(editing.budget.unpriced_attempts)}</strong>
-          <small>Unpriced attempts accrue 0 toward both budgets.</small>
+          <small>Unpriced attempts accrue 0 toward cost budgets.</small>
         </div>
       </div>
     {/if}

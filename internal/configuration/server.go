@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/plugins"
 )
 
@@ -17,7 +18,10 @@ type Server struct {
 	Egress *egress.Policy
 	// Unconfined is the deployment's unconfined plugin tier, or nil where it
 	// enables none, for plugin providers to pin.
-	Unconfined             *plugins.Unconfined
+	Unconfined *plugins.Unconfined
+	// Limiter, when the deployment enforces limits, receives budget balances a
+	// document changes before the change publishes.
+	Limiter                *limits.Limiter
 	VendorKind             func(vendor string) (string, bool)
 	StoreNetworkCredential func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error)
 	StoreCredential        func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error)
@@ -29,10 +33,15 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/configuration/apply", s.applyEndpoint, access.MaxBody(4<<20), access.Deadline(60*time.Second))
 }
 
-func (s *Server) export(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) export(r *http.Request, p access.Principal) (access.Reply, error) {
 	doc, err := s.exportDocument(r.Context(), s.Access.Pool)
 	if err != nil {
 		return access.Reply{}, err
+	}
+	if doc.SAML != nil || len(doc.WorkloadIssuers) > 0 || len(doc.SCIMGroupMappings) > 0 {
+		if err := p.Authorize(access.Access); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	digest, err := Digest(doc)
 	if err != nil {
@@ -48,13 +57,18 @@ type promotionInput struct {
 	SecretBindings map[string]string `json:"secret_bindings"`
 }
 
-func (s *Server) planEndpoint(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) planEndpoint(r *http.Request, p access.Principal) (access.Reply, error) {
 	var input promotionInput
 	if err := access.DecodeUnique(r, &input, 4<<20); err != nil {
 		return access.Reply{}, err
 	}
 	if input.Document == nil {
 		return access.Reply{}, access.Invalid("document", "Send the configuration artifact.")
+	}
+	if input.Document.SAML != nil || len(input.Document.WorkloadIssuers) > 0 || len(input.Document.SCIMGroupMappings) > 0 {
+		if err := p.Authorize(access.Access); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	result, err := s.plan(r.Context(), s.Access.Pool, input.Document, input.SecretBindings, input.ExpectedDigest)
 	if err != nil {
@@ -63,13 +77,16 @@ func (s *Server) planEndpoint(r *http.Request, _ access.Principal) (access.Reply
 	return access.OK(result), nil
 }
 
-func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Server) applyEndpoint(r *http.Request, initial access.Principal) (access.Reply, error) {
 	var input promotionInput
 	if err := access.DecodeUnique(r, &input, 4<<20); err != nil {
 		return access.Reply{}, err
 	}
 	if input.Document == nil {
 		return access.Reply{}, access.Invalid("document", "Send the configuration artifact.")
+	}
+	if err := s.prepareWorkloadIssuers(r.Context(), initial, input.Document); err != nil {
+		return access.Reply{}, err
 	}
 	tx, err := s.Access.Begin(r)
 	if err != nil {
@@ -79,6 +96,11 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	p, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
+	}
+	if input.Document.SAML != nil || len(input.Document.WorkloadIssuers) > 0 || len(input.Document.SCIMGroupMappings) > 0 {
+		if err := p.Authorize(access.Access); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	doc := input.Document
 	doc.canonicalize()
@@ -125,6 +147,10 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	if err = s.applyDocument(r.Context(), tx, p, doc, input.SecretBindings); err != nil {
 		return access.Reply{}, err
 	}
+	if err := s.applySAMLDefinition(r, tx, p, input.Document.SAML); err != nil {
+		return access.Reply{}, err
+	}
+
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "configuration.apply", "configuration", digest, "success"); err != nil {
 		return access.Reply{}, err
 	}

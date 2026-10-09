@@ -102,6 +102,7 @@ func TestIntegrationBedrockRequestsEnforceAndSettleSupplyCaps(t *testing.T) {
 			t.Run(operation+"/"+outcome, func(t *testing.T) {
 				limiter := mediaLimiter(t)
 				h := newHarness(t, Config{})
+				identifyHarness(h, "header")
 				h.gateway.Admission = NewAdmission(limiter, nil, h.gateway.log)
 				snapshot := h.rt.release.Snapshot
 				route := snapshot.Routes[routeSlug]
@@ -145,6 +146,9 @@ func TestIntegrationBedrockRequestsEnforceAndSettleSupplyCaps(t *testing.T) {
 					ProviderKind: "bedrock", Model: model, Operation: name, InputPerMillion: costText("1"), OutputPerMillion: costText("10"),
 				}}}}
 				h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+					if r.Header.Get(endUserHeader) != "" {
+						t.Error("Bedrock forwarded end-user header")
+					}
 					if outcome == "upstream failure" {
 						status(http.StatusServiceUnavailable, `{"message":"unavailable"}`)(w, r)
 						return
@@ -170,12 +174,14 @@ func TestIntegrationBedrockRequestsEnforceAndSettleSupplyCaps(t *testing.T) {
 				request.SetPathValue("model", routeSlug)
 				request.Header.Set("X-OLP-API-Key", fullKey)
 				request.Header.Set("Content-Type", "application/json")
+				request.Header.Set(endUserHeader, "bedrock-user")
 				response := httptest.NewRecorder()
 				h.gateway.bedrockServe(response, request, family, name, mode, operation)
 				calls, wantStatus, wantCost := 0, http.StatusBadGateway, "0"
 				switch outcome {
 				case "admitted":
 					calls, wantStatus, wantCost = 1, http.StatusOK, "0.000023"
+					assertEndUserEnvelope(t, h.sink.last(t), (endUserRuntime{h.rt}).EndUserDigest(nil, "bedrock-user"), "bedrock-user")
 					event := accountingEvent(h.sink.last(t))
 					if event == nil || len(event.Attempts) != 1 || event.Attempts[0].Routing == nil || !slices.Equal(event.Attempts[0].Routing.Budgets, owners) {
 						t.Fatalf("Bedrock accounting lost supply budget owners: %+v", event)

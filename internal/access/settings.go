@@ -6,11 +6,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/budgetcalendar"
 )
+
+const settingJSON = `to_jsonb(s)||CASE WHEN s.key='budgets.time_zone' THEN jsonb_build_object('calendar',olp.budget_calendar_status(now())) ELSE '{}'::jsonb END`
 
 func (s *Server) settings(r *http.Request, p Principal) (Reply, error) {
 	var err error
-	rows, err := s.Pool.Query(r.Context(), "SELECT to_jsonb(s) FROM olp.settings s ORDER BY key")
+	rows, err := s.Pool.Query(r.Context(), "SELECT "+settingJSON+" FROM olp.settings s ORDER BY key")
 	if err != nil {
 		return Reply{}, err
 	}
@@ -21,7 +25,7 @@ func (s *Server) setting(r *http.Request, p Principal) (Reply, error) {
 	var err error
 	var data []byte
 	var etag string
-	err = s.Pool.QueryRow(r.Context(), "SELECT to_jsonb(s),etag::text FROM olp.settings s WHERE key=$1", r.PathValue("key")).Scan(&data, &etag)
+	err = s.Pool.QueryRow(r.Context(), "SELECT "+settingJSON+",etag::text FROM olp.settings s WHERE key=$1", r.PathValue("key")).Scan(&data, &etag)
 	return Detail(json.RawMessage(data), etag), err
 }
 func (s *Server) updateSetting(r *http.Request, _ Principal) (Reply, error) {
@@ -38,11 +42,15 @@ func (s *Server) updateSetting(r *http.Request, _ Principal) (Reply, error) {
 		if err != nil || n < 1 || n > 3650 {
 			return Reply{}, Invalid("value", "Use an integer from 1 to 3650.")
 		}
+	case "budgets.time_zone":
+		if _, err := budgetcalendar.New(input.Value); err != nil {
+			return Reply{}, Invalid("value", "Use a supported IANA time zone.")
+		}
 	case "limits.valkey_unavailable":
 		if input.Value != "fail_open" && input.Value != "fail_closed" {
 			return Reply{}, Invalid("value", "Use fail_open or fail_closed.")
 		}
-	case "auth.local_login_enabled":
+	case "auth.local_login_enabled", "auth.mfa_required":
 		if input.Value != "true" && input.Value != "false" {
 			return Reply{}, Invalid("value", "Use true or false.")
 		}
@@ -63,12 +71,22 @@ func (s *Server) updateSetting(r *http.Request, _ Principal) (Reply, error) {
 			return Reply{}, err
 		}
 	}
+	if key == "auth.mfa_required" {
+		if err = p.Authorize(Access); err != nil {
+			return Reply{}, err
+		}
+	}
 	var etag string
 	if err = tx.QueryRow(r.Context(), "SELECT etag::text FROM olp.settings WHERE key=$1", key).Scan(&etag); err != nil {
 		return Reply{}, err
 	}
 	if err = Match(r, etag); err != nil {
 		return Reply{}, err
+	}
+	if key == "budgets.time_zone" {
+		if _, err = tx.Exec(r.Context(), "SELECT olp.schedule_budget_zone($1,now())", input.Value); err != nil {
+			return Reply{}, err
+		}
 	}
 	etag = NewID()
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.settings SET value=$1,etag=$2,updated_by=$3,updated_at=now() WHERE key=$4", input.Value, etag, p.UserID(), key); err != nil {
@@ -83,7 +101,7 @@ func (s *Server) updateSetting(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, err
 	}
 	var data []byte
-	if err = tx.QueryRow(r.Context(), "SELECT to_jsonb(s) FROM olp.settings s WHERE key=$1", key).Scan(&data); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT "+settingJSON+" FROM olp.settings s WHERE key=$1", key).Scan(&data); err != nil {
 		return Reply{}, err
 	}
 	return Commit(r, tx, Detail(json.RawMessage(data), etag))

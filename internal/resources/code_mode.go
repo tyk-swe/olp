@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -54,9 +55,11 @@ func (s *CodeStore) ObserveAllowance(ctx context.Context, account string, allowa
 }
 
 type CodeAdmission struct {
-	Route     codemode.Route
-	APIKeyID  string
-	Operation codemode.Operation
+	Attribution   map[string]string
+	Route         codemode.Route
+	APIKeyID      string
+	EndUserDigest string
+	Operation     codemode.Operation
 	// Providers are the route revision's provider connections whose adapter
 	// serves the request's path; only their accounts serve it.
 	Providers        []string
@@ -102,6 +105,12 @@ func (s *CodeStore) BindConnection(ctx context.Context, route codemode.Route, ke
 
 func (s *CodeStore) admit(ctx context.Context, in CodeAdmission, connection bool) (CodePermit, error) {
 	var out CodePermit
+	if err := attribution.Validate(in.Attribution); err != nil {
+		return out, codemode.Refuse(400, "code_invalid_attribution")
+	}
+	if in.EndUserDigest != "" && !access.ValidEndUserDigest(in.EndUserDigest) {
+		return out, codemode.Refuse(400, "code_end_user_invalid")
+	}
 	if err := in.Operation.Identity.Validate(); err != nil {
 		return out, err
 	}
@@ -177,10 +186,13 @@ func (s *CodeStore) admit(ctx context.Context, in CodeAdmission, connection bool
 	if out.Account.Principal != out.Pin.Principal {
 		return out, codemode.Refuse(403, "code_principal_changed")
 	}
+	if !connection && !out.Authority.AllowsAttribution(in.Attribution) {
+		return out, codemode.Refuse(409, "code_attribution_changed")
+	}
 	if connection {
 		return out, tx.Commit(ctx)
 	}
-	out.Attempt = codemode.Attempt{ID: access.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, State: "prepared"}
+	out.Attempt = codemode.Attempt{ID: access.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, State: "prepared"}
 	if in.Bound != nil {
 		if err = in.Bound.Validate(); err != nil {
 			return out, err
@@ -188,8 +200,8 @@ func (s *CodeStore) admit(ctx context.Context, in CodeAdmission, connection bool
 		out.Attempt.ReservedTokens = in.Bound.Tokens
 		out.Attempt.BoundEvidence = &in.Bound.Evidence
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO olp.code_attempts(id,project_id,route_id,api_key_id,binding_id,account_id,operation,model,state,reserved_tokens,bound_evidence,route_revision_id)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,'prepared',$9,$10,$11) RETURNING created_at`, out.Attempt.ID, in.Route.ProjectID, in.Route.ID, in.APIKeyID, out.Binding.ID, out.Account.ID, in.Operation.Name, in.Operation.Model, out.Attempt.ReservedTokens, out.Attempt.BoundEvidence, in.Route.RevisionID).Scan(&out.Attempt.CreatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO olp.code_attempts(id,project_id,route_id,api_key_id,binding_id,account_id,operation,model,state,reserved_tokens,bound_evidence,route_revision_id,end_user_digest,attribution)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,'prepared',$9,$10,$11,$12,$13) RETURNING created_at`, out.Attempt.ID, in.Route.ProjectID, in.Route.ID, in.APIKeyID, out.Binding.ID, out.Account.ID, in.Operation.Name, in.Operation.Model, out.Attempt.ReservedTokens, out.Attempt.BoundEvidence, in.Route.RevisionID, in.EndUserDigest, attribution.JSON(in.Attribution)).Scan(&out.Attempt.CreatedAt)
 	if err != nil {
 		return out, err
 	}
@@ -204,10 +216,12 @@ func (s *CodeStore) admit(ctx context.Context, in CodeAdmission, connection bool
 
 func codeAuthority(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *access.Authority) error {
 	var policy, document []byte
-	err := tx.QueryRow(ctx, `SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.policy,k.expires_at,k.revoked_at,v.document
-		FROM olp.api_keys k JOIN olp.users u ON u.id=k.created_by JOIN olp.code_routes r ON r.id=$2 JOIN olp.code_route_revisions v ON v.id=r.latest_revision_id
-		WHERE k.id=$1 AND u.active AND u.oidc_authorized AND
-		(u.access_scope='global' OR EXISTS(SELECT 1 FROM olp.project_members m WHERE m.user_id=u.id AND m.project_id=r.project_id))`, in.APIKeyID, in.Route.ID).Scan(&a.ID, &a.LookupID, &a.Issuer, &a.ProjectID, &policy, &a.ExpiresAt, &a.RevokedAt, &document)
+	var groups access.RouteGroups
+	var templates access.LimitTemplates
+	err := tx.QueryRow(ctx, `SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.policy,k.expires_at,k.revoked_at,v.document,COALESCE(p.attribution_policy,'{}'::jsonb),COALESCE(p.route_groups,'{}'::jsonb),COALESCE(k.limit_lookup_id,k.lookup_id),COALESCE(p.limit_templates,'{}'::jsonb),p.end_user_policy,k.budget_group_id::text,g.limit_template,g.requests_per_minute,g.tokens_per_minute,g.max_concurrency,g.daily_cost_limit::text,g.monthly_cost_limit::text,g.weekly_cost_limit::text,k.workload_issuer_id::text,COALESCE(k.workload_digest,''),COALESCE(k.workload_mapping,''),COALESCE(wi.etag::text,'')
+		FROM olp.api_keys k LEFT JOIN olp.workload_issuers wi ON wi.id=k.workload_issuer_id LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id LEFT JOIN olp.projects p ON p.id=k.project_id JOIN olp.users u ON u.id=k.created_by JOIN olp.code_routes r ON r.id=$2 JOIN olp.code_route_revisions v ON v.id=r.latest_revision_id
+		WHERE k.id=$1 AND (k.workload_issuer_id IS NULL OR wi.document->>'enabled'='true') AND u.active AND u.oidc_authorized AND
+		(u.access_scope='global' OR EXISTS(SELECT 1 FROM olp.effective_project_members m WHERE m.user_id=u.id AND m.project_id=r.project_id))`, in.APIKeyID, in.Route.ID).Scan(&a.ID, &a.LookupID, &a.Issuer, &a.ProjectID, &policy, &a.ExpiresAt, &a.RevokedAt, &document, &a.ProjectAttributionPolicy, &groups, &a.LimitLookupID, &templates, &a.ProjectEndUserPolicy, &a.BudgetGroupID, &a.BudgetGroupTemplate, &a.BudgetGroupRPM, &a.BudgetGroupTPM, &a.BudgetGroupConcurrency, &a.BudgetGroupDailyCostLimit, &a.BudgetGroupMonthlyCostLimit, &a.BudgetGroupWeeklyCostLimit, &a.WorkloadIssuerID, &a.WorkloadDigest, &a.WorkloadMapping, &a.WorkloadRevision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return codemode.Refuse(403, "code_permission_denied")
 	}
@@ -215,6 +229,12 @@ func codeAuthority(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *access.A
 		return err
 	}
 	if err = json.Unmarshal(policy, &a.Policy); err != nil {
+		return err
+	}
+	if err = a.BindLimitTemplates(templates); err != nil {
+		return err
+	}
+	if err = a.BindRouteGroups(groups); err != nil {
 		return err
 	}
 	var current codemode.Route
@@ -460,10 +480,13 @@ func (s *CodeStore) ObserveReference(ctx context.Context, attemptID, externalID 
 	return err
 }
 
-func (s *CodeStore) RecordRefusal(ctx context.Context, route codemode.Route, keyID, code string) error {
+func (s *CodeStore) RecordRefusal(ctx context.Context, route codemode.Route, keyID, digest, code string) error {
+	if digest != "" && !access.ValidEndUserDigest(digest) {
+		return codemode.Refuse(400, "code_end_user_invalid")
+	}
 	if !codeRefusalReason.MatchString(code) {
 		return codemode.Refuse(400, "code_refusal_invalid")
 	}
-	_, err := s.Pool.Exec(ctx, `INSERT INTO olp.code_refusals(id,project_id,route_id,api_key_id,code) SELECT $1,$2,$3,k.id,$5 FROM olp.api_keys k WHERE k.id=$4 AND k.project_id=$2`, access.NewID(), route.ProjectID, route.ID, keyID, code)
+	_, err := s.Pool.Exec(ctx, `INSERT INTO olp.code_refusals(id,project_id,route_id,api_key_id,code,end_user_digest) SELECT $1,$2,$3,k.id,$5,$6 FROM olp.api_keys k WHERE k.id=$4 AND k.project_id=$2`, access.NewID(), route.ProjectID, route.ID, keyID, code, digest)
 	return err
 }

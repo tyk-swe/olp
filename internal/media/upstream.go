@@ -54,11 +54,14 @@ type Failure struct {
 
 // Target is one resolved upstream destination for a media call.
 type Target struct {
-	ConnectionScope string
-	NetworkSecret   []byte
-	Config          connectors.Config
-	Model           string // upstream model identifier
-	Secret          []byte
+	// Sensitive is request-local error-redaction evidence, never durable state.
+	Sensitive        *egress.Sensitive `json:"-"`
+	CallerCredential bool
+	ConnectionScope  string
+	NetworkSecret    []byte
+	Config           connectors.Config
+	Model            string // upstream model identifier
+	Secret           []byte
 }
 
 // Transport executes media calls against provider endpoints.
@@ -110,7 +113,24 @@ func (t *Transport) now() time.Time {
 
 // Do dispatches one media call and decodes the response per its kind. The
 // returned SSE Result leaves Body open; every other kind is fully resolved.
-func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, request *Request) (*Result, *Failure) {
+func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, request *Request) (result *Result, failure *Failure) {
+	if target.CallerCredential && target.Sensitive == nil {
+		target.Sensitive = &egress.Sensitive{}
+	}
+	if target.Sensitive != nil {
+		target.Sensitive.Add(string(target.Secret))
+		defer func() {
+			if failure != nil {
+				failure.Detail = target.Sensitive.Redact(failure.Detail)
+				if failure.Upstream != nil {
+					failure.Upstream = failure.Upstream.Redact(target.Sensitive.Redact)
+				}
+			}
+		}()
+	}
+	if target.Config.CredentialSource == "caller" && !target.CallerCredential {
+		return nil, &Failure{Class: ClassCredential, Detail: "A caller credential is required for this connection."}
+	}
 	if _, err := t.Egress.ValidateEndpoint(target.Config.Endpoint); err != nil {
 		return nil, &Failure{Class: ClassConnect, Detail: "provider endpoint rejected by egress policy"}
 	}
@@ -204,9 +224,21 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		return nil, &Failure{Class: ClassCredential, Detail: "provider credential could not be applied"}
 	}
 
+	if target.Sensitive != nil {
+		target.Sensitive.Include(credentialValues)
+	}
 	started := t.now()
 	client := t.Client
-	if target.Config.Network != nil || target.Config.ProfileID != "" {
+	if target.CallerCredential {
+		client, err = t.Egress.EphemeralClient(target.Config.Network, target.NetworkSecret, 5*time.Minute)
+		if err != nil {
+			if pipe != nil {
+				pipe.CloseWithError(err)
+				<-multipartDone
+			}
+			return nil, &Failure{Class: ClassCredential, Detail: "provider network connection unavailable"}
+		}
+	} else if target.Config.Network != nil || target.Config.ProfileID != "" {
 		t.connectionsOnce.Do(func() { t.connections = egress.NewConnectionClientCache(128) })
 		var err error
 		client, err = t.connections.ClientScoped(target.ConnectionScope, *t.Egress, target.Config.Network, target.NetworkSecret, 5*time.Minute)
@@ -262,7 +294,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 		}
 	}
 
-	result, failure := t.decode(ctx, resp, call, request, firstByte, func(next *http.Request) (*http.Response, error) { return client.Do(next) }, target)
+	result, failure = t.decode(ctx, resp, call, request, firstByte, func(next *http.Request) (*http.Response, error) { return client.Do(next) }, target)
 	if failure != nil {
 		resp.Body.Close()
 		failure.Dispatched = true

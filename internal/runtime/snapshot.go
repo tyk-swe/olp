@@ -85,7 +85,8 @@ type Limits struct {
 
 // Provider is the serving view of one active provider revision.
 type Provider struct {
-	Network *egress.ConnectionOptions `json:"network,omitempty"`
+	CredentialSource string                    `json:"credential_source,omitempty"`
+	Network          *egress.ConnectionOptions `json:"network,omitempty"`
 	// Plugin is the plugin profile a plugin provider pins as its profile
 	// revision, which publication resolves from the installed plugin. A
 	// gateway serves the provider from its release and loads the plugin only
@@ -168,6 +169,7 @@ type Route struct {
 
 // Snapshot is the complete immutable serving configuration.
 type Snapshot struct {
+	hasBodyLimits      bool
 	CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
 	CodeConnections    map[string]Configuration  `json:"code_connections,omitempty"`
 	codeRevisions      map[string]codeRevision
@@ -215,6 +217,13 @@ func (p *Provider) Supports(model, operation, surface, mode string) bool {
 // Validate rejects snapshots that could not serve safely: dangling references,
 // non-positive budgets, malformed identifiers.
 func (s *Snapshot) Validate() error {
+	s.hasBodyLimits = false
+	for _, route := range s.Routes {
+		if route.MaxBodyBytes != nil {
+			s.hasBodyLimits = true
+			break
+		}
+	}
 	if err := s.validateCodeMode(); err != nil {
 		return err
 	}
@@ -229,6 +238,9 @@ func (s *Snapshot) Validate() error {
 	for id, p := range s.Providers {
 		if id != p.ID || !validUUID(p.ID) || p.RevisionID == "" || p.Name == "" || p.Kind == "" {
 			return fmt.Errorf("provider %q is malformed", id)
+		}
+		if err := connectors.ValidateCredentialSource(p.CredentialSource, p.Kind, p.Connector().AuthMode); err != nil {
+			return err
 		}
 		if err := p.Connector().ValidateProfile(); err != nil {
 			return fmt.Errorf("provider %q profile: %w", id, err)
@@ -269,6 +281,9 @@ func (s *Snapshot) Validate() error {
 			if _, ok := s.Providers[t.ProviderID]; !ok {
 				return fmt.Errorf("route %q references unknown provider %s", slug, t.ProviderID)
 			}
+		}
+		if err := s.validateCallerCostPolicy(r); err != nil {
+			return err
 		}
 		templates, policy, err := s.compileRouteExecution(r)
 		if err != nil {
@@ -311,5 +326,8 @@ func (p *Provider) Connector() connectors.Config {
 	if mode == "" {
 		mode = "api_key"
 	}
-	return connectors.Config{Network: p.Network, Plugin: p.Plugin, PluginOptions: p.PluginOptions, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, ObservedPrincipal: p.ObservedPrincipal, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
+	return connectors.Config{Network: p.Network, Plugin: p.Plugin, PluginOptions: p.PluginOptions, ProfileID: p.ProfileID, ProfileRevision: p.ProfileRevision, SemanticHeaders: p.SemanticHeaders, QuerySettings: p.QuerySettings, OperationDefaults: p.OperationDefaults, Bindings: p.Bindings, ObservedPrincipal: p.ObservedPrincipal, CredentialSource: p.CredentialSource, Kind: p.Kind, AuthMode: mode, Endpoint: p.Endpoint, CloudRegion: p.CloudRegion, CloudProject: p.CloudProject, Deployment: p.Deployment, APIVersion: p.APIVersion, VendorID: p.VendorID, CredentialHeaders: p.CredentialHeaders, Models: p.Models}
 }
+
+// HasBodyLimits reports whether ingress needs byte measurements for ordinary routes.
+func (s *Snapshot) HasBodyLimits() bool { return s != nil && s.hasBodyLimits }

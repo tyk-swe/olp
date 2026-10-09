@@ -107,14 +107,20 @@ func newStrictRealtimeFixture(t *testing.T, kind string) *strictRealtimeFixture 
 }
 
 func provisionStrictRealtime(t *testing.T, h *accessHarness, kind, endpoint string, networkCredential ...string) (string, string) {
+	return provisionStrictRealtimeWithBodyLimit(t, h, kind, endpoint, nil, networkCredential...)
+}
+
+func provisionStrictRealtimeWithBodyLimit(t *testing.T, h *accessHarness, kind, endpoint string, maxBody *int64, networkCredential ...string) (string, string) {
+	return provisionStrictRealtimeInProject(t, h, h.owner(), kind, endpoint, maxBody, nil, networkCredential...)
+}
+func provisionStrictRealtimeInProject(t *testing.T, h *accessHarness, owner *browser, kind, endpoint string, maxBody *int64, projectID *string, networkCredential ...string) (string, string) {
 	t.Helper()
-	owner := h.owner()
 	profile := "openai-responses"
 	if kind == "azure_openai" {
 		profile = "azure-v1-responses"
 	}
 	configuration := map[string]any{"kind": kind, "profile_id": profile, "profile_revision": "1", "auth_mode": "api_key", "endpoint": endpoint}
-	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Strict native realtime", "configuration": configuration, "model": vendorModel, "credential": vendorSecret}, map[string]string{"Idempotency-Key": uuid.NewString()}, http.StatusCreated)
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"project_id": projectID, "name": "Strict native realtime", "configuration": configuration, "model": vendorModel, "credential": vendorSecret}, map[string]string{"Idempotency-Key": uuid.NewString()}, http.StatusCreated)
 	path := "/api/v1/providers/" + provider["id"].(string)
 	if len(networkCredential) != 0 {
 		stored := h.want(owner, "POST", path+"/network-credentials", map[string]any{"credential": networkCredential[0]}, withMatch(provider, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusCreated)
@@ -134,12 +140,12 @@ func provisionStrictRealtime(t *testing.T, h *accessHarness, kind, endpoint stri
 	h.want(owner, "POST", path+"/activate", nil, withMatch(provider, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
 	slug := "strict-realtime-" + uuid.NewString()[:8]
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
-		"slug": slug, "operations": []string{"realtime"}, "fidelity": map[string]any{"mode": "strict"},
+		"project_id": projectID, "max_body_bytes": maxBody, "slug": slug, "operations": []string{"realtime"}, "fidelity": map[string]any{"mode": "strict"},
 		"overall_timeout_ms": 30000, "max_attempts": 1,
 		"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 20000}},
 	}, map[string]string{"Idempotency-Key": uuid.NewString()}, http.StatusCreated)
 	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, map[string]string{"Idempotency-Key": uuid.NewString()}), http.StatusOK)
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Strict native realtime", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, http.StatusCreated)["secret"].(string)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"project_id": projectID, "name": "Strict native realtime", "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, map[string]string{"Idempotency-Key": uuid.NewString()}, http.StatusCreated)["secret"].(string)
 	h.refresh()
 	return slug, key
 }

@@ -16,6 +16,7 @@ import (
 // such as a grant lapse, concerns the whole installation.
 const (
 	BudgetThresholdEvent = "budget.threshold"
+	KeyExpiringEvent     = "key.expiring"
 	GrantLapsedEvent     = "provider.grant.lapsed"
 )
 
@@ -31,7 +32,7 @@ const ruleFrom = ` FROM olp.notification_rules r
 	LEFT JOIN olp.budget_groups g ON r.subject_kind='budget_group' AND g.id=r.subject_id
 	JOIN olp.notification_destinations d ON d.id=r.destination_id`
 
-const deliveryFields = `'id',v.id,'rule_id',v.rule_id,'rule_name',r.name,'project_id',r.project_id,'event',r.event,'window_id',v.window_id,'threshold_percent',v.threshold_percent,'accrued',v.accrued::text,'limit',v.limit_amount::text,'currency',v.currency,'provider_id',v.payload->'provider_id','provider_name',v.payload->'provider_name','credential_version_id',v.credential_id,'credential_version',v.payload->'credential_version','status',v.status,'attempts',v.attempts,'last_error_code',v.last_error_code,'created_at',v.created_at,'last_attempt_at',v.last_attempt_at,'delivered_at',v.delivered_at`
+const deliveryFields = `'api_key_id',v.api_key_id,'api_key_name',v.payload->'api_key_name','due_at',v.due_at,'reason',v.reason,'id',v.id,'rule_id',v.rule_id,'rule_name',r.name,'project_id',r.project_id,'event',CASE WHEN v.api_key_id IS NOT NULL THEN 'key.expiring' ELSE r.event END,'window_id',v.window_id,'threshold_percent',v.threshold_percent,'accrued',v.accrued::text,'limit',v.limit_amount::text,'currency',v.currency,'provider_id',v.payload->'provider_id','provider_name',v.payload->'provider_name','credential_version_id',v.credential_id,'credential_version',v.payload->'credential_version','status',v.status,'attempts',v.attempts,'last_error_code',v.last_error_code,'created_at',v.created_at,'last_attempt_at',v.last_attempt_at,'delivered_at',v.delivered_at`
 const deliveryFrom = ` FROM olp.notification_deliveries v
 	JOIN olp.notification_rules r ON r.id=v.rule_id`
 
@@ -371,8 +372,8 @@ func (s *Server) validateRuleSubject(r *http.Request, tx pgx.Tx, input *ruleInpu
 	if input.SubjectKind == nil || *input.SubjectKind != "api_key" && *input.SubjectKind != "budget_group" {
 		return Invalid("subject_kind", "Use api_key or budget_group.")
 	}
-	if input.WindowKind == nil || *input.WindowKind != "day" && *input.WindowKind != "month" {
-		return Invalid("window_kind", "Use day or month.")
+	if input.WindowKind == nil || *input.WindowKind != "day" && *input.WindowKind != "month" && *input.WindowKind != "week" {
+		return Invalid("window_kind", "Use day, week or month.")
 	}
 	if input.ThresholdPercent == nil || *input.ThresholdPercent < 1 || *input.ThresholdPercent > 100 {
 		return Invalid("threshold_percent", "Use a threshold from 1 to 100.")
@@ -380,6 +381,10 @@ func (s *Server) validateRuleSubject(r *http.Request, tx pgx.Tx, input *ruleInpu
 	if input.SubjectID == nil {
 		return Invalid("subject_id", "Use a valid subject identifier.")
 	}
+	return s.validateNotificationSubject(r, tx, input)
+}
+
+func (s *Server) validateNotificationSubject(r *http.Request, tx pgx.Tx, input *ruleInput) error {
 	subjectID, err := ParseUUID(*input.SubjectID)
 	if err != nil {
 		return Invalid("subject_id", "Use a valid subject identifier.")
@@ -441,12 +446,19 @@ func (s *Server) validateRule(r *http.Request, tx pgx.Tx, input *ruleInput) erro
 		if err := s.validateRuleSubject(r, tx, input); err != nil {
 			return err
 		}
+	case KeyExpiringEvent:
+		if input.SubjectKind == nil || *input.SubjectKind != "api_key" || input.SubjectID == nil || input.WindowKind != nil || input.ThresholdPercent != nil {
+			return Invalid("subject_id", "Key reminders require an API key and no budget window or threshold.")
+		}
+		if err := s.validateNotificationSubject(r, tx, input); err != nil {
+			return err
+		}
 	case GrantLapsedEvent:
 		if err := validateProviderEventRule(*input); err != nil {
 			return err
 		}
 	default:
-		return Invalid("event", "Use budget.threshold or provider.grant.lapsed.")
+		return Invalid("event", "Use budget.threshold, provider.grant.lapsed or key.expiring.")
 	}
 	return s.validateRuleDestination(r, tx, input)
 }
@@ -617,7 +629,7 @@ func (s *Server) updateNotificationRule(r *http.Request, _ Principal) (Reply, er
 			}
 		case "window_kind":
 			if err = json.Unmarshal(raw, &next.WindowKind); err != nil {
-				return Reply{}, Invalid("window_kind", "Use day or month.")
+				return Reply{}, Invalid("window_kind", "Use day, week or month.")
 			}
 		case "threshold_percent":
 			if err = json.Unmarshal(raw, &next.ThresholdPercent); err != nil {

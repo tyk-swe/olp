@@ -127,6 +127,7 @@ const (
 	DimensionAPIKey      = "api_key"
 	DimensionOperation   = "operation"
 	DimensionAttribution = "attribution"
+	DimensionEndUser     = "end_user"
 	// DimensionModelFamily groups by the tokenizer family each attempt's input
 	// estimate was counted for, and DimensionEstimateProvenance by how that
 	// estimate was produced; together with a route they show where estimation
@@ -261,7 +262,7 @@ const estimatePaired = "usage_observed AND input_tokens IS NOT NULL AND estimate
 // whole bucket lies inside it, so no aggregate is ever cut in half.
 func (f Filters) usageRows(q *filterQuery, scope countScope) {
 	q.push("WITH usage_rows AS (SELECT observed_at, route_slug, provider_id, upstream_model," +
-		" api_key_id, operation, surface, attribution, model_family, estimate_provenance," +
+		" api_key_id, operation, surface, attribution, end_user_digest, model_family, estimate_provenance," +
 		" CASE WHEN " + scope.count + " THEN 1 ELSE 0 END::bigint AS request_count," +
 		" COALESCE(input_tokens, 0)::numeric AS input_tokens," +
 		" COALESCE(output_tokens, 0)::numeric AS output_tokens," +
@@ -281,7 +282,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 	q.pushBind(" AND observed_at < ", f.End)
 	f.dimensions(q)
 	q.push(" UNION ALL SELECT bucket AS observed_at, route_slug, provider_id, upstream_model," +
-		" api_key_id, operation, surface, attribution, model_family, estimate_provenance, " +
+		" api_key_id, operation, surface, attribution, end_user_digest, model_family, estimate_provenance, " +
 		scope.hourlyCount + ", input_tokens, output_tokens," +
 		" cached_input_tokens, cache_write_input_tokens, cache_write_5m_input_tokens," +
 		" cache_write_1h_input_tokens, media_units, estimated_cost, " + scope.hourlyUnpriced + ", " +
@@ -409,6 +410,8 @@ func ReadBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension s
 		} else {
 			scope = scopeTarget
 		}
+	case DimensionEndUser:
+		expression = "COALESCE(NULLIF(end_user_digest, ''), 'unidentified')"
 	case DimensionAPIKey:
 		expression = "COALESCE(api_key_id::text, 'system')"
 	case DimensionOperation:
@@ -431,7 +434,7 @@ func ReadBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension s
 		expression = "attribution->>$attribution_key$"
 	default:
 		return Breakdown{}, access.Fail(400, "invalid_dimension",
-			"Dimension must be route, provider, model, model_family, estimate_provenance, api_key, operation, or attribution.")
+			"Dimension must be route, provider, model, model_family, estimate_provenance, api_key, end_user, operation, or attribution.")
 	}
 	if limit < 1 {
 		limit = 1

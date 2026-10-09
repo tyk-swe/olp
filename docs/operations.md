@@ -96,7 +96,7 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   reconstruction. It expires requests, receipts, audit, gaps, epochs, sessions,
   invitations, replays, and OIDC flows under stored `retention.*` settings.
   Closing the session after each pass releases the lock.
-- **Cost reconciliation:** every 60 seconds, repairs current UTC spend windows
+- **Cost reconciliation:** every 60 seconds, repairs current calendar spend windows
   from durable facts. See [spend-budget reconciliation](#spend-budget-reconciliation)
   for initialization, leadership and recovery.
 - **Notification delivery:** every 60 seconds under a transaction advisory
@@ -158,7 +158,7 @@ configured key and budget-group daily/monthly window. The terminal accounting
 consumer and the reconciliation worker publish cumulative PostgreSQL totals.
 Only these paths initialize cost hashes; admission never creates a zero counter.
 
-New keys, expired UTC windows, missing hashes and malformed or wrong-window
+New keys, expired calendar windows, missing hashes and malformed or wrong-window
 state return `503 distributed_limits_unavailable` until an authoritative
 snapshot arrives. With a healthy worker, initialization normally waits for the
 next minute's reconciliation pass. Known exhausted windows return HTTP 429
@@ -179,13 +179,13 @@ which can start a route's `budget` fallback.
 Reconciliation replaces malformed hashes (including non-integer `unpriced`
 fields or non-hash values) from matching authoritative snapshots, without
 lowering the other window's valid counter. Stale or future snapshots cannot
-initialize a different current UTC window. Daily aggregation uses
+initialize a different current calendar window. Daily aggregation uses
 `[daily_start, daily_end)`, so accepted clock-skewed events for tomorrow do not
 exhaust today. Inflated but otherwise valid counters require reviewed data
 repair; never reset them to zero or bypass migration-history/checksum checks.
 
 One dedicated PostgreSQL session holds the reconciliation advisory lock between
-minute ticks and performs monthly reconstruction on that same session. Followers
+minute ticks and performs current-period reconstruction on that same session. Followers
 record skipped passes. Error, shutdown, cancellation or the 120-second pass
 deadline closes the leader session, releasing leadership; a connection holding
 that session lock is never returned to the pool. Repeated timeouts require
@@ -210,7 +210,7 @@ cost; there is no per-key Prometheus spend gauge.
 4. Review `unpriced_attempts`. Missing usage or prices means budgets cannot
    account for all spend; repair coverage and retain provider-side quotas.
 
-Admission measures these thresholds with exact decimal arithmetic and UTC
+Admission measures these thresholds with exact decimal arithmetic and installation-calendar
 boundaries against accrued spend plus the estimated cost of requests in flight
 ([cost reservation](gateway.md#cost-reservation)), which is not a reserved
 invoice cap: unpriced attempts accrue no money, operations whose cost is unknown
@@ -244,10 +244,14 @@ See the [limits](../tests/integration/limits_test.go),
 subscribes a destination to one `event`, which never changes:
 
 - `budget.threshold`: an API key's or budget group's accrued spend reached the
-  rule's `threshold_percent` of its limit in the current UTC `day` or `month`
+  rule's `threshold_percent` of its limit in the current calendar `day`, `week` or `month`
   window. A rule fires once per window. Installation-wide destinations and rules
   require settings permission; project-scoped ones require project-manager
   access, and a rule's subject and destination must belong to the same project.
+- `key.expiring`: an API key expires or is due for its declared rotation within
+  24 hours, or is overdue. The worker emits one event per rule/key/reason/date,
+  without generating or sending a credential. Superseded pending events become
+  `cancelled` before sending. See [API-key lifecycle](access.md#api-key-rotation-and-reminders).
 - `provider.grant.lapsed`: a provider plugin's [grant lapsed](plugins.md#lapsed-grants).
   Provider events concern the whole installation: their rules take no subject,
   window or threshold, are installation-wide with an installation-wide
@@ -265,10 +269,12 @@ failures persist only a safe category (`timeout`, `network`, `http_4xx`,
 `http_5xx`, `invalid_destination`), never response bodies or raw error text. Deliveries
 for a disabled rule or destination wait, unsent, until both are enabled again.
 
-Webhook payloads are metadata only, and the management contract documents both
+Webhook payloads are metadata only, and the management contract documents these events
 under `webhooks`. A `budget.threshold` payload names the rule, subject, window,
 threshold, accrued, limit, and currency, never prompts, outputs, or attribution
-labels. A `provider.grant.lapsed` payload reports the lapse as it was when the
+labels. A `key.expiring` payload contains `event`, `rule_id`, `rule_name`,
+`api_key_id`, `api_key_name`, nullable `project_id`, `due_at` and `reason`
+(`expiry` or `rotation`). A `provider.grant.lapsed` payload reports the lapse as it was when the
 grant lapsed:
 
 ```json
@@ -315,6 +321,11 @@ different versions, malformed payloads and permanently invalid records become
 `malformed_stream_event` gaps instead of being interpreted as another format.
 See [metadata tests](../internal/usage/) for the persistence contract.
 
+Transcription durations are recorded at microsecond precision to match the
+accounting tables; this does not change the native response bytes. Negative,
+nonfinite or out-of-range durations are unavailable billing evidence, rather
+than malformed values that invalidate the entire request event.
+
 Management processes serve the results: the usage summary, breakdown, time
 series, and completeness endpoints under `/api/v1/usage/`, request listing and
 detail under `/api/v1/requests`, pricing revisions under
@@ -327,6 +338,12 @@ restrict rows to labelled usage, and `dimension=attribution` groups the
 breakdown by one key's values (the key filter is required and rows without it
 are omitted). Request list and detail expose each request's stored labels.
 Project-scoped readers see only their own projects' rows in every report.
+
+`dimension=end_user` groups usage by the project-scoped HMAC digest of an
+identified end user, with `unidentified` for requests without one. Request list
+and detail expose `end_user_digest`. The digest survives hourly rollups; the
+raw identifier is never part of accounting. See [end-user identity](access.md#end-user-identity)
+for key policy, digest lookup and retention.
 
 Each attempt also records the admission estimate of its input, how it was
 produced (`tokenizer`, `calibrated` or `heuristic`) and the tokenizer family it
@@ -417,7 +434,7 @@ read, acknowledge, or reconcile one another's state.
 | --- | --- |
 | `<prefix>limits:{<lookup>}:rate` | Request and token windows for one lookup. |
 | `<prefix>limits:{<lookup>}:concurrency` | Concurrency leases for one lookup. |
-| `<prefix>limits:{<cost owner>}:cost:day` and `:cost:month` | Current UTC spend windows for an API-key, budget-group, connection, slot or route UUID. |
+| `<prefix>limits:{<cost owner>}:cost:day`, `:cost:week` and `:cost:month` | Current calendar spend windows for caller and supply owners; supply caps use day/month. Custom calendar hashes also contain start/end instants. |
 | `<prefix>limits:{<cost owner>}:cost:pending` and `:cost:expiry` | Cost reserved by requests in flight against that owner: a hash of each request's amount and their total, and the set of when each lapses. Advisory; absent when nothing is in flight. |
 | `<prefix>limits:provider-cooldown:<scope>` | Credential-version and slot cooldowns. |
 | `<prefix>limits:health:circuits` | Each provider whose circuit the fleet holds open, until when. Gateways publish transitions and read it every two seconds. |
@@ -663,3 +680,36 @@ cancellations must be reported separately, with an explicit inclusion/exclusion
 policy. Refusals and missing usage need distinct product/accounting indicators.
 Cost totals are estimates from recorded priced usage; always read their
 unpriced, incomplete, pending and loss coverage alongside the total.
+
+
+Budget-zone changes are scheduled, not immediate resets. See
+[budget time zones](access.md#budget-time-zone) for the effective-boundary display,
+DST behavior and retained-cost precision. If a newly active period returns 503,
+check the existing cost-reconciliation worker before retrying; never seed an
+unknown balance with zero. The calendar tables are backed up with PostgreSQL and
+are required to interpret delayed and retained usage correctly.
+
+### Local MFA recovery
+
+Before enforcing local MFA, enroll at least one working factor and store the
+one-use recovery codes separately. Security keys need the configured HTTPS DNS
+public origin (localhost is the development exception). Keep the relying-party
+hostname stable during a deployment migration; use TOTP or a recovery code if a
+key cannot operate at the current origin. A recovered factor still requires the
+account password for a new local session.
+
+An ordinary offline password reset keeps MFA enabled. Only use
+`olp account reset-password EMAIL PASSWORD_FILE --reset-mfa [flags]` for an
+explicit operator-approved factor reset: it invalidates factors, codes and
+sessions, records `user.mfa_recover`, and preserves the required-MFA policy.
+The next password sign-in bootstraps a new factor when policy requires it.
+See [local MFA and account recovery](access.md#local-multi-factor-authentication)
+for the proof protocol, storage inventory and recovery-file permissions.
+
+SAML operators should register the console's stable public origin and current SP
+signing certificate with the IdP, preserve the sealed-key inventory during backup,
+and keep an independent owner recovery method. A signing-key rotation invalidates
+pending flows and requires distributing the new public certificate. Do not solve a
+callback failure by loosening session SameSite policy or allowing unsigned
+assertions. See [SAML console sign-in](access.md#saml-console-sign-in) for supported
+bindings, expiry, promotion and recovery semantics.

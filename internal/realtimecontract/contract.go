@@ -99,7 +99,7 @@ func (t *Template) AdmitHandshake(rawQuery string, headers http.Header, route st
 		}
 		switch strings.ToLower(name) {
 		case "authorization", "connection", "upgrade", "sec-websocket-key", "sec-websocket-version",
-			"sec-websocket-extensions", "origin", "user-agent", "accept-encoding", "x-olp-attribution",
+			"sec-websocket-extensions", "origin", "user-agent", "accept-encoding", "x-olp-attribution", "x-olp-end-user", "x-olp-provider-credential",
 			"forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "via",
 			"traceparent", "tracestate":
 			// Transport and OLP metadata do not become native session controls.

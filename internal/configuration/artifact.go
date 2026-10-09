@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
@@ -17,17 +19,34 @@ import (
 const APIVersion = "openllmproxy.dev/config/v1"
 
 type Document struct {
-	APIVersion string          `json:"api_version"`
-	ExportedAt string          `json:"exported_at"`
-	Projects   []ProjectEntry  `json:"projects"`
-	Providers  []ProviderEntry `json:"providers"`
-	Routes     []RouteEntry    `json:"routes"`
-	Templates  []TemplateEntry `json:"templates,omitempty"`
-	Pricing    *PricingEntry   `json:"pricing"`
+	SAML              *access.SAMLDefinition `json:"saml,omitempty"`
+	RequireLocalMFA   *bool                  `json:"require_local_mfa,omitempty"`
+	SCIMGroupMappings []SCIMGroupMapping     `json:"scim_group_mappings,omitempty"`
+	// Endpoint preflight runs before the mutation lock; these versions detect races.
+	preparedWorkloads  map[string]string
+	WorkloadIssuers    []WorkloadIssuerEntry `json:"workload_issuers,omitempty"`
+	Organizations      []OrganizationEntry   `json:"organizations,omitempty"`
+	BudgetTimeZone     *string               `json:"budget_time_zone,omitempty"`
+	InstallationBudget *access.BudgetPolicy  `json:"installation_budget,omitempty"`
+	APIVersion         string                `json:"api_version"`
+	ExportedAt         string                `json:"exported_at"`
+	Projects           []ProjectEntry        `json:"projects"`
+	Providers          []ProviderEntry       `json:"providers"`
+	Routes             []RouteEntry          `json:"routes"`
+	Templates          []TemplateEntry       `json:"templates,omitempty"`
+	Pricing            *PricingEntry         `json:"pricing"`
 }
 
 type ProjectEntry struct {
-	Name string `json:"name"`
+	Organization         *string                   `json:"organization,omitempty"`
+	AttributionBudgets   access.AttributionBudgets `json:"attribution_budgets,omitempty"`
+	LimitTemplates       *access.LimitTemplates    `json:"limit_templates,omitempty"`
+	EndUserLimitTemplate *string                   `json:"end_user_limit_template,omitempty"`
+	Budget               *access.BudgetPolicy      `json:"budget,omitempty"`
+	RouteGroups          access.RouteGroups        `json:"route_groups,omitempty"`
+	AttributionPolicy    *attribution.Policy       `json:"attribution_policy,omitempty"`
+	Name                 string                    `json:"name"`
+	EndUserDefaults      *access.AdmissionLimits   `json:"end_user_defaults,omitempty"`
 }
 
 type CapabilityEntry struct {
@@ -85,6 +104,8 @@ func targetEntry(t runtime.PublishedTarget) TargetEntry {
 }
 
 type RouteEntry struct {
+	CallerCostExempt bool                `json:"caller_cost_exempt,omitempty"`
+	MaxBodyBytes     *int64              `json:"max_body_bytes,omitempty"`
 	Slug             string              `json:"slug"`
 	Project          *string             `json:"project"`
 	Operations       []string            `json:"operations"`
@@ -137,7 +158,7 @@ func (t *TemplateEntry) normalize() error {
 }
 
 func (r *RouteEntry) behavior() runtime.Behavior {
-	return runtime.Behavior{Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget}
+	return runtime.Behavior{CallerCostExempt: r.CallerCostExempt, MaxBodyBytes: r.MaxBodyBytes, Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget}
 }
 
 func (r *RouteEntry) setBehavior(raw []byte) error {
@@ -145,6 +166,8 @@ func (r *RouteEntry) setBehavior(raw []byte) error {
 	if err != nil {
 		return err
 	}
+	r.MaxBodyBytes = behavior.MaxBodyBytes
+	r.CallerCostExempt = behavior.CallerCostExempt
 	r.Fallbacks, r.Selectors, r.Retry, r.Affinity, r.Budget = behavior.Fallbacks, behavior.Selectors, behavior.Retry, behavior.Affinity, behavior.Budget
 	return nil
 }
@@ -261,6 +284,16 @@ func sortCapabilities(c []CapabilityEntry) {
 func (d *Document) canonicalize() {
 	normalizeDocument(d)
 	d.ExportedAt = ""
+	slices.SortFunc(d.SCIMGroupMappings, func(a, b SCIMGroupMapping) int {
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	})
+	for i := range d.SCIMGroupMappings {
+		slices.SortFunc(d.SCIMGroupMappings[i].Projects, func(a, b SCIMProjectMapping) int {
+			return strings.Compare(strings.ToLower(a.Project), strings.ToLower(b.Project))
+		})
+	}
+
+	slices.SortFunc(d.WorkloadIssuers, func(a, b WorkloadIssuerEntry) int { return strings.Compare(a.Issuer, b.Issuer) })
 	if d.Projects == nil {
 		d.Projects = []ProjectEntry{}
 	}

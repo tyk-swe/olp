@@ -51,14 +51,19 @@ export async function createApiKey(
   return unwrap(response);
 }
 
-export async function rotateApiKey(key: ApiKey): Promise<ApiKeySecret> {
+export async function rotateApiKey(
+  key: ApiKey,
+  overlapSeconds = 0,
+  idempotencyKey: string = crypto.randomUUID()
+): Promise<ApiKeySecret> {
   const response = await apiClient.POST(
     '/api/v1/api-keys/{api_key_id}/rotate',
     {
       params: {
         path: { api_key_id: key.id },
-        header: { 'If-Match': key.etag, 'Idempotency-Key': crypto.randomUUID() }
-      }
+        header: { 'If-Match': key.etag, 'Idempotency-Key': idempotencyKey }
+      },
+      body: { overlap_seconds: overlapSeconds }
     }
   );
   return unwrap(response);

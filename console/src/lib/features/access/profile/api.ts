@@ -1,3 +1,4 @@
+import { confirmMFA } from '$lib/features/access/mfa/prompt.svelte';
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
 import { ensureOk, unwrap } from '$lib/api/http';
@@ -10,7 +11,13 @@ export type ProfileUpdate = { display_name: string };
 export type PasswordChange = { current_password: string; new_password: string };
 export type PasswordEnrollment = { new_password: string };
 export type RecentAuthenticationPurpose =
-  'password_enrollment' | 'oidc_link' | 'oidc_unlink' | 'plugin_permit';
+  | 'password_enrollment'
+  | 'oidc_link'
+  | 'oidc_unlink'
+  | 'plugin_permit'
+  | 'mfa_manage'
+  | 'saml_link'
+  | 'saml_unlink';
 
 export async function getProfile(): Promise<UserProfile> {
   const { data, error, response } = await apiClient.GET('/api/v1/profile');
@@ -33,7 +40,7 @@ export async function reauthenticateWithPassword(
   purpose: RecentAuthenticationPurpose,
   resourceId?: string
 ): Promise<void> {
-  const { error, response } = await apiClient.POST(
+  const { data, error, response } = await apiClient.POST(
     '/api/v1/profile/reauthenticate',
     {
       body: {
@@ -44,6 +51,7 @@ export async function reauthenticateWithPassword(
     }
   );
   ensureOk({ error, response });
+  if (response.status === 202 && data) await confirmMFA({ challenge: data });
 }
 
 export async function changePassword(
@@ -98,4 +106,20 @@ export async function unlinkOidcIdentity(identityId: string): Promise<void> {
     { params: { path: { identity_id: identityId } } }
   );
   ensureOk({ error, response });
+}
+
+export async function beginIdentityReauthentication(
+  purpose: RecentAuthenticationPurpose,
+  resourceId?: string
+): Promise<string> {
+  const identities = unwrap(
+    await apiClient.GET('/api/v1/profile/saml-identities')
+  );
+  if (identities.reauthentication_available)
+    return unwrap(
+      await apiClient.POST('/api/v1/profile/saml/reauthenticate', {
+        body: { purpose, ...(resourceId ? { resource_id: resourceId } : {}) }
+      })
+    ).authorization_url;
+  return beginOidcReauthentication(purpose, resourceId);
 }

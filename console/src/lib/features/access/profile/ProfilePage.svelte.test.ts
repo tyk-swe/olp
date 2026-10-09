@@ -7,10 +7,14 @@ import {
   updateProfile,
   type UserProfile
 } from '$lib/features/access/profile/api';
+import { listSAMLIdentities } from '../saml/api';
+import { getMFA } from '$lib/features/access/mfa/api';
 import { listSessionPage } from '$lib/features/access/sessions/api';
 import { userKeys } from '$lib/features/access/users/userKeys';
 import ProfilePageProbe from './test/ProfilePageProbe.svelte';
 
+vi.mock('../saml/api', () => ({ listSAMLIdentities: vi.fn() }));
+vi.mock('$lib/features/access/mfa/api', () => ({ getMFA: vi.fn() }));
 vi.mock('$app/navigation', () => ({ replaceState: vi.fn() }));
 vi.mock('$lib/features/access/session/lifecycle', () => ({
   authLifecycle: {
@@ -23,7 +27,7 @@ vi.mock('$lib/features/access/profile/api', async (original) => ({
   getProfile: vi.fn(),
   listOidcIdentities: vi.fn(),
   updateProfile: vi.fn(),
-  beginOidcReauthentication: vi.fn()
+  beginIdentityReauthentication: vi.fn()
 }));
 vi.mock('$lib/features/access/sessions/api', async (original) => ({
   ...(await original<typeof import('$lib/features/access/sessions/api')>()),
@@ -52,6 +56,17 @@ beforeEach(() => {
   document.body.append(host);
   client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
+  });
+  vi.mocked(listSAMLIdentities).mockResolvedValue({
+    items: [],
+    linking_available: false,
+    reauthentication_available: false
+  });
+  vi.mocked(getMFA).mockResolvedValue({
+    etag: 'mfa-v1',
+    required: false,
+    recovery_codes_remaining: 0,
+    factors: []
   });
   vi.mocked(getProfile).mockResolvedValue(profile);
   vi.mocked(listOidcIdentities).mockResolvedValue({
@@ -134,9 +149,9 @@ it('keeps a newer display name dirty after an earlier save completes', async () 
 
 it('offers linked OIDC reauthentication alongside an enrolled password with the same purpose and resource', async () => {
   vi.spyOn(window, 'confirm').mockReturnValue(true);
-  const { beginOidcReauthentication } =
+  const { beginIdentityReauthentication } =
     await import('$lib/features/access/profile/api');
-  vi.mocked(beginOidcReauthentication).mockRejectedValue(
+  vi.mocked(beginIdentityReauthentication).mockRejectedValue(
     new Error('Fresh provider flow unavailable')
   );
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
@@ -173,7 +188,7 @@ it('offers linked OIDC reauthentication alongside an enrolled password with the 
     )!
     .click();
   await vi.waitFor(() =>
-    expect(beginOidcReauthentication).toHaveBeenCalledWith(
+    expect(beginIdentityReauthentication).toHaveBeenCalledWith(
       'oidc_unlink',
       'identity-a'
     )

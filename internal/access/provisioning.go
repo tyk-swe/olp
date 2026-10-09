@@ -11,6 +11,9 @@ import (
 
 func provisioningID(r *http.Request, name, field string, max int) (string, error) {
 	value := r.PathValue(name)
+	if name == "source" && value == "scim" {
+		return "", Fail(409, "managed_provisioning_source", "Use the SCIM API to manage its identities.")
+	}
 	if value == "" || len(value) > max || strings.ContainsAny(value, "/\r\n") || strings.ContainsFunc(value, unicode.IsControl) {
 		return "", Invalid(field, "Invalid provisioning identifier.")
 	}

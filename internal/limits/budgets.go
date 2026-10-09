@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/budgetcalendar"
 )
 
 // BudgetSQL is a self-contained scalar expression that reports one API key's
@@ -26,54 +27,49 @@ import (
 // against, and a shifted month end would silently zero the whole report.
 const BudgetSQL = `(SELECT jsonb_build_object(` +
 	`'daily',jsonb_build_object('accrued',t.daily_accrued::text,'window_ends_at',w.daily_end),` +
+	`'weekly',jsonb_build_object('accrued',t.weekly_accrued::text,'window_ends_at',w.weekly_end),` +
 	`'monthly',jsonb_build_object('accrued',t.monthly_accrued::text,'window_ends_at',w.monthly_end),` +
 	`'unpriced_attempts',t.unpriced_attempts)` +
-	` FROM (SELECT b.day AT TIME ZONE 'UTC' AS daily_start,` +
-	`(b.day+interval '1 day') AT TIME ZONE 'UTC' AS daily_end,` +
-	`b.month AT TIME ZONE 'UTC' AS monthly_start,` +
-	`(b.month+interval '1 month') AT TIME ZONE 'UTC' AS monthly_end` +
-	` FROM (SELECT date_trunc('day',now() AT TIME ZONE 'UTC') AS day,` +
-	`date_trunc('month',now() AT TIME ZONE 'UTC') AS month) b) w,` +
+	` FROM olp.budget_windows(now()) w,` +
 	` LATERAL (SELECT COALESCE(SUM(u.cost) FILTER (WHERE u.observed_at>=w.daily_start` +
 	` AND u.observed_at<w.daily_end),0) AS daily_accrued,` +
-	`COALESCE(SUM(u.cost),0) AS monthly_accrued,` +
-	`COALESCE(SUM(u.unpriced_attempts),0)::bigint AS unpriced_attempts` +
+	`COALESCE(SUM(u.cost) FILTER(WHERE u.observed_at>=w.weekly_start AND u.observed_at<w.weekly_end),0) AS weekly_accrued,COALESCE(SUM(u.cost) FILTER(WHERE u.observed_at>=w.monthly_start AND u.observed_at<w.monthly_end),0) AS monthly_accrued,` +
+	`COALESCE(SUM(u.unpriced_attempts) FILTER(WHERE u.observed_at>=w.monthly_start AND u.observed_at<w.monthly_end),0)::bigint AS unpriced_attempts` +
 	` FROM (SELECT f.observed_at,COALESCE(f.estimated_cost,0)::numeric AS cost,` +
 	`CASE WHEN f.charge_status<>'not_billable' AND f.unpriced THEN 1 ELSE 0 END::bigint` +
-	` AS unpriced_attempts FROM olp.attempt_usage_facts f` +
-	` WHERE f.api_key_id=k.id AND f.observed_at>=w.monthly_start AND f.observed_at<w.monthly_end` +
-	` UNION ALL SELECT h.bucket,COALESCE(h.estimated_cost,0)::numeric,h.unpriced_attempt_count` +
-	` FROM olp.attempt_usage_hourly h` +
-	` WHERE h.api_key_id=k.id AND h.bucket>=w.monthly_start AND h.bucket<w.monthly_end) u) t)`
+	` AS unpriced_attempts FROM (SELECT * FROM olp.attempt_usage_facts WHERE NOT budget_exempt) f` +
+	` WHERE f.api_key_id=k.id AND f.observed_at>=LEAST(w.daily_start,w.weekly_start,w.monthly_start) AND f.observed_at<GREATEST(w.daily_end,w.weekly_end,w.monthly_end)` +
+	` UNION ALL SELECT h.budget_bucket,COALESCE(h.estimated_cost,0)::numeric,h.unpriced_attempt_count` +
+	` FROM (SELECT * FROM olp.attempt_usage_hourly WHERE NOT budget_exempt) h` +
+	` WHERE h.api_key_id=k.id AND h.budget_bucket>=LEAST(w.daily_start,w.weekly_start,w.monthly_start) AND h.budget_bucket<GREATEST(w.daily_end,w.weekly_end,w.monthly_end)) u) t)`
 
 const GroupBudgetSQL = `(SELECT jsonb_build_object(` +
-	`'daily',jsonb_build_object('accrued',t.daily_accrued::text,'limit',g.daily_cost_limit::text,` +
-	`'remaining',CASE WHEN g.daily_cost_limit IS NULL THEN NULL ELSE GREATEST(g.daily_cost_limit-t.daily_accrued,0)::text END,` +
+	`'daily',jsonb_build_object('accrued',t.daily_accrued::text,'limit',(g.effective_limits->>'daily_cost_limit')::numeric::text,` +
+	`'remaining',CASE WHEN (g.effective_limits->>'daily_cost_limit')::numeric IS NULL THEN NULL ELSE GREATEST((g.effective_limits->>'daily_cost_limit')::numeric-t.daily_accrued,0)::text END,` +
 	`'reset_at',w.daily_end),` +
-	`'monthly',jsonb_build_object('accrued',t.monthly_accrued::text,'limit',g.monthly_cost_limit::text,` +
-	`'remaining',CASE WHEN g.monthly_cost_limit IS NULL THEN NULL ELSE GREATEST(g.monthly_cost_limit-t.monthly_accrued,0)::text END,` +
+	`'weekly',jsonb_build_object('accrued',t.weekly_accrued::text,'limit',(g.effective_limits->>'weekly_cost_limit')::numeric::text,'remaining',CASE WHEN g.effective_limits->>'weekly_cost_limit' IS NULL THEN NULL ELSE GREATEST((g.effective_limits->>'weekly_cost_limit')::numeric-t.weekly_accrued,0)::text END,'reset_at',w.weekly_end),` +
+	`'monthly',jsonb_build_object('accrued',t.monthly_accrued::text,'limit',(g.effective_limits->>'monthly_cost_limit')::numeric::text,` +
+	`'remaining',CASE WHEN (g.effective_limits->>'monthly_cost_limit')::numeric IS NULL THEN NULL ELSE GREATEST((g.effective_limits->>'monthly_cost_limit')::numeric-t.monthly_accrued,0)::text END,` +
 	`'reset_at',w.monthly_end),` +
 	`'unpriced_attempts',t.unpriced_attempts)` +
-	` FROM (SELECT b.day AT TIME ZONE 'UTC' AS daily_start,` +
-	`(b.day+interval '1 day') AT TIME ZONE 'UTC' AS daily_end,` +
-	`b.month AT TIME ZONE 'UTC' AS monthly_start,` +
-	`(b.month+interval '1 month') AT TIME ZONE 'UTC' AS monthly_end` +
-	` FROM (SELECT date_trunc('day',now() AT TIME ZONE 'UTC') AS day,` +
-	`date_trunc('month',now() AT TIME ZONE 'UTC') AS month) b) w,` +
+	` FROM olp.budget_windows(now()) w,` +
 	` LATERAL (SELECT COALESCE(SUM(u.cost) FILTER (WHERE u.observed_at>=w.daily_start` +
 	` AND u.observed_at<w.daily_end),0) AS daily_accrued,` +
-	`COALESCE(SUM(u.cost),0) AS monthly_accrued,` +
-	`COALESCE(SUM(u.unpriced_attempts),0)::bigint AS unpriced_attempts` +
+	`COALESCE(SUM(u.cost) FILTER(WHERE u.observed_at>=w.weekly_start AND u.observed_at<w.weekly_end),0) AS weekly_accrued,COALESCE(SUM(u.cost) FILTER(WHERE u.observed_at>=w.monthly_start AND u.observed_at<w.monthly_end),0) AS monthly_accrued,` +
+	`COALESCE(SUM(u.unpriced_attempts) FILTER(WHERE u.observed_at>=w.monthly_start AND u.observed_at<w.monthly_end),0)::bigint AS unpriced_attempts` +
 	` FROM (SELECT f.observed_at,COALESCE(f.estimated_cost,0)::numeric AS cost,` +
 	`CASE WHEN f.charge_status<>'not_billable' AND f.unpriced THEN 1 ELSE 0 END::bigint` +
-	` AS unpriced_attempts FROM olp.attempt_usage_facts f` +
-	` WHERE f.budget_group_id=g.id AND f.observed_at>=w.monthly_start AND f.observed_at<w.monthly_end` +
-	` UNION ALL SELECT h.bucket,COALESCE(h.estimated_cost,0)::numeric,h.unpriced_attempt_count` +
-	` FROM olp.attempt_usage_hourly h` +
-	` WHERE h.budget_group_id=g.id AND h.bucket>=w.monthly_start AND h.bucket<w.monthly_end) u) t)`
+	` AS unpriced_attempts FROM (SELECT * FROM olp.attempt_usage_facts WHERE NOT budget_exempt) f` +
+	` WHERE f.budget_group_id=g.id AND f.observed_at>=LEAST(w.daily_start,w.weekly_start,w.monthly_start) AND f.observed_at<GREATEST(w.daily_end,w.weekly_end,w.monthly_end)` +
+	` UNION ALL SELECT h.budget_bucket,COALESCE(h.estimated_cost,0)::numeric,h.unpriced_attempt_count` +
+	` FROM (SELECT * FROM olp.attempt_usage_hourly WHERE NOT budget_exempt) h` +
+	` WHERE h.budget_group_id=g.id AND h.budget_bucket>=LEAST(w.daily_start,w.weekly_start,w.monthly_start) AND h.budget_bucket<GREATEST(w.daily_end,w.weekly_end,w.monthly_end)) u) t)`
 
 // Windows are the fixed UTC day and month a cost budget is measured over.
 type Windows struct {
+	WeeklyStart  time.Time
+	WeeklyEnd    time.Time
+	WeeklyID     int64
 	DailyStart   time.Time
 	DailyEnd     time.Time
 	MonthlyStart time.Time
@@ -85,14 +81,16 @@ type Windows struct {
 	MonthlyID int64
 }
 
-// BudgetWindows derives the day and month that contain now. Windows end on
-// fixed UTC boundaries, never on a rolling offset from now.
+// BudgetWindows describes the original UTC calendar. Production accounting
+// uses CurrentBudgetWindows; this helper also supports legacy snapshot callers.
 func BudgetWindows(now time.Time) Windows {
 	utc := now.UTC()
 	year, month, day := utc.Date()
 	dailyStart := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 	monthlyStart := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
+	civil := (budgetcalendar.Calendar{}).Windows(now)
 	return Windows{
+		WeeklyStart: civil.Week.Start, WeeklyEnd: civil.Week.End, WeeklyID: (civil.Week.Start.Unix()/86400 + 3) / 7,
 		DailyStart:   dailyStart,
 		DailyEnd:     dailyStart.AddDate(0, 0, 1),
 		MonthlyStart: monthlyStart,
@@ -107,12 +105,17 @@ func BudgetWindows(now time.Time) Windows {
 // CostSnapshot is the durable spend PostgreSQL holds for one API key in the
 // windows it names. Accrued totals are canonical decimal strings.
 type CostSnapshot struct {
-	CostOwnerID      string
-	DailyWindowID    int64
-	DailyAccrued     string
-	MonthlyWindowID  int64
-	MonthlyAccrued   string
-	UnpricedAttempts int64
+	DailyStart, DailyEnd     time.Time
+	MonthlyStart, MonthlyEnd time.Time
+	WeeklyStart, WeeklyEnd   time.Time
+	WeeklyWindowID           int64
+	WeeklyAccrued            string
+	CostOwnerID              string
+	DailyWindowID            int64
+	DailyAccrued             string
+	MonthlyWindowID          int64
+	MonthlyAccrued           string
+	UnpricedAttempts         int64
 	// RequestID names the request whose spend this snapshot installed, when one
 	// did: the identifier its cost reservation was made under. Installing the
 	// spend removes the reservation in the same step, so the budget never counts
@@ -130,6 +133,9 @@ func (s CostSnapshot) validate() error {
 		s.MonthlyWindowID < 0 || s.MonthlyWindowID > maxLuaInteger {
 		return errors.New("cost snapshot window IDs exceed the Valkey Lua integer range")
 	}
+	if s.WeeklyAccrued != "" && (s.WeeklyWindowID < 0 || s.WeeklyWindowID > maxLuaInteger || !validDecimal(s.WeeklyAccrued)) {
+		return errors.New("invalid weekly cost snapshot")
+	}
 	if !validDecimal(s.DailyAccrued) {
 		return fmt.Errorf("daily accrued cost %q is not a non-negative decimal with at most 12 fractional digits", s.DailyAccrued)
 	}
@@ -138,6 +144,13 @@ func (s CostSnapshot) validate() error {
 	}
 	if s.UnpricedAttempts < 0 || s.UnpricedAttempts > maxLuaInteger {
 		return fmt.Errorf("unpriced attempt count %d exceeds the Valkey Lua integer range", s.UnpricedAttempts)
+	}
+	if !s.DailyStart.IsZero() || !s.MonthlyStart.IsZero() || !s.WeeklyStart.IsZero() {
+		for _, period := range [][2]time.Time{{s.DailyStart, s.DailyEnd}, {s.MonthlyStart, s.MonthlyEnd}, {s.WeeklyStart, s.WeeklyEnd}} {
+			if period[0].IsZero() || !period[1].After(period[0]) || period[0].UnixMilli() < 0 || period[1].UnixMilli() > maxLuaInteger {
+				return errors.New("invalid budget calendar bounds")
+			}
+		}
 	}
 	if s.RequestID != "" {
 		if _, err := uuid.Parse(s.RequestID); err != nil {
@@ -234,10 +247,13 @@ func (l *Limiter) ApplyCostSnapshot(ctx context.Context, s CostSnapshot) (bool, 
 	if s.RequestID != "" {
 		requestID = canonicalUUID(s.RequestID)
 	}
-	value, err := l.eval(ctx, reconcileCostScript, []string{daily, monthly, pending, expiry},
-		strconv.FormatInt(s.DailyWindowID, 10), s.DailyAccrued,
-		strconv.FormatInt(s.MonthlyWindowID, 10), s.MonthlyAccrued,
-		strconv.FormatInt(s.UnpricedAttempts, 10), "0", requestID)
+	args := []string{strconv.FormatInt(s.DailyWindowID, 10), s.DailyAccrued, strconv.FormatInt(s.MonthlyWindowID, 10), s.MonthlyAccrued, strconv.FormatInt(s.UnpricedAttempts, 10), "0", requestID, strconv.FormatInt(s.WeeklyWindowID, 10), s.WeeklyAccrued}
+	if !s.DailyStart.IsZero() && (s.DailyWindowID == s.DailyStart.Unix() || s.MonthlyWindowID == s.MonthlyStart.Unix() || s.WeeklyWindowID == s.WeeklyStart.Unix()) {
+		for _, instant := range []time.Time{s.DailyStart, s.DailyEnd, s.MonthlyStart, s.MonthlyEnd, s.WeeklyStart, s.WeeklyEnd} {
+			args = append(args, strconv.FormatInt(instant.UnixMilli(), 10))
+		}
+	}
+	value, err := l.eval(ctx, reconcileCostScript, []string{daily, monthly, pending, expiry, l.costPrefix(s.CostOwnerID) + ":week"}, args...)
 	if err != nil {
 		return false, false, err
 	}
@@ -248,9 +264,11 @@ func (l *Limiter) ApplyCostSnapshot(ctx context.Context, s CostSnapshot) (bool, 
 // that contain its observation, and reports the resulting balances. A delta for
 // a window other than the current one is kept in its own row, so clock skew can
 // never overwrite today's total.
-const addCostDeltaSQL = `WITH deltas (window_kind, window_id, accrued, unpriced_attempts) AS (
-  VALUES ('day'::text, $2::bigint, $3::text::numeric, 0::bigint),
-         ('month'::text, $4::bigint, $3::text::numeric, $5::bigint)
+const addCostDeltaSQL = `WITH budget_calendar AS MATERIALIZED (SELECT * FROM olp.budget_windows($4::timestamptz)),
+deltas (window_kind, window_id, accrued, unpriced_attempts) AS (
+  VALUES ('day'::text, (SELECT daily_id FROM budget_calendar), $2::text::numeric, 0::bigint),
+         ('month'::text, (SELECT monthly_id FROM budget_calendar), $2::text::numeric, $3::bigint),
+ ('week'::text,(SELECT weekly_id FROM budget_calendar),$2::text::numeric,0::bigint)
 ), applied AS (
   INSERT INTO olp.api_key_cost_windows
     (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
@@ -259,18 +277,23 @@ const addCostDeltaSQL = `WITH deltas (window_kind, window_id, accrued, unpriced_
     accrued = olp.api_key_cost_windows.accrued + EXCLUDED.accrued,
     unpriced_attempts = olp.api_key_cost_windows.unpriced_attempts
                         + EXCLUDED.unpriced_attempts
-  RETURNING api_key_id, window_kind, window_id, accrued, unpriced_attempts
+  RETURNING api_key_id, window_kind, window_id, accrued, unpriced_attempts, weekly_complete
 ) SELECT api_key_id::text,
          MAX(window_id) FILTER (WHERE window_kind = 'day')::bigint,
          MAX(accrued) FILTER (WHERE window_kind = 'day')::text,
          MAX(window_id) FILTER (WHERE window_kind = 'month')::bigint,
          MAX(accrued) FILTER (WHERE window_kind = 'month')::text,
-         MAX(unpriced_attempts) FILTER (WHERE window_kind = 'month')::bigint
-  FROM applied GROUP BY api_key_id`
+         MAX(unpriced_attempts) FILTER (WHERE window_kind = 'month')::bigint,
+ MAX(window_id) FILTER(WHERE window_kind='week')::bigint,
+ CASE WHEN bool_or(weekly_complete) FILTER(WHERE window_kind='week') THEN MAX(accrued) FILTER(WHERE window_kind='week')::text ELSE '' END
+ , (SELECT daily_start FROM budget_calendar), (SELECT daily_end FROM budget_calendar), (SELECT monthly_start FROM budget_calendar), (SELECT monthly_end FROM budget_calendar), (SELECT weekly_start FROM budget_calendar), (SELECT weekly_end FROM budget_calendar)
+FROM applied GROUP BY api_key_id`
 
-const addGroupCostDeltaSQL = `WITH deltas (window_kind,window_id,accrued,unpriced_attempts) AS (
- VALUES ('day'::text,$2::bigint,$3::text::numeric,0::bigint),
-        ('month'::text,$4::bigint,$3::text::numeric,$5::bigint)
+const addGroupCostDeltaSQL = `WITH budget_calendar AS MATERIALIZED (SELECT * FROM olp.budget_windows($4::timestamptz)),
+deltas (window_kind,window_id,accrued,unpriced_attempts) AS (
+ VALUES ('day'::text,(SELECT daily_id FROM budget_calendar),$2::text::numeric,0::bigint),
+        ('month'::text,(SELECT monthly_id FROM budget_calendar),$2::text::numeric,$3::bigint),
+ ('week'::text,(SELECT weekly_id FROM budget_calendar),$2::text::numeric,0::bigint)
 ), applied AS (
  INSERT INTO olp.budget_group_cost_windows
    (budget_group_id,window_kind,window_id,accrued,unpriced_attempts)
@@ -278,14 +301,17 @@ const addGroupCostDeltaSQL = `WITH deltas (window_kind,window_id,accrued,unprice
  ON CONFLICT (budget_group_id,window_kind,window_id) DO UPDATE SET
    accrued=olp.budget_group_cost_windows.accrued+EXCLUDED.accrued,
    unpriced_attempts=olp.budget_group_cost_windows.unpriced_attempts+EXCLUDED.unpriced_attempts
- RETURNING budget_group_id,window_kind,window_id,accrued,unpriced_attempts
+ RETURNING budget_group_id,window_kind,window_id,accrued,unpriced_attempts,weekly_complete
 ) SELECT budget_group_id::text,
  MAX(window_id) FILTER (WHERE window_kind='day')::bigint,
  MAX(accrued) FILTER (WHERE window_kind='day')::text,
  MAX(window_id) FILTER (WHERE window_kind='month')::bigint,
  MAX(accrued) FILTER (WHERE window_kind='month')::text,
- MAX(unpriced_attempts) FILTER (WHERE window_kind='month')::bigint
- FROM applied GROUP BY budget_group_id`
+ MAX(unpriced_attempts) FILTER (WHERE window_kind='month')::bigint,
+ MAX(window_id) FILTER(WHERE window_kind='week')::bigint,
+ CASE WHEN bool_or(weekly_complete) FILTER(WHERE window_kind='week') THEN MAX(accrued) FILTER(WHERE window_kind='week')::text ELSE '' END
+ , (SELECT daily_start FROM budget_calendar), (SELECT daily_end FROM budget_calendar), (SELECT monthly_start FROM budget_calendar), (SELECT monthly_end FROM budget_calendar), (SELECT weekly_start FROM budget_calendar), (SELECT weekly_end FROM budget_calendar)
+FROM applied GROUP BY budget_group_id`
 
 // AddCostDelta accumulates one attempt's cost inside the caller's transaction
 // and returns the API key's resulting balances, ready to hand to Valkey. cost
@@ -311,8 +337,7 @@ func addOwnerDelta(ctx context.Context, tx pgx.Tx, query string, ownerID string,
 	if unpriced < 0 || unpriced > maxLuaInteger {
 		return CostSnapshot{}, fmt.Errorf("unpriced attempt count %d is out of range", unpriced)
 	}
-	windows := BudgetWindows(observedAt)
-	row := tx.QueryRow(ctx, query, ownerID, windows.DailyID, cost, windows.MonthlyID, unpriced)
+	row := tx.QueryRow(ctx, query, ownerID, cost, unpriced, observedAt)
 	return scanSnapshot(row)
 }
 
@@ -321,7 +346,8 @@ func addOwnerDelta(ctx context.Context, tx pgx.Tx, query string, ownerID string,
 // durable balances. GREATEST keeps a window that already counted more than the
 // facts can still see, which is what makes reconciliation safe to repeat after
 // retention has rolled attempts up.
-const reconciliationSnapshotsSQL = `WITH active_keys AS (
+const reconciliationSnapshotsSQL = `WITH budget_calendar AS MATERIALIZED (SELECT * FROM olp.budget_windows($1::timestamptz)),
+unused_owner AS (SELECT $2::uuid), active_keys AS (
   SELECT id AS api_key_id FROM olp.api_keys
   WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > $1::timestamptz)
 ), usage AS (
@@ -329,98 +355,104 @@ const reconciliationSnapshotsSQL = `WITH active_keys AS (
          COALESCE(fact.estimated_cost, 0)::numeric AS cost,
          CASE WHEN fact.charge_status <> 'not_billable' AND fact.unpriced
               THEN 1 ELSE 0 END::bigint AS unpriced_attempts
-  FROM olp.attempt_usage_facts fact
+  FROM (SELECT * FROM olp.attempt_usage_facts WHERE NOT budget_exempt) fact
   JOIN active_keys key ON key.api_key_id = fact.api_key_id
-  WHERE fact.observed_at >= $3::timestamptz AND fact.observed_at < $4::timestamptz
+  WHERE fact.observed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND fact.observed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
   UNION ALL
-  SELECT hourly.api_key_id, hourly.bucket,
+  SELECT hourly.api_key_id, hourly.budget_bucket,
          COALESCE(hourly.estimated_cost, 0)::numeric,
          hourly.unpriced_attempt_count
-  FROM olp.attempt_usage_hourly hourly
+  FROM (SELECT * FROM olp.attempt_usage_hourly WHERE NOT budget_exempt) hourly
   JOIN active_keys key ON key.api_key_id = hourly.api_key_id
-  WHERE hourly.bucket >= $3::timestamptz AND hourly.bucket < $4::timestamptz
+  WHERE hourly.budget_bucket >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND hourly.budget_bucket < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 ), totals AS (
   SELECT key.api_key_id,
          COALESCE(SUM(usage.cost) FILTER (
-           WHERE usage.observed_at >= $2::timestamptz
-             AND usage.observed_at < $7::timestamptz), 0) AS daily_accrued,
-         COALESCE(SUM(usage.cost), 0) AS monthly_accrued,
-         COALESCE(SUM(usage.unpriced_attempts), 0)::bigint AS unpriced_attempts
+           WHERE usage.observed_at >= (SELECT daily_start FROM budget_calendar)
+             AND usage.observed_at < (SELECT daily_end FROM budget_calendar)), 0) AS daily_accrued,
+         COALESCE(SUM(usage.cost) FILTER(WHERE usage.observed_at >= (SELECT monthly_start FROM budget_calendar) AND usage.observed_at < (SELECT monthly_end FROM budget_calendar)), 0) AS monthly_accrued,
+ COALESCE(SUM(usage.cost) FILTER(WHERE usage.observed_at >= (SELECT weekly_start FROM budget_calendar) AND usage.observed_at < (SELECT weekly_end FROM budget_calendar)),0) AS weekly_accrued,
+         COALESCE(SUM(usage.unpriced_attempts) FILTER(WHERE usage.observed_at >= (SELECT monthly_start FROM budget_calendar) AND usage.observed_at < (SELECT monthly_end FROM budget_calendar)), 0)::bigint AS unpriced_attempts
   FROM active_keys key LEFT JOIN usage ON usage.api_key_id = key.api_key_id
   GROUP BY key.api_key_id
 ), pruned AS (
   DELETE FROM olp.api_key_cost_windows
-  WHERE (window_kind = 'day' AND window_id < $5::bigint)
-     OR (window_kind = 'month' AND window_id < $6::bigint) RETURNING 1
+  WHERE (window_kind = 'day' AND window_id < (SELECT daily_id FROM budget_calendar))
+     OR (window_kind = 'month' AND window_id < (SELECT monthly_id FROM budget_calendar)) OR (window_kind='week' AND window_id<(SELECT weekly_id FROM budget_calendar)) RETURNING 1
 ), desired AS (
-  SELECT api_key_id, 'day'::text AS window_kind, $5::bigint AS window_id,
+  SELECT api_key_id, 'day'::text AS window_kind, (SELECT daily_id FROM budget_calendar) AS window_id,
          daily_accrued AS accrued, 0::bigint AS unpriced_attempts FROM totals
   UNION ALL
-  SELECT api_key_id, 'month', $6::bigint, monthly_accrued, unpriced_attempts FROM totals
+  SELECT api_key_id, 'month', (SELECT monthly_id FROM budget_calendar), monthly_accrued, unpriced_attempts FROM totals
+ UNION ALL SELECT api_key_id,'week',(SELECT weekly_id FROM budget_calendar),weekly_accrued,0 FROM totals
 ), reconciled AS (
   INSERT INTO olp.api_key_cost_windows
-    (api_key_id, window_kind, window_id, accrued, unpriced_attempts)
-  SELECT api_key_id, window_kind, window_id, accrued, unpriced_attempts FROM desired
-  ON CONFLICT (api_key_id, window_kind, window_id) DO UPDATE SET
+    (api_key_id, window_kind, window_id, accrued, unpriced_attempts,weekly_complete)
+  SELECT api_key_id, window_kind, window_id, accrued, unpriced_attempts,true FROM desired
+  ON CONFLICT (api_key_id, window_kind, window_id) DO UPDATE SET weekly_complete=true,
     accrued = GREATEST(olp.api_key_cost_windows.accrued, EXCLUDED.accrued),
     unpriced_attempts = GREATEST(olp.api_key_cost_windows.unpriced_attempts,
                                  EXCLUDED.unpriced_attempts)
   RETURNING api_key_id, window_kind, window_id, accrued, unpriced_attempts
-) SELECT api_key_id::text, $5::bigint,
+) SELECT api_key_id::text, (SELECT daily_id FROM budget_calendar),
          MAX(accrued) FILTER (WHERE window_kind = 'day')::text,
-         $6::bigint,
+         (SELECT monthly_id FROM budget_calendar),
          MAX(accrued) FILTER (WHERE window_kind = 'month')::text,
-         MAX(unpriced_attempts) FILTER (WHERE window_kind = 'month')::bigint
-  FROM reconciled GROUP BY api_key_id ORDER BY api_key_id`
+         MAX(unpriced_attempts) FILTER (WHERE window_kind = 'month')::bigint,
+ (SELECT weekly_id FROM budget_calendar),MAX(accrued) FILTER(WHERE window_kind='week')::text
+ , (SELECT daily_start FROM budget_calendar), (SELECT daily_end FROM budget_calendar), (SELECT monthly_start FROM budget_calendar), (SELECT monthly_end FROM budget_calendar), (SELECT weekly_start FROM budget_calendar), (SELECT weekly_end FROM budget_calendar)
+FROM reconciled GROUP BY api_key_id ORDER BY api_key_id`
 
-const reconciliationGroupSnapshotsSQL = `WITH active_groups AS (
- SELECT id AS budget_group_id FROM olp.budget_groups
+const reconciliationGroupSnapshotsSQL = `WITH budget_calendar AS MATERIALIZED (SELECT * FROM olp.budget_windows($1::timestamptz)),
+unused_owner AS (SELECT $2::uuid), active_groups AS (
+ SELECT id AS budget_group_id FROM olp.budget_groups_with_limits
  WHERE $1::timestamptz IS NOT NULL
-   AND (daily_cost_limit IS NOT NULL OR monthly_cost_limit IS NOT NULL)
+   AND (effective_limits->>'daily_cost_limit' IS NOT NULL OR effective_limits->>'monthly_cost_limit' IS NOT NULL OR effective_limits->>'weekly_cost_limit' IS NOT NULL)
 ), usage AS (
  SELECT fact.budget_group_id,fact.observed_at,COALESCE(fact.estimated_cost,0)::numeric AS cost,
    CASE WHEN fact.charge_status<>'not_billable' AND fact.unpriced THEN 1 ELSE 0 END::bigint AS unpriced_attempts
- FROM olp.attempt_usage_facts fact JOIN active_groups g USING (budget_group_id)
- WHERE fact.observed_at >= $3::timestamptz AND fact.observed_at < $4::timestamptz
+ FROM (SELECT * FROM olp.attempt_usage_facts WHERE NOT budget_exempt) fact JOIN active_groups g USING (budget_group_id)
+ WHERE fact.observed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND fact.observed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
  UNION ALL
- SELECT hourly.budget_group_id,hourly.bucket,COALESCE(hourly.estimated_cost,0)::numeric,hourly.unpriced_attempt_count
- FROM olp.attempt_usage_hourly hourly JOIN active_groups g USING (budget_group_id)
- WHERE hourly.bucket >= $3::timestamptz AND hourly.bucket < $4::timestamptz
+ SELECT hourly.budget_group_id,hourly.budget_bucket,COALESCE(hourly.estimated_cost,0)::numeric,hourly.unpriced_attempt_count
+ FROM (SELECT * FROM olp.attempt_usage_hourly WHERE NOT budget_exempt) hourly JOIN active_groups g USING (budget_group_id)
+ WHERE hourly.budget_bucket >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND hourly.budget_bucket < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 ), totals AS (
  SELECT g.budget_group_id,
-  COALESCE(SUM(u.cost) FILTER (WHERE u.observed_at >= $2::timestamptz AND u.observed_at < $7::timestamptz),0) AS daily_accrued,
-  COALESCE(SUM(u.cost),0) AS monthly_accrued,
-  COALESCE(SUM(u.unpriced_attempts),0)::bigint AS unpriced_attempts
+  COALESCE(SUM(u.cost) FILTER (WHERE u.observed_at >= (SELECT daily_start FROM budget_calendar) AND u.observed_at < (SELECT daily_end FROM budget_calendar)),0) AS daily_accrued,
+  COALESCE(SUM(u.cost) FILTER(WHERE u.observed_at >= (SELECT monthly_start FROM budget_calendar) AND u.observed_at < (SELECT monthly_end FROM budget_calendar)),0) AS monthly_accrued,
+ COALESCE(SUM(u.cost) FILTER(WHERE u.observed_at >= (SELECT weekly_start FROM budget_calendar) AND u.observed_at < (SELECT weekly_end FROM budget_calendar)),0) AS weekly_accrued,
+  COALESCE(SUM(u.unpriced_attempts) FILTER(WHERE u.observed_at >= (SELECT monthly_start FROM budget_calendar) AND u.observed_at < (SELECT monthly_end FROM budget_calendar)),0)::bigint AS unpriced_attempts
  FROM active_groups g LEFT JOIN usage u USING (budget_group_id) GROUP BY g.budget_group_id
 ), pruned AS (
  DELETE FROM olp.budget_group_cost_windows
- WHERE (window_kind='day' AND window_id<$5::bigint) OR (window_kind='month' AND window_id<$6::bigint) RETURNING 1
+ WHERE (window_kind='day' AND window_id<(SELECT daily_id FROM budget_calendar)) OR (window_kind='month' AND window_id<(SELECT monthly_id FROM budget_calendar)) OR (window_kind='week' AND window_id<(SELECT weekly_id FROM budget_calendar)) RETURNING 1
 ), desired AS (
- SELECT budget_group_id,'day'::text AS window_kind,$5::bigint AS window_id,daily_accrued AS accrued,0::bigint AS unpriced_attempts FROM totals
+ SELECT budget_group_id,'day'::text AS window_kind,(SELECT daily_id FROM budget_calendar) AS window_id,daily_accrued AS accrued,0::bigint AS unpriced_attempts FROM totals
  UNION ALL
- SELECT budget_group_id,'month',$6::bigint,monthly_accrued,unpriced_attempts FROM totals
+ SELECT budget_group_id,'month',(SELECT monthly_id FROM budget_calendar),monthly_accrued,unpriced_attempts FROM totals
+ UNION ALL SELECT budget_group_id,'week',(SELECT weekly_id FROM budget_calendar),weekly_accrued,0 FROM totals
 ), reconciled AS (
- INSERT INTO olp.budget_group_cost_windows (budget_group_id,window_kind,window_id,accrued,unpriced_attempts)
- SELECT budget_group_id,window_kind,window_id,accrued,unpriced_attempts FROM desired
- ON CONFLICT (budget_group_id,window_kind,window_id) DO UPDATE SET
+ INSERT INTO olp.budget_group_cost_windows (budget_group_id,window_kind,window_id,accrued,unpriced_attempts,weekly_complete)
+ SELECT budget_group_id,window_kind,window_id,accrued,unpriced_attempts,true FROM desired
+ ON CONFLICT (budget_group_id,window_kind,window_id) DO UPDATE SET weekly_complete=true,
   accrued=GREATEST(olp.budget_group_cost_windows.accrued,EXCLUDED.accrued),
   unpriced_attempts=GREATEST(olp.budget_group_cost_windows.unpriced_attempts,EXCLUDED.unpriced_attempts)
  RETURNING budget_group_id,window_kind,window_id,accrued,unpriced_attempts
-) SELECT budget_group_id::text,$5::bigint,
- MAX(accrued) FILTER (WHERE window_kind='day')::text,$6::bigint,
+) SELECT budget_group_id::text,(SELECT daily_id FROM budget_calendar),
+ MAX(accrued) FILTER (WHERE window_kind='day')::text,(SELECT monthly_id FROM budget_calendar),
  MAX(accrued) FILTER (WHERE window_kind='month')::text,
- MAX(unpriced_attempts) FILTER (WHERE window_kind='month')::bigint
- FROM reconciled GROUP BY budget_group_id ORDER BY budget_group_id`
+ MAX(unpriced_attempts) FILTER (WHERE window_kind='month')::bigint,
+ (SELECT weekly_id FROM budget_calendar),MAX(accrued) FILTER(WHERE window_kind='week')::text
+ , (SELECT daily_start FROM budget_calendar), (SELECT daily_end FROM budget_calendar), (SELECT monthly_start FROM budget_calendar), (SELECT monthly_end FROM budget_calendar), (SELECT weekly_start FROM budget_calendar), (SELECT weekly_end FROM budget_calendar)
+FROM reconciled GROUP BY budget_group_id ORDER BY budget_group_id`
 
 // ReconciliationSnapshots recomputes every active key's and budget group's
 // durable spend for the windows containing now, adds the balances of every
 // capped supply owner, and returns the snapshots to install in Valkey. It
 // writes, so it must run on the connection that holds the reconciliation lock.
 func ReconciliationSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time) ([]CostSnapshot, error) {
-	windows := BudgetWindows(now)
-	rows, err := conn.Query(ctx, reconciliationSnapshotsSQL, now.UTC(), windows.DailyStart,
-		windows.MonthlyStart, windows.MonthlyEnd, windows.DailyID, windows.MonthlyID,
-		windows.DailyEnd)
+	rows, err := conn.Query(ctx, reconciliationSnapshotsSQL, now.UTC(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -436,9 +468,7 @@ func ReconciliationSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	groupRows, err := conn.Query(ctx, reconciliationGroupSnapshotsSQL, now.UTC(), windows.DailyStart,
-		windows.MonthlyStart, windows.MonthlyEnd, windows.DailyID, windows.MonthlyID,
-		windows.DailyEnd)
+	groupRows, err := conn.Query(ctx, reconciliationGroupSnapshotsSQL, now.UTC(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -453,20 +483,30 @@ func ReconciliationSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time)
 	if err := groupRows.Err(); err != nil {
 		return nil, err
 	}
-	supply, err := supplySnapshots(ctx, conn, windows)
+	supply, err := supplySnapshots(ctx, conn, now)
 	if err != nil {
 		return nil, err
 	}
-	return append(snapshots, supply...), nil
+	snapshots = append(snapshots, supply...)
+	endUsers, err := endUserSnapshots(ctx, conn, now)
+	if err != nil {
+		return nil, err
+	}
+	snapshots = append(snapshots, endUsers...)
+	aggregates, err := aggregateSnapshots(ctx, conn, now)
+	if err != nil {
+		return nil, err
+	}
+	return append(snapshots, aggregates...), nil
 }
 
-// scanSnapshot reads the six columns both budget statements project. A NULL in
+// scanSnapshot reads the fourteen columns all budget statements project. A NULL in
 // any of them means the statement did not produce both windows, which must fail
 // rather than install a partial balance.
 func scanSnapshot(row pgx.Row) (CostSnapshot, error) {
 	var snapshot CostSnapshot
 	if err := row.Scan(&snapshot.CostOwnerID, &snapshot.DailyWindowID, &snapshot.DailyAccrued,
-		&snapshot.MonthlyWindowID, &snapshot.MonthlyAccrued, &snapshot.UnpricedAttempts); err != nil {
+		&snapshot.MonthlyWindowID, &snapshot.MonthlyAccrued, &snapshot.UnpricedAttempts, &snapshot.WeeklyWindowID, &snapshot.WeeklyAccrued, &snapshot.DailyStart, &snapshot.DailyEnd, &snapshot.MonthlyStart, &snapshot.MonthlyEnd, &snapshot.WeeklyStart, &snapshot.WeeklyEnd); err != nil {
 		return CostSnapshot{}, err
 	}
 	if err := snapshot.validate(); err != nil {

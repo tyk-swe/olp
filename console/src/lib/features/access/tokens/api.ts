@@ -18,6 +18,7 @@ export const MANAGEMENT_TOKEN_SCOPES = [
   'settings',
   'configure',
   'keys',
+  'manage_organization',
   'playground',
   'usage'
 ] as const satisfies readonly ManagementTokenScope[];

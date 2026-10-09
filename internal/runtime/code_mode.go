@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 )
@@ -90,6 +91,9 @@ func (s *Snapshot) CodeModelProviders(route codemode.Route, path string, protoco
 
 func (s *Snapshot) validateCodeMode() error {
 	for slug, route := range s.CodeRoutes {
+		if !bodylimit.Valid(route.MaxBodyBytes) {
+			return fmt.Errorf("invalid code route body limit for %s", slug)
+		}
 		if route.Slug != slug || route.ID == "" || route.ProjectID == "" || route.PoolID == "" || route.RevisionID == "" || route.Revision < 1 || route.PublishedAt == nil {
 			return fmt.Errorf("invalid code route %s", slug)
 		}

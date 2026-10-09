@@ -15,6 +15,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -114,10 +115,11 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	token, e := geminiClientKey(r)
 	if e == nil {
 		var authority access.Authority
-		authority, e = s.authorizeKey(token, "inference")
+		authority, e = s.authenticateRequest(r, token, "inference")
 		if e == nil {
 			x.authority = authority
 			x.keyID, x.affinity = authority.ID, []byte(authority.ID)
+			x.endUserDigest = authority.EndUserDigest
 			x.budgetGroupID = authority.BudgetGroupID
 			x.attribution, e = s.parseAttribution(r, authority)
 		}
@@ -164,6 +166,12 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.route = &route
+	if route.MaxBodyBytes != nil && int64(len(initial)) > *route.MaxBodyBytes {
+		client.Close(websocket.StatusMessageTooBig, "request body limit exceeded")
+		x.failure, status = bodyTooLarge(), http.StatusRequestEntityTooLarge
+		return
+	}
+	client.SetReadLimit(bodylimit.Lower(limit, route.MaxBodyBytes))
 	if e := policySurfaceGate(&route); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "policy unavailable")
 		x.failure, status = e, e.Status
@@ -187,6 +195,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 			s.settlePinHold(r.Context(), x, p.hold, settled)
 		}
 		s.settleCaps(r.Context(), x)
+		x.recordCost()
 		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
 	}()
 	p, e = s.selectPinSurface(ctx, x, &route, "realtime", "gemini", "realtime", func(provider *runtime.Provider, model string) bool {
@@ -194,6 +203,11 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	})
 	if e != nil {
 		client.Close(websocket.StatusPolicyViolation, "provider unavailable")
+		x.failure, status = e, e.Status
+		return
+	}
+	if e := s.reserveSessionCost(ctx, x, x.authority, p.attempt, geminiLiveSession); e != nil {
+		client.Close(websocket.StatusPolicyViolation, "admission refused")
 		x.failure, status = e, e.Status
 		return
 	}
@@ -479,7 +493,7 @@ loop:
 			break loop
 		case <-reauth.C:
 			authority, err := s.Runtime.Authenticate(token)
-			if err != nil || authority.ID != x.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || s.pinEligibility(p) != runtime.Eligible {
+			if err != nil || authority.ID != x.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) || s.pinEligibility(p) != runtime.Eligible {
 				first.err = errGeminiLiveAuthority
 				client.Close(websocket.StatusPolicyViolation, "authority revoked")
 				break loop

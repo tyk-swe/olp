@@ -29,6 +29,9 @@ type Prefix struct {
 	// GatewayCatchAll marks prefixes whose unknown paths the gateway answers
 	// itself wherever it is mounted.
 	GatewayCatchAll bool
+	// ManagementCatchAll is mounted by the control server instead of the
+	// generic reserved-prefix handler.
+	ManagementCatchAll bool
 }
 
 var prefixes = []Prefix{
@@ -41,6 +44,7 @@ var prefixes = []Prefix{
 	{Path: "/ws/", Surface: Surface{Name: "gemini", Inference: true}},
 	{Path: "/bedrock/", Surface: Surface{Name: "bedrock", Inference: true}, GatewayCatchAll: true},
 	{Path: "/api/", Surface: Management},
+	{Path: "/scim/", Surface: Management, ManagementCatchAll: true},
 	{Path: "/v1beta/", Surface: Management},
 	{Path: "/openai/", Surface: Management},
 	{Path: "/health/", Surface: Management},

@@ -273,14 +273,36 @@ describe('authentication lifecycle', () => {
     expect(request.headers.get('x-csrf-token')).toBe('csrf-refreshed');
   });
 
-  it('allows a public authentication request without a session', async () => {
+  it.each([
+    '/api/v1/sessions',
+    '/api/v1/auth/mfa/verify',
+    '/api/v1/auth/mfa/enroll'
+  ])('allows public authentication at %s without a session', async (path) => {
     const lifecycle = new AuthenticationLifecycle();
-    const request = new Request(
-      'https://console.example.test/api/v1/sessions',
-      { method: 'POST' }
-    );
+    const request = new Request(`https://console.example.test${path}`, {
+      method: 'POST'
+    });
 
     await expect(lifecycle.prepareRequest(request)).resolves.toBe(request);
+  });
+
+  it('binds authenticated MFA verification to CSRF and adopts the rotated session proof', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    lifecycle.establishSession(session('csrf-before'));
+    const request = await lifecycle.prepareRequest(
+      new Request('https://console.example.test/api/v1/auth/mfa/verify', {
+        method: 'POST'
+      })
+    );
+    expect(request.headers.get('x-csrf-token')).toBe('csrf-before');
+    await lifecycle.handleResponse(
+      request,
+      new Response('{}', {
+        status: 200,
+        headers: { 'x-csrf-token': 'csrf-after' }
+      })
+    );
+    expect(getCsrfToken()).toBe('csrf-after');
   });
 
   it('shares one freshness validation between concurrent stale-session mutations', async () => {

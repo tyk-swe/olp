@@ -12,7 +12,14 @@ func (p DigestPurpose) String() string { return p.name }
 
 // Digest purposes.
 var (
+	SAMLStateDigest       = DigestPurpose{"saml_state"}
+	SAMLCookieDigest      = DigestPurpose{"saml_cookie"}
+	SAMLAssertionDigest   = DigestPurpose{"saml_assertion"}
+	MFAChallengeDigest    = DigestPurpose{"mfa_challenge"}
+	MFARecoveryDigest     = DigestPurpose{"mfa_recovery"}
+	WorkloadDigest        = DigestPurpose{"workload_identity"}
 	APIKeyDigest          = DigestPurpose{"api_key"}
+	EndUserDigest         = DigestPurpose{"end_user"}
 	ManagementTokenDigest = DigestPurpose{"management_token"}
 	SessionDigest         = DigestPurpose{"session"}
 	RecentAuthDigest      = DigestPurpose{"recent_auth"}
@@ -27,7 +34,7 @@ var (
 
 // DigestPurposes lists every digest purpose.
 func DigestPurposes() []DigestPurpose {
-	return []DigestPurpose{APIKeyDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
+	return []DigestPurpose{SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
 		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest}
 }
 
@@ -46,10 +53,14 @@ func (p SealPurpose) Value() (driver.Value, error) { return p.name, nil }
 
 // Seal purposes.
 var (
+	SAMLKey  = SealPurpose{"saml_key"}
+	SAMLFlow = SealPurpose{"saml_flow"}
 	// ProviderCredential is a provider API or network (TLS and proxy) secret.
 	ProviderCredential = SealPurpose{"provider_credential"}
 	// ProviderContinuation is a retained provider resource's contract.
 	ProviderContinuation = SealPurpose{"provider_continuation"}
+	MFATOTP              = SealPurpose{"mfa_totp"}
+	MFAWebAuthn          = SealPurpose{"mfa_webauthn"}
 	NotificationSecret   = SealPurpose{"notification_secret"}
 	MutationReplay       = SealPurpose{"mutation_replay"}
 	OIDCClientSecret     = SealPurpose{"oidc_client"}
@@ -63,7 +74,7 @@ var (
 
 // SealPurposes lists every seal purpose.
 func SealPurposes() []SealPurpose {
-	return []SealPurpose{ProviderCredential, ProviderContinuation, NotificationSecret, MutationReplay,
+	return []SealPurpose{SAMLKey, SAMLFlow, MFATOTP, MFAWebAuthn, ProviderCredential, ProviderContinuation, NotificationSecret, MutationReplay,
 		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment}
 }
 
