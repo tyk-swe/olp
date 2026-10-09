@@ -108,6 +108,7 @@ upstream.
 | [Deployment](docs/deployment.md) | Database setup, topology, capacity, qualification limits, and edge routing |
 | [Configuration](docs/configuration.md) | Variables, secret files, CLI settings, and configuration promotion |
 | [Access control](docs/access.md) | Identity, projects, management tokens, and account recovery |
+| [Management clients](docs/operator-cli.md) | Contract-generated CLI commands, stale-safe configuration promotion, client setup, and scoped management MCP |
 | [Security architecture](docs/security.md) | Trust boundaries, authorization, secrets, egress, and response headers |
 | [Gateway execution](docs/gateway.md) | Admission, attempts, content policies, and durable media |
 | [Operations](docs/operations.md) | Monitoring, spend reconciliation, backups, key rotation, and versions |

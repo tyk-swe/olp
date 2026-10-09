@@ -2791,6 +2791,21 @@ func (e GetCodeClientConfigurationParamsClient) Valid() bool {
 	}
 }
 
+// Defines values for ManagementMcpJSONBodyJsonrpc.
+const (
+	N20 ManagementMcpJSONBodyJsonrpc = "2.0"
+)
+
+// Valid indicates whether the value is a known member of the ManagementMcpJSONBodyJsonrpc enum.
+func (e ManagementMcpJSONBodyJsonrpc) Valid() bool {
+	switch e {
+	case N20:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DownloadMediaJobContentParamsVariant.
 const (
 	DownloadMediaJobContentParamsVariantSpritesheet DownloadMediaJobContentParamsVariant = "spritesheet"
@@ -8930,6 +8945,28 @@ type RevokeManagementTokenParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// ManagementMcpJSONBody defines parameters for ManagementMcp.
+type ManagementMcpJSONBody struct {
+	Id      *ManagementMcpJSONBody_Id    `json:"id,omitempty"`
+	Jsonrpc ManagementMcpJSONBodyJsonrpc `json:"jsonrpc"`
+	Method  string                       `json:"method"`
+	Params  *map[string]interface{}      `json:"params,omitempty"`
+}
+
+// ManagementMcpJSONBodyId0 defines parameters for ManagementMcp.
+type ManagementMcpJSONBodyId0 = string
+
+// ManagementMcpJSONBodyId1 defines parameters for ManagementMcp.
+type ManagementMcpJSONBodyId1 = float32
+
+// ManagementMcpJSONBody_Id defines parameters for ManagementMcp.
+type ManagementMcpJSONBody_Id struct {
+	union json.RawMessage
+}
+
+// ManagementMcpJSONBodyJsonrpc defines parameters for ManagementMcp.
+type ManagementMcpJSONBodyJsonrpc string
+
 // ListMediaJobsParams defines parameters for ListMediaJobs.
 type ListMediaJobsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -10022,6 +10059,9 @@ type AcceptInvitationJSONRequestBody = AcceptInvitationRequest
 // CreateManagementTokenJSONRequestBody defines body for CreateManagementToken for application/json ContentType.
 type CreateManagementTokenJSONRequestBody = CreateManagementTokenRequest
 
+// ManagementMcpJSONRequestBody defines body for ManagementMcp for application/json ContentType.
+type ManagementMcpJSONRequestBody ManagementMcpJSONBody
+
 // CreateNotificationDestinationJSONRequestBody defines body for CreateNotificationDestination for application/json ContentType.
 type CreateNotificationDestinationJSONRequestBody = CreateNotificationDestinationRequest
 
@@ -10950,6 +10990,68 @@ func (t MfaVerify201JSONResponseBody) MarshalJSON() ([]byte, error) {
 }
 
 func (t *MfaVerify201JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsManagementMcpJSONBodyId0 returns the union data inside the ManagementMcpJSONBody_Id as a ManagementMcpJSONBodyId0
+func (t ManagementMcpJSONBody_Id) AsManagementMcpJSONBodyId0() (ManagementMcpJSONBodyId0, error) {
+	var body ManagementMcpJSONBodyId0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromManagementMcpJSONBodyId0 overwrites any union data inside the ManagementMcpJSONBody_Id as the provided ManagementMcpJSONBodyId0
+func (t *ManagementMcpJSONBody_Id) FromManagementMcpJSONBodyId0(v ManagementMcpJSONBodyId0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeManagementMcpJSONBodyId0 performs a merge with any union data inside the ManagementMcpJSONBody_Id, using the provided ManagementMcpJSONBodyId0
+func (t *ManagementMcpJSONBody_Id) MergeManagementMcpJSONBodyId0(v ManagementMcpJSONBodyId0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsManagementMcpJSONBodyId1 returns the union data inside the ManagementMcpJSONBody_Id as a ManagementMcpJSONBodyId1
+func (t ManagementMcpJSONBody_Id) AsManagementMcpJSONBodyId1() (ManagementMcpJSONBodyId1, error) {
+	var body ManagementMcpJSONBodyId1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromManagementMcpJSONBodyId1 overwrites any union data inside the ManagementMcpJSONBody_Id as the provided ManagementMcpJSONBodyId1
+func (t *ManagementMcpJSONBody_Id) FromManagementMcpJSONBodyId1(v ManagementMcpJSONBodyId1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeManagementMcpJSONBodyId1 performs a merge with any union data inside the ManagementMcpJSONBody_Id, using the provided ManagementMcpJSONBodyId1
+func (t *ManagementMcpJSONBody_Id) MergeManagementMcpJSONBodyId1(v ManagementMcpJSONBodyId1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ManagementMcpJSONBody_Id) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ManagementMcpJSONBody_Id) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }

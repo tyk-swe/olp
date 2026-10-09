@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M4](m04-tenancy-identity.md) | Automation-first and multi-region operation |
+| In progress | [M4](m04-tenancy-identity.md) | Automation-first and multi-region operation |
 
 OLP is operated through its console, its management API and configuration
 promotion, with one PostgreSQL primary and file-mounted secrets. LiteLLM adds a
@@ -126,17 +126,14 @@ editing, and session-scoped saved filters for usage and request history.
 | Read replicas and regions | `internal/database/`, `internal/runtime/`, `internal/limits/` |
 | Management MCP server | `internal/management/` |
 
-## Decisions to settle
+## Decisions
 
-1. Whether regional rate limits divide a key's global limit automatically
-   (recommended: no; regional values are explicit, and the default applies the
-   full limit per region, which is documented).
-2. The Terraform provider's model: per-resource management or a single
-   configuration-artifact resource (recommended: per-resource, which matches
-   Terraform practice, with configuration promotion kept for whole-installation
-   moves).
-3. Whether the public catalog may show prices (recommended: only when the
-   owner opts in separately).
+1. Regional limits are explicit. A region without an override applies the full
+   key limit; limits are never divided automatically as regions join or leave.
+2. Terraform manages individual resources, with ETags protecting updates.
+   Configuration promotion remains the workflow for whole-installation moves.
+3. Public catalogs hide prices by default. A project owner must enable public
+   prices separately from enabling the public catalog.
 
 ## Exit criteria
 

@@ -194,6 +194,7 @@
     "POST /api/v1/invitations/accept": "YYYYYYYYYYYY",
     "POST /api/v1/management-tokens": "Y-----------",
     "POST /api/v1/management-tokens/{management_token_id}/revoke": "Y-----------",
+    "POST /api/v1/mcp": "--------YYYY",
     "POST /api/v1/media-jobs/{job_id}/refresh": "YYYY----YYYY",
     "POST /api/v1/notifications/destinations": "YYYYYY--YYY-",
     "POST /api/v1/notifications/rules": "YYYYYY--YYY-",

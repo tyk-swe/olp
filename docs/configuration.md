@@ -1,5 +1,9 @@
 # Configuration reference
 
+For remote administration, see the [management CLI and MCP](operator-cli.md).
+These clients use `OLP_MANAGEMENT_URL` and `OLP_MANAGEMENT_TOKEN_FILE`, not the
+server configuration below.
+
 Runtime settings come from environment variables or CLI flags; flags take
 precedence. Use `olp <subcommand> --help` and the source in
 [`internal/config/config.go`](../internal/config/config.go) for accepted flags.

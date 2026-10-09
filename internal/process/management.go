@@ -53,6 +53,7 @@ type Management struct {
 // feature's routes, and the catch-all that answers 404 for the rest.
 func (m Management) Register(mux *http.ServeMux) {
 	management.Register(mux)
+	(&management.MCP{Access: m.Access, API: mux}).Register(mux)
 	m.Access.Egress = m.Egress
 	m.Access.Register(mux)
 	catalogue := providers.New(m.Access, m.Egress, m.PluginHost)
