@@ -97,7 +97,7 @@ var policy = [operationCount]rule{
 	Self:               {name: "self", roles: everyone},
 	ManageSessions:     {name: "manage_sessions", roles: owner, installation: true},
 	ManageTokens:       {name: "manage_tokens", roles: owner, installation: true},
-	ManageProjects:     {name: "manage_projects", roles: owner, installation: true},
+	ManageProjects:     {name: "manage_projects", roles: owner, installation: true, delegable: true},
 	LocalLogin:         {name: "local_login", roles: owner, installation: true},
 	ManagePlugins:      {name: "manage_plugins", roles: owner, installation: true},
 }

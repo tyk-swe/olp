@@ -4478,6 +4478,58 @@
     }
   },
   {
+    "name": "create_organization",
+    "group": "organizations",
+    "method": "POST",
+    "path": "/api/v1/organizations",
+    "description": "",
+    "scopes": [
+      [
+        "manage_projects",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique mutation key"
+        },
+        "body": {
+          "$ref": "#/$defs/CreateProjectRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "CreateProjectRequest": {
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
     "name": "create_pricing_revision",
     "group": "pricing",
     "method": "POST",
@@ -4712,6 +4764,58 @@
             "catalog"
           ],
           "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "create_project",
+    "group": "projects",
+    "method": "POST",
+    "path": "/api/v1/projects",
+    "description": "create project",
+    "scopes": [
+      [
+        "manage_projects",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique mutation key"
+        },
+        "body": {
+          "$ref": "#/$defs/CreateProjectRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "CreateProjectRequest": {
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
         }
       }
     }
@@ -6703,6 +6807,70 @@
     }
   },
   {
+    "name": "delete_project_member",
+    "group": "projects",
+    "method": "DELETE",
+    "path": "/api/v1/projects/{project_id}/members/{user_id}",
+    "description": "delete project member",
+    "scopes": [
+      [
+        "manage_projects",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "project_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "user_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "user_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "project_id",
+            "user_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current project ETag"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match"
+      ]
+    }
+  },
+  {
     "name": "delete_route_draft",
     "group": "routes",
     "method": "DELETE",
@@ -8231,6 +8399,49 @@
           "additionalProperties": false,
           "required": [
             "pricing_source_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_project",
+    "group": "projects",
+    "method": "GET",
+    "path": "/api/v1/projects/{project_id}",
+    "description": "get project",
+    "scopes": [
+      [
+        "manage_projects",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "project_id",
+        "in": "path",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "project_id"
           ]
         }
       },
@@ -10663,6 +10874,74 @@
     }
   },
   {
+    "name": "list_project_members",
+    "group": "projects",
+    "method": "GET",
+    "path": "/api/v1/projects/{project_id}/members",
+    "description": "list project members",
+    "scopes": [
+      [
+        "manage_projects",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "project_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "project_id"
+          ]
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "list_project_memberships",
     "group": "projects",
     "method": "GET",
@@ -10678,6 +10957,53 @@
     "input_schema": {
       "type": "object",
       "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_projects",
+    "group": "projects",
+    "method": "GET",
+    "path": "/api/v1/projects",
+    "description": "list projects",
+    "scopes": [
+      [
+        "manage_projects",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
       "additionalProperties": false
     }
   },
@@ -17319,6 +17645,91 @@
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
             }
           }
+        }
+      }
+    }
+  },
+  {
+    "name": "put_project_member",
+    "group": "projects",
+    "method": "PUT",
+    "path": "/api/v1/projects/{project_id}/members/{user_id}",
+    "description": "put project member",
+    "scopes": [
+      [
+        "manage_projects",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "project_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "user_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "user_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "project_id",
+            "user_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current project ETag"
+        },
+        "body": {
+          "$ref": "#/$defs/PutProjectMemberRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "PutProjectMemberRequest": {
+          "properties": {
+            "role": {
+              "enum": [
+                "manager",
+                "viewer"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "role"
+          ],
+          "type": "object"
         }
       }
     }
@@ -24730,6 +25141,77 @@
               ]
             }
           },
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "update_project",
+    "group": "projects",
+    "method": "PATCH",
+    "path": "/api/v1/projects/{project_id}",
+    "description": "update project",
+    "scopes": [
+      [
+        "manage_projects",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "project_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "project_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current project ETag"
+        },
+        "body": {
+          "$ref": "#/$defs/UpdateProjectRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "UpdateProjectRequest": {
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
           "type": "object"
         }
       }

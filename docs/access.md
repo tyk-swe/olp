@@ -428,6 +428,12 @@ inactive or OIDC-deauthorized, loses operations the creator's current role does
 not hold, and reaches only the creator's projects when the creator has an
 assigned access scope. Nothing is revoked, so a creator who regains authority
 also restores their tokens.
+An installation-wide `manage_projects` token can create, read and update
+projects and their membership while its creator remains an installation-wide
+owner. The scope is separate from provider configuration and does not imply
+`read`, `configure` or `keys`; assigned-project tokens cannot administer the
+installation's project boundary. This supports infrastructure automation
+without granting token administration.
 Token administration itself — create, list, read, revoke — is always
 session-owner-only; no management token can manage tokens. Installing,
 approving, permitting and uninstalling [provider plugins](plugins.md) is

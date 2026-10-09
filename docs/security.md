@@ -56,7 +56,7 @@ installation lock, so they commit only under authority that is still current.
 | `self` | yes | yes | yes | yes |  |  |
 | `manage_sessions` | yes |  |  |  | yes |  |
 | `manage_tokens` | yes |  |  |  | yes |  |
-| `manage_projects` | yes |  |  |  | yes |  |
+| `manage_projects` | yes |  |  |  | yes | yes |
 | `local_login` | yes |  |  |  | yes |  |
 | `manage_plugins` | yes |  |  |  | yes |  |
 | `manage_organization` | yes | yes | yes |  |  | yes |

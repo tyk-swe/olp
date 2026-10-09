@@ -4207,6 +4207,7 @@
           "settings",
           "access_read",
           "access",
+          "manage_projects",
           "manage_organization"
         ],
         "type": "string"
@@ -25656,6 +25657,12 @@
               "manage_projects",
               "installation"
             ]
+          },
+          {
+            "managementToken": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -25752,6 +25759,12 @@
               "manage_projects",
               "installation"
             ]
+          },
+          {
+            "managementToken": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -25808,6 +25821,12 @@
         "security": [
           {
             "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
               "manage_projects",
               "installation"
             ]
@@ -25928,6 +25947,12 @@
               "manage_projects",
               "installation"
             ]
+          },
+          {
+            "managementToken": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -26013,6 +26038,12 @@
         "security": [
           {
             "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
               "manage_projects",
               "installation"
             ]
@@ -26114,6 +26145,12 @@
           {
             "csrfToken": [],
             "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
               "manage_projects",
               "installation"
             ]
@@ -26240,6 +26277,12 @@
           {
             "csrfToken": [],
             "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
               "manage_projects",
               "installation"
             ]
@@ -39444,6 +39487,12 @@
               "manage_projects",
               "installation"
             ]
+          },
+          {
+            "managementToken": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -46510,6 +46559,12 @@
           {
             "managementToken": [
               "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "manage_projects",
+              "installation"
             ]
           }
         ],

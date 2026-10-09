@@ -1505,6 +1505,7 @@ const (
 	ManagementTokenScopeConfigure          ManagementTokenScope = "configure"
 	ManagementTokenScopeKeys               ManagementTokenScope = "keys"
 	ManagementTokenScopeManageOrganization ManagementTokenScope = "manage_organization"
+	ManagementTokenScopeManageProjects     ManagementTokenScope = "manage_projects"
 	ManagementTokenScopePlayground         ManagementTokenScope = "playground"
 	ManagementTokenScopeRead               ManagementTokenScope = "read"
 	ManagementTokenScopeSettings           ManagementTokenScope = "settings"
@@ -1523,6 +1524,8 @@ func (e ManagementTokenScope) Valid() bool {
 	case ManagementTokenScopeKeys:
 		return true
 	case ManagementTokenScopeManageOrganization:
+		return true
+	case ManagementTokenScopeManageProjects:
 		return true
 	case ManagementTokenScopePlayground:
 		return true
