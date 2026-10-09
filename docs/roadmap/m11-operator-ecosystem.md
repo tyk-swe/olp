@@ -261,3 +261,12 @@ retirement. Exact target projection and canonical imported references are covere
 by focused tests. The eight-resource acceptance suite passes against the provider's
 immutable SDK-matched OLP build; the complete twelve-resource criterion remains
 pending for routing policies, guardrails, sinks and MCP servers.
+
+Routing-policy lifecycle prerequisites are qualified by
+`TestRoutingPolicyRemovalPreservesFreshPreconditionsAndParentProof`: installation,
+API-key, and route-draft removal/recreation, stale and missing preconditions,
+original parent transitions on replay, and exact successful audit counts.
+Removal retains a fresh default-policy ETag so an earlier default observation
+cannot become valid again. Full local checks, focused races, and the complete
+management/SDK/CLI/MCP machine authorization sweeps pass. The Terraform resource
+qualification remains pending.

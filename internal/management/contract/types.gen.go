@@ -6087,8 +6087,10 @@ type PolicyDecision struct {
 
 // PolicyResponse defines model for PolicyResponse.
 type PolicyResponse struct {
-	Etag   openapi_types.UUID `json:"etag"`
-	Policy RoutingPolicy      `json:"policy"`
+	// Configured Whether an explicit policy exists. False represents inherited defaults with a fresh observed ETag after removal.
+	Configured *bool              `json:"configured,omitempty"`
+	Etag       openapi_types.UUID `json:"etag"`
+	Policy     RoutingPolicy      `json:"policy"`
 }
 
 // PriceCeiling defines model for PriceCeiling.
@@ -10106,6 +10108,15 @@ type DiffRouteRevisionsParams struct {
 
 // RestoreRouteRevisionParams defines parameters for RestoreRouteRevision.
 type RestoreRouteRevisionParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteRoutingPolicyParams defines parameters for DeleteRoutingPolicy.
+type DeleteRoutingPolicyParams struct {
+	// IfMatch Current policy ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique write key
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 

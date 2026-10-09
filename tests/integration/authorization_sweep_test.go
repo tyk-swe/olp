@@ -169,8 +169,10 @@ func sweepCallers(h *accessHarness, owner *browser, golden routeGolden, projectA
 // policy write needs the operation its scope implies, and the sweep writes a
 // route draft's policy, which a developer's keys operation does not cover.
 var sweepRefinements = map[string]bool{
-	"PUT /api/v1/routing-policies/{scope}/{id} as developer global":   true,
-	"PUT /api/v1/routing-policies/{scope}/{id} as developer assigned": true,
+	"PUT /api/v1/routing-policies/{scope}/{id} as developer global":      true,
+	"PUT /api/v1/routing-policies/{scope}/{id} as developer assigned":    true,
+	"DELETE /api/v1/routing-policies/{scope}/{id} as developer global":   true,
+	"DELETE /api/v1/routing-policies/{scope}/{id} as developer assigned": true,
 }
 
 // sweepBody is the request body for pattern: resources are placed in the

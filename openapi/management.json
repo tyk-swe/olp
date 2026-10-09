@@ -5961,6 +5961,10 @@
           },
           "policy": {
             "$ref": "#/components/schemas/RoutingPolicy"
+          },
+          "configured": {
+            "type": "boolean",
+            "description": "Whether an explicit policy exists. False represents inherited defaults with a fresh observed ETag after removal."
           }
         },
         "required": [
@@ -32363,7 +32367,21 @@
                 }
               }
             },
-            "description": ""
+            "description": "",
+            "headers": {
+              "OLP-Previous-Parent-ETag": {
+                "description": "Locked parent ETag before a scoped mutation; omitted for installation scope.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "OLP-Parent-ETag": {
+                "description": "Parent ETag committed by this mutation; omitted for installation scope.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -32446,6 +32464,116 @@
         "tags": [
           "routes"
         ]
+      },
+      "delete": {
+        "operationId": "delete_routing_policy",
+        "tags": [
+          "routes"
+        ],
+        "summary": "Remove an explicit scoped routing policy",
+        "description": "Returns inherited defaults with a fresh ETag, preserving conditional-write protection across removal/recreation. Applies the same scope-specific permissions as PUT, publishes non-draft changes, and audits the removal.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current policy ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique write key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Explicit policy removed; parent authority updated",
+            "headers": {
+              "OLP-Previous-Parent-ETag": {
+                "description": "Locked parent ETag before a scoped mutation; omitted for installation scope.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "OLP-Parent-ETag": {
+                "description": "Parent ETag committed by this mutation; omitted for installation scope.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope requires its specific operation"
+          },
+          "412": {
+            "description": "Stale observed policy ETag"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
       }
     },
     "/api/v1/routing/simulate": {

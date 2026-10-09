@@ -7998,6 +7998,86 @@
     }
   },
   {
+    "name": "delete_routing_policy",
+    "group": "routes",
+    "method": "DELETE",
+    "path": "/api/v1/routing-policies/{scope}/{id}",
+    "description": "Remove an explicit scoped routing policy",
+    "scopes": [
+      [
+        "configure"
+      ],
+      [
+        "keys"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "scope",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string"
+            },
+            "id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current policy ETag"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique write key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "deprovision_user",
     "group": "provisioning",
     "method": "DELETE",

@@ -34,6 +34,7 @@
     "DELETE /api/v1/provisioning/{source}/users/{external_id}": "Y-------Y---",
     "DELETE /api/v1/route-drafts/{draft_id}": "YYYY----YYYY",
     "DELETE /api/v1/route-templates/{template_id}": "YYYY----YYYY",
+    "DELETE /api/v1/routing-policies/{scope}/{id}": "YYYYYY--YYYY",
     "DELETE /api/v1/sessions/current": "YYYYYYYY----",
     "DELETE /api/v1/sessions/{session_id}": "YYYYYYYY----",
     "DELETE /scim/v2/Groups/{scim_id}": "--------Y---",

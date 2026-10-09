@@ -280,6 +280,21 @@ when another replica has reclaimed the job.
 
 ![Credential slots with validation, priority, and shared quota usage](assets/screenshots/provider-credential-pool.png)
 
+## Scoped routing policies
+
+`GET /api/v1/routing-policies/{scope}/{id}` reports `configured` alongside
+its policy and observed ETag. Installation policy uses the nil UUID and requires
+installation settings authority; API-key policies require key authority, and
+route-draft policies require configuration authority and project access.
+
+`DELETE` removes an explicit override under the same permissions, observed
+`If-Match`, and `Idempotency-Key` requirements as `PUT`. The next read reports
+inherited defaults with a fresh ETag. An observation from before a create/delete
+cycle remains stale. Non-draft removal publishes the runtime change; draft removal
+becomes effective when that draft is activated. Scoped writes return their exact
+parent ETag transition, and replay returns the original transition and outcome.
+Successful removals are audited.
+
 ## Routes
 
 Automation can create a published route with `POST /api/v1/routes` and replace
