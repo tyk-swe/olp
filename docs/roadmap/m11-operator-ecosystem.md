@@ -28,7 +28,7 @@ API, so authorization, ETags, idempotency and audit apply unchanged.
 | Desired state | [Export, plan and apply](../configuration.md#configuration-promotion-artifacts) with canonical digests | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models |
 | Secrets | Mounted master-key ring and HMAC key files; provider secrets sealed in PostgreSQL ([secrets](../security.md#secrets)) | [Secret managers](https://docs.litellm.ai/docs/secret_managers/overview) (Enterprise) |
 | Topology | [Regional fleets](../deployment.md#regional-fleets), explicit key overrides, global cost reconciliation and [replica-aware runtime authority](../deployment.md#regional-read-replicas) and the [independent-installation console switcher](../operator-console.md#independent-installation-bookmarks) | [Read replicas](https://docs.litellm.ai/docs/proxy/db_read_replica), [multi-region](https://docs.litellm.ai/docs/proxy/multi_region) and a [global control plane](https://docs.litellm.ai/docs/proxy/global_control_plane) (Enterprise) |
-| Discovery | `GET /v1/models` lists key-visible routes | [AI Hub](https://docs.litellm.ai/docs/proxy/ai_hub) |
+| Discovery | [Member/key-visible model catalog](../model-catalog.md), SDK examples, explicit upstream disclosure and independently priced owner-enabled public catalogs | [AI Hub](https://docs.litellm.ai/docs/proxy/ai_hub) |
 
 ## Scope
 
@@ -184,3 +184,13 @@ list against the same matrix, calls every disallowed tool, and rejects
 session-only, unknown and recursive MCP operations. The uncached race test
 passes against a disposable installation. Contract generation and drift checks
 include the shared CLI/MCP registry.
+
+Catalog qualification: `TestModelCatalogVisibilityPublishingAndUpstreamDisclosure`
+verifies project/key/token visibility, precise current pricing, default identity
+privacy, independent public-price opt-in, ETags, withdrawal and key revocation.
+`TestModelCatalogPromotionPreservesOwnerConsentAndStagesRouteDisclosure` checks
+conditional owner authority and disclosure publication only after imported draft
+activation. The packaged catalog browser journey covers discovery, disclosure,
+public publication and accessibility. Projection tests cover conservative facts,
+unknown/partial coverage, exact decimal ranges and native SDK examples. The full
+local gate and ordinary/generated-client authorization sweeps pass.

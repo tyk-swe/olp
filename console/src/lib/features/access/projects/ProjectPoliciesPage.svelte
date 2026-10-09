@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PublicationPanel from '$lib/features/model-catalog/PublicationPanel.svelte';
   import AggregateBudgetPanel from '../budgets/AggregateBudgetPanel.svelte';
   import ProjectLimitTemplatesPanel from './ProjectLimitTemplatesPanel.svelte';
   import ProjectAttributionBudgetsPanel from './ProjectAttributionBudgetsPanel.svelte';
@@ -70,6 +71,7 @@
         project manager access.
       </p>{/if}
     {#key selected.id}
+      <PublicationPanel projectId={selected.id} />
       <ProjectEndUserPolicyPanel projectId={selected.id} {editable} />
       <ProjectAttributionPolicyPanel projectId={selected.id} {editable} />
       <AggregateBudgetPanel projectId={selected.id} {editable} />

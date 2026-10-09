@@ -444,7 +444,7 @@ func TestPlanNoopProviderAndRoute(t *testing.T) {
 		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", ""}}},
 		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, "cred-id", []byte(`{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`), []byte(`{}`)}}},
 		{match: "FROM olp.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
-		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil, []byte(`{"mode":"strict"}`), []byte(`{}`)}},
+		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil, []byte(`{"mode":"strict"}`), []byte(`{}`), false}},
 		{match: "routing_policies WHERE", row: []any{[]byte(`{"allowed_strategies":["weighted"]}`)}},
 		{match: "FROM olp.route_drafts", rows: [][]any{{"draft-id", "main", "edge-id"}}},
 		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge", nil, nil, nil, nil, nil, nil, nil}}},

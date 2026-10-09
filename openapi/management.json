@@ -1624,7 +1624,8 @@
               "credential",
               "route",
               "route_template",
-              "pricing"
+              "pricing",
+              "catalog_publication"
             ],
             "type": "string"
           }
@@ -1855,6 +1856,14 @@
               "null"
             ],
             "description": "Organization name. Omitted/null preserves destination membership. First assignment requires installation access authority; existing membership cannot change."
+          },
+          "public_catalog": {
+            "type": "boolean",
+            "description": "Owner-enabled anonymous catalog. Changing this value through promotion requires installation access scope."
+          },
+          "public_catalog_prices": {
+            "type": "boolean",
+            "description": "Independent opt-in for published catalog prices."
           }
         },
         "required": [
@@ -2047,6 +2056,10 @@
           "caller_cost_exempt": {
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "expose_upstream_models": {
+            "type": "boolean",
+            "description": "Explicitly disclose upstream model names in route catalogs."
           }
         },
         "required": [
@@ -19072,6 +19085,386 @@
             "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
           }
         }
+      },
+      "CatalogRange": {
+        "type": "object",
+        "properties": {
+          "minimum": {
+            "type": "string"
+          },
+          "maximum": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "minimum",
+          "maximum"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogPrice": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "input_per_million": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cached_input_per_million": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "output_per_million": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "cache_write_input_per_million": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cache_write_5m_input_per_million": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cache_write_1h_input_per_million": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "operation",
+          "currency",
+          "input_per_million",
+          "cached_input_per_million",
+          "output_per_million",
+          "unit_price",
+          "complete",
+          "cache_write_input_per_million",
+          "cache_write_5m_input_per_million",
+          "cache_write_1h_input_per_million"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogCapabilities": {
+        "type": "object",
+        "properties": {
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "operation_support": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "guaranteed",
+                "target_dependent",
+                "unknown"
+              ]
+            }
+          },
+          "input_modalities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "output_modalities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "context_length": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "max_output_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "supported_parameters": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "unknown": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "operations",
+          "operation_support",
+          "input_modalities",
+          "output_modalities",
+          "context_length",
+          "max_output_tokens",
+          "supported_parameters",
+          "unknown"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogPrivacy": {
+        "type": "object",
+        "properties": {
+          "data_collection": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "zero_data_retention": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "regions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "unknown": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "data_collection",
+          "zero_data_retention",
+          "regions",
+          "unknown"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogSample": {
+        "type": "object",
+        "properties": {
+          "sdk": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "anthropic",
+              "gemini"
+            ]
+          },
+          "operation": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "python"
+            ]
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sdk",
+          "operation",
+          "language",
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogModel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/CatalogCapabilities"
+          },
+          "privacy": {
+            "$ref": "#/components/schemas/CatalogPrivacy"
+          },
+          "prices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogPrice"
+            }
+          },
+          "upstream_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogSample"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "capabilities",
+          "privacy",
+          "samples"
+        ],
+        "additionalProperties": false
+      },
+      "ModelCatalogResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogModel"
+            }
+          },
+          "prices_visible": {
+            "type": "boolean",
+            "description": "Whether this catalog discloses configured prices. Missing current price records remain unknown."
+          }
+        },
+        "required": [
+          "items",
+          "prices_visible"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogPublicationResponse": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "prices_public": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string",
+            "description": "Observed resource version; supply it in If-Match for updates."
+          }
+        },
+        "required": [
+          "enabled",
+          "prices_public",
+          "etag"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateCatalogPublicationRequest": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "prices_public": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "prices_public"
+        ],
+        "additionalProperties": false
+      },
+      "RouteCatalogExposureResponse": {
+        "type": "object",
+        "properties": {
+          "expose_upstream_models": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string",
+            "description": "Observed resource version; supply it in If-Match for updates."
+          }
+        },
+        "required": [
+          "expose_upstream_models",
+          "etag"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateRouteCatalogExposureRequest": {
+        "type": "object",
+        "properties": {
+          "expose_upstream_models": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "expose_upstream_models"
+        ],
+        "additionalProperties": false
       }
     },
     "securitySchemes": {
@@ -19097,6 +19490,11 @@
         "in": "cookie",
         "name": "__Host-olp_session",
         "type": "apiKey"
+      },
+      "apiKeyBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Gateway API key with models_read scope. Admitted only for consumer catalog reads, with the gateway authority-age, revocation, route and client-address restrictions."
       }
     }
   },
@@ -46199,6 +46597,356 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/catalog": {
+      "get": {
+        "operationId": "list_model_catalog",
+        "tags": [
+          "model-catalog"
+        ],
+        "summary": "List visible published routes with capabilities, privacy, prices and qualified SDK examples",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "models_read"
+            ]
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalogResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Resource not found"
+          }
+        }
+      }
+    },
+    "/api/v1/catalog/public/{project_id}": {
+      "get": {
+        "operationId": "get_public_model_catalog",
+        "tags": [
+          "model-catalog"
+        ],
+        "summary": "Read an owner-published project catalog; prices require a separate opt-in",
+        "security": [],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalogResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Resource not found"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/catalog": {
+      "get": {
+        "operationId": "get_catalog_publication",
+        "tags": [
+          "model-catalog"
+        ],
+        "summary": "Read a project catalog publication policy",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogPublicationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Resource not found"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_catalog_publication",
+        "tags": [
+          "model-catalog"
+        ],
+        "summary": "Publish or withdraw a project catalog and independently choose public prices",
+        "security": [
+          {
+            "sessionCookie": [
+              "access",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCatalogPublicationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogPublicationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "412": {
+            "description": "Observed version is stale"
+          },
+          "428": {
+            "description": "If-Match required"
+          }
+        }
+      }
+    },
+    "/api/v1/routes/{route_id}/catalog": {
+      "get": {
+        "operationId": "get_route_catalog_exposure",
+        "tags": [
+          "model-catalog"
+        ],
+        "summary": "Read a route upstream-model disclosure policy",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "route_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteCatalogExposureResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Resource not found"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_route_catalog_exposure",
+        "tags": [
+          "model-catalog"
+        ],
+        "summary": "Choose whether a route catalog may disclose upstream model names",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "route_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRouteCatalogExposureRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteCatalogExposureResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "412": {
+            "description": "Observed version is stale"
+          },
+          "428": {
+            "description": "If-Match required"
           }
         }
       }

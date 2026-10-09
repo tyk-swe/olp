@@ -32,15 +32,18 @@ func TestContractRequirementsMustReadTruthfully(t *testing.T) {
 		return `{"paths":{"` + path + `":{"` + method + `":{"security":` + security + `}}}}`
 	}
 	for name, document := range map[string]string{
-		"missing security":        `{"paths":{"/api/v1/x":{"get":{}}}}`,
-		"unknown scheme":          operation("/api/v1/x", "get", `[{"bearerToken":[]}]`),
-		"unknown operation":       operation("/api/v1/x", "get", `[{"sessionCookie":["root"]}]`),
-		"safe method with proof":  operation("/api/v1/x", "get", `[{"sessionCookie":["read"],"csrfToken":[]}]`),
-		"unsafe method no proof":  operation("/api/v1/x", "post", `[{"sessionCookie":["configure"]}]`),
-		"undelegable token scope": operation("/api/v1/x", "get", `[{"managementToken":["self"]}]`),
-		"hidden installation":     operation("/api/v1/x", "get", `[{"sessionCookie":["settings"]}]`),
-		"no operation":            operation("/api/v1/x", "get", `[{"sessionCookie":["installation"]}]`),
-		"combined token":          operation("/api/v1/x", "get", `[{"managementToken":["read"],"sessionCookie":["read"]}]`),
+		"missing security":         `{"paths":{"/api/v1/x":{"get":{}}}}`,
+		"unknown scheme":           operation("/api/v1/x", "get", `[{"bearerToken":[]}]`),
+		"unknown operation":        operation("/api/v1/x", "get", `[{"sessionCookie":["root"]}]`),
+		"safe method with proof":   operation("/api/v1/x", "get", `[{"sessionCookie":["read"],"csrfToken":[]}]`),
+		"unsafe method no proof":   operation("/api/v1/x", "post", `[{"sessionCookie":["configure"]}]`),
+		"undelegable token scope":  operation("/api/v1/x", "get", `[{"managementToken":["self"]}]`),
+		"hidden installation":      operation("/api/v1/x", "get", `[{"sessionCookie":["settings"]}]`),
+		"no operation":             operation("/api/v1/x", "get", `[{"sessionCookie":["installation"]}]`),
+		"combined token":           operation("/api/v1/x", "get", `[{"managementToken":["read"],"sessionCookie":["read"]}]`),
+		"consumer management read": operation("/api/v1/users", "get", `[{"apiKeyBearer":["models_read"]}]`),
+		"consumer write":           operation("/api/v1/catalog", "put", `[{"apiKeyBearer":["models_read"]}]`),
+		"consumer broader scope":   operation("/api/v1/catalog", "get", `[{"apiKeyBearer":["inference"]}]`),
 	} {
 		if _, err := parseRequirements([]byte(document)); err == nil {
 			t.Errorf("%s: an untruthful contract loaded", name)
@@ -59,6 +62,26 @@ func TestContractRequirementsMustReadTruthfully(t *testing.T) {
 	}
 	if public, err := parseRequirements([]byte(operation("/api/v1/x", "post", `[]`))); err != nil || !public["POST /api/v1/x"].Public {
 		t.Fatal("an empty requirement must be public", err)
+	}
+}
+
+func TestConsumerCatalogAuthorityCannotBecomeManagementAuthority(t *testing.T) {
+	requirements, err := parseRequirements([]byte(`{"paths":{"/api/v1/catalog":{"get":{"security":[{"apiKeyBearer":["models_read"]}]}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := Principal{Kind: "key", KeyAuthority: &Authority{Policy: KeyPolicy{Scopes: []string{"models_read"}}}}
+	if requirements["GET /api/v1/catalog"].Admits(p) != nil {
+		t.Fatal("consumer catalog authority refused")
+	}
+	for _, op := range Operations() {
+		if op != Read && p.Authorize(op) == nil {
+			t.Fatalf("consumer key admitted management operation %v", op)
+		}
+	}
+	p.KeyAuthority = nil
+	if requirements["GET /api/v1/catalog"].Admits(p) == nil {
+		t.Fatal("empty consumer authority admitted")
 	}
 }
 

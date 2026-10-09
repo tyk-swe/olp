@@ -67,6 +67,12 @@
           route: 'GET /api/v1/provider-models'
         },
         {
+          label: 'Catalog',
+          href: resolve('/catalog'),
+          icon: 'model',
+          route: 'GET /api/v1/catalog'
+        },
+        {
           label: 'Routes',
           href: resolve('/routes'),
           icon: 'route',

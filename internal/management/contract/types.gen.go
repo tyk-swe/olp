@@ -292,6 +292,63 @@ func (e BudgetWindowKind) Valid() bool {
 	}
 }
 
+// Defines values for CatalogCapabilitiesOperationSupport.
+const (
+	CatalogCapabilitiesOperationSupportGuaranteed      CatalogCapabilitiesOperationSupport = "guaranteed"
+	CatalogCapabilitiesOperationSupportTargetDependent CatalogCapabilitiesOperationSupport = "target_dependent"
+	CatalogCapabilitiesOperationSupportUnknown         CatalogCapabilitiesOperationSupport = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the CatalogCapabilitiesOperationSupport enum.
+func (e CatalogCapabilitiesOperationSupport) Valid() bool {
+	switch e {
+	case CatalogCapabilitiesOperationSupportGuaranteed:
+		return true
+	case CatalogCapabilitiesOperationSupportTargetDependent:
+		return true
+	case CatalogCapabilitiesOperationSupportUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CatalogSampleLanguage.
+const (
+	Python CatalogSampleLanguage = "python"
+)
+
+// Valid indicates whether the value is a known member of the CatalogSampleLanguage enum.
+func (e CatalogSampleLanguage) Valid() bool {
+	switch e {
+	case Python:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CatalogSampleSdk.
+const (
+	CatalogSampleSdkAnthropic CatalogSampleSdk = "anthropic"
+	CatalogSampleSdkGemini    CatalogSampleSdk = "gemini"
+	CatalogSampleSdkOpenai    CatalogSampleSdk = "openai"
+)
+
+// Valid indicates whether the value is a known member of the CatalogSampleSdk enum.
+func (e CatalogSampleSdk) Valid() bool {
+	switch e {
+	case CatalogSampleSdkAnthropic:
+		return true
+	case CatalogSampleSdkGemini:
+		return true
+	case CatalogSampleSdkOpenai:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAccountAdapter.
 const (
 	CodeAccountAdapterCodex       CodeAccountAdapter = "codex"
@@ -708,20 +765,23 @@ func (e ConfigurationPlanItemAction) Valid() bool {
 
 // Defines values for ConfigurationPlanItemKind.
 const (
-	ConfigurationPlanItemKindConfiguration     ConfigurationPlanItemKind = "configuration"
-	ConfigurationPlanItemKindCredential        ConfigurationPlanItemKind = "credential"
-	ConfigurationPlanItemKindNetworkCredential ConfigurationPlanItemKind = "network_credential"
-	ConfigurationPlanItemKindPlugin            ConfigurationPlanItemKind = "plugin"
-	ConfigurationPlanItemKindPricing           ConfigurationPlanItemKind = "pricing"
-	ConfigurationPlanItemKindProject           ConfigurationPlanItemKind = "project"
-	ConfigurationPlanItemKindProvider          ConfigurationPlanItemKind = "provider"
-	ConfigurationPlanItemKindRoute             ConfigurationPlanItemKind = "route"
-	ConfigurationPlanItemKindRouteTemplate     ConfigurationPlanItemKind = "route_template"
+	ConfigurationPlanItemKindCatalogPublication ConfigurationPlanItemKind = "catalog_publication"
+	ConfigurationPlanItemKindConfiguration      ConfigurationPlanItemKind = "configuration"
+	ConfigurationPlanItemKindCredential         ConfigurationPlanItemKind = "credential"
+	ConfigurationPlanItemKindNetworkCredential  ConfigurationPlanItemKind = "network_credential"
+	ConfigurationPlanItemKindPlugin             ConfigurationPlanItemKind = "plugin"
+	ConfigurationPlanItemKindPricing            ConfigurationPlanItemKind = "pricing"
+	ConfigurationPlanItemKindProject            ConfigurationPlanItemKind = "project"
+	ConfigurationPlanItemKindProvider           ConfigurationPlanItemKind = "provider"
+	ConfigurationPlanItemKindRoute              ConfigurationPlanItemKind = "route"
+	ConfigurationPlanItemKindRouteTemplate      ConfigurationPlanItemKind = "route_template"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationPlanItemKind enum.
 func (e ConfigurationPlanItemKind) Valid() bool {
 	switch e {
+	case ConfigurationPlanItemKindCatalogPublication:
+		return true
 	case ConfigurationPlanItemKindConfiguration:
 		return true
 	case ConfigurationPlanItemKindCredential:
@@ -3414,6 +3474,21 @@ type CapabilityResponse struct {
 	Surface     string                       `json:"surface"`
 }
 
+// CatalogCapabilities defines model for CatalogCapabilities.
+type CatalogCapabilities struct {
+	ContextLength       nullable.Nullable[int64]                       `json:"context_length"`
+	InputModalities     []string                                       `json:"input_modalities"`
+	MaxOutputTokens     nullable.Nullable[int64]                       `json:"max_output_tokens"`
+	OperationSupport    map[string]CatalogCapabilitiesOperationSupport `json:"operation_support"`
+	Operations          []string                                       `json:"operations"`
+	OutputModalities    []string                                       `json:"output_modalities"`
+	SupportedParameters nullable.Nullable[[]string]                    `json:"supported_parameters"`
+	Unknown             []string                                       `json:"unknown"`
+}
+
+// CatalogCapabilitiesOperationSupport defines model for CatalogCapabilities.OperationSupport.
+type CatalogCapabilitiesOperationSupport string
+
 // CatalogCapabilityHints Capabilities the vendor documents; an absent hint is unknown. Hints never certify a capability.
 type CatalogCapabilityHints struct {
 	PromptCaching     *bool `json:"prompt_caching,omitempty"`
@@ -3421,6 +3496,67 @@ type CatalogCapabilityHints struct {
 	StructuredOutputs *bool `json:"structured_outputs,omitempty"`
 	Tools             *bool `json:"tools,omitempty"`
 }
+
+// CatalogModel defines model for CatalogModel.
+type CatalogModel struct {
+	Capabilities   CatalogCapabilities `json:"capabilities"`
+	Id             string              `json:"id"`
+	Prices         *[]CatalogPrice     `json:"prices,omitempty"`
+	Privacy        CatalogPrivacy      `json:"privacy"`
+	Samples        []CatalogSample     `json:"samples"`
+	UpstreamModels *[]string           `json:"upstream_models,omitempty"`
+}
+
+// CatalogPrice defines model for CatalogPrice.
+type CatalogPrice struct {
+	CacheWrite1hInputPerMillion nullable.Nullable[CatalogRange] `json:"cache_write_1h_input_per_million"`
+	CacheWrite5mInputPerMillion nullable.Nullable[CatalogRange] `json:"cache_write_5m_input_per_million"`
+	CacheWriteInputPerMillion   nullable.Nullable[CatalogRange] `json:"cache_write_input_per_million"`
+	CachedInputPerMillion       nullable.Nullable[CatalogRange] `json:"cached_input_per_million"`
+	Complete                    bool                            `json:"complete"`
+	Currency                    string                          `json:"currency"`
+	InputPerMillion             nullable.Nullable[CatalogRange] `json:"input_per_million"`
+	Operation                   string                          `json:"operation"`
+	OutputPerMillion            nullable.Nullable[CatalogRange] `json:"output_per_million"`
+	UnitPrice                   nullable.Nullable[CatalogRange] `json:"unit_price"`
+}
+
+// CatalogPrivacy defines model for CatalogPrivacy.
+type CatalogPrivacy struct {
+	DataCollection    nullable.Nullable[bool] `json:"data_collection"`
+	Regions           []string                `json:"regions"`
+	Unknown           []string                `json:"unknown"`
+	ZeroDataRetention nullable.Nullable[bool] `json:"zero_data_retention"`
+}
+
+// CatalogPublicationResponse defines model for CatalogPublicationResponse.
+type CatalogPublicationResponse struct {
+	Enabled bool `json:"enabled"`
+
+	// Etag Observed resource version; supply it in If-Match for updates.
+	Etag         string `json:"etag"`
+	PricesPublic bool   `json:"prices_public"`
+}
+
+// CatalogRange defines model for CatalogRange.
+type CatalogRange struct {
+	Maximum string `json:"maximum"`
+	Minimum string `json:"minimum"`
+}
+
+// CatalogSample defines model for CatalogSample.
+type CatalogSample struct {
+	Code      string                `json:"code"`
+	Language  CatalogSampleLanguage `json:"language"`
+	Operation string                `json:"operation"`
+	Sdk       CatalogSampleSdk      `json:"sdk"`
+}
+
+// CatalogSampleLanguage defines model for CatalogSample.Language.
+type CatalogSampleLanguage string
+
+// CatalogSampleSdk defines model for CatalogSample.Sdk.
+type CatalogSampleSdk string
 
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
@@ -3967,6 +4103,12 @@ type ConfigurationProjectEntry struct {
 	// Organization Organization name. Omitted/null preserves destination membership. First assignment requires installation access authority; existing membership cannot change.
 	Organization nullable.Nullable[string] `json:"organization,omitempty"`
 
+	// PublicCatalog Owner-enabled anonymous catalog. Changing this value through promotion requires installation access scope.
+	PublicCatalog *bool `json:"public_catalog,omitempty"`
+
+	// PublicCatalogPrices Independent opt-in for published catalog prices.
+	PublicCatalogPrices *bool `json:"public_catalog_prices,omitempty"`
+
 	// RouteGroups Portable project route groups. Omitted, null or empty removes groups. Changes require keys permission as well as configure.
 	RouteGroups nullable.Nullable[RouteGroups] `json:"route_groups,omitempty"`
 }
@@ -4007,6 +4149,9 @@ type ConfigurationRouteEntry struct {
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
 	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
 	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
+
+	// ExposeUpstreamModels Explicitly disclose upstream model names in route catalogs.
+	ExposeUpstreamModels *bool `json:"expose_upstream_models,omitempty"`
 
 	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
 	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
@@ -5148,6 +5293,14 @@ type MediaJobItem struct {
 type MediaJobListResponse struct {
 	Items      []MediaJobItem            `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// ModelCatalogResponse defines model for ModelCatalogResponse.
+type ModelCatalogResponse struct {
+	Items []CatalogModel `json:"items"`
+
+	// PricesVisible Whether this catalog discloses configured prices. Missing current price records remain unknown.
+	PricesVisible bool `json:"prices_visible"`
 }
 
 // ModelLifecycle A model's deprecation and retirement as its vendor documents them in the reference catalog.
@@ -7100,6 +7253,13 @@ type RouteBehavior struct {
 	Selectors []RouteSelector `json:"selectors"`
 }
 
+// RouteCatalogExposureResponse defines model for RouteCatalogExposureResponse.
+type RouteCatalogExposureResponse struct {
+	// Etag Observed resource version; supply it in If-Match for updates.
+	Etag                 string `json:"etag"`
+	ExposeUpstreamModels bool   `json:"expose_upstream_models"`
+}
+
 // RouteDetailResponse defines model for RouteDetailResponse.
 type RouteDetailResponse struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -8352,6 +8512,12 @@ type UpdateBudgetGroupRequest struct {
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
+// UpdateCatalogPublicationRequest defines model for UpdateCatalogPublicationRequest.
+type UpdateCatalogPublicationRequest struct {
+	Enabled      bool `json:"enabled"`
+	PricesPublic bool `json:"prices_public"`
+}
+
 // UpdateInstallationBrandingRequest defines model for UpdateInstallationBrandingRequest.
 type UpdateInstallationBrandingRequest struct {
 	// Logo Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels.
@@ -8407,6 +8573,11 @@ type UpdateProjectRequest struct {
 type UpdateProviderRequest struct {
 	Configuration ProviderConfiguration `json:"configuration"`
 	Name          string                `json:"name"`
+}
+
+// UpdateRouteCatalogExposureRequest defines model for UpdateRouteCatalogExposureRequest.
+type UpdateRouteCatalogExposureRequest struct {
+	ExposeUpstreamModels bool `json:"expose_upstream_models"`
 }
 
 // UpdateSettingRequest defines model for UpdateSettingRequest.
@@ -9353,6 +9524,11 @@ type PutProjectBudgetParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// PutCatalogPublicationParams defines parameters for PutCatalogPublication.
+type PutCatalogPublicationParams struct {
+	IfMatch string `json:"If-Match"`
+}
+
 // PutProjectEndUserPolicyJSONBody defines parameters for PutProjectEndUserPolicy.
 type PutProjectEndUserPolicyJSONBody struct {
 	Policy nullable.Nullable[EndUserPolicy] `json:"policy"`
@@ -9723,6 +9899,11 @@ type ListRoutesParams struct {
 
 	// Limit Page size, from 1 to 200. Defaults to 50.
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PutRouteCatalogExposureParams defines parameters for PutRouteCatalogExposure.
+type PutRouteCatalogExposureParams struct {
+	IfMatch string `json:"If-Match"`
 }
 
 // RetireRouteParams defines parameters for RetireRoute.
@@ -10204,6 +10385,9 @@ type PutProjectAttributionPolicyJSONRequestBody PutProjectAttributionPolicyJSONB
 // PutProjectBudgetJSONRequestBody defines body for PutProjectBudget for application/json ContentType.
 type PutProjectBudgetJSONRequestBody PutProjectBudgetJSONBody
 
+// PutCatalogPublicationJSONRequestBody defines body for PutCatalogPublication for application/json ContentType.
+type PutCatalogPublicationJSONRequestBody = UpdateCatalogPublicationRequest
+
 // PutProjectEndUserPolicyJSONRequestBody defines body for PutProjectEndUserPolicy for application/json ContentType.
 type PutProjectEndUserPolicyJSONRequestBody PutProjectEndUserPolicyJSONBody
 
@@ -10263,6 +10447,9 @@ type CreateRouteTemplateJSONRequestBody = RouteTemplateRequest
 
 // ReplaceRouteTemplateJSONRequestBody defines body for ReplaceRouteTemplate for application/json ContentType.
 type ReplaceRouteTemplateJSONRequestBody = RouteTemplateRequest
+
+// PutRouteCatalogExposureJSONRequestBody defines body for PutRouteCatalogExposure for application/json ContentType.
+type PutRouteCatalogExposureJSONRequestBody = UpdateRouteCatalogExposureRequest
 
 // PutRoutingPolicyJSONRequestBody defines body for PutRoutingPolicy for application/json ContentType.
 type PutRoutingPolicyJSONRequestBody = RoutingPolicy

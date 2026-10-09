@@ -228,12 +228,12 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 		var draftID string
 		if staged {
 			draftID = draft.ID
-			if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,behavior=$10,updated_at=now() WHERE id=$1 AND slug=$2", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), input.Fidelity, input.Behavior); err != nil {
+			if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET state='draft',operations=$3,overall_timeout_ms=$4,max_attempts=$5,targets=$6,content_policy=$7,etag=$8,fidelity=$9,behavior=$10,catalog_expose_upstream_models=$11,updated_at=now() WHERE id=$1 AND slug=$2", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), input.Fidelity, input.Behavior, route.ExposeUpstreamModels); err != nil {
 				return err
 			}
 		} else {
 			draftID = access.NewID()
-			if _, err = tx.Exec(ctx, "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity,behavior) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), p.UserID(), projectID, input.Fidelity, input.Behavior); err != nil {
+			if _, err = tx.Exec(ctx, "INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,content_policy,etag,created_by,project_id,fidelity,behavior,catalog_expose_upstream_models) VALUES($1,$2,'draft',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)", draftID, input.Slug, operations, input.OverallTimeoutMS, input.MaxAttempts, encoded, input.ContentPolicy, access.NewID(), p.UserID(), projectID, input.Fidelity, input.Behavior, route.ExposeUpstreamModels); err != nil {
 				return err
 			}
 		}
@@ -299,7 +299,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 		}
 	}
 
-	return nil
+	return applyCatalogPolicies(ctx, tx, p, doc)
 }
 
 func (s *Server) resolveSlots(ctx context.Context, tx pgx.Tx, providerID string, entry *ProviderEntry, existing *existingProvider, ok bool, bindings map[string]string) ([]resolvedSlot, error) {

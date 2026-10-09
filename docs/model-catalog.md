@@ -1,0 +1,11 @@
+# Model catalog
+
+The console’s **Catalog** page and `GET /api/v1/catalog` describe published route names available to the caller. Installation members and read-scoped management tokens see their permitted projects. Consumer keys need `models_read` and see only the routes admitted by their current key authority. Revoked keys and authority older than 60 seconds receive the same refusal as ordinary model discovery.
+
+Each entry includes operations, common context and output limits, input/output modalities, privacy declarations, current decimal price ranges, and Python SDK examples. Unknown facts remain explicit. Prices preserve decimal precision and summarize enabled non-shadow targets; incomplete target coverage is marked. Examples use the route name and `OLP_API_KEY` from the environment. Generation has OpenAI, Anthropic and Gemini examples; embeddings and token counting show the SDK interfaces that support those operations.
+
+Provider names, endpoints and upstream model names remain private by default. Under **Catalog disclosure settings**, select a published route and explicitly enable upstream model names. This choice affects both authenticated and public catalogs. Provider identities and credentials remain private.
+
+Installation owners can enable an anonymous catalog in **Project policies → Public model catalog**. `/catalog/public/{project_id}` provides the public page. `GET /api/v1/catalog/public/{project_id}` then lists only that project’s published routes. Publishing prices is a separate checkbox; anonymous responses include `prices_visible` so clients can distinguish withheld pricing from missing current declarations. Disabled projects return 404. Publication and disclosure changes use observed ETags and ordinary authorization/audit handling.
+
+Configuration exports preserve `public_catalog` and `public_catalog_prices` on projects and `expose_upstream_models` on routes. Changing publication through promotion requires installation access authority. Imported route disclosure is staged with its draft and takes effect when that draft is activated; normal draft activations preserve the route’s existing disclosure choice.

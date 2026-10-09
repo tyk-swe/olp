@@ -171,6 +171,13 @@ recorded for that request, and every provider-derived error message, type, and
 code is scrubbed of those values, including their JSON-escaped forms, before a
 client, log, or request record sees it.
 
+Consumer catalog reads admit a `models_read` inference key only on the declared
+`GET /api/v1/catalog` surface. The gateway’s ordinary authority, revocation,
+expiry and client-address checks remain in force. A consumer principal cannot
+authorize any management mutation or other management read. Public project
+catalogs require owner publication; price publication and upstream-model
+disclosure are independent explicit choices. See [model catalog](model-catalog.md).
+
 ## Public perimeter
 
 `process.Perimeter` wraps the public listener ahead of admission and routing,

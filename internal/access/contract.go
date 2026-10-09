@@ -135,6 +135,12 @@ func parseRequirement(pattern string, security []map[string][]string) (Requireme
 				return req, fmt.Errorf("%s: a management token alternative stands alone", pattern)
 			}
 			parsed.Kind, scopes = "machine", alternative["managementToken"]
+		case alternative["apiKeyBearer"] != nil:
+			catalog := pattern == "GET /api/v1/catalog" || strings.HasPrefix(pattern, "GET /api/v1/catalog/")
+			if !catalog || unsafe || len(alternative) != 1 || len(alternative["apiKeyBearer"]) != 1 || alternative["apiKeyBearer"][0] != "models_read" {
+				return req, fmt.Errorf("%s: inference keys admit only safe models_read operations", pattern)
+			}
+			parsed.Kind, scopes = "key", []string{"read"}
 		default:
 			return req, fmt.Errorf("%s: unknown security alternative %v", pattern, alternative)
 		}

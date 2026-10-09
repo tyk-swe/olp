@@ -1028,6 +1028,14 @@
                 "null"
               ],
               "description": "Organization name. Omitted/null preserves destination membership. First assignment requires installation access authority; existing membership cannot change."
+            },
+            "public_catalog": {
+              "type": "boolean",
+              "description": "Owner-enabled anonymous catalog. Changing this value through promotion requires installation access scope."
+            },
+            "public_catalog_prices": {
+              "type": "boolean",
+              "description": "Independent opt-in for published catalog prices."
             }
           },
           "required": [
@@ -2101,6 +2109,10 @@
             "caller_cost_exempt": {
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+            },
+            "expose_upstream_models": {
+              "type": "boolean",
+              "description": "Explicitly disclose upstream model names in route catalogs."
             }
           },
           "required": [
@@ -7628,6 +7640,48 @@
     }
   },
   {
+    "name": "get_catalog_publication",
+    "group": "model-catalog",
+    "method": "GET",
+    "path": "/api/v1/projects/{project_id}/catalog",
+    "description": "Read a project catalog publication policy",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "project_id",
+        "in": "path",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "project_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_code_client_configuration",
     "group": "code-mode",
     "method": "GET",
@@ -8534,6 +8588,48 @@
             "route_id": {
               "format": "uuid",
               "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "route_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_route_catalog_exposure",
+    "group": "model-catalog",
+    "method": "GET",
+    "path": "/api/v1/routes/{route_id}/catalog",
+    "description": "Read a route upstream-model disclosure policy",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "route_id",
+        "in": "path",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "route_id": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           "additionalProperties": false,
@@ -10002,6 +10098,25 @@
           "additionalProperties": false
         }
       },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_model_catalog",
+    "group": "model-catalog",
+    "method": "GET",
+    "path": "/api/v1/catalog",
+    "description": "List visible published routes with capabilities, privacy, prices and qualified SDK examples",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {},
       "additionalProperties": false
     }
   },
@@ -13120,6 +13235,14 @@
                 "null"
               ],
               "description": "Organization name. Omitted/null preserves destination membership. First assignment requires installation access authority; existing membership cannot change."
+            },
+            "public_catalog": {
+              "type": "boolean",
+              "description": "Owner-enabled anonymous catalog. Changing this value through promotion requires installation access scope."
+            },
+            "public_catalog_prices": {
+              "type": "boolean",
+              "description": "Independent opt-in for published catalog prices."
             }
           },
           "required": [
@@ -14193,6 +14316,10 @@
             "caller_cost_exempt": {
               "type": "boolean",
               "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+            },
+            "expose_upstream_models": {
+              "type": "boolean",
+              "description": "Explicitly disclose upstream model names in route catalogs."
             }
           },
           "required": [
@@ -15694,6 +15821,82 @@
     }
   },
   {
+    "name": "put_catalog_publication",
+    "group": "model-catalog",
+    "method": "PUT",
+    "path": "/api/v1/projects/{project_id}/catalog",
+    "description": "Publish or withdraw a project catalog and independently choose public prices",
+    "scopes": [
+      [
+        "access",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "project_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "project_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "body": {
+          "$ref": "#/$defs/UpdateCatalogPublicationRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "UpdateCatalogPublicationRequest": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "prices_public": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled",
+            "prices_public"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  },
+  {
     "name": "put_configuration",
     "group": "oidc",
     "method": "PUT",
@@ -17028,6 +17231,77 @@
             }
           },
           "description": "Project-local named sets of ordinary or subscription route slugs. Empty groups grant no routes. Unknown slugs may be declared ahead of route creation; project isolation still applies."
+        }
+      }
+    }
+  },
+  {
+    "name": "put_route_catalog_exposure",
+    "group": "model-catalog",
+    "method": "PUT",
+    "path": "/api/v1/routes/{route_id}/catalog",
+    "description": "Choose whether a route catalog may disclose upstream model names",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "route_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "route_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "route_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "body": {
+          "$ref": "#/$defs/UpdateRouteCatalogExposureRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "UpdateRouteCatalogExposureRequest": {
+          "type": "object",
+          "properties": {
+            "expose_upstream_models": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "expose_upstream_models"
+          ],
+          "additionalProperties": false
         }
       }
     }

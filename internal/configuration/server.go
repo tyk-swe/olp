@@ -74,6 +74,9 @@ func (s *Server) planEndpoint(r *http.Request, p access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err = authorizeCatalogPublication(r.Context(), s.Access.Pool, p, input.Document); err != nil {
+		return access.Reply{}, err
+	}
 	return access.OK(result), nil
 }
 

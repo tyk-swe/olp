@@ -702,6 +702,9 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		return nil, err
 	}
 	result := &planResult{Digest: digest, Actions: []planItem{}, Conflicts: []planItem{}, Blockers: []planItem{}}
+	if err = planCatalogPolicies(ctx, q, doc, result); err != nil {
+		return nil, err
+	}
 	for plugin, refusal := range unavailable {
 		result.blocker("plugin", plugin, refusal)
 	}
@@ -1071,7 +1074,7 @@ func (s *Server) currentProviderEntry(ctx context.Context, q access.Queryer, p *
 func (s *Server) currentRouteEntry(ctx context.Context, q access.Queryer, draftID string, desired *RouteEntry, state *stateView) (*RouteEntry, error) {
 	entry := &RouteEntry{Slug: desired.Slug, Project: desired.Project}
 	var operations, targets, behavior []byte
-	if err := q.QueryRow(ctx, "SELECT operations,overall_timeout_ms,max_attempts,targets,content_policy,fidelity,behavior FROM olp.route_drafts WHERE id=$1", draftID).Scan(&operations, &entry.OverallTimeoutMS, &entry.MaxAttempts, &targets, &entry.ContentPolicy, &entry.Fidelity, &behavior); err != nil {
+	if err := q.QueryRow(ctx, "SELECT operations,overall_timeout_ms,max_attempts,targets,content_policy,fidelity,behavior,COALESCE(catalog_expose_upstream_models,(SELECT c.expose_upstream_models FROM olp.model_catalog_route_settings c JOIN olp.routes r ON r.id=c.route_id WHERE r.slug=route_drafts.slug),false) FROM olp.route_drafts WHERE id=$1", draftID).Scan(&operations, &entry.OverallTimeoutMS, &entry.MaxAttempts, &targets, &entry.ContentPolicy, &entry.Fidelity, &behavior, &entry.ExposeUpstreamModels); err != nil {
 		return nil, err
 	}
 	if err := entry.setBehavior(behavior); err != nil {

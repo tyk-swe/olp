@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/modelcatalog"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -58,6 +59,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	m.Access.Egress = m.Egress
 	m.Access.Register(mux)
 	(&branding.Server{Access: m.Access}).Register(mux)
+	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)
 	catalogue := providers.New(m.Access, m.Egress, m.PluginHost)
 	catalogue.Unconfined = m.Unconfined
 	catalogue.Log = m.Log

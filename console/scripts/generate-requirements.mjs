@@ -20,16 +20,19 @@ for (const [path, item] of Object.entries(contract.paths)) {
       (security.length === 1 && 'bootstrapSetupToken' in security[0]);
     const alternatives = isPublic
       ? []
-      : security.map((alternative) => {
-          const kind = 'sessionCookie' in alternative ? 'user' : 'machine';
-          const scopes =
-            alternative.sessionCookie ?? alternative.managementToken ?? [];
-          return {
-            kind,
-            operations: scopes.filter((scope) => scope !== 'installation'),
-            installation: scopes.includes('installation')
-          };
-        });
+      : // Consumer inference keys are not console management principals.
+        security
+          .filter((alternative) => !('apiKeyBearer' in alternative))
+          .map((alternative) => {
+            const kind = 'sessionCookie' in alternative ? 'user' : 'machine';
+            const scopes =
+              alternative.sessionCookie ?? alternative.managementToken ?? [];
+            return {
+              kind,
+              operations: scopes.filter((scope) => scope !== 'installation'),
+              installation: scopes.includes('installation')
+            };
+          });
     routes.push([
       `${method.toUpperCase()} ${path}`,
       { public: isPublic, alternatives }
