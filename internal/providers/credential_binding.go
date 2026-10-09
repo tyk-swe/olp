@@ -37,6 +37,17 @@ func PreserveCredentialBoundary(ctx context.Context, q access.Queryer, providerI
 	sameIdentity := *next
 	sameIdentity.ProfileID, sameIdentity.ProfileRevision = current.ProfileID, current.ProfileRevision
 	grantMigration := current.Grant() && next.Grant() && current.credentialBoundary() == sameIdentity.credentialBoundary()
+	if grantMigration {
+		// The revision is the destination: a grant build binds its upstream
+		// and authority origins into the manifest, so a migration may only
+		// land on a build declaring the same origins. A missing build or
+		// different origins is a destination change, not a migration.
+		if err := q.QueryRow(ctx, `SELECT COALESCE((SELECT a.manifest::jsonb->'origins' FROM olp.plugins a WHERE a.digest=$1)
+			= (SELECT b.manifest::jsonb->'origins' FROM olp.plugins b WHERE b.digest=$2), false)`,
+			current.ProfileRevision, next.ProfileRevision).Scan(&grantMigration); err != nil {
+			return err
+		}
+	}
 	networkChanged := current.credentialNetwork() != next.credentialNetwork() || value(current.Endpoint) != value(next.Endpoint)
 	var stored bool
 	if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.provider_credentials
