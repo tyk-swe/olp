@@ -2,8 +2,8 @@
 
 The [OpenLLMProxy provider](https://github.com/tyk-swe/terraform-provider-openllmproxy)
 lives in a separate repository. Its M11 implementation is in progress. Projects,
-providers, credential slots, routes, keys, budget groups, notification destinations
-and notification rules currently have
+providers, credential slots, routes, routing policies, keys, budget groups,
+notification destinations and notification rules currently have
 live create, update, import and destroy qualification with Terraform 1.16.5 and
 OpenTofu 1.13.1. The remaining M11 resources are being implemented before the
 milestone is marked complete.
@@ -66,3 +66,11 @@ independent console drafts and existing routing policy. Target refresh preserves
 chosen facts; UUID import uses canonical provider-model references. Destroy retires
 the route and retains history and slug ownership. A project boundary change must
 use a new slug; saved plans refuse external publications committed afterward.
+
+Routing-policy resources use `scope` and `scope_id`: installation (nil UUID),
+API key, or route draft. Import uses `SCOPE/UUID`. Their definitions replace the
+complete policy; removing a constraint returns it to the default. Destroy removes
+the explicit override while retaining a fresh ETag. The scoped API's settings,
+key or configuration authority remains required. Draft policy changes become
+live upon activation. Key/policy graphs coordinate only their own proven parent
+writes; a foreign parent or policy edit still invalidates a saved plan.

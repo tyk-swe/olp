@@ -269,4 +269,12 @@ original parent transitions on replay, and exact successful audit counts.
 Removal retains a fresh default-policy ETag so an earlier default observation
 cannot become valid again. Full local checks, focused races, and the complete
 management/SDK/CLI/MCP machine authorization sweeps pass. The Terraform resource
-qualification remains pending.
+qualification is recorded below.
+
+`TestRoutingPolicyLifecyclesWithTerraformAndOpenTofu` qualifies installation,
+API-key, and route-draft policy create/update/composite import/no-change/destroy
+with both engines. The graph changes its key and policy together, clears omitted
+constraints, and refuses a saved plan after an external policy/parent transition
+without overwriting it. The complete nine-resource, SDK-matched disposable
+acceptance suite passes. Guardrails, sinks, and MCP servers still remain before
+the full Terraform exit criterion can be satisfied.
