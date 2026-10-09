@@ -27,7 +27,7 @@ API, so authorization, ETags, idempotency and audit apply unchanged.
 | CLI | [Contract-generated management commands](../operator-cli.md), saved configuration plans and qualified-client environment setup, alongside process and recovery commands | [lite CLI](https://docs.litellm.ai/docs/proxy/management_cli) for models, credentials, keys, teams and users |
 | Desired state | [Export, plan and apply](../configuration.md#configuration-promotion-artifacts) with canonical digests | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models |
 | Secrets | Mounted master-key ring and HMAC key files; provider secrets sealed in PostgreSQL ([secrets](../security.md#secrets)) | [Secret managers](https://docs.litellm.ai/docs/secret_managers/overview) (Enterprise) |
-| Topology | `gateway`, `control` and `worker` modes with [replica-aware runtime authority](../deployment.md#regional-read-replicas); regional limit and fleet work remains in progress | [Read replicas](https://docs.litellm.ai/docs/proxy/db_read_replica), [multi-region](https://docs.litellm.ai/docs/proxy/multi_region) and a [global control plane](https://docs.litellm.ai/docs/proxy/global_control_plane) (Enterprise) |
+| Topology | [Regional fleets](../deployment.md#regional-fleets), explicit key overrides, global cost reconciliation and [replica-aware runtime authority](../deployment.md#regional-read-replicas); the independent-installation console switcher remains in progress | [Read replicas](https://docs.litellm.ai/docs/proxy/db_read_replica), [multi-region](https://docs.litellm.ai/docs/proxy/multi_region) and a [global control plane](https://docs.litellm.ai/docs/proxy/global_control_plane) (Enterprise) |
 | Discovery | `GET /v1/models` lists key-visible routes | [AI Hub](https://docs.litellm.ai/docs/proxy/ai_hub) |
 
 ## Scope
@@ -145,7 +145,7 @@ editing, and session-scoped saved filters for usage and request history.
       referenced credential rotates through validation and activation.
 - [x] Gateways reading from a lagging replica refuse traffic once authority age
       exceeds 60 seconds.
-- [ ] A two-region integration test enforces regional limits and reconciles
+- [x] A two-region integration test enforces regional limits and reconciles
       global cost budgets within the documented overshoot bound.
 - [ ] The management MCP server refuses every operation the token's scopes do
       not admit.
@@ -157,3 +157,13 @@ gateway HTTP 503 at the authority deadline, resumes replay, and checks HTTP 401
 for the revoked key. WAL checkpoint unit tests cover idle replicas, replay
 regression and bounded monitoring state. Deployment settings are validated by
 the Helm checks and the full local check.
+
+Regional qualification:
+`TestRegionalRateAndConcurrencyLimitsWithGlobalBudgetReconciliation` uses two
+independent Valkey services, checks inherited and explicit limits, elects one
+leader per region, observes $1.20 global spend against a $1 budget, and verifies
+that both stores refuse further cost after reconciliation. It also verifies
+that local readiness cannot borrow another region's worker success. Selection
+tests preserve priority and hard region constraints while preferring local
+connections. The regional changes pass the full local check, focused race
+tests and Helm validation.

@@ -114,7 +114,9 @@ type Manager struct {
 	pool                 *pgxpool.Pool
 	// ReadPool, when set before Start, supplies runtime release and authority
 	// reads. Writes and historical secret resolution always use the primary.
-	ReadPool         *pgxpool.Pool
+	ReadPool *pgxpool.Pool
+	// Region is the deployment's explicit region name, fixed before Start.
+	Region           string
 	authorityRefresh sync.Mutex
 	replica          replicaProgress
 	installation     string
@@ -296,6 +298,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 			rows.Close()
 			return fmt.Errorf("authority: key %s policy: %w", record.authority.ID, err)
 		}
+		record.authority.Policy = record.authority.Policy.InRegion(m.Region)
 		record.authority.BudgetIncreases = state.budgetIncreases
 		record.authority.InstallationID = m.installation
 		record.authority.InstallationBudget = state.installationBudget

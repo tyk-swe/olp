@@ -394,6 +394,14 @@
           "effective_limits": {
             "$ref": "#/components/schemas/EndUserLimits",
             "description": "Rate and cost limits the gateway enforces, after the key's limit template fills dimensions the key leaves unset. Edit the key's own fields; present these."
+          },
+          "regional_limits": {
+            "type": "object",
+            "maxProperties": 64,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegionalRateLimits"
+            },
+            "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
           }
         },
         "required": [
@@ -412,7 +420,8 @@
           "etag",
           "created_at",
           "allowed_attribution_keys",
-          "response_metadata"
+          "response_metadata",
+          "regional_limits"
         ],
         "type": "object"
       },
@@ -2711,6 +2720,17 @@
               "null"
             ],
             "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "regional_limits": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "maxProperties": 64,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegionalRateLimits"
+            },
+            "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
           }
         },
         "required": [
@@ -11889,6 +11909,17 @@
               "null"
             ],
             "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "regional_limits": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "maxProperties": 64,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegionalRateLimits"
+            },
+            "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
           }
         },
         "type": "object"
@@ -18954,6 +18985,40 @@
           "group_role_mappings"
         ],
         "description": "Portable public SAML trust and role mappings. Promotion creates or preserves a destination-local SP signing key and certificate; link state, subjects, flows, sessions and private material never travel."
+      },
+      "RegionalRateLimits": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Explicit per-region key rate and concurrency values. Omitted or null fields inherit the full default; cost budgets are global.",
+        "properties": {
+          "requests_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "tokens_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "max_concurrency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        }
       }
     },
     "securitySchemes": {

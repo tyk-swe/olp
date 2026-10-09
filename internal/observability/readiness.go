@@ -15,6 +15,7 @@ import (
 // Everything is a small function so collectors stay honest when a plane was
 // never configured: an unconfigured probe reports absence, not failure.
 type State struct {
+	Region string
 	Pool   storeQuerier
 	PingDB func(context.Context) error
 	// Mode classifies which responsibilities this process must evidence.
@@ -231,7 +232,7 @@ func probeStore(ctx context.Context, s *State, now time.Time, hasGeneration bool
 		return nil, fmt.Errorf("database_unavailable: gateway epochs: %w", err)
 	}
 	probe.epochs = epochs
-	tasks, err := ReadWorkerTaskHealth(ctx, s.Pool)
+	tasks, err := ReadRegionalWorkerTaskHealth(ctx, s.Pool, s.Region)
 	if err != nil {
 		return nil, fmt.Errorf("database_unavailable: worker tasks: %w", err)
 	}

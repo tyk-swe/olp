@@ -57,6 +57,9 @@ OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
 "${compose[@]}" up -d --wait --wait-timeout 90 postgres-replica
 replica=$("${compose[@]}" port postgres-replica 5432)
 export OLP_TEST_DATABASE_READ_URL="postgres://olp:olp-local@$replica/olp?sslmode=disable"
+"${compose[@]}" up -d --wait --wait-timeout 90 valkey-region
+regional=$("${compose[@]}" port valkey-region 6380)
+export OLP_TEST_VALKEY_REGIONAL_URL="rediss://:olp-local@$regional/0"
 export OLP_CODEX_BINARY OLP_CLAUDE_CODE_BINARY OLP_OPENCODE_BINARY
 OLP_CODEX_BINARY=$(./scripts/code-mode-qualification.sh install)
 OLP_CLAUDE_CODE_BINARY=$(./scripts/code-mode-qualification.sh install claude-code)

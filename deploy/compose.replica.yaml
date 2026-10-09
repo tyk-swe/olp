@@ -1,5 +1,19 @@
 # Disposable physical standby used by integration qualification.
 services:
+  valkey-region:
+    image: valkey/valkey:9
+    profiles: ['regional']
+    command: ['valkey-server', '--appendonly', 'yes', '--requirepass', 'olp-local', '--port', '6379', '--tls-port', '6380', '--tls-cert-file', '/tls/server.crt', '--tls-key-file', '/tls/server.key', '--tls-ca-cert-file', '/tls/ca.crt', '--tls-auth-clients', 'no']
+    ports:
+      - '127.0.0.1::6379'
+      - '127.0.0.1::6380'
+    volumes:
+      - ${OLP_TEST_TLS_DIR:?}/:/tls:ro
+    healthcheck:
+      test: ['CMD', 'valkey-cli', '-a', 'olp-local', 'ping']
+      interval: 1s
+      timeout: 3s
+      retries: 40
   postgres-replica:
     image: postgres:18
     profiles: ['replica']

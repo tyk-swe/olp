@@ -38,6 +38,7 @@ import (
 
 // Config bounds the inference surface.
 type Config struct {
+	Region             string
 	MaxInFlight        int
 	MaxBodyBytes       int64
 	MaxMediaBodyBytes  int64

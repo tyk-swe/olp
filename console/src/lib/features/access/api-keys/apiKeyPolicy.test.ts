@@ -15,6 +15,7 @@ const key = {
   budget_group_id: null,
   scopes: ['inference'],
   allowed_routes: ['default'],
+  regional_limits: {},
   requests_per_minute: 120,
   tokens_per_minute: 24_000,
   max_concurrency: 8,

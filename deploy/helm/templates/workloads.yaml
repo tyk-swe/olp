@@ -162,6 +162,10 @@ spec:
                   name: {{ $root.Values.config.databaseReadSecretName | quote }}
                   key: {{ required "config.databaseReadSecretKey is required" $root.Values.config.databaseReadSecretKey | quote }}
             {{- end }}
+            {{- if $root.Values.config.region }}
+            - name: OLP_REGION
+              value: {{ $root.Values.config.region | quote }}
+            {{- end }}
             - name: OLP_VALKEY_URL
               valueFrom:
                 secretKeyRef:

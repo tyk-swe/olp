@@ -140,6 +140,7 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, runtime.Pla
 		preferences = &copied
 	}
 	options := runtime.SelectionOptions{
+		Region:  s.Region,
 		Context: m.ctx, KeyID: key.id, Preferences: preferences, Inputs: m.inputs, TokenDemand: counted.fixed, Demand: counted.sourceDemand(),
 		CheckSlots: true, CredentialEligibility: eligibility, UnconfinedPlugins: s.UnconfinedPlugins,
 		Accept: accept, Effective: effective, Supply: m.supply, Unhealthy: m.unhealthy,

@@ -34,11 +34,15 @@ var WorkerTasks = []WorkerTask{
 
 // ValkeyWorkerTasks are the responsibilities expected only when a limiter is
 // configured.
-var ValkeyWorkerTasks = []string{
-	string(usage.TaskRequestMetadataConsumer),
-	string(usage.TaskCostReconciliation),
-	string(usage.TaskHealthProbes),
-}
+var ValkeyWorkerTasks = func() []string {
+	var names []string
+	for _, task := range WorkerTasks {
+		if usage.RegionalTask(usage.Task(task.Name)) {
+			names = append(names, task.Name)
+		}
+	}
+	return names
+}()
 
 const (
 	TaskStateUnknown = "unknown"
@@ -122,13 +126,25 @@ func (w *WorkerTaskHealth) status(name string) WorkerTaskStatus {
 // database against clock_timestamp(), the same clock workers stamp
 // checkpoints with, so replica clock skew cannot falsify staleness.
 func ReadWorkerTaskHealth(ctx context.Context, q access.Queryer) (*WorkerTaskHealth, error) {
+	return ReadRegionalWorkerTaskHealth(ctx, q, "")
+}
+
+// ReadRegionalWorkerTaskHealth combines local coordination checkpoints with
+// shared PostgreSQL task health. An empty region reads the global summary.
+func ReadRegionalWorkerTaskHealth(ctx context.Context, q access.Queryer, region string) (*WorkerTaskHealth, error) {
 	rows, err := q.Query(ctx, `SELECT task, checked_at, last_success_at, last_progress_at,
 			successes_total, failures_total, skipped_total,
 			GREATEST(0, floor(extract(epoch FROM clock_timestamp() - checked_at)))::bigint AS heartbeat_age_seconds,
 			CASE WHEN last_success_at IS NULL THEN NULL ELSE
 				GREATEST(0, floor(extract(epoch FROM clock_timestamp() - last_success_at)))::bigint
 			END AS last_success_age_seconds
-		FROM olp.worker_task_health ORDER BY task`)
+		FROM (
+			SELECT task,checked_at,last_success_at,last_progress_at,successes_total,failures_total,skipped_total
+			FROM olp.worker_task_health WHERE $1='' OR task<>ALL($2::text[])
+			UNION ALL
+			SELECT task,checked_at,last_success_at,last_progress_at,successes_total,failures_total,skipped_total
+			FROM olp.regional_worker_task_health WHERE region=$1 AND task=ANY($2::text[])
+		) health ORDER BY task`, region, ValkeyWorkerTasks)
 	if err != nil {
 		return nil, fmt.Errorf("read worker task health: %w", err)
 	}

@@ -3382,6 +3382,17 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "regional_limits": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "maxProperties": 64,
+              "additionalProperties": {
+                "$ref": "#/$defs/RegionalRateLimits"
+              },
+              "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
             }
           },
           "required": [
@@ -3496,6 +3507,40 @@
             "$ref": "#/$defs/EndUserLimits"
           },
           "description": "Additional per-key limits by ingress route slug. All ordinary key and hierarchy limits still apply. No entry or an empty entry adds no limit. Fallback costs and retries accrue to the original named route; classifier requests use their own route. Subscription routes enforce rates and concurrency but remain exempt from USD budgets. Clearing entries never resets accrued spend."
+        },
+        "RegionalRateLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Explicit per-region key rate and concurrency values. Omitted or null fields inherit the full default; cost budgets are global.",
+          "properties": {
+            "requests_per_minute": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "tokens_per_minute": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "max_concurrency": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -23485,6 +23530,17 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "regional_limits": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "maxProperties": 64,
+              "additionalProperties": {
+                "$ref": "#/$defs/RegionalRateLimits"
+              },
+              "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
             }
           },
           "type": "object"
@@ -23596,6 +23652,40 @@
             "$ref": "#/$defs/EndUserLimits"
           },
           "description": "Additional per-key limits by ingress route slug. All ordinary key and hierarchy limits still apply. No entry or an empty entry adds no limit. Fallback costs and retries accrue to the original named route; classifier requests use their own route. Subscription routes enforce rates and concurrency but remain exempt from USD budgets. Clearing entries never resets accrued spend."
+        },
+        "RegionalRateLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Explicit per-region key rate and concurrency values. Omitted or null fields inherit the full default; cost budgets are global.",
+          "properties": {
+            "requests_per_minute": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "tokens_per_minute": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "max_concurrency": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }

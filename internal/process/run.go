@@ -227,6 +227,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		policy = egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
 		rt = runtime.NewManager(pool, installation, auth, keys, log)
 		rt.ReadPool = readPool
+		rt.Region = c.Region
 		if c.ConnectorConfigFile != "" {
 			rt.Mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
 			if err != nil {
@@ -255,6 +256,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		defer pluginHost.Close(context.Background())
 		if c.Mode.Management() || c.Mode.Inference() {
 			gw = gateway.New(rt, &policy, gateway.Config{
+				Region:             c.Region,
 				MaxInFlight:        c.MaxInFlightInference,
 				MaxShadowInFlight:  c.MaxInFlightShadow,
 				CORSAllowedOrigins: c.GatewayCORSAllowedOrigins,
@@ -285,6 +287,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			// own: planned, gated and priced like any request, and persisted
 			// directly, since a worker carries no metadata stream.
 			prober = gateway.New(rt, &policy, gateway.Config{
+				Region:            c.Region,
 				MaxInFlight:       1,
 				MaxResponseBytes:  c.ProviderMaxResponseBytes,
 				MaxEventBytes:     c.ProviderMaxEventBytes,
@@ -386,6 +389,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	// The observability collectors probe only what this process composes: an
 	// unconfigured dependency is reported as absent, never as failed.
 	obsState := &observability.State{
+		Region:        c.Region,
 		Pool:          pool,
 		PingDB:        pool.Ping,
 		ServesGateway: c.Mode.Inference(),
@@ -452,7 +456,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, prober, keys, installation, &policy, log)
+		workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, prober, keys, installation, c.Region, &policy, log)
 	}
 	liveMetrics := newLiveMetrics(rt, inferencePool, managementPool)
 	private := observability.NewHandler(obsCache, liveMetrics).ServeMux()

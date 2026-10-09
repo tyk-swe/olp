@@ -34,6 +34,7 @@ type Config struct {
 	Mode                      Mode
 	DatabaseURL               string
 	DatabaseReadURL           string
+	Region                    string
 	DatabaseMaxConnections    int
 	ValkeyURL                 string
 	ValkeyCAFile              string
@@ -108,6 +109,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.StringVar(&c.DatabaseURL, "database-url", "", "PostgreSQL URL (OLP_DATABASE_URL)")
 	f.StringVar(&databaseFile, "database-url-file", "", "file containing PostgreSQL URL")
 	f.StringVar(&c.DatabaseReadURL, "database-read-url", "", "optional PostgreSQL replica for runtime release and authority reads")
+	f.StringVar(&c.Region, "region", "", "deployment region for regional limits and local provider preference")
 	f.StringVar(&databaseReadFile, "database-read-url-file", "", "file containing optional PostgreSQL read-replica URL")
 	f.IntVar(&c.DatabaseMaxConnections, "database-max-connections", 20, "PostgreSQL pool capacity")
 	f.StringVar(&c.ValkeyURL, "valkey-url", "", "redis:// or rediss:// URL; required for worker")
@@ -276,6 +278,17 @@ func secretURL(value, path, name string) (string, error) {
 }
 
 func (c Config) Validate() error {
+	if c.Region != "" {
+		if len(c.Region) > 100 {
+			return errors.New("OLP_REGION must be a valid region name")
+		}
+		for i, char := range c.Region {
+			if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || i > 0 && (char == '.' || char == '_' || char == '-') {
+				continue
+			}
+			return errors.New("OLP_REGION must be a valid region name")
+		}
+	}
 	switch c.Mode {
 	case All, Gateway, Control, Worker:
 	default:

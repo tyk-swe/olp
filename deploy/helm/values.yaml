@@ -169,6 +169,8 @@ config:
   # Optional regional read replica; runtime release and authority reads only.
   databaseReadSecretName: ""
   databaseReadSecretKey: url
+  # Same name across the gateways and workers sharing a regional Valkey.
+  region: ""
   valkeySecretName: olp-valkey
   valkeySecretKey: url
   masterKeySecretName: olp-master-key

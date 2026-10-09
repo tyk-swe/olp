@@ -58,7 +58,11 @@ if ! helm template olp deploy/helm --set config.databaseReadSecretName=olp-repli
   echo 'Expected the configured read-replica URL in workload environments' >&2
   exit 1
 fi
-for invalid in 'config.databaseMaxConnections=0' 'config.httpMaxJsonBodyBytes=0' \
+if ! helm template olp deploy/helm --set config.region=us-west-2 | grep -q 'name: OLP_REGION'; then
+  echo 'Expected the regional environment in workloads' >&2
+  exit 1
+fi
+for invalid in 'config.region=Invalid' 'config.databaseMaxConnections=0' 'config.httpMaxJsonBodyBytes=0' \
   'config.databaseReadSecretName=olp-replica,config.databaseReadSecretKey=' \
   'gateway.replicas=-1' 'ingress.enabled=true,config.trustedProxyCidrs=' \
   'networkPolicy.enabled=true' 'config.unconfinedPluginDir=plugins' \

@@ -3010,9 +3010,12 @@ type ApiKeyDetailResponse struct {
 	Priority nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
 
 	// ProjectId Owning project; null means installation-wide.
-	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id"`
-	ProjectName       nullable.Nullable[string]             `json:"project_name"`
-	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
+	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName nullable.Nullable[string]             `json:"project_name"`
+
+	// RegionalLimits Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global.
+	RegionalLimits    map[string]RegionalRateLimits `json:"regional_limits"`
+	RequestsPerMinute nullable.Nullable[int32]      `json:"requests_per_minute,omitempty"`
 
 	// RequiredAttributionKeys Required attribution labels, in addition to project requirements. Missing labels return 400 missing_attribution before dispatch.
 	RequiredAttributionKeys nullable.Nullable[[]string] `json:"required_attribution_keys,omitempty"`
@@ -4283,8 +4286,11 @@ type CreateApiKeyRequest struct {
 	Priority nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
 
 	// ProjectId Owning project; omit or null for an installation-wide key. Required for assigned principals.
-	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
-	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+
+	// RegionalLimits Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global.
+	RegionalLimits    nullable.Nullable[map[string]RegionalRateLimits] `json:"regional_limits,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]                         `json:"requests_per_minute,omitempty"`
 
 	// RequiredAttributionKeys Required attribution labels, in addition to project requirements. Missing labels return 400 missing_attribution before dispatch.
 	RequiredAttributionKeys nullable.Nullable[[]string] `json:"required_attribution_keys,omitempty"`
@@ -6794,6 +6800,13 @@ type ReferenceCatalog struct {
 	VendorCount int32  `json:"vendor_count"`
 }
 
+// RegionalRateLimits Explicit per-region key rate and concurrency values. Omitted or null fields inherit the full default; cost budgets are global.
+type RegionalRateLimits struct {
+	MaxConcurrency    nullable.Nullable[int64] `json:"max_concurrency,omitempty"`
+	RequestsPerMinute nullable.Nullable[int64] `json:"requests_per_minute,omitempty"`
+	TokensPerMinute   nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`
+}
+
 // ReplaceRouteDraftRequest defines model for ReplaceRouteDraftRequest.
 type ReplaceRouteDraftRequest struct {
 	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
@@ -8283,8 +8296,11 @@ type UpdateApiKeyRequest struct {
 	Name             *string                              `json:"name,omitempty"`
 
 	// Priority Admission class of requests that name none; defaults to normal.
-	Priority          nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
-	RequestsPerMinute nullable.Nullable[int32]             `json:"requests_per_minute,omitempty"`
+	Priority nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
+
+	// RegionalLimits Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global.
+	RegionalLimits    nullable.Nullable[map[string]RegionalRateLimits] `json:"regional_limits,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]                         `json:"requests_per_minute,omitempty"`
 
 	// RequiredAttributionKeys Required attribution labels, in addition to project requirements. Missing labels return 400 missing_attribution before dispatch.
 	RequiredAttributionKeys nullable.Nullable[[]string] `json:"required_attribution_keys,omitempty"`

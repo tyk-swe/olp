@@ -67,6 +67,9 @@ func (m Management) Register(mux *http.ServeMux) {
 	catalogue.Register(mux)
 	routeServer := routes.New(m.Access)
 	routeServer.Inputs = m.Runtime.RoutingInputs
+	if m.Runtime != nil {
+		routeServer.Region = m.Runtime.Region
+	}
 	routeServer.UnconfinedPlugins = m.Unconfined != nil
 	routeServer.Catalog = m.Catalog
 	if m.Limiter != nil {
