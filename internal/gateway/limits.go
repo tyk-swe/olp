@@ -203,23 +203,18 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 // leases for one settlement. Every refusal refunds earlier reservations. The
 // optional route identifies the ingress route for per-key route policy.
 func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
-	boundariesOnly := keyBoundariesOnly(authority)
-	// The boundary scan pays for itself only when durable accounting is wired;
-	// a nil Admission admits nothing at all.
-	if a != nil && a.CostAccountingReady != nil && admissionCostBoundaries(authority, route, boundariesOnly) {
-		if e := a.checkCostAccounting(ctx); e != nil {
-			return nil, e
-		}
+	// Every cost boundary checks shared accounting evidence just before it
+	// spends against it, once per request, so keys without budgets stay free.
+	costChecked := false
+	if keyBoundariesOnly(authority) {
+		return a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold, &costChecked)
 	}
-	if boundariesOnly {
-		return a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold)
-	}
-	aggregate, err := a.reserveAggregateBudgets(ctx, authority, ttl, hold)
+	aggregate, err := a.reserveAggregateBudgets(ctx, authority, ttl, hold, &costChecked)
 	if err != nil {
 		return nil, err
 	}
 
-	endUsers, err := a.reserveEndUsers(ctx, authority, estimate, ttl, hold)
+	endUsers, err := a.reserveEndUsers(ctx, authority, estimate, ttl, hold, &costChecked)
 	if err != nil {
 		settleKey(ctx, aggregate, false, nil, a.logger())
 		return nil, err
@@ -233,7 +228,7 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Auth
 	if len(route) > 0 {
 		named = route[0]
 	}
-	routeLease, refusal := a.reserveRouteLimits(ctx, authority, named, estimate, ttl, hold)
+	routeLease, refusal := a.reserveRouteLimits(ctx, authority, named, estimate, ttl, hold, &costChecked)
 	if refusal != nil {
 		settleKey(ctx, endUsers, false, nil, a.logger())
 		return nil, refusal
@@ -242,7 +237,7 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Auth
 		routeLease.Attach(endUsers)
 		endUsers = routeLease
 	}
-	lease, failure := a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold)
+	lease, failure := a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold, &costChecked)
 	if failure != nil {
 		settleKey(ctx, endUsers, false, nil, a.logger())
 		return nil, failure
@@ -252,6 +247,16 @@ func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Auth
 	}
 	lease.Attach(endUsers)
 	return lease, nil
+}
+
+// checkCostAccountingOnce runs the shared accounting check the first time a
+// request's cost boundary needs it.
+func (a *Admission) checkCostAccountingOnce(ctx context.Context, checked *bool) *Error {
+	if *checked {
+		return nil
+	}
+	*checked = true
+	return a.checkCostAccounting(ctx)
 }
 
 func (a *Admission) checkCostAccounting(ctx context.Context) *Error {
@@ -274,25 +279,15 @@ func keyBoundariesOnly(authority *access.Authority) bool {
 		authority.Policy.EndUserPolicy == nil && authority.ProjectEndUserPolicy == nil && len(authority.Policy.RouteLimits) == 0
 }
 
-// admissionCostBoundaries reports whether the request spends against any cost
-// boundary. A key without aggregate, end-user, or route policy can only still
-// spend its own and its budget group's cost allowances, which is all the cheap
-// check has to cover.
-func admissionCostBoundaries(authority *access.Authority, route []string, boundariesOnly bool) bool {
-	if boundariesOnly {
-		return authority.Policy.AdmissionLimits().CostBudgeted() ||
-			authority.BudgetGroupID != nil && authority.GroupLimits().CostBudgeted()
-	}
-	var named string
-	if len(route) > 0 {
-		named = route[0]
-	}
-	return callerCostBudgeted(authority, named)
-}
-
-func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
+func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
 	var group *limits.Lease
 	if request := groupRequest(authority, ttl); request != nil {
+		if request.DailyCostLimit != nil || request.MonthlyCostLimit != nil || request.WeeklyCostLimit != nil {
+			if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
+				return nil, e
+			}
+			request.CostEstimate, request.RequestID = hold.amount, hold.requestID
+		}
 		if !a.ready() {
 			return nil, limitsUnavailable()
 		}
@@ -300,9 +295,6 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Au
 		request.RequestedTokens = estimate
 		if request.TokensPerMinute != nil && estimate > *request.TokensPerMinute {
 			return nil, invalidRequest("request_exceeds_token_limit", "This request exceeds the budget group token limit.", nil)
-		}
-		if request.DailyCostLimit != nil || request.MonthlyCostLimit != nil || request.WeeklyCostLimit != nil {
-			request.CostEstimate, request.RequestID = hold.amount, hold.requestID
 		}
 		decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 		lease, err := a.limiter.Reserve(decision, *request)
@@ -332,6 +324,13 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Au
 	// operations, would be answered an allowance nothing writes, and the reply
 	// costs the request about a dozen allocations to build.
 	request.ReportRate = rateHeadersOf(surface) != nil
+	if request.HasCostBudget() {
+		if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
+			settleKey(ctx, group, false, nil, a.logger())
+			return nil, e
+		}
+		request.CostEstimate, request.RequestID = hold.amount, hold.requestID
+	}
 	if !a.ready() {
 		return nil, limitsUnavailable()
 	}
@@ -340,9 +339,6 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Au
 		// the caller retry into a limit it cannot satisfy.
 		settleKey(ctx, group, false, nil, a.logger())
 		return nil, invalidRequest("request_exceeds_token_limit", "This request needs more tokens than the API key tokens per minute limit allows.", nil)
-	}
-	if request.HasCostBudget() {
-		request.CostEstimate, request.RequestID = hold.amount, hold.requestID
 	}
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()

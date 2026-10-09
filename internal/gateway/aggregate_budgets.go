@@ -12,7 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
-func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *access.Authority, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
+func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *access.Authority, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
 	if !authority.OrganizationBudget.Limited() && !authority.InstallationBudget.Limited() && !authority.ProjectBudget.Limited() && !authority.ProjectAttributionBudgets.Matches(authority.Attribution) {
 		return nil, nil
 	}
@@ -28,12 +28,16 @@ func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *acce
 		if !boundary.policy.Limited() {
 			continue
 		}
+		if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
+			settleKey(ctx, chain, false, nil, a.logger())
+			return nil, e
+		}
 		if !a.ready() || boundary.subject == "" {
 			settleKey(ctx, chain, false, nil, a.logger())
 			return nil, limitsUnavailable()
 		}
 		owner := limits.AggregateBudgetID(boundary.level, boundary.subject)
-		lease, failure := a.reserveCostBoundary(ctx, authority.ID, owner, boundary.level, "budget."+boundary.level, authority.BudgetIncreases[owner], boundary.policy, ttl, hold)
+		lease, failure := a.reserveCostBoundary(ctx, authority.ID, owner, boundary.level, "budget."+boundary.level, authority.BudgetIncreases[owner], boundary.policy, ttl, hold, costChecked)
 		if failure != nil {
 			settleKey(ctx, chain, false, nil, a.logger())
 			return nil, failure
@@ -47,12 +51,16 @@ func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *acce
 		if !ok || !policy.Limited() {
 			continue
 		}
+		if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
+			settleKey(ctx, chain, false, nil, a.logger())
+			return nil, e
+		}
 		if !a.ready() || authority.ProjectID == nil {
 			settleKey(ctx, chain, false, nil, a.logger())
 			return nil, limitsUnavailable()
 		}
 		owner := limits.AttributionBudgetID(*authority.ProjectID, key, value)
-		lease, failure := a.reserveCostBoundary(ctx, authority.ID, owner, "project attribution", "attribution_budgets."+key+"."+value, authority.BudgetIncreases[owner], &policy, ttl, hold)
+		lease, failure := a.reserveCostBoundary(ctx, authority.ID, owner, "project attribution", "attribution_budgets."+key+"."+value, authority.BudgetIncreases[owner], &policy, ttl, hold, costChecked)
 		if failure != nil {
 			settleKey(ctx, chain, false, nil, a.logger())
 			return nil, failure
@@ -65,7 +73,10 @@ func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *acce
 
 // Every aggregate boundary uses the same reservation and fail-closed semantics.
 // The caller attaches successful leases or refunds earlier boundaries on refusal.
-func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label, param string, increases string, policy *access.BudgetPolicy, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
+func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label, param string, increases string, policy *access.BudgetPolicy, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
+	if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
+		return nil, e
+	}
 	request := limits.Request{
 		CostOwnerID:      owner,
 		CostIncreases:    increases,
@@ -123,13 +134,14 @@ func (s *Server) reserveSystemBudgets(ctx context.Context, x *execution) *Error 
 	if x.callerCostExempt() {
 		authority = withoutCostBudgets(authority)
 	}
-	if callerCostBudgeted(&authority, x.limitRoute()) {
+	costChecked := callerCostBudgeted(&authority, x.limitRoute())
+	if costChecked {
 		if failure := s.Admission.checkCostAccounting(ctx); failure != nil {
 			return failure
 		}
 	}
 	var failure *Error
-	x.lease, failure = s.Admission.reserveAggregateBudgets(ctx, &authority, time.Duration(x.route.OverallTimeout)*time.Millisecond, s.costReservation(x, authority))
+	x.lease, failure = s.Admission.reserveAggregateBudgets(ctx, &authority, time.Duration(x.route.OverallTimeout)*time.Millisecond, s.costReservation(x, authority), &costChecked)
 	return failure
 }
 
