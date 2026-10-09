@@ -4775,6 +4775,37 @@ type CredentialSlot struct {
 	Weight            *int32                   `json:"weight,omitempty"`
 }
 
+// CredentialSlotDetail defines model for CredentialSlotDetail.
+type CredentialSlotDetail struct {
+	AllowedApiKeys *[]openapi_types.UUID `json:"allowed_api_keys,omitempty"`
+	AllowedModels  *[]string             `json:"allowed_models,omitempty"`
+	AllowedRoutes  *[]string             `json:"allowed_routes,omitempty"`
+
+	// CredentialVersionId The credential version the slot serves with. A slot write binds the version it names, which must be neither revoked nor lapsed; one that sends null or omits it keeps the slot's current version unless it stages a pasted credential.
+	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id,omitempty"`
+
+	// DailyCostLimit Exact decimal amount in the installation currency.
+	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	Enabled        *bool                     `json:"enabled,omitempty"`
+	Etag           openapi_types.UUID        `json:"etag"`
+	Id             *openapi_types.UUID       `json:"id,omitempty"`
+	IsDefault      bool                      `json:"is_default"`
+	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
+
+	// MonthlyCostLimit Exact decimal amount in the installation currency.
+	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	Name              *string                           `json:"name,omitempty"`
+	Priority          *int32                            `json:"priority,omitempty"`
+	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	ProviderId        openapi_types.UUID                `json:"provider_id"`
+	RequestsPerMinute nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
+
+	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
+	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
+	TokensPerMinute   nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`
+	Weight            *int32                   `json:"weight,omitempty"`
+}
+
 // DiscoverModelsRequest defines model for DiscoverModelsRequest.
 type DiscoverModelsRequest struct {
 	// Models Omit or pass an empty array to query the upstream model-list API.
@@ -9720,6 +9751,12 @@ type CreateProviderParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// DeleteProviderParams defines parameters for DeleteProvider.
+type DeleteProviderParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // UpdateProviderParams defines parameters for UpdateProvider.
 type UpdateProviderParams struct {
 	IfMatch string `json:"If-Match"`
@@ -9743,9 +9780,18 @@ type AcceptProviderCatalogSuggestionsParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// DeleteCredentialSlotParams defines parameters for DeleteCredentialSlot.
+type DeleteCredentialSlotParams struct {
+	// IfMatch Observed individual credential-slot or collection ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique write key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // PutCredentialSlotParams defines parameters for PutCredentialSlot.
 type PutCredentialSlotParams struct {
-	// IfMatch Current credential-slot ETag
+	// IfMatch Observed individual credential-slot or collection ETag
 	IfMatch string `json:"If-Match"`
 
 	// IdempotencyKey Unique write key

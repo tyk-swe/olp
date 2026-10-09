@@ -64,6 +64,13 @@ account, model, region, and credential.
 
 ## Provider lifecycle
 
+An unused draft can be deleted with `DELETE /api/v1/providers/{provider_id}`,
+using its observed ETag and an idempotency key. Published revisions, route
+draft references, scoped price history, notification evidence and retained
+resource dependencies return `409 provider_in_use`. Deletion cleans the draft's
+owned sealed material and advances authority. Use disable for published
+providers, preserving their immutable revisions and accounting history.
+
 A provider is created as a draft with its configuration and a credential unless
 the authentication mode is `none`, `adc`, `default_chain`, `azure_default`, or a
 plugin's `grant`, whose credential versions come from
@@ -170,6 +177,13 @@ edit, rotate, and validate additional slots under
 `/api/v1/providers/{provider_id}/credential-slots` and in the provider detail
 page. Writes use ETags and idempotency keys; secrets remain encrypted and
 write-only. A connection supports up to 64 slots including the default.
+
+Individual `GET /credential-slots/{slot_id}` reads return a slot ETag.
+Individual PUT and DELETE accept it, so sibling edits preserve each other's
+preconditions. Pool edits retain the collection ETag. DELETE removes a
+nondefault draft slot and its pending enrollment state, retaining immutable
+credential versions and published revision slots. The default slot is required;
+activate the changed provider draft to publish the resulting pool.
 
 Default-slot restrictions and quotas also apply to connections using no stored
 secret (`none`, ADC, or the AWS default chain).

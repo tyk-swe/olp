@@ -19541,6 +19541,145 @@
           }
         },
         "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
+      },
+      "CredentialSlotDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_api_keys": {
+            "default": [],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "allowed_models": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "allowed_routes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "credential_version_id": {
+            "default": null,
+            "description": "The credential version the slot serves with. A slot write binds the version it names, which must be neither revoked nor lapsed; one that sends null or omits it keeps the slot's current version unless it stages a pasted credential.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "id": {
+            "default": "00000000-0000-0000-0000-000000000000",
+            "format": "uuid",
+            "type": "string"
+          },
+          "max_concurrency": {
+            "default": null,
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "default": "",
+            "type": "string"
+          },
+          "priority": {
+            "default": 0,
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requests_per_minute": {
+            "default": null,
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "weight": {
+            "default": 1,
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "daily_cost_limit": {
+            "description": "Exact decimal amount in the installation currency.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "description": "Exact decimal amount in the installation currency.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "priority_shares": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriorityShares"
+              }
+            ]
+          },
+          "saturation_percent": {
+            "description": "Usage percentage of the quota above which each class is held to its share.",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_id",
+          "is_default",
+          "etag"
+        ]
       }
     },
     "securitySchemes": {
@@ -27513,6 +27652,88 @@
         "tags": [
           "providers"
         ]
+      },
+      "delete": {
+        "operationId": "delete_provider",
+        "description": "Conditionally delete an unused draft provider and owned sealed credentials. Published revisions, draft references, prices and retained evidence produce a conflict; disable published providers instead.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "Provider has published revisions, dependencies or retained history",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match is required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
       }
     },
     "/api/v1/providers/{provider_id}/activate": {
@@ -27684,7 +27905,7 @@
             }
           },
           {
-            "description": "Current credential-slot ETag",
+            "description": "Observed individual credential-slot or collection ETag",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -27762,6 +27983,150 @@
               }
             },
             "description": "If-Match is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      },
+      "get": {
+        "operationId": "get_credential_slot",
+        "description": "Read one draft credential slot and its individual ETag. Resolved secret values are never returned.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credential slot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialSlotDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_credential_slot",
+        "description": "Delete a nondefault draft slot using its individual or pool ETag. Published slots and immutable credential versions remain pinned.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Observed individual credential-slot or collection ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique write key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Draft slot removed"
+          },
+          "409": {
+            "description": "Default slot is required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [

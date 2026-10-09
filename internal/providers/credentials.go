@@ -516,9 +516,6 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
-	if err = access.Match(r, current.SlotsETag); err != nil {
-		return access.Reply{}, err
-	}
 	slots, err := loadSlots(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
@@ -528,6 +525,9 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 		if slots[i].ID == slotID {
 			existing = &slots[i]
 		}
+	}
+	if err = matchSlot(r, current, existing); err != nil {
+		return access.Reply{}, err
 	}
 	if existing == nil && len(slots) >= maxSlots {
 		return access.Reply{}, access.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")

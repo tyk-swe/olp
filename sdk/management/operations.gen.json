@@ -6755,6 +6755,80 @@
     }
   },
   {
+    "name": "delete_credential_slot",
+    "group": "providers",
+    "method": "DELETE",
+    "path": "/api/v1/providers/{provider_id}/credential-slots/{slot_id}",
+    "description": "Delete a nondefault draft slot using its individual or pool ETag. Published slots and immutable credential versions remain pinned.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "slot_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "slot_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id",
+            "slot_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Observed individual credential-slot or collection ETag"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique write key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "delete_media_job",
     "group": "media-jobs",
     "method": "DELETE",
@@ -7132,6 +7206,70 @@
       "required": [
         "path",
         "if_match"
+      ]
+    }
+  },
+  {
+    "name": "delete_provider",
+    "group": "providers",
+    "method": "DELETE",
+    "path": "/api/v1/providers/{provider_id}",
+    "description": "Conditionally delete an unused draft provider and owned sealed credentials. Published revisions, draft references, prices and retained evidence produce a conflict; disable published providers instead.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
       ]
     }
   },
@@ -8318,6 +8456,58 @@
       "type": "object",
       "properties": {},
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_credential_slot",
+    "group": "providers",
+    "method": "GET",
+    "path": "/api/v1/providers/{provider_id}/credential-slots/{slot_id}",
+    "description": "Read one draft credential slot and its individual ETag. Resolved secret values are never returned.",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "slot_id",
+        "in": "path",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "slot_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id",
+            "slot_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
     }
   },
   {
@@ -16794,7 +16984,7 @@
         "if_match": {
           "type": "string",
           "minLength": 1,
-          "description": "Current credential-slot ETag"
+          "description": "Observed individual credential-slot or collection ETag"
         },
         "idempotency_key": {
           "type": "string",

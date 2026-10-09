@@ -221,3 +221,14 @@ projection, owner-only one-time output without secret state, and retained
 revocation records. A forced output error preserves the created UUID in state
 and allows destroy, preventing orphaned active credentials. The full resource
 list remains pending.
+
+Provider and slot lifecycle prerequisites are qualified by
+`TestProviderDeletionRequiresUnusedDraftAndCleansOwnedSeals` and
+`TestCredentialSlotConditionsAreIndependentAndPreservePublishedVersions`.
+Unused draft deletion is conditional, replayable and audited, cleans owned seals,
+and preserves provider-specific price history and published dependencies.
+Individual slot preconditions survive sibling edits; deletion retains published
+credential versions and refuses the required default slot. The generated SDK,
+CLI and MCP authorization sweep covers the new operations; focused races,
+contract generation and the full local gate pass. Terraform adapters and the
+complete resource-list qualification remain in progress.

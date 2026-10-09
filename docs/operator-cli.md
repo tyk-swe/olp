@@ -55,6 +55,23 @@ Key creation and rotation return their one-time secret, matching the API.
 Keep that output out of CI logs, or use `--output` and store the file securely.
 Error messages exclude server-controlled request details.
 
+### Provider and credential-slot lifecycle
+
+`olp api delete_provider PROVIDER_ID --if-match ETAG` removes an unused draft
+provider. Published revisions, route drafts, provider-specific price history,
+notification evidence and other retained dependencies produce a conflict.
+Disable published providers through `disable_provider`. Successful deletion
+removes the draft's owned sealed credentials, advances authority and records
+one audit event; an explicit idempotency key replays its completed result.
+
+`get_credential_slot` returns one draft slot and its individual ETag. Use that
+observed value with `put_credential_slot` or `delete_credential_slot` to edit a
+slot independently. Pool edits can continue using the collection ETag from
+`credential_slots`. A stale individual or collection ETag refuses mutation.
+The default slot is required. Removing another draft slot preserves immutable
+credential versions and the slots pinned in published revisions; activate the
+changed provider draft to publish its new pool.
+
 ### Usage export
 
 ```sh
