@@ -1,8 +1,9 @@
 # Terraform and OpenTofu
 
 The [OpenLLMProxy provider](https://github.com/tyk-swe/terraform-provider-openllmproxy)
-lives in a separate repository. Its M11 implementation is in progress. Projects, keys,
-budget groups, notification destinations and notification rules currently have
+lives in a separate repository. Its M11 implementation is in progress. Projects,
+providers, credential slots, routes, keys, budget groups, notification destinations
+and notification rules currently have
 live create, update, import and destroy qualification with Terraform 1.16.5 and
 OpenTofu 1.13.1. The remaining M11 resources are being implemented before the
 milestone is marked complete.
@@ -59,3 +60,9 @@ slot preserves published bindings and immutable versions. Parent deletion follow
 only atomic transitions from the same client's slot writes; foreign edits still
 refuse a saved destruction plan. See the provider README for the resource forms
 and partial-validation recovery behavior.
+
+`openllmproxy_route` publishes validated immutable revisions atomically, preserving
+independent console drafts and existing routing policy. Target refresh preserves
+chosen facts; UUID import uses canonical provider-model references. Destroy retires
+the route and retains history and slug ownership. A project boundary change must
+use a new slug; saved plans refuse external publications committed afterward.

@@ -252,3 +252,12 @@ replays preserve identity and audit counts, independent drafts remain untouched,
 and the serving snapshot preserves existing policy. Full local checks, focused
 races and the complete management/generated-client/MCP authorization sweeps pass.
 Terraform route qualification remains pending until both engine lifecycles pass.
+
+Published routes now have live Terraform 1.16.5 and OpenTofu 1.13.1 qualification:
+`TestPublishedRouteLifecycleWithTerraformAndOpenTofu` exercises create, atomic
+revision updates, UUID import, empty plans, retirement with retained history,
+stale saved-plan refusal and project-boundary replacement rejection before
+retirement. Exact target projection and canonical imported references are covered
+by focused tests. The eight-resource acceptance suite passes against the provider's
+immutable SDK-matched OLP build; the complete twelve-resource criterion remains
+pending for routing policies, guardrails, sinks and MCP servers.
