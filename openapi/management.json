@@ -11097,6 +11097,15 @@
           },
           "user": {
             "$ref": "#/components/schemas/UserResponse"
+          },
+          "installation_logo": {
+            "type": "string",
+            "description": "Embedded PNG/JPEG installation logo; empty uses the default brand mark."
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Public session identifier for session-scoped console preferences; conveys no authentication proof."
           }
         },
         "required": [
@@ -19017,6 +19026,50 @@
             "format": "int64",
             "minimum": 1,
             "maximum": 2147483647
+          }
+        }
+      },
+      "InstallationBrandingResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "logo",
+          "etag"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "logo": {
+            "type": "string",
+            "maxLength": 100000,
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+          },
+          "etag": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateInstallationBrandingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "logo"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "logo": {
+            "type": "string",
+            "maxLength": 100000,
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
           }
         }
       }
@@ -46045,6 +46098,107 @@
           },
           "403": {
             "description": "Token lacks authority"
+          }
+        }
+      }
+    },
+    "/api/v1/branding": {
+      "get": {
+        "operationId": "get_installation_branding",
+        "summary": "Read the installation name and logo",
+        "tags": [
+          "branding"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current installation branding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallationBrandingResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_installation_branding",
+        "summary": "Update the installation name and embedded logo",
+        "tags": [
+          "branding"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateInstallationBrandingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated branding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallationBrandingResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }

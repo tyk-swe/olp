@@ -7746,6 +7746,25 @@
     }
   },
   {
+    "name": "get_installation_branding",
+    "group": "branding",
+    "method": "GET",
+    "path": "/api/v1/branding",
+    "description": "Read the installation name and logo",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "get_installation_budget",
     "group": "projects",
     "method": "GET",
@@ -23805,6 +23824,67 @@
             }
           },
           "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "update_installation_branding",
+    "group": "branding",
+    "method": "PUT",
+    "path": "/api/v1/branding",
+    "description": "Update the installation name and embedded logo",
+    "scopes": [
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "body": {
+          "$ref": "#/$defs/UpdateInstallationBrandingRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "UpdateInstallationBrandingRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "logo"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "logo": {
+              "type": "string",
+              "maxLength": 100000,
+              "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+            }
+          }
         }
       }
     }

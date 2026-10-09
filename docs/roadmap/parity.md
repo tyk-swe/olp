@@ -210,16 +210,16 @@ of [M3](m03-routing-resilience.md).
 | Playground | Test key | Playground with streaming, native operations and realtime traces | `Parity` | |
 | Configuration as code | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models | Digest-addressed export, plan and apply | `Ahead` | |
 | Live configuration changes | [Database models](https://docs.litellm.ai/docs/proxy/model_management) | Atomic, digest-verified runtime generations pinned per request | `Ahead` | |
-| Management CLI | [lite CLI](https://docs.litellm.ai/docs/proxy/management_cli) | Operator commands only | `Gap` | M11.1 |
+| Management CLI | [lite CLI](https://docs.litellm.ai/docs/proxy/management_cli) | [Contract-generated commands](../operator-cli.md), ETags, saved configuration plans and management-token authorization sweeps | `Ahead` | |
 | Secret managers | [Enterprise](https://docs.litellm.ai/docs/secret_managers/overview) | Mounted key files; secrets sealed in PostgreSQL | `Gap` | M11.3 |
 | Kubernetes packaging | [Helm](https://docs.litellm.ai/docs/proxy/deploy) | Helm chart and Compose | `Parity` | |
 | Separate admin and worker roles | [Enterprise](https://docs.litellm.ai/docs/enterprise) | `gateway`, `control` and `worker` process modes | `Ahead` | |
-| Database read replicas | [Read replica](https://docs.litellm.ai/docs/proxy/db_read_replica) | Not available | `Gap` | M11.5 |
-| Multi-region deployment | [Enterprise](https://docs.litellm.ai/docs/proxy/multi_region) | Single region | `Gap` | M11.5 |
-| Central control of several installations | [Enterprise](https://docs.litellm.ai/docs/proxy/global_control_plane) | Not available | `Gap` | M11.5 |
+| Database read replicas | [Read replica](https://docs.litellm.ai/docs/proxy/db_read_replica) | [Replica authority with a tested 60-second refusal boundary](../deployment.md#regional-read-replicas) | `Parity` | |
+| Multi-region deployment | [Enterprise](https://docs.litellm.ai/docs/proxy/multi_region) | [Independent regional counters, explicit key overrides and globally reconciled cost budgets](../deployment.md#regional-fleets) | `Parity` | |
+| Central control of several installations | [Enterprise](https://docs.litellm.ai/docs/proxy/global_control_plane) | [Console switcher with independent installation sessions, keys and databases](../operator-console.md#independent-installation-bookmarks) | `Parity` | |
 | Model hub | [AI Hub](https://docs.litellm.ai/docs/proxy/ai_hub) | Not available | `Gap` | M11.4 |
-| Administration through agents | [LiteAdmin MCP](https://docs.litellm.ai/docs/proxy/liteadmin_mcp) | Not available | `Gap` | M11.6 |
-| Custom branding | [Logo](https://docs.litellm.ai/docs/proxy/ui/ui_edit_logo) | Not available | `Gap` | M11.7 |
+| Administration through agents | [LiteAdmin MCP](https://docs.litellm.ai/docs/proxy/liteadmin_mcp) | [Generated tools with token-scope, project, ETag and audit enforcement](../operator-cli.md#management-mcp); every disallowed operation is swept | `Ahead` | |
+| Custom branding | [Logo](https://docs.litellm.ai/docs/proxy/ui/ui_edit_logo) | [Installation name and bounded embedded logo](../operator-console.md#installation-identity), with conditional writes and browser accessibility coverage | `Parity` | |
 
 ## Performance
 

@@ -13,7 +13,7 @@ function database(name: string) {
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: '**/{access,basics,gateway,plugins,code-mode}/**/*.spec.ts',
+  testMatch: '**/{access,basics,gateway,plugins,code-mode,fleet}/**/*.spec.ts',
   timeout: 90_000,
   outputDir: 'test-results/access',
   workers: 1,
@@ -88,6 +88,26 @@ export default defineConfig({
       url: 'http://127.0.0.1:4186/.well-known/openid-configuration',
       reuseExistingServer: false
     },
+    ...(process.env.OLP_CONSOLE_E2E_FLEET_SECRET_DIR
+      ? [
+          { name: 'first', host: 'localhost', port: 4197 },
+          { name: 'second', host: '127.0.0.1', port: 4198 }
+        ].map(({ name, host, port }) => ({
+          command: 'bash tests/fleet/run-olp.sh',
+          url: `http://127.0.0.1:${port + 5000}/health/live`,
+          reuseExistingServer: false,
+          gracefulShutdown: { signal: 'SIGTERM' as const, timeout: 30_000 },
+          env: {
+            OLP_DATABASE_URL: database(`olp_fleet_${name}`),
+            OLP_PUBLIC_ORIGIN: `http://${host}:${port}`,
+            OLP_LISTEN_ADDR: `127.0.0.1:${port}`,
+            OLP_OBSERVABILITY_LISTEN_ADDR: `127.0.0.1:${port + 5000}`,
+            OLP_CONSOLE_DIR: 'console/build',
+            OLP_DATABASE_MAX_CONNECTIONS: '5',
+            OLP_CONSOLE_E2E_FLEET_INSTANCE_SECRET_DIR: `${process.env.OLP_CONSOLE_E2E_FLEET_SECRET_DIR}/${name}`
+          }
+        }))
+      : []),
     {
       command: 'node tests/journeys/mock-azure-openai.mjs',
       url: 'http://127.0.0.1:4178/health',

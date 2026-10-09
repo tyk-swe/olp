@@ -4851,6 +4851,15 @@ type InspectedTurnRole string
 // InspectedTurnScope defines model for InspectedTurn.Scope.
 type InspectedTurnScope string
 
+// InstallationBrandingResponse defines model for InstallationBrandingResponse.
+type InstallationBrandingResponse struct {
+	Etag string `json:"etag"`
+
+	// Logo Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels.
+	Logo string `json:"logo"`
+	Name string `json:"name"`
+}
+
 // InteractionDisposition defines model for InteractionDisposition.
 type InteractionDisposition struct {
 	Disposition string `json:"disposition"`
@@ -7936,12 +7945,18 @@ type SessionListResponse struct {
 
 // SessionResponse defines model for SessionResponse.
 type SessionResponse struct {
-	CsrfToken        string `json:"csrf_token"`
-	InstallationName string `json:"installation_name"`
+	CsrfToken string `json:"csrf_token"`
+
+	// InstallationLogo Embedded PNG/JPEG installation logo; empty uses the default brand mark.
+	InstallationLogo *string `json:"installation_logo,omitempty"`
+	InstallationName string  `json:"installation_name"`
 
 	// Operations The management operations the signed-in member may perform now; the console shows only what the server would admit.
 	Operations []ManagementOperation `json:"operations"`
-	User       UserResponse          `json:"user"`
+
+	// SessionId Public session identifier for session-scoped console preferences; conveys no authentication proof.
+	SessionId *openapi_types.UUID `json:"session_id,omitempty"`
+	User      UserResponse        `json:"user"`
 }
 
 // SetModelRequest defines model for SetModelRequest.
@@ -8337,6 +8352,13 @@ type UpdateBudgetGroupRequest struct {
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
+// UpdateInstallationBrandingRequest defines model for UpdateInstallationBrandingRequest.
+type UpdateInstallationBrandingRequest struct {
+	// Logo Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels.
+	Logo string `json:"logo"`
+	Name string `json:"name"`
+}
+
 // UpdateNotificationDestinationRequest defines model for UpdateNotificationDestinationRequest.
 type UpdateNotificationDestinationRequest struct {
 	Enabled *bool   `json:"enabled,omitempty"`
@@ -8716,6 +8738,11 @@ type ListAuditEventsParams struct {
 // MfaVerify201JSONResponseBody defines parameters for MfaVerify.
 type MfaVerify201JSONResponseBody struct {
 	union json.RawMessage
+}
+
+// UpdateInstallationBrandingParams defines parameters for UpdateInstallationBranding.
+type UpdateInstallationBrandingParams struct {
+	IfMatch string `json:"If-Match"`
 }
 
 // ListBudgetGroupsParams defines parameters for ListBudgetGroups.
@@ -10023,6 +10050,9 @@ type MfaBootstrapEnrollJSONRequestBody = MFAEnrollmentRequest
 
 // MfaVerifyJSONRequestBody defines body for MfaVerify for application/json ContentType.
 type MfaVerifyJSONRequestBody = MFAVerificationRequest
+
+// UpdateInstallationBrandingJSONRequestBody defines body for UpdateInstallationBranding for application/json ContentType.
+type UpdateInstallationBrandingJSONRequestBody = UpdateInstallationBrandingRequest
 
 // CreateBudgetGroupJSONRequestBody defines body for CreateBudgetGroup for application/json ContentType.
 type CreateBudgetGroupJSONRequestBody = CreateBudgetGroupRequest

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/branding"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -56,6 +57,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	(&management.MCP{Access: m.Access, API: mux}).Register(mux)
 	m.Access.Egress = m.Egress
 	m.Access.Register(mux)
+	(&branding.Server{Access: m.Access}).Register(mux)
 	catalogue := providers.New(m.Access, m.Egress, m.PluginHost)
 	catalogue.Unconfined = m.Unconfined
 	catalogue.Log = m.Log

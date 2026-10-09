@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SavedFilters from '../SavedFilters.svelte';
   import { requestKeys } from '$lib/features/usage/history/requestKeys';
 
   import RequestTimeline from '$lib/features/usage/history/RequestTimeline.svelte';
@@ -93,6 +94,13 @@
       href={resolve(`/requests${page.url.search}`)}>Back to requests</a
     >{/if}
 </div>
+
+{#if !requestId}<SavedFilters
+    scope="history"
+    search={`?${requestSearch(urlFilters)}`}
+    apply={(search) =>
+      applyListSearch(listState, requestUrl, search.replace(/^\?/, ''))}
+  />{/if}
 
 {#if services.pending}<div class="loading-state" role="status">
     Loading request history…

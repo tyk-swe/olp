@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SavedFilters from './SavedFilters.svelte';
   import { usageKeys } from '$lib/features/usage/usageKeys';
 
   import { goto } from '$app/navigation';
@@ -129,6 +130,16 @@
     disabled={usage.isFetching || Boolean(urlProblem)}>Refresh</button
   >
 </div>
+
+<SavedFilters
+  scope="usage"
+  search={`?${usageSearch(applied)}`}
+  apply={(search) => {
+    void showUsage(
+      readUsageState(new URLSearchParams(search), defaultUsageState())
+    );
+  }}
+/>
 
 <form class="card filters" aria-label="Usage filters" onsubmit={apply}>
   <div class="filter-grid">

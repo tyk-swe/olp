@@ -27,7 +27,7 @@ API, so authorization, ETags, idempotency and audit apply unchanged.
 | CLI | [Contract-generated management commands](../operator-cli.md), saved configuration plans and qualified-client environment setup, alongside process and recovery commands | [lite CLI](https://docs.litellm.ai/docs/proxy/management_cli) for models, credentials, keys, teams and users |
 | Desired state | [Export, plan and apply](../configuration.md#configuration-promotion-artifacts) with canonical digests | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models |
 | Secrets | Mounted master-key ring and HMAC key files; provider secrets sealed in PostgreSQL ([secrets](../security.md#secrets)) | [Secret managers](https://docs.litellm.ai/docs/secret_managers/overview) (Enterprise) |
-| Topology | [Regional fleets](../deployment.md#regional-fleets), explicit key overrides, global cost reconciliation and [replica-aware runtime authority](../deployment.md#regional-read-replicas); the independent-installation console switcher remains in progress | [Read replicas](https://docs.litellm.ai/docs/proxy/db_read_replica), [multi-region](https://docs.litellm.ai/docs/proxy/multi_region) and a [global control plane](https://docs.litellm.ai/docs/proxy/global_control_plane) (Enterprise) |
+| Topology | [Regional fleets](../deployment.md#regional-fleets), explicit key overrides, global cost reconciliation and [replica-aware runtime authority](../deployment.md#regional-read-replicas) and the [independent-installation console switcher](../operator-console.md#independent-installation-bookmarks) | [Read replicas](https://docs.litellm.ai/docs/proxy/db_read_replica), [multi-region](https://docs.litellm.ai/docs/proxy/multi_region) and a [global control plane](https://docs.litellm.ai/docs/proxy/global_control_plane) (Enterprise) |
 | Discovery | `GET /v1/models` lists key-visible routes | [AI Hub](https://docs.litellm.ai/docs/proxy/ai_hub) |
 
 ## Scope
@@ -137,7 +137,7 @@ editing, and session-scoped saved filters for usage and request history.
 
 ## Exit criteria
 
-- [ ] The CLI covers every operation it lists, passes the authorization sweep as
+- [x] The CLI covers every operation it lists, passes the authorization sweep as
       a management-token client, and is generated from the contract in CI.
 - [ ] The Terraform provider creates, updates, imports and destroys each
       resource against a disposable installation.
@@ -147,7 +147,7 @@ editing, and session-scoped saved filters for usage and request history.
       exceeds 60 seconds.
 - [x] A two-region integration test enforces regional limits and reconciles
       global cost budgets within the documented overshoot bound.
-- [ ] The management MCP server refuses every operation the token's scopes do
+- [x] The management MCP server refuses every operation the token's scopes do
       not admit.
 - [ ] The [parity matrix](parity.md) administration rows are `Parity` or better.
 
@@ -167,3 +167,20 @@ that local readiness cannot borrow another region's worker success. Selection
 tests preserve priority and hard region constraints while preferring local
 connections. The regional changes pass the full local check, focused race
 tests and Helm validation.
+
+Console qualification: `control.spec.ts` covers ETag-protected name/logo edits,
+bulk role changes, session-scoped saved usage views, and accessibility.
+`fleet/installations.spec.ts` runs two live installations with separate
+databases and independently generated keys, verifies project and saved-view
+isolation, switches between retained sessions, and checks the menu at mobile
+width. Packaged Chromium journeys, the full local check, backend race tests
+and the management authorization sweep pass.
+
+Generated-client qualification:
+`TestGeneratedManagementClientsAndMCPFollowEveryMachineAuthorization` exercises
+every generated operation through both the SDK and CLI against each live
+management-token archetype in the authorization golden. It checks the MCP tool
+list against the same matrix, calls every disallowed tool, and rejects
+session-only, unknown and recursive MCP operations. The uncached race test
+passes against a disposable installation. Contract generation and drift checks
+include the shared CLI/MCP registry.

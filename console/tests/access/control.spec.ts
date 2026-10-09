@@ -134,6 +134,45 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   ).not.toHaveCount(0);
   await invitedContext.close();
 
+  // Bulk operations keep the normal member API's ETags and session revocation.
+  await page.getByRole('button', { name: 'Members', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Refresh members', exact: true })
+    .click();
+  await expect(page.getByLabel('Select Owner', { exact: true })).toBeDisabled();
+  for (const action of ['role:developer', 'role:viewer']) {
+    await page.getByLabel('Select Viewer', { exact: true }).check();
+    await page.getByLabel('Bulk member action').selectOption(action);
+    await page
+      .getByRole('button', { name: 'Apply to selected members' })
+      .click();
+    await expect(
+      page.getByText('1 of 1 members updated.', { exact: false })
+    ).toBeVisible();
+    await expect(page.getByLabel('Role for Viewer')).toHaveValue(
+      action.slice(5)
+    );
+  }
+
+  await page.goto('/usage');
+  await page.getByText('Saved views', { exact: true }).click();
+  await page.getByLabel('View name', { exact: true }).fill('Session view');
+  await page.getByRole('button', { name: 'Save current filters' }).click();
+  await page.reload();
+  await page.getByText('Saved views', { exact: true }).click();
+  await page
+    .getByLabel('Saved view', { exact: true })
+    .selectOption('Session view');
+  await page.getByRole('button', { name: 'Apply view', exact: true }).click();
+  await signOut(page);
+  await signIn(page, 'owner@example.com');
+  await page.goto('/usage');
+  await page.getByText('Saved views', { exact: true }).click();
+  await expect(page.getByRole('option', { name: 'Session view' })).toHaveCount(
+    0
+  );
+  await page.goto('/access');
+
   // The console offers only what the server would admit: with an assigned
   // access scope, installation pages such as Audit and Settings disappear.
   const viewerID = await page.evaluate(async () => {
@@ -593,6 +632,62 @@ test('setup, invitations, key policy, profile, settings, audit, and OIDC work th
   await sibling.close();
 
   await page.goto('/settings');
+  await page
+    .getByLabel('Installation name', { exact: true })
+    .fill('Operator test installation');
+  await page.getByLabel('Logo', { exact: true }).setInputFiles({
+    name: 'operator-logo.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMwbPr/HwAFTAKyh13odwAAAABJRU5ErkJggg==',
+      'base64'
+    )
+  });
+  await page
+    .getByRole('button', { name: 'Save identity', exact: true })
+    .click();
+  await expect(
+    page.getByText('Installation branding saved.', { exact: true })
+  ).toBeVisible();
+  await page.locator('.installation-switcher summary').click();
+  await page.getByLabel('Bookmark name').fill('Second installation');
+  await page
+    .getByLabel('Installation origin')
+    .fill('https://second.example.com');
+  await page.getByRole('button', { name: 'Add bookmark', exact: true }).click();
+  await expect(
+    page.getByRole('option', {
+      name: 'Second installation — https://second.example.com'
+    })
+  ).toHaveCount(1);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.screenshot({
+    path: info.outputPath('operator-identity.png'),
+    fullPage: false
+  });
+  await page.keyboard.press('Escape');
+  let forwardedCookie: string | undefined;
+  await page.route('https://second.example.com/**', async (route) => {
+    forwardedCookie = (await route.request().allHeaders()).cookie;
+    await route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><html lang="en"><title>Second installation</title><h1>Second installation sign-in</h1></html>'
+    });
+  });
+  const firstOrigin = new URL(page.url()).origin;
+  await page.locator('.installation-switcher summary').click();
+  await page
+    .getByLabel('Switch installation', { exact: true })
+    .selectOption('https://second.example.com');
+  await expect(page).toHaveURL('https://second.example.com/overview');
+  expect(forwardedCookie).toBeUndefined();
+  expect(
+    await page.evaluate(() => localStorage.getItem('olp.installations.v1'))
+  ).toBeNull();
+  await page.goto(`${firstOrigin}/settings`);
+  await expect(
+    page.getByLabel('Installation name', { exact: true })
+  ).toHaveValue('Operator test installation');
   const networkRestricted = await page.evaluate(
     async () =>
       (await (await fetch('/api/v1/auth/capabilities')).json())

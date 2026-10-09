@@ -91,10 +91,11 @@ export OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" OLP_VALKEY_URL="$OLP_TEST_VALKE
 # Browser OIDC uses a separate, explicitly test-only binary. Release builds
 # never allow loopback identity issuers.
 make build-go GO_BUILD_OUTPUT=.local/bin/olp-identity-test GO_BUILD_TAGS=oidctest
-for database in olp_packaged olp_vite; do
+for database in olp_packaged olp_vite olp_fleet_first olp_fleet_second; do
   "${compose[@]}" exec -T postgres createdb -U olp "$database"
 done
 export OLP_CONSOLE_E2E_BIN="$PWD/.local/bin/olp-identity-test"
+export OLP_CONSOLE_E2E_FLEET_SECRET_DIR="$scratch/fleet-secrets"
 pnpm --dir console exec playwright test --config playwright.config.ts
 
 export OLP_TEST_DATABASE_URL_PREFIX="postgres://olp:olp-local@$postgres"

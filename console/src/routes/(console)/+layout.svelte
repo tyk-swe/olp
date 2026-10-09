@@ -24,6 +24,7 @@
   let authentication = $state<AuthenticationSnapshot>(authLifecycle.snapshot());
   let pendingCapabilities: AuthenticationCapabilities | null = null;
   let installationName = $state('');
+  let installationLogo = $state('');
   let signOutError = $state('');
   let signingOut = $state(false);
 
@@ -83,6 +84,7 @@
         ]);
         pendingCapabilities = fetched;
         installationName = session.installation_name;
+        installationLogo = session.installation_logo ?? '';
         return session;
       },
       async unauthenticatedDestination(signal, sessionExpired) {
@@ -152,6 +154,7 @@
   <AppShell
     user={authentication.user}
     {installationName}
+    {installationLogo}
     {signingOut}
     signOutError={signOutError || authentication.principalExitError}
     onSignOut={signOut}
