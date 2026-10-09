@@ -8987,6 +8987,13 @@ type CreateBudgetGroupParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// DeleteBudgetGroupParams defines parameters for DeleteBudgetGroup.
+type DeleteBudgetGroupParams struct {
+	// IfMatch Current budget group ETag
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // UpdateBudgetGroupParams defines parameters for UpdateBudgetGroup.
 type UpdateBudgetGroupParams struct {
 	// IfMatch Current budget group ETag
@@ -9304,6 +9311,13 @@ type CreateNotificationDestinationParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// DeleteNotificationDestinationParams defines parameters for DeleteNotificationDestination.
+type DeleteNotificationDestinationParams struct {
+	// IfMatch Concurrency token returned with the resource
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // UpdateNotificationDestinationParams defines parameters for UpdateNotificationDestination.
 type UpdateNotificationDestinationParams struct {
 	// IfMatch Concurrency token returned with the resource
@@ -9322,6 +9336,13 @@ type ListNotificationRulesParams struct {
 // CreateNotificationRuleParams defines parameters for CreateNotificationRule.
 type CreateNotificationRuleParams struct {
 	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteNotificationRuleParams defines parameters for DeleteNotificationRule.
+type DeleteNotificationRuleParams struct {
+	// IfMatch Concurrency token returned with the resource
+	IfMatch        string `json:"If-Match"`
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 

@@ -14,9 +14,12 @@
     {"name":"token read+configure, owner global","kind":"machine","creator_role":"owner","global":true,"scopes":["read","configure"],"operations":["read","configure"]}
   ],
   "routes": {
+    "DELETE /api/v1/budget-groups/{budget_group_id}": "YYYYYY--YYY-",
     "DELETE /api/v1/budget-increases/{increase_id}": "YYYYYY--YYY-",
     "DELETE /api/v1/invitations/{invitation_id}": "Y-------Y---",
     "DELETE /api/v1/media-jobs/{job_id}": "YYYY----YYYY",
+    "DELETE /api/v1/notifications/destinations/{notification_destination_id}": "YYYYYY--YYY-",
+    "DELETE /api/v1/notifications/rules/{notification_rule_id}": "YYYYYY--YYY-",
     "DELETE /api/v1/oidc/identities/{identity_id}": "YYYYYYYY----",
     "DELETE /api/v1/organizations/{organization_id}/members/{user_id}": "YYYYYY--YYY-",
     "DELETE /api/v1/organizations/{organization_id}/projects/{project_id}/members/{user_id}": "YYYYYY--YYY-",

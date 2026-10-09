@@ -6691,6 +6691,70 @@
     }
   },
   {
+    "name": "delete_budget_group",
+    "group": "budget-groups",
+    "method": "DELETE",
+    "path": "/api/v1/budget-groups/{budget_group_id}",
+    "description": "Conditionally delete an unused resource; dependencies and retained history produce a conflict. Completed deletion is replayable with the original idempotency key.",
+    "scopes": [
+      [
+        "keys"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "budget_group_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "budget_group_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "budget_group_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current budget group ETag"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "delete_media_job",
     "group": "media-jobs",
     "method": "DELETE",
@@ -6740,6 +6804,142 @@
       "required": [
         "path",
         "if_match"
+      ]
+    }
+  },
+  {
+    "name": "delete_notification_destination",
+    "group": "notifications",
+    "method": "DELETE",
+    "path": "/api/v1/notifications/destinations/{notification_destination_id}",
+    "description": "Conditionally delete an unused resource; dependencies and retained history produce a conflict. Completed deletion is replayable with the original idempotency key.",
+    "scopes": [
+      [
+        "keys"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "notification_destination_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "notification_destination_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "notification_destination_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Concurrency token returned with the resource"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
+    "name": "delete_notification_rule",
+    "group": "notifications",
+    "method": "DELETE",
+    "path": "/api/v1/notifications/rules/{notification_rule_id}",
+    "description": "Conditionally delete an unused resource; dependencies and retained history produce a conflict. Completed deletion is replayable with the original idempotency key.",
+    "scopes": [
+      [
+        "keys"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "notification_rule_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "notification_rule_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "notification_rule_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Concurrency token returned with the resource"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
       ]
     }
   },

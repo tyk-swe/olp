@@ -364,6 +364,14 @@ builds a separate test binary, and release images never enable that tag.
 
 ## Projects and budget groups
 
+Automation can delete unused budget groups and notification destinations/rules
+with their observed `If-Match` and an `Idempotency-Key`. A dependency or retained
+accounting/delivery history returns HTTP 409; detach or disable the resource
+when retained history prevents deletion. A completed deletion replays with its
+original key. Removing a destination also removes its sealed signing secret;
+budget-group deletion advances key authority. Every successful deletion is
+audited through the ordinary management mutation path.
+
 Users have a global or assigned-project access scope in addition to their
 installation role. Global users can access all projects and unassigned resources
 within that role's permissions. Assigned users see only their member projects;
