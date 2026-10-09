@@ -15,6 +15,8 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 // HealthStats summarises gateway attempts against one provider.
@@ -45,8 +47,9 @@ type QuotaSource interface {
 
 // Server serves the provider management surface.
 type Server struct {
-	Access *access.Server
-	Egress *egress.Policy
+	Access          *access.Server
+	Egress          *egress.Policy
+	ExternalSecrets runtime.ExternalSecrets
 	// Unconfined is the deployment's unconfined plugin tier, or nil where it
 	// enables none: providers may pin unconfined plugins only where it does.
 	Unconfined *plugins.Unconfined
@@ -74,7 +77,7 @@ type Server struct {
 func New(a *access.Server, policy *egress.Policy, signer connectors.Signer) *Server {
 	auth := connectors.NewAuth(policy)
 	auth.Signer = signer
-	return &Server{connections: egress.NewConnectionClientCache(128), Access: a, Egress: policy, client: policy.Client(probeTimeout), auth: auth, probes: make(chan struct{}, 4)}
+	return &Server{connections: egress.NewConnectionClientCache(128), Access: a, Egress: policy, ExternalSecrets: secretstore.New(*policy), client: policy.Client(probeTimeout), auth: auth, probes: make(chan struct{}, 4)}
 }
 
 type record struct {

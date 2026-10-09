@@ -211,7 +211,7 @@ of [M3](m03-routing-resilience.md).
 | Configuration as code | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models | Digest-addressed export, plan and apply | `Ahead` | |
 | Live configuration changes | [Database models](https://docs.litellm.ai/docs/proxy/model_management) | Atomic, digest-verified runtime generations pinned per request | `Ahead` | |
 | Management CLI | [lite CLI](https://docs.litellm.ai/docs/proxy/management_cli) | [Contract-generated commands](../operator-cli.md), ETags, saved configuration plans and management-token authorization sweeps | `Ahead` | |
-| Secret managers | [Enterprise](https://docs.litellm.ai/docs/secret_managers/overview) | Mounted key files; secrets sealed in PostgreSQL | `Gap` | M11.3 |
+| Secret managers | [Enterprise](https://docs.litellm.ai/docs/secret_managers/overview) | AWS/GCP/Azure/Vault wrapped rings and pinned references, workload identity, bounded cache, explicit unavailable plan decisions and validated rotation ([runbook](../external-secrets.md)) | `Ahead` | M11.3 protocol, live rotation/promotion/startup and console qualification |
 | Kubernetes packaging | [Helm](https://docs.litellm.ai/docs/proxy/deploy) | Helm chart and Compose | `Parity` | |
 | Separate admin and worker roles | [Enterprise](https://docs.litellm.ai/docs/enterprise) | `gateway`, `control` and `worker` process modes | `Ahead` | |
 | Database read replicas | [Read replica](https://docs.litellm.ai/docs/proxy/db_read_replica) | [Replica authority with a tested 60-second refusal boundary](../deployment.md#regional-read-replicas) | `Parity` | |

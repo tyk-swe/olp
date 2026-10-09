@@ -320,6 +320,13 @@
               },
               "description": "Write-only map from credential_ref to secret; never echoed, audited, or replayed. A slot a grant backs takes no binding.",
               "type": "object"
+            },
+            "external_credential_bindings": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ExternalCredentialReference"
+              },
+              "description": "Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings."
             }
           },
           "required": [
@@ -2887,6 +2894,45 @@
             "role"
           ],
           "type": "object"
+        },
+        "ExternalCredentialReference": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "store",
+            "secret_id",
+            "version"
+          ],
+          "properties": {
+            "store": {
+              "type": "string",
+              "enum": [
+                "aws",
+                "gcp",
+                "azure",
+                "vault"
+              ]
+            },
+            "secret_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "field": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
         }
       }
     }
@@ -4740,6 +4786,9 @@
                 "string",
                 "null"
               ]
+            },
+            "credential_reference": {
+              "$ref": "#/$defs/ExternalCredentialReference"
             }
           },
           "required": [
@@ -5307,6 +5356,45 @@
             "interval_seconds"
           ],
           "type": "object"
+        },
+        "ExternalCredentialReference": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "store",
+            "secret_id",
+            "version"
+          ],
+          "properties": {
+            "store": {
+              "type": "string",
+              "enum": [
+                "aws",
+                "gcp",
+                "azure",
+                "vault"
+              ]
+            },
+            "secret_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "field": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
         }
       }
     }
@@ -12527,6 +12615,13 @@
               },
               "description": "Write-only map from credential_ref to secret; never echoed, audited, or replayed. A slot a grant backs takes no binding.",
               "type": "object"
+            },
+            "external_credential_bindings": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ExternalCredentialReference"
+              },
+              "description": "Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings."
             }
           },
           "required": [
@@ -15094,6 +15189,45 @@
             "role"
           ],
           "type": "object"
+        },
+        "ExternalCredentialReference": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "store",
+            "secret_id",
+            "version"
+          ],
+          "properties": {
+            "store": {
+              "type": "string",
+              "enum": [
+                "aws",
+                "gcp",
+                "azure",
+                "vault"
+              ]
+            },
+            "secret_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "field": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
         }
       }
     }
@@ -16100,6 +16234,9 @@
             },
             "slot": {
               "$ref": "#/$defs/CredentialSlot"
+            },
+            "credential_reference": {
+              "$ref": "#/$defs/ExternalCredentialReference"
             }
           },
           "required": [
@@ -16266,6 +16403,45 @@
             "low"
           ],
           "type": "object"
+        },
+        "ExternalCredentialReference": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "store",
+            "secret_id",
+            "version"
+          ],
+          "properties": {
+            "store": {
+              "type": "string",
+              "enum": [
+                "aws",
+                "gcp",
+                "azure",
+                "vault"
+              ]
+            },
+            "secret_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "field": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
         }
       }
     }
@@ -20468,12 +20644,64 @@
             "credential": {
               "type": "string",
               "writeOnly": true
+            },
+            "credential_reference": {
+              "$ref": "#/$defs/ExternalCredentialReference"
             }
           },
+          "required": [],
+          "type": "object",
+          "anyOf": [
+            {
+              "required": [
+                "credential"
+              ]
+            },
+            {
+              "required": [
+                "credential_reference"
+              ]
+            }
+          ]
+        },
+        "ExternalCredentialReference": {
+          "type": "object",
+          "additionalProperties": false,
           "required": [
-            "credential"
+            "store",
+            "secret_id",
+            "version"
           ],
-          "type": "object"
+          "properties": {
+            "store": {
+              "type": "string",
+              "enum": [
+                "aws",
+                "gcp",
+                "azure",
+                "vault"
+              ]
+            },
+            "secret_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "field": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
         }
       }
     }

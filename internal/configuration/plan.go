@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -651,7 +652,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	return unavailable, nil
 }
 
-func validateBindings(doc *Document, bindings map[string]string) error {
+func validateBindings(doc *Document, bindings bindingSet) error {
 	refs, grants := map[string]bool{}, map[string]bool{}
 	for _, p := range doc.Providers {
 		if p.NetworkCredentialRef != nil {
@@ -668,9 +669,20 @@ func validateBindings(doc *Document, bindings map[string]string) error {
 		if grants[name] {
 			return access.Invalid("secret_bindings."+name, grantBindingRefused)
 		}
+		if secret.reference != nil {
+			if !refs[name] || secret.reference.Validate() != nil {
+				return access.Invalid("external_credential_bindings", "Use a document reference and an immutable store version.")
+			}
+			for _, provider := range doc.Providers {
+				if provider.NetworkCredentialRef != nil && *provider.NetworkCredentialRef == name {
+					return access.Invalid("external_credential_bindings", "Network identities require sealed secret bindings.")
+				}
+			}
+			continue
+		}
 		for _, provider := range doc.Providers {
 			if provider.NetworkCredentialRef != nil && *provider.NetworkCredentialRef == name {
-				if err := egress.ValidateConnectionSecret([]byte(secret)); err != nil {
+				if err := egress.ValidateConnectionSecret([]byte(secret.secret)); err != nil {
 					return access.Invalid("secret_bindings."+name, err.Error())
 				}
 			}
@@ -678,17 +690,17 @@ func validateBindings(doc *Document, bindings map[string]string) error {
 		if !refs[name] {
 			return access.Invalid("secret_bindings", "Secret binding "+name+" is not referenced by the document.")
 		}
-		if err := providers.ValidCredential(secret); err != nil {
+		if err := providers.ValidCredential(secret.secret); err != nil {
 			return access.Invalid("secret_bindings."+name, "Use a credential of 1–65536 bytes.")
 		}
-		if len(secret) > maxSecretBytes {
+		if len(secret.secret) > maxSecretBytes {
 			return access.Invalid("secret_bindings."+name, "Secrets must fit within 64 KiB.")
 		}
 	}
 	return nil
 }
 
-func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bindings map[string]string, expected *string) (*planResult, error) {
+func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bindings bindingSet, expected *string) (*planResult, error) {
 	unavailable, err := s.validateDocument(ctx, q, doc)
 	if err != nil {
 		return nil, err
@@ -1106,9 +1118,20 @@ func (s *Server) currentRouteEntry(ctx context.Context, q access.Queryer, draftI
 	return entry, nil
 }
 
-func (s *Server) bindingMatches(ctx context.Context, q access.Queryer, credentialID *string, secret string) (bool, error) {
+func (s *Server) bindingMatches(ctx context.Context, q access.Queryer, credentialID *string, binding credentialBinding) (bool, error) {
 	if credentialID == nil {
 		return false, nil
+	}
+	if binding.reference != nil {
+		var data []byte
+		if err := q.QueryRow(ctx, "SELECT external_reference FROM olp.provider_credentials WHERE id=$1 AND revoked_at IS NULL", *credentialID).Scan(&data); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, nil
+			}
+			return false, err
+		}
+		var current secretstore.Reference
+		return len(data) > 0 && json.Unmarshal(data, &current) == nil && current == *binding.reference, nil
 	}
 	if s.Access == nil || s.Access.Keys == nil {
 		return false, errors.New("credential comparison unavailable")
@@ -1120,10 +1143,11 @@ func (s *Server) bindingMatches(ctx context.Context, q access.Queryer, credentia
 	if err != nil {
 		return false, err
 	}
-	return sha256.Sum256(current) == sha256.Sum256([]byte(secret)), nil
+	defer clear(current)
+	return sha256.Sum256(current) == sha256.Sum256([]byte(binding.secret)), nil
 }
 
-func bindingFingerprint(doc *Document, digest string, bindings map[string]string, expected *string) map[string]any {
+func bindingFingerprint(doc *Document, digest string, bindings bindingSet, expected *string) map[string]any {
 	names := make([]string, 0, len(bindings))
 	for name := range bindings {
 		names = append(names, name)
@@ -1131,7 +1155,13 @@ func bindingFingerprint(doc *Document, digest string, bindings map[string]string
 	slices.Sort(names)
 	sealed := make([]map[string]string, 0, len(names))
 	for _, name := range names {
-		sum := sha256.Sum256([]byte(bindings[name]))
+		value := []byte("sealed:" + bindings[name].secret)
+		if bindings[name].reference != nil {
+			value, _ = json.Marshal(bindings[name].reference)
+			value = append([]byte("external:"), value...)
+		}
+		sum := sha256.Sum256(value)
+		clear(value)
 		sealed = append(sealed, map[string]string{"ref": name, "sha256": hex.EncodeToString(sum[:])})
 	}
 	return map[string]any{"document_digest": digest, "expected_digest": expected, "secret_bindings": sealed}

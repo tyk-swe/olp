@@ -10,6 +10,8 @@ export type ConfigurationPlanItem =
   components['schemas']['ConfigurationPlanItem'];
 export type ConfigurationExport =
   components['schemas']['ConfigurationExportResponse'];
+export type ExternalCredentialReference =
+  components['schemas']['ExternalCredentialReference'];
 
 export async function exportConfiguration(
   signal?: AbortSignal
@@ -24,11 +26,19 @@ export async function exportConfiguration(
 export async function planConfiguration(
   document: ConfigurationDocument,
   secretBindings: Record<string, string>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  externalBindings?: Record<string, ExternalCredentialReference>
 ): Promise<ConfigurationPlan> {
   const { data, error, response } = await apiClient.POST(
     '/api/v1/configuration/plan',
-    { body: { document, secret_bindings: secretBindings }, signal }
+    {
+      body: {
+        document,
+        secret_bindings: secretBindings,
+        external_credential_bindings: externalBindings
+      },
+      signal
+    }
   );
   return unwrap({ data, error, response });
 }
@@ -36,13 +46,18 @@ export async function planConfiguration(
 export async function applyConfiguration(
   document: ConfigurationDocument,
   secretBindings: Record<string, string>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  externalBindings?: Record<string, ExternalCredentialReference>
 ): Promise<ConfigurationPlan> {
   const { data, error, response } = await apiClient.POST(
     '/api/v1/configuration/apply',
     {
       params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
-      body: { document, secret_bindings: secretBindings },
+      body: {
+        document,
+        secret_bindings: secretBindings,
+        external_credential_bindings: externalBindings
+      },
       signal
     }
   );

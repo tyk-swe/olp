@@ -1890,6 +1890,13 @@
             },
             "description": "Write-only map from credential_ref to secret; never echoed, audited, or replayed. A slot a grant backs takes no binding.",
             "type": "object"
+          },
+          "external_credential_bindings": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ExternalCredentialReference"
+            },
+            "description": "Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings."
           }
         },
         "required": [
@@ -3186,6 +3193,9 @@
               "string",
               "null"
             ]
+          },
+          "credential_reference": {
+            "$ref": "#/components/schemas/ExternalCredentialReference"
           }
         },
         "required": [
@@ -3426,6 +3436,16 @@
           "version": {
             "format": "int32",
             "type": "integer"
+          },
+          "external_reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalCredentialReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -9544,12 +9564,25 @@
           "credential": {
             "type": "string",
             "writeOnly": true
+          },
+          "credential_reference": {
+            "$ref": "#/components/schemas/ExternalCredentialReference"
           }
         },
-        "required": [
-          "credential"
-        ],
-        "type": "object"
+        "required": [],
+        "type": "object",
+        "anyOf": [
+          {
+            "required": [
+              "credential"
+            ]
+          },
+          {
+            "required": [
+              "credential_reference"
+            ]
+          }
+        ]
       },
       "RouteActivationResponse": {
         "properties": {
@@ -11564,6 +11597,9 @@
           },
           "slot": {
             "$ref": "#/components/schemas/CredentialSlot"
+          },
+          "credential_reference": {
+            "$ref": "#/components/schemas/ExternalCredentialReference"
           }
         },
         "required": [
@@ -19465,6 +19501,45 @@
           "expose_upstream_models"
         ],
         "additionalProperties": false
+      },
+      "ExternalCredentialReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "store",
+          "secret_id",
+          "version"
+        ],
+        "properties": {
+          "store": {
+            "type": "string",
+            "enum": [
+              "aws",
+              "gcp",
+              "azure",
+              "vault"
+            ]
+          },
+          "secret_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "region": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "field": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
       }
     },
     "securitySchemes": {

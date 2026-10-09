@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import ProviderProfileEditor from './ProviderProfileEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
@@ -275,14 +276,23 @@
           encrypted; the console never sees it.</span
         >
       </div>{:else if credentialRequired}<div class="form-field full">
-        <label for="provider-secret">Credential</label><input
-          id="provider-secret"
-          aria-describedby="credential-help"
-          type="password"
-          autocomplete="new-password"
-          bind:value={draft.credential}
-          required
-        /><small id="credential-help"
+        <label
+          ><input
+            type="checkbox"
+            bind:checked={draft.useExternalCredential}
+          />Use an external credential version</label
+        >
+        {#if draft.useExternalCredential}<ExternalReferenceEditor
+            bind:value={draft.externalCredentialReference}
+          />{:else}
+          <label for="provider-secret">Credential</label><input
+            id="provider-secret"
+            aria-describedby="credential-help"
+            type="password"
+            autocomplete="new-password"
+            bind:value={draft.credential}
+            required
+          />{/if}<small id="credential-help"
           >Sent once to this installation; never saved by the console or
           returned by the API.{#if plugin}
             The plugin's hosting adaptation places it in the headers and query

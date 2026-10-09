@@ -141,6 +141,13 @@ OLP holds two keys, both mounted from files that others cannot read:
   anything else runs, and [rotation](operations.md#master-key-rotation-and-recovery)
   re-seals records in bounded batches.
 
+Wrapped data keys are unwrapped at startup through workload identity and the
+provider egress policy. External provider versions contain immutable store
+metadata rather than sealed copies; the sole runtime credential source bounds
+their cache and reports unavailable versions in route plans. Expired values
+and sealed credentials cannot substitute for an unavailable pinned reference.
+See [external secrets](external-secrets.md) for identity, rotation and recovery.
+
 `internal/secrets/purpose.go` declares every purpose, and only that package can
 construct one, so no digest or ciphertext names an ad hoc purpose. Purpose
 names are bound into stored data and never change:

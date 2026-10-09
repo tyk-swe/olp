@@ -111,6 +111,7 @@ upstream.
 | [Management clients](docs/operator-cli.md) | Contract-generated CLI commands, stale-safe configuration promotion, client setup, and scoped management MCP |
 | [Operator console](docs/operator-console.md) | Installation identity, independent-installation bookmarks, bulk member editing, and session-scoped saved views |
 | [Model catalog](docs/model-catalog.md) | Scoped route discovery, SDK samples, and owner-controlled public catalogs |
+| [External secrets](docs/external-secrets.md) | Wrapped key rings, workload identities, pinned provider credentials, and safe rotation |
 | [Security architecture](docs/security.md) | Trust boundaries, authorization, secrets, egress, and response headers |
 | [Gateway execution](docs/gateway.md) | Admission, attempts, content policies, and durable media |
 | [Operations](docs/operations.md) | Monitoring, spend reconciliation, backups, key rotation, and versions |

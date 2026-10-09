@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/workload"
 )
@@ -48,6 +49,7 @@ type Release struct {
 	Snapshot    *Snapshot
 	InstalledAt time.Time
 	credentials map[string][]byte
+	references  map[string]secretstore.Reference
 }
 
 // NewRelease builds an installed release directly from a snapshot and its
@@ -116,7 +118,10 @@ type Manager struct {
 	// reads. Writes and historical secret resolution always use the primary.
 	ReadPool *pgxpool.Pool
 	// Region is the deployment's explicit region name, fixed before Start.
-	Region           string
+	Region string
+	// ExternalSecrets is fixed before Start and follows the provider egress policy.
+	ExternalSecrets  ExternalSecrets
+	external         externalCredentials
 	authorityRefresh sync.Mutex
 	replica          replicaProgress
 	installation     string
@@ -210,7 +215,7 @@ func (m *Manager) Stop() {
 func (m *Manager) Refresh(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, PollInterval)
 	defer cancel()
-	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx), m.refreshGrants(ctx), m.refreshInputs(ctx))
+	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx), m.refreshGrants(ctx), m.refreshInputs(ctx), m.refreshExternalCredentials(ctx))
 }
 
 func (m *Manager) refreshAuthority(ctx context.Context) error {
@@ -476,6 +481,18 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	var credentialIDs []string
+	for _, provider := range snapshot.Providers {
+		for _, slot := range provider.Slots {
+			if slot.CredentialID != nil {
+				credentialIDs = append(credentialIDs, *slot.CredentialID)
+			}
+		}
+	}
+	release.references, err = readExternalReferences(ctx, tx, credentialIDs)
+	if err != nil {
+		return nil, err
+	}
 	for _, provider := range snapshot.Providers {
 		if provider.Network != nil && provider.Network.CredentialID != "" {
 			id := provider.Network.CredentialID
@@ -499,6 +516,9 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 			if slot.CredentialID == nil {
 				continue
 			}
+			if _, external := release.references[*slot.CredentialID]; external {
+				continue
+			}
 			if _, done := release.credentials[*slot.CredentialID]; done {
 				continue
 			}
@@ -508,6 +528,15 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 			}
 			release.credentials[*slot.CredentialID] = secret
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	// Record store availability before publication so failed references produce
+	// explicit route-plan decisions. Fetches hold neither transaction nor mutex.
+	for id, reference := range release.references {
+		value, _ := m.external.read(ctx, m.ExternalSecrets, id, reference)
+		clear(value)
 	}
 	return release, nil
 }

@@ -34,6 +34,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/surface"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -228,6 +229,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		rt = runtime.NewManager(pool, installation, auth, keys, log)
 		rt.ReadPool = readPool
 		rt.Region = c.Region
+		rt.ExternalSecrets = secretstore.New(policy)
 		if c.ConnectorConfigFile != "" {
 			rt.Mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
 			if err != nil {
@@ -553,7 +555,7 @@ func loadSecrets(ctx context.Context, pool *pgxpool.Pool, c config.Config, insta
 	}
 	var keys *secrets.KeyRing
 	if c.MasterKeyFile != "" {
-		keys, err = secrets.LoadRing(c.MasterKeyFile)
+		keys, err = secrets.LoadRingWithUnwrapper(ctx, c.MasterKeyFile, secretstore.New(egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}))
 		if err != nil {
 			return nil, nil, "", err
 		}

@@ -29,7 +29,7 @@ type resolvedSlot struct {
 	allowedAPIKeys []string
 }
 
-func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document, bindings map[string]string) error {
+func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document, bindings bindingSet) error {
 	if err := applyMFAPolicy(ctx, tx, p, doc.RequireLocalMFA); err != nil {
 		return err
 	}
@@ -302,7 +302,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 	return applyCatalogPolicies(ctx, tx, p, doc)
 }
 
-func (s *Server) resolveSlots(ctx context.Context, tx pgx.Tx, providerID string, entry *ProviderEntry, existing *existingProvider, ok bool, bindings map[string]string) ([]resolvedSlot, error) {
+func (s *Server) resolveSlots(ctx context.Context, tx pgx.Tx, providerID string, entry *ProviderEntry, existing *existingProvider, ok bool, bindings bindingSet) ([]resolvedSlot, error) {
 	resolved := make([]resolvedSlot, 0, len(entry.Slots))
 	for j := range entry.Slots {
 		slot := &entry.Slots[j]
@@ -334,7 +334,7 @@ func (s *Server) resolveSlots(ctx context.Context, tx pgx.Tx, providerID string,
 					return nil, err
 				}
 				if !same {
-					stored, err := s.StoreCredential(ctx, tx, providerID, secret)
+					stored, err := s.storeBinding(ctx, tx, providerID, secret)
 					if err != nil {
 						return nil, err
 					}
@@ -347,7 +347,7 @@ func (s *Server) resolveSlots(ctx context.Context, tx pgx.Tx, providerID string,
 	return resolved, nil
 }
 
-func (s *Server) bindChangedCredentials(ctx context.Context, tx pgx.Tx, providerID string, entry *ProviderEntry, existing *existingProvider, bindings map[string]string) error {
+func (s *Server) bindChangedCredentials(ctx context.Context, tx pgx.Tx, providerID string, entry *ProviderEntry, existing *existingProvider, bindings bindingSet) error {
 	changed := false
 	for j := range entry.Slots {
 		slot := &entry.Slots[j]
@@ -369,7 +369,7 @@ func (s *Server) bindChangedCredentials(ctx context.Context, tx pgx.Tx, provider
 		if same {
 			continue
 		}
-		stored, err := s.StoreCredential(ctx, tx, providerID, secret)
+		stored, err := s.storeBinding(ctx, tx, providerID, secret)
 		if err != nil {
 			return err
 		}

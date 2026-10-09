@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 type Server struct {
@@ -52,9 +53,10 @@ func (s *Server) export(r *http.Request, p access.Principal) (access.Reply, erro
 }
 
 type promotionInput struct {
-	Document       *Document         `json:"document"`
-	ExpectedDigest *string           `json:"expected_digest"`
-	SecretBindings map[string]string `json:"secret_bindings"`
+	Document         *Document                        `json:"document"`
+	ExpectedDigest   *string                          `json:"expected_digest"`
+	SecretBindings   map[string]string                `json:"secret_bindings"`
+	ExternalBindings map[string]secretstore.Reference `json:"external_credential_bindings"`
 }
 
 func (s *Server) planEndpoint(r *http.Request, p access.Principal) (access.Reply, error) {
@@ -70,7 +72,11 @@ func (s *Server) planEndpoint(r *http.Request, p access.Principal) (access.Reply
 			return access.Reply{}, err
 		}
 	}
-	result, err := s.plan(r.Context(), s.Access.Pool, input.Document, input.SecretBindings, input.ExpectedDigest)
+	bindings, err := input.bindings()
+	if err != nil {
+		return access.Reply{}, err
+	}
+	result, err := s.plan(r.Context(), s.Access.Pool, input.Document, bindings, input.ExpectedDigest)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -87,6 +93,10 @@ func (s *Server) applyEndpoint(r *http.Request, initial access.Principal) (acces
 	}
 	if input.Document == nil {
 		return access.Reply{}, access.Invalid("document", "Send the configuration artifact.")
+	}
+	bindings, err := input.bindings()
+	if err != nil {
+		return access.Reply{}, err
 	}
 	if err := s.prepareWorkloadIssuers(r.Context(), initial, input.Document); err != nil {
 		return access.Reply{}, err
@@ -111,14 +121,14 @@ func (s *Server) applyEndpoint(r *http.Request, initial access.Principal) (acces
 	if err != nil {
 		return access.Reply{}, err
 	}
-	claim, replayed, err := s.Access.Replay(r, tx, p, bindingFingerprint(doc, digest, input.SecretBindings, input.ExpectedDigest))
+	claim, replayed, err := s.Access.Replay(r, tx, p, bindingFingerprint(doc, digest, bindings, input.ExpectedDigest))
 	if err != nil {
 		return access.Reply{}, err
 	}
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
-	result, err := s.plan(r.Context(), tx, doc, input.SecretBindings, input.ExpectedDigest)
+	result, err := s.plan(r.Context(), tx, doc, bindings, input.ExpectedDigest)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -147,7 +157,7 @@ func (s *Server) applyEndpoint(r *http.Request, initial access.Principal) (acces
 			}
 		}
 	}
-	if err = s.applyDocument(r.Context(), tx, p, doc, input.SecretBindings); err != nil {
+	if err = s.applyDocument(r.Context(), tx, p, doc, bindings); err != nil {
 		return access.Reply{}, err
 	}
 	if err := s.applySAMLDefinition(r, tx, p, input.Document.SAML); err != nil {

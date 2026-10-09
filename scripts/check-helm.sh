@@ -5,6 +5,12 @@ version=1.27.0
 helm lint deploy/helm
 helm lint deploy/helm -f deploy/helm/values.production.yaml
 helm template olp deploy/helm --kube-version "$version" >/dev/null
+helm template olp deploy/helm --kube-version "$version" \
+  --set-json 'extraEnv=[{"name":"OLP_VAULT_ROLE","value":"olp"},{"name":"OLP_VAULT_JWT_FILE","value":"/run/identity/token"}]' \
+  --set-json 'extraVolumes=[{"name":"workload-identity","projected":{"sources":[{"serviceAccountToken":{"path":"token","audience":"vault","expirationSeconds":3600}}]}}]' \
+  --set-json 'extraVolumeMounts=[{"name":"workload-identity","mountPath":"/run/identity","readOnly":true}]' |
+  docker run --rm -i ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e \
+    -strict -summary -kubernetes-version "$version" -skip ServiceMonitor,PrometheusRule
 helm template olp deploy/helm --kube-version "$version" -f deploy/helm/values.production.yaml |
   docker run --rm -i ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e \
     -strict -summary -kubernetes-version "$version" -skip ServiceMonitor,PrometheusRule

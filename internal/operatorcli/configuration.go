@@ -28,7 +28,7 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 	if len(positional) != 0 {
 		return errors.New("configuration commands take named file options")
 	}
-	if err = checkOptions(opts, "file", "plan-file", "bindings-file", "output", "idempotency-key"); err != nil {
+	if err = checkOptions(opts, "file", "plan-file", "bindings-file", "external-bindings-file", "output", "idempotency-key"); err != nil {
 		return err
 	}
 	client, err := runner.client()
@@ -114,7 +114,17 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 	default:
 		return errors.New("unknown config command; use export, plan or apply")
 	}
-	request := map[string]any{"document": saved.Document, "expected_digest": saved.DestinationDigest, "secret_bindings": bindings}
+	externalBindings := map[string]json.RawMessage{}
+	if path := opts.one("external-bindings-file"); path != "" {
+		data, err := readJSON(path)
+		if err != nil {
+			return err
+		}
+		if json.Unmarshal(data, &externalBindings) != nil {
+			return errors.New("external bindings file must be an object of pinned references")
+		}
+	}
+	request := map[string]any{"document": saved.Document, "expected_digest": saved.DestinationDigest, "secret_bindings": bindings, "external_credential_bindings": externalBindings}
 	result, err := call("plan_configuration", request)
 	if err != nil {
 		return err

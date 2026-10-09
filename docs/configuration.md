@@ -118,7 +118,7 @@ connectors. Every command refuses to start when `OLP_AUTH_HMAC_KEY`,
 
 | Variable | Required by | File contents |
 | --- | --- | --- |
-| `OLP_MASTER_KEY_FILE` | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | JSON master-key ring shown below. |
+| `OLP_MASTER_KEY_FILE` | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | JSON master-key ring shown below; also supports [workload-identity wrapped keys](external-secrets.md). |
 | `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `worker`, `doctor`, `master-key` | 32 random bytes, encoded as hex or standard base64. |
 | `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run | Random 32–256-byte token for one-time owner setup. |
 | `OLP_OTLP_HEADERS_FILE` | traced `all`, `gateway`, `control`, or `worker` | Optional JSON object of OTLP exporter headers. |

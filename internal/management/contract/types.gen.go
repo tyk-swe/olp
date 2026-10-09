@@ -1006,6 +1006,30 @@ func (e CredentialRequirement) Valid() bool {
 	}
 }
 
+// Defines values for ExternalCredentialReferenceStore.
+const (
+	Aws   ExternalCredentialReferenceStore = "aws"
+	Azure ExternalCredentialReferenceStore = "azure"
+	Gcp   ExternalCredentialReferenceStore = "gcp"
+	Vault ExternalCredentialReferenceStore = "vault"
+)
+
+// Valid indicates whether the value is a known member of the ExternalCredentialReferenceStore enum.
+func (e ExternalCredentialReferenceStore) Valid() bool {
+	switch e {
+	case Aws:
+		return true
+	case Azure:
+		return true
+	case Gcp:
+		return true
+	case Vault:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FallbackCondition.
 const (
 	Budget        FallbackCondition = "budget"
@@ -4121,6 +4145,9 @@ type ConfigurationPromotionRequest struct {
 	// ExpectedDigest Digest the destination must still export for the apply to proceed
 	ExpectedDigest nullable.Nullable[string] `json:"expected_digest,omitempty"`
 
+	// ExternalCredentialBindings Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings.
+	ExternalCredentialBindings *map[string]ExternalCredentialReference `json:"external_credential_bindings,omitempty"`
+
 	// SecretBindings Write-only map from credential_ref to secret; never echoed, audited, or replayed. A slot a grant backs takes no binding.
 	SecretBindings *map[string]string `json:"secret_bindings,omitempty"`
 }
@@ -4621,9 +4648,12 @@ type CreateProjectRequest struct {
 
 // CreateProviderRequest defines model for CreateProviderRequest.
 type CreateProviderRequest struct {
-	Configuration ProviderConfiguration     `json:"configuration"`
-	Credential    *string                   `json:"credential,omitempty"`
-	DisplayName   nullable.Nullable[string] `json:"display_name,omitempty"`
+	Configuration ProviderConfiguration `json:"configuration"`
+	Credential    *string               `json:"credential,omitempty"`
+
+	// CredentialReference Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values.
+	CredentialReference *ExternalCredentialReference `json:"credential_reference,omitempty"`
+	DisplayName         nullable.Nullable[string]    `json:"display_name,omitempty"`
 
 	// Model Optional seed/probe model. Vertex AI requires one because its publisher
 	// model collection has no list operation; other connectors can discover
@@ -4704,7 +4734,8 @@ type CredentialResponse struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	// DraftSelected True when this credential is selected only by the mutable draft.
-	DraftSelected bool `json:"draft_selected"`
+	DraftSelected     bool                                           `json:"draft_selected"`
+	ExternalReference nullable.Nullable[ExternalCredentialReference] `json:"external_reference,omitempty"`
 
 	// Grant What grant enrollment recorded, for a version with a grant beneath it; null for a pasted credential.
 	Grant     nullable.Nullable[CredentialGrant] `json:"grant,omitempty"`
@@ -4798,6 +4829,18 @@ type ExperimentSide struct {
 	Successes        int64                      `json:"successes"`
 	UnpricedRequests int64                      `json:"unpriced_requests"`
 }
+
+// ExternalCredentialReference Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values.
+type ExternalCredentialReference struct {
+	Field    *string                          `json:"field,omitempty"`
+	Region   *string                          `json:"region,omitempty"`
+	SecretId string                           `json:"secret_id"`
+	Store    ExternalCredentialReferenceStore `json:"store"`
+	Version  string                           `json:"version"`
+}
+
+// ExternalCredentialReferenceStore defines model for ExternalCredentialReference.Store.
+type ExternalCredentialReferenceStore string
 
 // FallbackCondition exhausted: every attempt failed with a retryable class. context_window, content_filter, rate_limit: the route ended on that failure class. budget: a supply-side spend cap removed or refused the route's targets.
 type FallbackCondition string
@@ -7213,7 +7256,17 @@ type RotateApiKeyResponse struct {
 // RotateCredentialRequest defines model for RotateCredentialRequest.
 type RotateCredentialRequest struct {
 	Credential *string `json:"credential,omitempty"`
+
+	// CredentialReference Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values.
+	CredentialReference *ExternalCredentialReference `json:"credential_reference,omitempty"`
+	union               json.RawMessage
 }
+
+// RotateCredentialRequest0 defines model for RotateCredentialRequest.0.
+type RotateCredentialRequest0 = interface{}
+
+// RotateCredentialRequest1 defines model for RotateCredentialRequest.1.
+type RotateCredentialRequest1 = interface{}
 
 // RouteActivationResponse defines model for RouteActivationResponse.
 type RouteActivationResponse struct {
@@ -8344,7 +8397,10 @@ type SlotList struct {
 // SlotWrite defines model for SlotWrite.
 type SlotWrite struct {
 	Credential nullable.Nullable[string] `json:"credential,omitempty"`
-	Slot       CredentialSlot            `json:"slot"`
+
+	// CredentialReference Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values.
+	CredentialReference *ExternalCredentialReference `json:"credential_reference,omitempty"`
+	Slot                CredentialSlot               `json:"slot"`
 }
 
 // SpendCap Daily and monthly cost caps. An exhausted cap removes its owner from selection.
@@ -11090,6 +11146,116 @@ func (t PlaygroundResponseFormat) MarshalJSON() ([]byte, error) {
 
 func (t *PlaygroundResponseFormat) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsRotateCredentialRequest0 returns the union data inside the RotateCredentialRequest as a RotateCredentialRequest0
+func (t RotateCredentialRequest) AsRotateCredentialRequest0() (RotateCredentialRequest0, error) {
+	var body RotateCredentialRequest0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromRotateCredentialRequest0 overwrites any union data inside the RotateCredentialRequest as the provided RotateCredentialRequest0
+func (t *RotateCredentialRequest) FromRotateCredentialRequest0(v RotateCredentialRequest0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeRotateCredentialRequest0 performs a merge with any union data inside the RotateCredentialRequest, using the provided RotateCredentialRequest0
+func (t *RotateCredentialRequest) MergeRotateCredentialRequest0(v RotateCredentialRequest0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsRotateCredentialRequest1 returns the union data inside the RotateCredentialRequest as a RotateCredentialRequest1
+func (t RotateCredentialRequest) AsRotateCredentialRequest1() (RotateCredentialRequest1, error) {
+	var body RotateCredentialRequest1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromRotateCredentialRequest1 overwrites any union data inside the RotateCredentialRequest as the provided RotateCredentialRequest1
+func (t *RotateCredentialRequest) FromRotateCredentialRequest1(v RotateCredentialRequest1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeRotateCredentialRequest1 performs a merge with any union data inside the RotateCredentialRequest, using the provided RotateCredentialRequest1
+func (t *RotateCredentialRequest) MergeRotateCredentialRequest1(v RotateCredentialRequest1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t RotateCredentialRequest) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	object := make(map[string]json.RawMessage)
+	if t.union != nil {
+		err = json.Unmarshal(b, &object)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if t.Credential != nil {
+		object["credential"], err = json.Marshal(t.Credential)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'credential': %w", err)
+		}
+	}
+
+	if t.CredentialReference != nil {
+		object["credential_reference"], err = json.Marshal(t.CredentialReference)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'credential_reference': %w", err)
+		}
+	}
+	b, err = json.Marshal(object)
+	return b, err
+}
+
+func (t *RotateCredentialRequest) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	if err != nil {
+		return err
+	}
+	object := make(map[string]json.RawMessage)
+	err = json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["credential"]; found {
+		err = json.Unmarshal(raw, &t.Credential)
+		if err != nil {
+			return fmt.Errorf("error reading 'credential': %w", err)
+		}
+	}
+
+	if raw, found := object["credential_reference"]; found {
+		err = json.Unmarshal(raw, &t.CredentialReference)
+		if err != nil {
+			return fmt.Errorf("error reading 'credential_reference': %w", err)
+		}
+	}
+
 	return err
 }
 

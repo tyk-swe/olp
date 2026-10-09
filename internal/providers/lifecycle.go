@@ -18,17 +18,19 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 const maxCredentialBytes = 65536
 
 type createRequest struct {
-	Name          string        `json:"name"`
-	Configuration Configuration `json:"configuration"`
-	Credential    *string       `json:"credential"`
-	DisplayName   *string       `json:"display_name"`
-	Model         *string       `json:"model"`
-	ProjectID     *string       `json:"project_id"`
+	Name                string                 `json:"name"`
+	Configuration       Configuration          `json:"configuration"`
+	Credential          *string                `json:"credential"`
+	CredentialReference *secretstore.Reference `json:"credential_reference,omitempty"`
+	DisplayName         *string                `json:"display_name"`
+	Model               *string                `json:"model"`
+	ProjectID           *string                `json:"project_id"`
 }
 
 type updateRequest struct {
@@ -129,17 +131,15 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	switch cfg := &input.Configuration; {
-	case cfg.Grant() && input.Credential != nil:
+	case cfg.Grant() && (input.Credential != nil || input.CredentialReference != nil):
 		return access.Reply{}, access.Invalid("credential", grantEnrollmentOnly)
-	case cfg.CredentialRequired() && !cfg.Grant() && input.Credential == nil:
+	case cfg.CredentialRequired() && !cfg.Grant() && input.Credential == nil && input.CredentialReference == nil:
 		return access.Reply{}, access.Invalid("credential", "This authentication mode requires a credential.")
-	case !cfg.CredentialRequired() && input.Credential != nil:
+	case !cfg.CredentialRequired() && (input.Credential != nil || input.CredentialReference != nil):
 		return access.Reply{}, access.Invalid("credential", "This authentication mode takes no stored credential.")
 	}
-	if input.Credential != nil {
-		if err = ValidCredential(*input.Credential); err != nil {
-			return access.Reply{}, err
-		}
+	if err = validateCredentialInput(input.Credential, input.CredentialReference); err != nil {
+		return access.Reply{}, err
 	}
 	if input.Model != nil {
 		if err = ValidModelName("model", *input.Model); err != nil {
@@ -167,8 +167,8 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	var credentialID *string
-	if input.Credential != nil {
-		stored, _, err := s.StoreCredential(r.Context(), tx, id, *input.Credential)
+	if input.Credential != nil || input.CredentialReference != nil {
+		stored, _, err := s.storeCredentialInput(r.Context(), tx, id, input.Credential, input.CredentialReference)
 		if err != nil {
 			return access.Reply{}, err
 		}

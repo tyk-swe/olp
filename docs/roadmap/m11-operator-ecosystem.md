@@ -26,7 +26,7 @@ API, so authorization, ETags, idempotency and audit apply unchanged.
 | --- | --- | --- |
 | CLI | [Contract-generated management commands](../operator-cli.md), saved configuration plans and qualified-client environment setup, alongside process and recovery commands | [lite CLI](https://docs.litellm.ai/docs/proxy/management_cli) for models, credentials, keys, teams and users |
 | Desired state | [Export, plan and apply](../configuration.md#configuration-promotion-artifacts) with canonical digests | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models |
-| Secrets | Mounted master-key ring and HMAC key files; provider secrets sealed in PostgreSQL ([secrets](../security.md#secrets)) | [Secret managers](https://docs.litellm.ai/docs/secret_managers/overview) (Enterprise) |
+| Secrets | Workload-identity wrapped rings and immutable AWS/GCP/Azure/Vault credential references with validated rotation ([external secrets](../external-secrets.md)) | [Secret managers](https://docs.litellm.ai/docs/secret_managers/overview) (Enterprise) |
 | Topology | [Regional fleets](../deployment.md#regional-fleets), explicit key overrides, global cost reconciliation and [replica-aware runtime authority](../deployment.md#regional-read-replicas) and the [independent-installation console switcher](../operator-console.md#independent-installation-bookmarks) | [Read replicas](https://docs.litellm.ai/docs/proxy/db_read_replica), [multi-region](https://docs.litellm.ai/docs/proxy/multi_region) and a [global control plane](https://docs.litellm.ai/docs/proxy/global_control_plane) (Enterprise) |
 | Discovery | [Member/key-visible model catalog](../model-catalog.md), SDK examples, explicit upstream disclosure and independently priced owner-enabled public catalogs | [AI Hub](https://docs.litellm.ai/docs/proxy/ai_hub) |
 
@@ -141,7 +141,7 @@ editing, and session-scoped saved filters for usage and request history.
       a management-token client, and is generated from the contract in CI.
 - [ ] The Terraform provider creates, updates, imports and destroys each
       resource against a disposable installation.
-- [ ] A KMS-wrapped master-key ring starts OLP with workload identity, and a
+- [x] A KMS-wrapped master-key ring starts OLP with workload identity, and a
       referenced credential rotates through validation and activation.
 - [x] Gateways reading from a lagging replica refuse traffic once authority age
       exceeds 60 seconds.
@@ -194,3 +194,13 @@ activation. The packaged catalog browser journey covers discovery, disclosure,
 public publication and accessibility. Projection tests cover conservative facts,
 unknown/partial coverage, exact decimal ranges and native SDK examples. The full
 local gate and ordinary/generated-client authorization sweeps pass.
+
+Secret-store qualification: four-platform protocol tests verify identity,
+version and integrity bindings; egress tests refuse private destinations and
+redirects. `TestExternalCredentialAndWrappedMasterKeyRotationKeepPublishedVersionsPinned`
+uses live PostgreSQL/Valkey and Vault JWT/Transit/KV protocols to validate,
+activate and promote a new reference without copying values, retain old pinned
+versions, rotate/verify sealed records and start the built gateway with a
+wrapped ring. Cache races cover single-flight, bounded capacity and unavailable
+plan decisions. The packaged external-credential console journey creates and
+rotates versions and passes accessibility checks; local and Helm gates pass.

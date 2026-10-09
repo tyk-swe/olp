@@ -162,6 +162,12 @@ tracing:
   # Accept a valid inbound W3C trace context as the request parent.
   acceptInbound: true
 
+# Additional workload-identity environment and projected files, shared by
+# gateway, control and worker pods. Keep identity tokens in mounted files.
+extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []
+
 config:
   logLevel: info
   databaseSecretName: olp-postgresql
