@@ -33,7 +33,7 @@ olp keys get KEY_ID
 olp keys update KEY_ID --body-file key.json --if-match OBSERVED_ETAG
 olp providers activate PROVIDER_ID --if-match OBSERVED_ETAG \
   --idempotency-key DEPLOYMENT_KEY
-olp api put_credential_slot PROVIDER_ID SLOT_NAME \
+olp api put_credential_slot PROVIDER_ID SLOT_ID \
   --body-file slot.json --if-match OBSERVED_ETAG
 olp api simulate_route_draft ROUTE_ID --body-file request.json
 ```
@@ -84,6 +84,8 @@ olp usage breakdown --query start=2026-10-01T00:00:00Z \
 CSV columns are sorted; nested objects remain JSON in cells. Cells that
 spreadsheets could interpret as formulas get an apostrophe prefix. JSON output
 preserves the API's coverage and completeness metadata.
+
+Slot PUT/DELETE responses include `OLP-Previous-Parent-ETag` and `OLP-Parent-ETag`: the exact provider transition committed by that request. Idempotent replay preserves those original values. Clients coordinating parent and child resources can follow a contiguous chain of their own writes; a missing transition remains a conflict and never authorizes adopting an unrelated edit.
 
 ## Configuration promotion
 
@@ -171,5 +173,3 @@ recursively. Failed responses omit details that could echo secret input.
 A key created through MCP therefore has **no retrievable secret**; use the CLI
 or console when you need to capture a new key. Token revocation and changes
 to the creator's authority apply to both transports.
-
-Slot PUT/DELETE responses include `OLP-Previous-Parent-ETag` and `OLP-Parent-ETag`: the exact provider transition committed by that request. Idempotent replay preserves those original values. Clients coordinating parent and child resources can follow a contiguous chain of their own writes; a missing transition remains a conflict and never authorizes adopting an unrelated edit.

@@ -50,3 +50,12 @@ its value. Changing that path replaces the key. Omit the option when importing
 existing metadata, since an existing key's secret cannot be recovered. The
 operator removes the local file after revocation. An output failure preserves
 the created UUID in state so the authority can be reconciled or destroyed.
+
+Providers manage draft configuration and validate write-only credential rotations
+before staging a new version. Normalized configuration defaults are projected to
+operator-selected fields. Credential slots use their own ETags and import with
+`PROVIDER_UUID/SLOT_UUID`; creation uses the observed pool ETag. Deleting a draft
+slot preserves published bindings and immutable versions. Parent deletion follows
+only atomic transitions from the same client's slot writes; foreign edits still
+refuse a saved destruction plan. See the provider README for the resource forms
+and partial-validation recovery behavior.

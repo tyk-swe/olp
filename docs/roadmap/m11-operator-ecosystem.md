@@ -232,3 +232,13 @@ credential versions and refuses the required default slot. The generated SDK,
 CLI and MCP authorization sweep covers the new operations; focused races,
 contract generation and the full local gate pass. Terraform adapters and the
 complete resource-list qualification remain in progress.
+
+Provider and credential-slot Terraform/OpenTofu qualification now covers a real
+compatible upstream, simultaneous pool creation, independent conditional updates,
+validated write-only credential rotation, normalized nested configuration, UUID
+and composite imports, and destruction. Tests prove secrets stay out of saved
+plans/state, retain committed configuration and the prior counter after failed
+credential validation, and refuse an externally edited provider during a saved
+destruction plan. Atomic parent transition metadata survives idempotent replay.
+The seven-type acceptance suite passes against the SDK-pinned OLP binary; the
+complete twelve-resource exit criterion remains pending.
