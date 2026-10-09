@@ -278,3 +278,13 @@ constraints, and refuses a saved plan after an external policy/parent transition
 without overwriting it. The complete nine-resource, SDK-matched disposable
 acceptance suite passes. Guardrails, sinks, and MCP servers still remain before
 the full Terraform exit criterion can be satisfied.
+
+Named guardrail prerequisites are qualified by
+`TestNamedGuardrailRevisionsRemainScopedAndPublishedCopiesStayPinned` and
+`TestNamedGuardrailConfigurationPromotionIsPortableAndIdempotent`. Project
+boundaries, immutable policy versions, conditional writes/replay/audit, actual
+input refusal, pinned published copies, and portable reuse are verified against
+disposable PostgreSQL and Valkey. The complete management authorization/isolation
+and generated-client/MCP sweeps pass for the new operations; focused races and
+the full local gate pass. Terraform guardrail lifecycle qualification remains
+pending.

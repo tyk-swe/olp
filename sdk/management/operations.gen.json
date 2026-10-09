@@ -448,6 +448,13 @@
                 }
               ],
               "description": "Omission/null preserves SAML. Export, plan, apply and replay containing SAML additionally require installation access authority. Set enabled=false explicitly to disable; the usable-owner safeguard still applies."
+            },
+            "guardrails": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "$ref": "#/$defs/ConfigurationGuardrail"
+              }
             }
           },
           "required": [
@@ -2895,6 +2902,37 @@
           ],
           "type": "object"
         },
+        "ConfigurationGuardrail": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "project": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "builtin.regex"
+              ]
+            },
+            "policy": {
+              "$ref": "#/$defs/ContentPolicy"
+            }
+          },
+          "required": [
+            "name",
+            "project",
+            "type",
+            "policy"
+          ]
+        },
         "ExternalCredentialReference": {
           "type": "object",
           "additionalProperties": false,
@@ -3819,7 +3857,8 @@
                 "key_end_user",
                 "project_end_user",
                 "attribution",
-                "organization"
+                "organization",
+                "guardrail"
               ]
             },
             "id": {
@@ -4203,6 +4242,128 @@
             "pool_id",
             "models",
             "enabled"
+          ],
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "create_guardrail",
+    "group": "guardrails",
+    "method": "POST",
+    "path": "/api/v1/guardrails",
+    "description": "create guardrail",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/CreateGuardrailRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "CreateGuardrailRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "builtin.regex"
+              ]
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "policy": {
+              "$ref": "#/$defs/ContentPolicy"
+            }
+          },
+          "required": [
+            "name",
+            "type",
+            "project_id",
+            "policy"
+          ]
+        },
+        "ContentPolicy": {
+          "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
+          "properties": {
+            "rules": {
+              "items": {
+                "$ref": "#/$defs/ContentPolicyRule"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "rules"
+          ],
+          "type": "object"
+        },
+        "ContentPolicyRule": {
+          "properties": {
+            "action": {
+              "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
+              "enum": [
+                "block",
+                "redact"
+              ],
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "pattern": {
+              "description": "Go RE2 expression; must not match the empty string.",
+              "type": "string"
+            },
+            "phase": {
+              "enum": [
+                "input",
+                "output"
+              ],
+              "type": "string"
+            },
+            "replacement": {
+              "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "phase",
+            "pattern",
+            "action"
           ],
           "type": "object"
         }
@@ -7447,6 +7608,70 @@
     }
   },
   {
+    "name": "delete_guardrail",
+    "group": "guardrails",
+    "method": "DELETE",
+    "path": "/api/v1/guardrails/{guardrail_id}",
+    "description": "delete guardrail",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "guardrail_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "guardrail_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "guardrail_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "delete_media_job",
     "group": "media-jobs",
     "method": "DELETE",
@@ -9199,6 +9424,100 @@
           "required": [
             "provider_id",
             "slot_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_guardrail",
+    "group": "guardrails",
+    "method": "GET",
+    "path": "/api/v1/guardrails/{guardrail_id}",
+    "description": "get guardrail",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "guardrail_id",
+        "in": "path",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "guardrail_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "guardrail_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_guardrail_revision",
+    "group": "guardrails",
+    "method": "GET",
+    "path": "/api/v1/guardrails/{guardrail_id}/revisions/{revision_id}",
+    "description": "get guardrail revision",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "guardrail_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "revision_id",
+        "in": "path",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "guardrail_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "guardrail_id",
+            "revision_id"
           ]
         }
       },
@@ -11392,6 +11711,61 @@
             "project_id": {
               "format": "uuid",
               "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_guardrails",
+    "group": "guardrails",
+    "method": "GET",
+    "path": "/api/v1/guardrails",
+    "description": "list guardrails",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "search",
+        "in": "query",
+        "required": false
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "search": {
+              "type": "string",
+              "maxLength": 200
             }
           },
           "additionalProperties": false
@@ -14222,6 +14596,13 @@
                 }
               ],
               "description": "Omission/null preserves SAML. Export, plan, apply and replay containing SAML additionally require installation access authority. Set enabled=false explicitly to disable; the usable-owner safeguard still applies."
+            },
+            "guardrails": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "$ref": "#/$defs/ConfigurationGuardrail"
+              }
             }
           },
           "required": [
@@ -16668,6 +17049,37 @@
             "role"
           ],
           "type": "object"
+        },
+        "ConfigurationGuardrail": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "project": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "builtin.regex"
+              ]
+            },
+            "policy": {
+              "$ref": "#/$defs/ContentPolicy"
+            }
+          },
+          "required": [
+            "name",
+            "project",
+            "type",
+            "policy"
+          ]
         },
         "ExternalCredentialReference": {
           "type": "object",
@@ -25889,6 +26301,146 @@
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
             }
           },
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "update_guardrail",
+    "group": "guardrails",
+    "method": "PUT",
+    "path": "/api/v1/guardrails/{guardrail_id}",
+    "description": "update guardrail",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "guardrail_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "guardrail_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "guardrail_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/UpdateGuardrailRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "UpdateGuardrailRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "policy": {
+              "$ref": "#/$defs/ContentPolicy"
+            }
+          },
+          "required": [
+            "name",
+            "policy"
+          ]
+        },
+        "ContentPolicy": {
+          "description": "Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.",
+          "properties": {
+            "rules": {
+              "items": {
+                "$ref": "#/$defs/ContentPolicyRule"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "rules"
+          ],
+          "type": "object"
+        },
+        "ContentPolicyRule": {
+          "properties": {
+            "action": {
+              "description": "Redaction is permitted only on transformed routes; strict routes accept block rules.",
+              "enum": [
+                "block",
+                "redact"
+              ],
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "pattern": {
+              "description": "Go RE2 expression; must not match the empty string.",
+              "type": "string"
+            },
+            "phase": {
+              "enum": [
+                "input",
+                "output"
+              ],
+              "type": "string"
+            },
+            "replacement": {
+              "description": "Literal replacement for the redact action; defaults to [REDACTED]. No capture expansion.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "phase",
+            "pattern",
+            "action"
+          ],
           "type": "object"
         }
       }

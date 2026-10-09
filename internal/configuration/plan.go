@@ -309,6 +309,9 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		return nil, access.Fail(422, "unsupported_api_version", "The artifact declares an unsupported api_version.")
 	}
 	normalizeDocument(doc)
+	if err := validateGuardrails(doc); err != nil {
+		return nil, err
+	}
 	if err := validateSCIMMappings(doc); err != nil {
 		return nil, err
 	}
@@ -722,6 +725,9 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 	}
 	state, err := loadState(ctx, q)
 	if err != nil {
+		return nil, err
+	}
+	if err = planGuardrails(ctx, q, doc, state, result); err != nil {
 		return nil, err
 	}
 	if doc.SAML != nil {

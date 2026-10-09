@@ -204,6 +204,7 @@ const (
 	BudgetIncreaseTargetKindApiKey         BudgetIncreaseTargetKind = "api_key"
 	BudgetIncreaseTargetKindAttribution    BudgetIncreaseTargetKind = "attribution"
 	BudgetIncreaseTargetKindBudgetGroup    BudgetIncreaseTargetKind = "budget_group"
+	BudgetIncreaseTargetKindGuardrail      BudgetIncreaseTargetKind = "guardrail"
 	BudgetIncreaseTargetKindInstallation   BudgetIncreaseTargetKind = "installation"
 	BudgetIncreaseTargetKindKeyEndUser     BudgetIncreaseTargetKind = "key_end_user"
 	BudgetIncreaseTargetKindKeyRoute       BudgetIncreaseTargetKind = "key_route"
@@ -220,6 +221,8 @@ func (e BudgetIncreaseTargetKind) Valid() bool {
 	case BudgetIncreaseTargetKindAttribution:
 		return true
 	case BudgetIncreaseTargetKindBudgetGroup:
+		return true
+	case BudgetIncreaseTargetKindGuardrail:
 		return true
 	case BudgetIncreaseTargetKindInstallation:
 		return true
@@ -724,6 +727,21 @@ func (e ConfigurationDocumentApiVersion) Valid() bool {
 	}
 }
 
+// Defines values for ConfigurationGuardrailType.
+const (
+	ConfigurationGuardrailTypeBuiltinRegex ConfigurationGuardrailType = "builtin.regex"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationGuardrailType enum.
+func (e ConfigurationGuardrailType) Valid() bool {
+	switch e {
+	case ConfigurationGuardrailTypeBuiltinRegex:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConfigurationPlanItemAction.
 const (
 	ConfigurationPlanItemActionBind     ConfigurationPlanItemAction = "bind"
@@ -768,6 +786,7 @@ const (
 	ConfigurationPlanItemKindCatalogPublication ConfigurationPlanItemKind = "catalog_publication"
 	ConfigurationPlanItemKindConfiguration      ConfigurationPlanItemKind = "configuration"
 	ConfigurationPlanItemKindCredential         ConfigurationPlanItemKind = "credential"
+	ConfigurationPlanItemKindGuardrail          ConfigurationPlanItemKind = "guardrail"
 	ConfigurationPlanItemKindNetworkCredential  ConfigurationPlanItemKind = "network_credential"
 	ConfigurationPlanItemKindPlugin             ConfigurationPlanItemKind = "plugin"
 	ConfigurationPlanItemKindPricing            ConfigurationPlanItemKind = "pricing"
@@ -785,6 +804,8 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 	case ConfigurationPlanItemKindConfiguration:
 		return true
 	case ConfigurationPlanItemKindCredential:
+		return true
+	case ConfigurationPlanItemKindGuardrail:
 		return true
 	case ConfigurationPlanItemKindNetworkCredential:
 		return true
@@ -985,6 +1006,21 @@ func (e CreateBudgetIncreaseRequestWindow) Valid() bool {
 	}
 }
 
+// Defines values for CreateGuardrailRequestType.
+const (
+	CreateGuardrailRequestTypeBuiltinRegex CreateGuardrailRequestType = "builtin.regex"
+)
+
+// Valid indicates whether the value is a known member of the CreateGuardrailRequestType enum.
+func (e CreateGuardrailRequestType) Valid() bool {
+	switch e {
+	case CreateGuardrailRequestTypeBuiltinRegex:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CredentialRequirement.
 const (
 	CredentialRequirementForbidden CredentialRequirement = "forbidden"
@@ -1090,6 +1126,21 @@ func (e GrantEnrollmentStatusStatus) Valid() bool {
 	case GrantEnrollmentStatusStatusExpired:
 		return true
 	case GrantEnrollmentStatusStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailResponseType.
+const (
+	GuardrailResponseTypeBuiltinRegex GuardrailResponseType = "builtin.regex"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailResponseType enum.
+func (e GuardrailResponseType) Valid() bool {
+	switch e {
+	case GuardrailResponseTypeBuiltinRegex:
 		return true
 	default:
 		return false
@@ -4000,7 +4051,8 @@ type ConfigurationDocument struct {
 	BudgetTimeZone nullable.Nullable[string] `json:"budget_time_zone,omitempty"`
 
 	// ExportedAt Informational only; excluded from the artifact digest
-	ExportedAt *time.Time `json:"exported_at,omitempty"`
+	ExportedAt *time.Time                `json:"exported_at,omitempty"`
+	Guardrails *[]ConfigurationGuardrail `json:"guardrails,omitempty"`
 
 	// InstallationBudget Installation cap. Omitted or null preserves destination policy; an empty policy clears it. Exports always include the current policy. Changes require settings permission.
 	InstallationBudget nullable.Nullable[BudgetPolicy] `json:"installation_budget,omitempty"`
@@ -4039,6 +4091,19 @@ type ConfigurationExportResponse struct {
 	// Document Secret-free desired-state artifact identified by natural names, never UUIDs
 	Document ConfigurationDocument `json:"document"`
 }
+
+// ConfigurationGuardrail defines model for ConfigurationGuardrail.
+type ConfigurationGuardrail struct {
+	Name string `json:"name"`
+
+	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
+	Policy  ContentPolicy              `json:"policy"`
+	Project string                     `json:"project"`
+	Type    ConfigurationGuardrailType `json:"type"`
+}
+
+// ConfigurationGuardrailType defines model for ConfigurationGuardrail.Type.
+type ConfigurationGuardrailType string
 
 // ConfigurationModelEntry defines model for ConfigurationModelEntry.
 type ConfigurationModelEntry struct {
@@ -4535,6 +4600,19 @@ type CreateBudgetIncreaseRequest struct {
 // CreateBudgetIncreaseRequestWindow defines model for CreateBudgetIncreaseRequest.Window.
 type CreateBudgetIncreaseRequestWindow string
 
+// CreateGuardrailRequest defines model for CreateGuardrailRequest.
+type CreateGuardrailRequest struct {
+	Name string `json:"name"`
+
+	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
+	Policy    ContentPolicy              `json:"policy"`
+	ProjectId openapi_types.UUID         `json:"project_id"`
+	Type      CreateGuardrailRequestType `json:"type"`
+}
+
+// CreateGuardrailRequestType defines model for CreateGuardrailRequest.Type.
+type CreateGuardrailRequestType string
+
 // CreateInvitationRequest defines model for CreateInvitationRequest.
 type CreateInvitationRequest struct {
 	Email string `json:"email"`
@@ -4952,6 +5030,41 @@ type GrantEnrollmentStatus struct {
 
 // GrantEnrollmentStatusStatus `pending` until the operator approves the device upstream; `completed` once the grant created a credential version; `denied` when the operator denied the device; `expired` when the device authorization expired first.
 type GrantEnrollmentStatusStatus string
+
+// GuardrailListResponse defines model for GuardrailListResponse.
+type GuardrailListResponse struct {
+	Items      []GuardrailResponse       `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// GuardrailResponse defines model for GuardrailResponse.
+type GuardrailResponse struct {
+	Etag string             `json:"etag"`
+	Id   openapi_types.UUID `json:"id"`
+	Name string             `json:"name"`
+
+	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
+	Policy     ContentPolicy                `json:"policy"`
+	ProjectId  openapi_types.UUID           `json:"project_id"`
+	RetiredAt  nullable.Nullable[time.Time] `json:"retired_at"`
+	Revision   int64                        `json:"revision"`
+	RevisionId openapi_types.UUID           `json:"revision_id"`
+	Type       GuardrailResponseType        `json:"type"`
+}
+
+// GuardrailResponseType defines model for GuardrailResponse.Type.
+type GuardrailResponseType string
+
+// GuardrailRevisionResponse defines model for GuardrailRevisionResponse.
+type GuardrailRevisionResponse struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	GuardrailId openapi_types.UUID `json:"guardrail_id"`
+	Id          openapi_types.UUID `json:"id"`
+
+	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
+	Policy   ContentPolicy `json:"policy"`
+	Revision int64         `json:"revision"`
+}
 
 // HealthProbe Opts the connection into active health probes: bounded synthetic requests accounted to the installation.
 type HealthProbe struct {
@@ -8610,6 +8723,14 @@ type UpdateCatalogPublicationRequest struct {
 	PricesPublic bool `json:"prices_public"`
 }
 
+// UpdateGuardrailRequest defines model for UpdateGuardrailRequest.
+type UpdateGuardrailRequest struct {
+	Name string `json:"name"`
+
+	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
+	Policy ContentPolicy `json:"policy"`
+}
+
 // UpdateInstallationBrandingRequest defines model for UpdateInstallationBrandingRequest.
 type UpdateInstallationBrandingRequest struct {
 	// Logo Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels.
@@ -9247,6 +9368,30 @@ type ListCodeTokenWindowsParams struct {
 // ApplyConfigurationParams defines parameters for ApplyConfiguration.
 type ApplyConfigurationParams struct {
 	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ListGuardrailsParams defines parameters for ListGuardrails.
+type ListGuardrailsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
+}
+
+// CreateGuardrailParams defines parameters for CreateGuardrail.
+type CreateGuardrailParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteGuardrailParams defines parameters for DeleteGuardrail.
+type DeleteGuardrailParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// UpdateGuardrailParams defines parameters for UpdateGuardrail.
+type UpdateGuardrailParams struct {
+	IfMatch        string `json:"If-Match"`
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
@@ -10464,6 +10609,12 @@ type ApplyConfigurationJSONRequestBody = ConfigurationPromotionRequest
 
 // PlanConfigurationJSONRequestBody defines body for PlanConfiguration for application/json ContentType.
 type PlanConfigurationJSONRequestBody = ConfigurationPromotionRequest
+
+// CreateGuardrailJSONRequestBody defines body for CreateGuardrail for application/json ContentType.
+type CreateGuardrailJSONRequestBody = CreateGuardrailRequest
+
+// UpdateGuardrailJSONRequestBody defines body for UpdateGuardrail for application/json ContentType.
+type UpdateGuardrailJSONRequestBody = UpdateGuardrailRequest
 
 // CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
 type CreateInvitationJSONRequestBody = CreateInvitationRequest

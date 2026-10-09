@@ -227,6 +227,10 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 			doc.Pricing.Prices = append(doc.Pricing.Prices, entry)
 		}
 	}
+	doc.Guardrails, err = exportGuardrails(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	doc.canonicalize()
 	doc.SCIMGroupMappings, err = exportSCIMMappings(ctx, q)
 	if err != nil {
