@@ -117,12 +117,20 @@ func Forbidden() error {
 }
 
 type Reply struct {
-	Status   int            `json:"status"`
-	Body     any            `json:"body"`
-	ETag     string         `json:"etag,omitempty"`
-	Location string         `json:"location,omitempty"`
-	Cookies  []*http.Cookie `json:"-"`
-	CSRF     string         `json:"-"`
+	Status         int             `json:"status"`
+	Body           any             `json:"body"`
+	ETag           string          `json:"etag,omitempty"`
+	Location       string          `json:"location,omitempty"`
+	Cookies        []*http.Cookie  `json:"-"`
+	CSRF           string          `json:"-"`
+	ParentMutation *ParentMutation `json:"parent_mutation,omitempty"`
+}
+
+// ParentMutation records the atomic parent transition caused by a child edit.
+// Clients can account for their own writes without adopting an unrelated edit.
+type ParentMutation struct {
+	Previous string `json:"previous"`
+	Current  string `json:"current"`
 }
 
 func OK(body any) Reply                  { return Reply{Status: 200, Body: body} }
@@ -181,6 +189,10 @@ func (s *Server) serve(maxBody int64, timeout time.Duration, fn func(*http.Reque
 		}
 		if result.ETag != "" {
 			w.Header().Set("ETag", `"`+result.ETag+`"`)
+		}
+		if result.ParentMutation != nil {
+			w.Header().Set("OLP-Previous-Parent-ETag", `"`+result.ParentMutation.Previous+`"`)
+			w.Header().Set("OLP-Parent-ETag", `"`+result.ParentMutation.Current+`"`)
 		}
 		if result.Location != "" {
 			w.Header().Set("Location", result.Location)

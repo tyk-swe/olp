@@ -54,15 +54,16 @@ func (s *Server) Replay(r *http.Request, tx pgx.Tx, p Principal, input any) (Rep
 	// Body into any would round native integers/decimals and underflow exponents
 	// before the response writer serializes a replay.
 	var response struct {
-		Status   int             `json:"status"`
-		Body     json.RawMessage `json:"body"`
-		ETag     string          `json:"etag,omitempty"`
-		Location string          `json:"location,omitempty"`
+		Status         int             `json:"status"`
+		Body           json.RawMessage `json:"body"`
+		ETag           string          `json:"etag,omitempty"`
+		Location       string          `json:"location,omitempty"`
+		ParentMutation *ParentMutation `json:"parent_mutation,omitempty"`
 	}
 	if err = json.Unmarshal(data, &response); err != nil {
 		return c, nil, err
 	}
-	result := Reply{Status: response.Status, ETag: response.ETag, Location: response.Location}
+	result := Reply{Status: response.Status, ETag: response.ETag, Location: response.Location, ParentMutation: response.ParentMutation}
 	if len(response.Body) > 0 && string(response.Body) != "null" {
 		result.Body = response.Body
 	}

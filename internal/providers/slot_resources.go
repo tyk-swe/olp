@@ -102,7 +102,8 @@ func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, 
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.provider_slots WHERE id=$1 AND provider_id=$2", slotID, providerID); err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = touch(r.Context(), tx, providerID); err != nil {
+	etag, err := touch(r.Context(), tx, providerID)
+	if err != nil {
 		return access.Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", providerID, access.NewID()); err != nil {
@@ -111,7 +112,7 @@ func (s *Server) deleteSlot(r *http.Request, _ access.Principal) (access.Reply, 
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.slot.delete", "provider_slot", slotID, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	result := access.Reply{Status: http.StatusNoContent}
+	result := access.Reply{Status: http.StatusNoContent, ParentMutation: &access.ParentMutation{Previous: current.ETag, Current: etag}}
 	if err = s.Access.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}

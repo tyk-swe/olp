@@ -166,9 +166,11 @@ func NewClient(endpoint, tokenFile string) (*Client, error) {
 
 // Response preserves ETags for subsequent writes and the declared JSON body.
 type Response struct {
-	Status int
-	ETag   string
-	Body   json.RawMessage
+	Status             int
+	ETag               string
+	Body               json.RawMessage
+	PreviousParentETag string
+	ParentETag         string
 }
 
 // APIError deliberately excludes server-controlled details, which may contain
@@ -227,7 +229,8 @@ func (client *Client) Call(ctx context.Context, operation Operation, args Argume
 	if len(data) > 0 && !json.Valid(data) {
 		return Response{}, errors.New("management API response must be JSON")
 	}
-	return Response{Status: resp.StatusCode, ETag: resp.Header.Get("ETag"), Body: data}, nil
+	return Response{Status: resp.StatusCode, ETag: resp.Header.Get("ETag"), Body: data,
+		PreviousParentETag: resp.Header.Get("OLP-Previous-Parent-ETag"), ParentETag: resp.Header.Get("OLP-Parent-ETag")}, nil
 }
 
 // ReadTokenFile bounds file reads and rejects empty or multi-line credentials.

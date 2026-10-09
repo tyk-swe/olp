@@ -604,6 +604,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
+	result.ParentMutation = &access.ParentMutation{Previous: current.ETag, Current: updated.ETag}
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}

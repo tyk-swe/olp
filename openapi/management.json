@@ -27942,7 +27942,21 @@
                 }
               }
             },
-            "description": ""
+            "description": "",
+            "headers": {
+              "OLP-Previous-Parent-ETag": {
+                "description": "Provider ETag immediately before this slot mutation.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "OLP-Parent-ETag": {
+                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request’s atomic parent transition, including idempotent replay.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -28096,7 +28110,21 @@
         ],
         "responses": {
           "204": {
-            "description": "Draft slot removed"
+            "description": "Draft slot removed",
+            "headers": {
+              "OLP-Previous-Parent-ETag": {
+                "description": "Provider ETag immediately before this slot mutation.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "OLP-Parent-ETag": {
+                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request’s atomic parent transition, including idempotent replay.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "409": {
             "description": "Default slot is required",

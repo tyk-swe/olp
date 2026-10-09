@@ -182,3 +182,21 @@ func TestClientOriginAndTokenBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestClientPreservesAtomicParentMutationMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("OLP-Previous-Parent-ETag", `"previous"`)
+		w.Header().Set("OLP-Parent-ETag", `"current"`)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, tokenFile(t, "private-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation, _ := Lookup("delete_credential_slot")
+	result, err := client.Call(t.Context(), operation, Arguments{Path: map[string]string{"provider_id": "p", "slot_id": "s"}, IfMatch: "observed"})
+	if err != nil || result.PreviousParentETag != `"previous"` || result.ParentETag != `"current"` {
+		t.Fatalf("parent metadata lost: %v", err)
+	}
+}
