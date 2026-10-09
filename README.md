@@ -110,6 +110,7 @@ upstream.
 | [Access control](docs/access.md) | Identity, projects, management tokens, and account recovery |
 | [Management clients](docs/operator-cli.md) | Contract-generated CLI commands, stale-safe configuration promotion, client setup, and scoped management MCP |
 | [Configuration Actions](docs/configuration-actions.md) | Reusable pull-request planning, review comments and merged configuration promotion |
+| [Terraform and OpenTofu](docs/terraform.md) | Individual resource automation and acceptance qualification |
 | [Operator console](docs/operator-console.md) | Installation identity, independent-installation bookmarks, bulk member editing, and session-scoped saved views |
 | [Model catalog](docs/model-catalog.md) | Scoped route discovery, SDK samples, and owner-controlled public catalogs |
 | [External secrets](docs/external-secrets.md) | Wrapped key rings, workload identities, pinned provider credentials, and safe rotation |

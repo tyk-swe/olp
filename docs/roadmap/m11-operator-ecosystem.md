@@ -204,3 +204,13 @@ versions, rotate/verify sealed records and start the built gateway with a
 wrapped ring. Cache races cover single-flight, bounded capacity and unavailable
 plan decisions. The packaged external-credential console journey creates and
 rotates versions and passes accessibility checks; local and Helm gates pass.
+
+Terraform qualification in progress: the separate
+[provider repository](https://github.com/tyk-swe/terraform-provider-openllmproxy)
+currently qualifies projects, budget groups, notification destinations and
+notification rules against fresh live installations with Terraform 1.16.5 and
+OpenTofu 1.13.1. Both engines exercise plan/create/update/import/destroy,
+concurrent-edit refusal, nullable budget-ceiling removal and ephemeral signing
+values excluded from saved plans/state. CI builds OLP from the SDK's immutable
+module version. The full M11 resource-list exit criterion remains pending. See
+[provider operations](../terraform.md).

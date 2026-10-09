@@ -1,0 +1,43 @@
+# Terraform and OpenTofu
+
+The [OpenLLMProxy provider](https://github.com/tyk-swe/terraform-provider-openllmproxy)
+lives in a separate repository. Its M11 implementation is in progress. Projects,
+budget groups, notification destinations and notification rules currently have
+live create, update, import and destroy qualification with Terraform 1.16.5 and
+OpenTofu 1.13.1. The remaining M11 resources are being implemented before the
+milestone is marked complete.
+
+Connect with `OLP_MANAGEMENT_URL` and `OLP_MANAGEMENT_TOKEN_FILE`. The provider
+uses the generated management contract and reads the private token file for
+every operation. A token's creator role, project boundary and current scopes
+remain authoritative. Project resources require an installation-wide
+`manage_projects` token whose creator is an owner. Budget and notification
+resources use their ordinary `keys` or installation `settings` requirements;
+the provider does not require configuration-promotion permissions.
+
+Each resource manages its own UUID, JSON `definition` and observed ETag.
+Creation-only field changes require replacement; updates use the API's declared
+mutable fields. Removing a nullable budget ceiling explicitly clears it.
+Equivalent fixed-scale monetary values keep the configured representation,
+avoiding repeated plans. Import discovers nonsecret creation fields from the
+current server response. An external edit after a reviewed plan's observed
+ETag refuses apply and requires a fresh review.
+
+Notification signing values use a separate write-only `secret` attribute,
+an ephemeral input and a positive `secret_version` change counter. Values are
+excluded from saved plans and state. The acceptance suite checks that boundary
+with both engines. The provider rejects credential values in the state-bearing
+`definition` field.
+
+Destroy is conditional. Dependent resources and retained accounting/delivery
+history return a conflict. Delete notification rules before their destination
+or budget group, and detach dependent resources before deleting a project.
+Successful conditional deletion retains its audit and idempotent replay;
+deleting a signing destination removes its stored secret. See
+[access administration](access.md) for these API boundaries.
+
+The provider repository documents source builds, development overrides,
+required disposable-service environment and its CI acceptance suite. Its OLP
+binary and SDK come from the same immutable dependency version. For
+installation-wide artifact promotion through GitHub Actions, use the separate
+[configuration-promotion workflow](configuration-actions.md).
