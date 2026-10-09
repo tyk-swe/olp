@@ -134,7 +134,12 @@ echo "bench-gate: ${#packages[@]} benchmark packages: ${packages[*]#github.com/*
 measure() { # tree, output, -bench pattern, packages...
   local tree=$1 output=$2 pattern=$3
   shift 3
-  local flags=(-bench "$pattern" -benchmem -count=1)
+  # Align functions to 64 bytes on both sides. A benchmark of a code layout
+  # the linker happens to emit is noise the comparison should not gate on;
+  # with entries 64-byte aligned, an instruction's position modulo the fetch
+  # quantum depends only on its offset inside its function, so identical code
+  # performs identically whatever text the change adds before it.
+  local flags=(-bench "$pattern" -benchmem -count=1 -ldflags=-funcalign=64)
   [[ -z ${BENCH_TIME:-} ]] || flags+=(-benchtime "$BENCH_TIME")
   [[ -z $skip ]] || flags+=(-skip "$skip")
   if ! (cd -- "$tree" && go test -p 1 -vet=off -run '^$' "${flags[@]}" "$@") >"$scratch/stdout" 2>"$scratch/stderr"; then
@@ -148,7 +153,7 @@ measure() { # tree, output, -bench pattern, packages...
 
 # Compile both sides up front, so build time stays out of the first sample.
 for tree in "$scratch/base" .; do
-  (cd -- "$tree" && go test -p 2 -vet=off -run '^$' -bench '^$' -count=1 "${packages[@]}" >/dev/null)
+  (cd -- "$tree" && go test -p 2 -vet=off -run '^$' -bench '^$' -count=1 -ldflags=-funcalign=64 "${packages[@]}" >/dev/null)
 done
 : >"$out/old.txt"
 : >"$out/new.txt"
