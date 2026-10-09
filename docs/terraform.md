@@ -1,7 +1,7 @@
 # Terraform and OpenTofu
 
 The [OpenLLMProxy provider](https://github.com/tyk-swe/terraform-provider-openllmproxy)
-lives in a separate repository. Its M11 implementation is in progress. Projects,
+lives in a separate repository. Its M11 implementation is in progress. Projects, keys,
 budget groups, notification destinations and notification rules currently have
 live create, update, import and destroy qualification with Terraform 1.16.5 and
 OpenTofu 1.13.1. The remaining M11 resources are being implemented before the
@@ -41,3 +41,12 @@ required disposable-service environment and its CI acceptance suite. Its OLP
 binary and SDK come from the same immutable dependency version. For
 installation-wide artifact promotion through GitHub Actions, use the separate
 [configuration-promotion workflow](configuration-actions.md).
+
+API keys use `openllmproxy_key` and revoke on destroy, preserving retained
+accounting. Their mutable ceiling fields are projected from budget windows,
+separately from accrued spend. An optional absolute `secret_file` atomically
+captures the one-time key into an owner-only file; state stores its path, not
+its value. Changing that path replaces the key. Omit the option when importing
+existing metadata, since an existing key's secret cannot be recovered. The
+operator removes the local file after revocation. An output failure preserves
+the created UUID in state so the authority can be reconciled or destroyed.

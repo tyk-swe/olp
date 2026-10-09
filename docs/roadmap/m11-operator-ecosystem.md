@@ -214,3 +214,10 @@ concurrent-edit refusal, nullable budget-ceiling removal and ephemeral signing
 values excluded from saved plans/state. CI builds OLP from the SDK's immutable
 module version. The full M11 resource-list exit criterion remains pending. See
 [provider operations](../terraform.md).
+
+API-key resource qualification also runs both engines against the SDK-pinned
+OLP binary. It covers create/update/import/no-change/destroy, exact budget-window
+projection, owner-only one-time output without secret state, and retained
+revocation records. A forced output error preserves the created UUID in state
+and allows destroy, preventing orphaned active credentials. The full resource
+list remains pending.
