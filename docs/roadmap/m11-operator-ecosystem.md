@@ -286,5 +286,12 @@ boundaries, immutable policy versions, conditional writes/replay/audit, actual
 input refusal, pinned published copies, and portable reuse are verified against
 disposable PostgreSQL and Valkey. The complete management authorization/isolation
 and generated-client/MCP sweeps pass for the new operations; focused races and
-the full local gate pass. Terraform guardrail lifecycle qualification remains
-pending.
+the full local gate pass. Terraform guardrail lifecycle qualification is recorded below.
+
+`TestGuardrailAndCopiedRoutePoliciesWithTerraformAndOpenTofu` manages a named
+guardrail and a dependent published route through both real engines. Definition
+create/update/import/no-change/destroy, immutable old-policy reads, reviewed
+policy-copy publication, foreign saved-plan refusal, and history-preserving
+retirement pass. The complete ten-resource SDK-matched disposable acceptance
+suite passes. Sinks and MCP servers remain before the full Terraform exit
+criterion is satisfied.

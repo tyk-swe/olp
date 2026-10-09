@@ -2,7 +2,7 @@
 
 The [OpenLLMProxy provider](https://github.com/tyk-swe/terraform-provider-openllmproxy)
 lives in a separate repository. Its M11 implementation is in progress. Projects,
-providers, credential slots, routes, routing policies, keys, budget groups,
+providers, credential slots, routes, routing policies, guardrails, keys, budget groups,
 notification destinations and notification rules currently have
 live create, update, import and destroy qualification with Terraform 1.16.5 and
 OpenTofu 1.13.1. The remaining M11 resources are being implemented before the
@@ -74,3 +74,11 @@ the explicit override while retaining a fresh ETag. The scoped API's settings,
 key or configuration authority remains required. Draft policy changes become
 live upon activation. Key/policy graphs coordinate only their own proven parent
 writes; a foreign parent or policy edit still invalidates a saved plan.
+
+`openllmproxy_guardrail` manages project-scoped `builtin.regex` definitions,
+conditional immutable policy revisions, UUID import and retirement. Compose a
+route's `content_policy` from
+`jsondecode(openllmproxy_guardrail.filter.definition).policy` to review and
+publish a selected copy. Existing serving revisions stay pinned; foreign saved
+plans are refused before dependent publication. Retained guardrail history can
+prevent project deletion. See [Named guardrails](guardrails.md).
