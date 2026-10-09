@@ -25958,6 +25958,90 @@
         "tags": [
           "projects"
         ]
+      },
+      "delete": {
+        "operationId": "delete_project",
+        "description": "Delete an empty project with observed ETag and idempotency. Dependencies and retained history refuse deletion.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "manage_projects",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "projects"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Project deleted"
+          },
+          "409": {
+            "description": "Project retains resources or history",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        }
       }
     },
     "/api/v1/projects/{project_id}/members": {

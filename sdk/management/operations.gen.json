@@ -6807,6 +6807,71 @@
     }
   },
   {
+    "name": "delete_project",
+    "group": "projects",
+    "method": "DELETE",
+    "path": "/api/v1/projects/{project_id}",
+    "description": "Delete an empty project with observed ETag and idempotency. Dependencies and retained history refuse deletion.",
+    "scopes": [
+      [
+        "manage_projects",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "project_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "project_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "delete_project_member",
     "group": "projects",
     "method": "DELETE",

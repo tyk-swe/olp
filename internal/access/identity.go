@@ -115,6 +115,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 		"GET /api/v1/projects":                                                                   s.projects, "POST /api/v1/projects": s.createProject,
 		"GET /api/v1/project-memberships":   s.projectMemberships,
 		"GET /api/v1/projects/{project_id}": s.project, "PATCH /api/v1/projects/{project_id}": s.updateProject,
+		"DELETE /api/v1/projects/{project_id}":                   s.deleteProject,
 		"GET /api/v1/projects/{project_id}/members":              s.projectMembers,
 		"PUT /api/v1/projects/{project_id}/members/{user_id}":    s.putProjectMember,
 		"DELETE /api/v1/projects/{project_id}/members/{user_id}": s.deleteProjectMember,

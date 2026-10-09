@@ -41,6 +41,8 @@
     settings: 'Manage settings and pricing',
     configure: 'Manage providers and routes',
     keys: 'Manage API keys',
+    manage_projects: 'Manage installation projects',
+    manage_organization: 'Manage organizations',
     playground: 'Use the playground',
     usage: 'Read usage and request history'
   };

@@ -434,6 +434,11 @@ owner. The scope is separate from provider configuration and does not imply
 `read`, `configure` or `keys`; assigned-project tokens cannot administer the
 installation's project boundary. This supports infrastructure automation
 without granting token administration.
+Deleting an empty project requires its observed ETag and an Idempotency-Key.
+Existing providers, routes, drafts, keys and retained foreign-key dependencies
+return `409 project_in_use`, preserving the project boundary and its history.
+Successful deletion advances runtime authority and records an audit event;
+repeating the same idempotency key returns the completed result.
 Token administration itself — create, list, read, revoke — is always
 session-owner-only; no management token can manage tokens. Installing,
 approving, permitting and uninstalling [provider plugins](plugins.md) is

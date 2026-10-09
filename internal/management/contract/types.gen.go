@@ -9543,6 +9543,12 @@ type CreateProjectParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// DeleteProjectParams defines parameters for DeleteProject.
+type DeleteProjectParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // UpdateProjectParams defines parameters for UpdateProject.
 type UpdateProjectParams struct {
 	// IfMatch Current project ETag

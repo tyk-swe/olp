@@ -32,4 +32,20 @@ func TestProjectAutomationRequiresOwnerScopeAndObservedETag(t *testing.T) {
 	want("PATCH", "/api/v1/projects/"+id, map[string]any{"name": "Renamed project"}, etagHeader(read), 200)
 	want("PATCH", "/api/v1/projects/"+id, map[string]any{"name": "Stale rename"}, etagHeader(read), 412)
 	want("GET", "/api/v1/providers", nil, nil, 403)
+	current := want("GET", "/api/v1/projects/"+id, nil, nil, 200)
+	stale := etagHeader(read)
+	stale["Idempotency-Key"] = "stale-project-delete"
+	want("DELETE", "/api/v1/projects/"+id, nil, stale, 412)
+	headers := etagHeader(current)
+	headers["Idempotency-Key"] = "project-delete"
+	want("DELETE", "/api/v1/projects/"+id, nil, headers, 204)
+	want("DELETE", "/api/v1/projects/"+id, nil, headers, 204)
+	want("GET", "/api/v1/projects/"+id, nil, nil, 404)
+	retained := createProject(h, owner, "Retained project")
+	h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Retained key", "project_id": retained}, map[string]string{"Idempotency-Key": "retained-project-key"}, 201)
+	retainedRead := want("GET", "/api/v1/projects/"+retained, nil, nil, 200)
+	retainedHeaders := etagHeader(retainedRead)
+	retainedHeaders["Idempotency-Key"] = "retain-project-boundary"
+	want("DELETE", "/api/v1/projects/"+retained, nil, retainedHeaders, 409)
+	want("GET", "/api/v1/projects/"+retained, nil, nil, 200)
 }

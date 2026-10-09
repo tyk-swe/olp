@@ -23,6 +23,7 @@
     "DELETE /api/v1/plugins/{plugin_digest}": "Y-----------",
     "DELETE /api/v1/profile/mfa/factors/{factor_id}": "YYYYYYYY----",
     "DELETE /api/v1/profile/saml-identities/{identity_id}": "YYYYYYYY----",
+    "DELETE /api/v1/projects/{project_id}": "Y-------Y---",
     "DELETE /api/v1/projects/{project_id}/members/{user_id}": "Y-------Y---",
     "DELETE /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}": "YYYY----YYYY",
     "DELETE /api/v1/provisioning/{source}/users/{external_id}": "Y-------Y---",
