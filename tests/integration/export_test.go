@@ -24,6 +24,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/gateway"
@@ -451,6 +452,40 @@ func TestProjectAuditSinkScopesAuditStream(t *testing.T) {
 	}
 }
 
+func TestProjectAuditResolvesRouteAndProviderModelIDs(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	projectID := createProject(h, owner, "Audit ownership")
+	fixtureRoute(t, h, "audit-route")
+	var routeID string
+	if err := h.Pool.QueryRow(t.Context(), `UPDATE olp.routes SET project_id=$1 WHERE slug='audit-route' RETURNING id::text`, projectID).Scan(&routeID); err != nil {
+		t.Fatal(err)
+	}
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Audit provider", "project_id": projectID,
+		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": "https://provider.example/v1"},
+		"credential":    "private-fixture", "model": "audit-model",
+	}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	var modelID string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.provider_models WHERE provider_id=$1`, provider["id"]).Scan(&modelID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := h.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	for kind, id := range map[string]string{"route": routeID, "provider_model": modelID} {
+		if err := access.Audit(t.Context(), tx, httptest.NewRequest("PATCH", "/", nil), access.System, "fixture.update", kind, id, "success"); err != nil {
+			t.Fatal(err)
+		}
+		var got *string
+		if err := tx.QueryRow(t.Context(), `SELECT project_id::text FROM olp.audit WHERE action='fixture.update' AND resource_id=$1`, id).Scan(&got); err != nil || got == nil || *got != projectID {
+			t.Fatalf("%s audit lost project ownership: %v, %v", kind, got, err)
+		}
+	}
+}
+
 func fixtureRoute(t *testing.T, h *accessHarness, slug string) {
 	t.Helper()
 	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.routes(id,slug,created_by,latest_revision,latest_revision_id,etag) VALUES(gen_random_uuid(),$1,(SELECT id FROM olp.users LIMIT 1),1,gen_random_uuid(),gen_random_uuid())`, slug); err != nil {
@@ -787,6 +822,34 @@ func TestExportSinkCredentialClear(t *testing.T) {
 	var secrets int
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1`, credentialID).Scan(&secrets); err != nil || secrets != 0 {
 		t.Fatal("old sealed credential leaked")
+	}
+}
+
+func TestExportSinkDestinationChangesRequireExplicitCredentials(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	for _, kind := range []string{"https", "otlp_logs", "s3", "gcs", "azure_blob"} {
+		t.Run(kind, func(t *testing.T) {
+			format := map[string]string{"https": "json", "otlp_logs": "otlp", "s3": "jsonl", "gcs": "jsonl", "azure_blob": "jsonl"}[kind]
+			sink := h.want(owner, "POST", "/api/v1/observability/sinks", map[string]any{
+				"name": "credential-" + kind, "type": kind, "destination": "https://receiver.example/bucket", "streams": []string{"requests"}, "format": format,
+				"credential": map[string]any{"headers": map[string]string{"Authorization": "Bearer private-fixture"}},
+			}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			path := "/api/v1/observability/sinks/" + sink["export_sink_id"].(string)
+			h.want(owner, "PATCH", path, map[string]any{"destination": "https://other.example/bucket"}, etagHeader(sink), 422)
+			unchanged := h.want(owner, "GET", path, nil, nil, 200)
+			if unchanged["destination"] != sink["destination"] || unchanged["etag"] != sink["etag"] {
+				t.Fatal("rejected update changed the credential destination")
+			}
+			sink = h.want(owner, "PATCH", path, map[string]any{
+				"destination": "https://other.example/bucket", "credential": map[string]any{"headers": map[string]string{"Authorization": "Bearer replacement-fixture"}},
+			}, etagHeader(sink), 200)
+			sink = h.want(owner, "PATCH", path, map[string]any{"destination": "https://third.example/bucket", "credential": nil}, etagHeader(sink), 200)
+			if sink["credential_configured"] != false {
+				t.Fatal("explicit removal retained the old secret")
+			}
+			h.want(owner, "PATCH", path, map[string]any{"destination": "https://fourth.example/bucket"}, etagHeader(sink), 200)
+		})
 	}
 }
 

@@ -416,6 +416,12 @@ func tokenFailure(err error) error {
 }
 
 func (a *Auth) ApplyAzureStorage(ctx context.Context, req *http.Request, mode string, secret []byte) (egress.Sensitive, error) {
+	if !storageDestination(req.URL, "azure_blob") {
+		return egress.Sensitive{}, ErrAuthentication
+	}
+	if mode != "azure_default" && mode != "azure_client_secret" {
+		return egress.Sensitive{}, ErrCredentialRejected
+	}
 	c := Config{Kind: "azure_blob", AuthMode: mode}
 	key := cacheKey(c, secret)
 	a.mu.Lock()

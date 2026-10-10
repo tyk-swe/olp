@@ -55,6 +55,7 @@ func objectKey(record Record) string {
 
 type senderAuth interface {
 	Apply(ctx context.Context, req *http.Request, config connectors.Config, secret, body []byte) (egress.Sensitive, error)
+	ApplyGoogleStorage(ctx context.Context, req *http.Request, mode string, secret []byte) (egress.Sensitive, error)
 	ApplyAzureStorage(ctx context.Context, req *http.Request, mode string, secret []byte) (egress.Sensitive, error)
 }
 
@@ -299,7 +300,7 @@ func (s *Sender) sendObject(ctx context.Context, endpoint *url.URL, destination 
 		if mode == "service_account" && len(credentialDoc.Secret) == 0 {
 			return sendError("credential", errors.New("gcs service_account auth_mode requires a secret"))
 		}
-		if _, err := s.auth.Apply(ctx, request, connectors.Config{Kind: "vertex_ai", AuthMode: mode}, credentialDoc.Secret, body); err != nil {
+		if _, err := s.auth.ApplyGoogleStorage(ctx, request, mode, credentialDoc.Secret); err != nil {
 			if errors.Is(err, connectors.ErrCredentialRejected) {
 				return sendError("credential", err)
 			}

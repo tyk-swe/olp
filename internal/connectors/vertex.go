@@ -12,7 +12,7 @@ func (c Config) vertexDestination(u *url.URL) bool {
 	if u == nil {
 		return false
 	}
-	if vertexTestDestination(u) {
+	if cloudTestDestination(u) {
 		return true
 	}
 	expected, err := url.Parse(DefaultEndpoint("vertex_ai", c.CloudRegion, c.CloudProject))
