@@ -205,103 +205,65 @@ wrapped ring. Cache races cover single-flight, bounded capacity and unavailable
 plan decisions. The packaged external-credential console journey creates and
 rotates versions and passes accessibility checks; local and Helm gates pass.
 
-Terraform qualification in progress: the separate
-[provider repository](https://github.com/tyk-swe/terraform-provider-openllmproxy)
-currently qualifies projects, budget groups, notification destinations and
-notification rules against fresh live installations with Terraform 1.16.5 and
-OpenTofu 1.13.1. Both engines exercise plan/create/update/import/destroy,
-concurrent-edit refusal, nullable budget-ceiling removal and ephemeral signing
-values excluded from saved plans/state. CI builds OLP from the SDK's immutable
-module version. The full M11 resource-list exit criterion remains pending. See
-[provider operations](../terraform.md).
+Terraform qualification covers eleven resource types in the separate
+[provider repository](https://github.com/tyk-swe/terraform-provider-openllmproxy):
+projects, providers, credential slots, routes, routing policies, guardrails,
+export sinks, keys, budget groups, notification destinations and notification
+rules. Terraform 1.16.5 and OpenTofu 1.13.1 run plan/create/update/import/no-change/
+destroy against fresh live installations built from the SDK's immutable module
+version. The full eleven-type suite passed under race in 143.233 seconds. The
+complete twelve-resource exit criterion remains pending for upstream MCP servers.
+See [provider operations](../terraform.md).
 
-API-key resource qualification also runs both engines against the SDK-pinned
-OLP binary. It covers create/update/import/no-change/destroy, exact budget-window
-projection, owner-only one-time output without secret state, and retained
-revocation records. A forced output error preserves the created UUID in state
-and allows destroy, preventing orphaned active credentials. The full resource
-list remains pending.
+Budget/notification tests cover concurrent-edit refusal, explicit nullable-ceiling
+removal and ephemeral signing values excluded from saved plans/state. API-key
+qualification covers exact budget-window projection, owner-only one-time output,
+retained revocation, and recovery from forced output failure: state retains the
+created UUID so destroy cannot leave an orphaned active credential.
 
-Provider and slot lifecycle prerequisites are qualified by
+Provider/slot backend qualification includes
 `TestProviderDeletionRequiresUnusedDraftAndCleansOwnedSeals` and
 `TestCredentialSlotConditionsAreIndependentAndPreservePublishedVersions`.
 Unused draft deletion is conditional, replayable and audited, cleans owned seals,
-and preserves provider-specific price history and published dependencies.
-Individual slot preconditions survive sibling edits; deletion retains published
-credential versions and refuses the required default slot. The generated SDK,
-CLI and MCP authorization sweep covers the new operations; focused races,
-contract generation and the full local gate pass. Terraform adapters and the
-complete resource-list qualification remain in progress.
+and preserves scoped prices and published dependencies. Individual slot
+preconditions survive sibling edits; deletion retains published credentials and
+refuses the default slot. Both infrastructure engines exercise simultaneous pool
+creation, validated write-only rotation, normalized configuration and composite
+imports. Failed validation retains committed configuration and the prior secret
+counter. Saved destruction plans refuse external parent edits. Atomic parent
+transition metadata survives idempotent replay and advances only contiguous own
+writes.
 
-Provider and credential-slot Terraform/OpenTofu qualification now covers a real
-compatible upstream, simultaneous pool creation, independent conditional updates,
-validated write-only credential rotation, normalized nested configuration, UUID
-and composite imports, and destruction. Tests prove secrets stay out of saved
-plans/state, retain committed configuration and the prior counter after failed
-credential validation, and refuse an externally edited provider during a saved
-destruction plan. Atomic parent transition metadata survives idempotent replay.
-The seven-type acceptance suite passes against the SDK-pinned OLP binary; the
-complete twelve-resource exit criterion remains pending.
-
-Published-route automation prerequisites are qualified by
 `TestPublishedRouteWritesAreConditionalAtomicAndPreserveIndependentDrafts` and
-`TestPublishedRouteReplacementPreservesItsPolicy`: create/replace publish through
-the console's validation and promotion in one transaction; missing/stale
-preconditions refuse, failed writes leave no draft/revision/release change,
-replays preserve identity and audit counts, independent drafts remain untouched,
-and the serving snapshot preserves existing policy. Full local checks, focused
-races and the complete management/generated-client/MCP authorization sweeps pass.
-Terraform route qualification remains pending until both engine lifecycles pass.
+`TestPublishedRouteReplacementPreservesItsPolicy` prove atomic shared validation
+and promotion, conditional refusal, failure rollback, replayed identity/audit,
+independent draft preservation and pinned serving policy. The infrastructure
+route test covers revision updates, canonical target import, empty plans,
+retirement/history, stale saved-plan refusal and project-boundary replacement
+rejection before retirement.
 
-Published routes now have live Terraform 1.16.5 and OpenTofu 1.13.1 qualification:
-`TestPublishedRouteLifecycleWithTerraformAndOpenTofu` exercises create, atomic
-revision updates, UUID import, empty plans, retirement with retained history,
-stale saved-plan refusal and project-boundary replacement rejection before
-retirement. Exact target projection and canonical imported references are covered
-by focused tests. The eight-resource acceptance suite passes against the provider's
-immutable SDK-matched OLP build; the complete twelve-resource criterion remains
-pending for routing policies, guardrails, sinks and MCP servers.
+`TestRoutingPolicyRemovalPreservesFreshPreconditionsAndParentProof` covers all
+three scopes, removal/recreation, missing/stale conditions, original replay
+proofs and exact audit counts. Removal retains a fresh default-policy ETag.
+`TestRoutingPolicyLifecyclesWithTerraformAndOpenTofu` covers composite imports,
+key/policy graph mutations, omitted-constraint clearing and foreign saved-plan
+refusal without overwriting the external policy.
 
-Routing-policy lifecycle prerequisites are qualified by
-`TestRoutingPolicyRemovalPreservesFreshPreconditionsAndParentProof`: installation,
-API-key, and route-draft removal/recreation, stale and missing preconditions,
-original parent transitions on replay, and exact successful audit counts.
-Removal retains a fresh default-policy ETag so an earlier default observation
-cannot become valid again. Full local checks, focused races, and the complete
-management/SDK/CLI/MCP machine authorization sweeps pass. The Terraform resource
-qualification is recorded below.
-
-`TestRoutingPolicyLifecyclesWithTerraformAndOpenTofu` qualifies installation,
-API-key, and route-draft policy create/update/composite import/no-change/destroy
-with both engines. The graph changes its key and policy together, clears omitted
-constraints, and refuses a saved plan after an external policy/parent transition
-without overwriting it. The complete nine-resource, SDK-matched disposable
-acceptance suite passes. Guardrails, sinks, and MCP servers still remain before
-the full Terraform exit criterion can be satisfied.
-
-Named guardrail prerequisites are qualified by
 `TestNamedGuardrailRevisionsRemainScopedAndPublishedCopiesStayPinned` and
-`TestNamedGuardrailConfigurationPromotionIsPortableAndIdempotent`. Project
-boundaries, immutable policy versions, conditional writes/replay/audit, actual
-input refusal, pinned published copies, and portable reuse are verified against
-disposable PostgreSQL and Valkey. The complete management authorization/isolation
-and generated-client/MCP sweeps pass for the new operations; focused races and
-the full local gate pass. Terraform guardrail lifecycle qualification is recorded below.
+`TestNamedGuardrailConfigurationPromotionIsPortableAndIdempotent` cover project
+boundaries, immutable revisions, conditional replay/audit, actual input refusal,
+pinned published copies and portable reuse. The infrastructure guardrail/route
+graph qualifies reviewed policy composition, old-revision reads, foreign
+saved-plan refusal and retained retirement.
 
-`TestGuardrailAndCopiedRoutePoliciesWithTerraformAndOpenTofu` manages a named
-guardrail and a dependent published route through both real engines. Definition
-create/update/import/no-change/destroy, immutable old-policy reads, reviewed
-policy-copy publication, foreign saved-plan refusal, and history-preserving
-retirement pass. The complete ten-resource SDK-matched disposable acceptance
-suite passes. Sinks and MCP servers remain before the full Terraform exit
-criterion is satisfied.
-
-Content-free sink prerequisites are implemented in `0052_export_sinks.sql`,
-`internal/sinks`, and configuration promotion. Live tests prove atomic source
-queuing, replay suppression, project isolation, signed stable retries, pricing
-correction events, expired-gap counters, audit-field privacy, retirement cleanup,
-and destination-secret promotion with unchanged ETag reuse. The strengthened
-three-test service suite passed under race in 13.759 seconds. Ordinary management,
-isolation, and every generated SDK/CLI/MCP machine-authorization sweep passed in
-188.450 seconds; focused races and the full local gate pass. Terraform sink
-lifecycle qualification is still pending.
+Content-free sink qualification covers atomic scoped source queuing, replay
+suppression, stable signed retries, usage/pricing corrections, expired-gap counts,
+audit-field privacy, retirement cleanup and destination-bound promotion with
+unchanged ETag reuse. The three-test service suite passed under race in 13.759
+seconds. Ordinary management, isolation and every generated SDK/CLI/MCP machine
+operation passed in 188.450 seconds; focused races and the full local gate pass.
+`TestSignedExportSinkLifecyclesWithTerraformAndOpenTofu` additionally verifies
+actual signed delivery by the built installation worker, both scoped lifecycles,
+write-only values absent from saved-plan JSON and state, UUID imports, empty
+plans, foreign saved-plan refusal and signing-material cleanup. Both engines are
+included in the complete eleven-type suite.
