@@ -1924,7 +1924,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/ExternalCredentialReference"
             },
-            "description": "Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings."
+            "description": "Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings. Introducing an external reference requires installation-wide settings authority in addition to configure authority."
           }
         },
         "required": [
@@ -3253,7 +3253,8 @@
             ]
           },
           "credential_reference": {
-            "$ref": "#/components/schemas/ExternalCredentialReference"
+            "$ref": "#/components/schemas/ExternalCredentialReference",
+            "description": "Introducing an external reference requires installation-wide settings authority in addition to configure authority."
           }
         },
         "required": [
@@ -9674,7 +9675,8 @@
             "writeOnly": true
           },
           "credential_reference": {
-            "$ref": "#/components/schemas/ExternalCredentialReference"
+            "$ref": "#/components/schemas/ExternalCredentialReference",
+            "description": "Introducing an external reference requires installation-wide settings authority in addition to configure authority."
           }
         },
         "required": [],
@@ -11707,7 +11709,8 @@
             "$ref": "#/components/schemas/CredentialSlot"
           },
           "credential_reference": {
-            "$ref": "#/components/schemas/ExternalCredentialReference"
+            "$ref": "#/components/schemas/ExternalCredentialReference",
+            "description": "Introducing an external reference requires installation-wide settings authority in addition to configure authority."
           }
         },
         "required": [

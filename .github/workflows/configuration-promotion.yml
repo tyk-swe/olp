@@ -16,6 +16,10 @@ on:
         description: Optional destination reference JSON; contains no secret values
         type: string
         default: ''
+      reviewed_plan_path:
+        description: Committed olp-plan-review.json from the reviewed pull-request plan; required for apply
+        type: string
+        default: ''
       apply:
         description: Apply on a push to the caller's default branch
         type: boolean
@@ -44,10 +48,12 @@ jobs:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REVIEWED_PLAN: ${{ inputs.reviewed_plan_path }}
         run: |
           [[ $OLP_REF =~ ^[a-f0-9]{40}$ ]] || { echo 'olp_ref must be a reviewed commit SHA'; exit 1; }
           if [[ $APPLY == true ]]; then
             [[ $EVENT == push && $REF == "refs/heads/$DEFAULT_BRANCH" ]] || { echo 'Apply requires a push to the default branch'; exit 1; }
+            [[ -n $REVIEWED_PLAN ]] || { echo 'Apply requires a committed reviewed plan'; exit 1; }
           fi
       - name: Check out configuration data
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -116,8 +122,18 @@ jobs:
         env:
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
         run: '[[ $PLAN_OUTCOME == success ]]'
-      - name: Apply merged configuration
+      - name: Verify reviewed plan
+        id: review
         if: inputs.apply && steps.plan.outcome == 'success'
+        env:
+          REVIEWED_PLAN: ${{ inputs.reviewed_plan_path }}
+        run: |
+          configuration_root="$(realpath configuration)"
+          review_file="$(realpath -e "configuration/$REVIEWED_PLAN")"
+          [[ $review_file == "$configuration_root/"* ]] || { echo 'Reviewed plan must stay within configuration checkout'; exit 1; }
+          node olp-source/scripts/verify-promotion-review.mjs "$RUNNER_TEMP/olp-plan.json" "$review_file"
+      - name: Apply merged configuration
+        if: inputs.apply && steps.plan.outcome == 'success' && steps.review.outcome == 'success'
         env:
           OLP_MANAGEMENT_URL: ${{ inputs.installation_url }}
           PROMOTION_TOKEN: ${{ secrets.management_token }}

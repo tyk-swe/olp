@@ -1245,3 +1245,28 @@ func TestCaptureSinksListIsMetadataOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestExportSinkDeletionReportsCapturePolicyDependency(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	fixtureRoute(t, h, "capture-dependency")
+	configuration := h.want(owner, "GET", "/api/v1/observability/capture", nil, nil, 200)
+	h.want(owner, "PATCH", "/api/v1/observability/capture", map[string]any{"enabled": true}, etagHeader(configuration), 200)
+	_, receiver := newExportReceiver(t, "", 204)
+	sink := h.want(owner, "POST", "/api/v1/observability/sinks", map[string]any{
+		"name": "Capture dependency", "type": "https", "destination": receiver.URL,
+		"streams": []string{"requests"}, "format": "json",
+	}, idem(uuid.NewString()), 201)
+	policy := h.want(owner, "POST", "/api/v1/observability/capture-policies", map[string]any{
+		"sink": sink["export_sink_id"], "sample_ratio": "1", "include": []string{"output"},
+		"max_bytes": 1048576, "route_slug": "capture-dependency",
+	}, idem(uuid.NewString()), 201)
+	path := "/api/v1/observability/sinks/" + sink["export_sink_id"].(string)
+	problem := h.want(owner, "DELETE", path, nil, withMatch(sink, idem(uuid.NewString())), 409)
+	if problemCode(t, problem) != "sink_in_use" {
+		t.Fatalf("unexpected dependency response: %v", problem)
+	}
+	h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "DELETE", "/api/v1/observability/capture-policies/"+policy["id"].(string), nil, withMatch(policy, idem(uuid.NewString())), 204)
+	h.want(owner, "DELETE", path, nil, withMatch(sink, idem(uuid.NewString())), 204)
+}

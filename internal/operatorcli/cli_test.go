@@ -2,6 +2,7 @@ package operatorcli
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -144,5 +145,58 @@ func TestClientEnvironmentKeepsKeyValuesOutOfOutputAndQuotesPaths(t *testing.T) 
 		if strings.Contains(out.String(), "private-key-value") || !strings.Contains(out.String(), shellQuote(path)) {
 			t.Fatalf("unsafe environment: %s", out)
 		}
+	}
+}
+
+func TestUsageCSVNeutralizesFormulasAfterUnicodePrefixes(t *testing.T) {
+	for _, value := range []string{"\uFEFF=cmd()", "\u2003+1", "\x01@SUM(A1)", "\u00A0-1", "\t\uFEFF=1"} {
+		body, _ := json.Marshal(map[string]any{"items": []any{map[string]string{"model": value}}})
+		data, err := usageCSV(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := csv.NewReader(bytes.NewReader(data)).ReadAll()
+		if err != nil || len(rows) != 2 || rows[1][0] != "'"+value {
+			t.Fatalf("formula prefix was not neutralized: %q, %v", data, err)
+		}
+	}
+}
+
+func TestSavedPlanBindsExternalReferencesBeforeApplying(t *testing.T) {
+	applied := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/configuration/export":
+			w.Write([]byte(`{"digest":"destination","document":{}}`))
+		case "/api/v1/configuration/plan":
+			w.Write([]byte(`{"digest":"desired","actions":[],"conflicts":[],"blockers":[]}`))
+		case "/api/v1/configuration/apply":
+			applied++
+			w.Write([]byte(`{"digest":"desired","actions":[],"conflicts":[],"blockers":[]}`))
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	runner, _ := testRunner(t, server)
+	dir := t.TempDir()
+	doc, bindings, plan := filepath.Join(dir, "document.json"), filepath.Join(dir, "references.json"), filepath.Join(dir, "plan.json")
+	os.WriteFile(doc, []byte(`{"format":"olp-configuration"}`), 0600)
+	os.WriteFile(bindings, []byte(`{"provider":{"store":"gcp","secret_id":"projects/one/secrets/private-reference","version":"1"}}`), 0600)
+	if err := runner.Run(t.Context(), []string{"config", "plan", "--file", doc, "--external-bindings-file", bindings, "--output", plan}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(plan)
+	if strings.Contains(string(data), "private-reference") {
+		t.Fatal("saved plan disclosed external reference metadata")
+	}
+	args := []string{"config", "apply", "--plan-file", plan, "--external-bindings-file", bindings, "--idempotency-key", "external-plan"}
+	os.WriteFile(bindings, []byte(`{"provider":{"store":"gcp","secret_id":"projects/other/secrets/private-reference","version":"1"}}`), 0600)
+	if err := runner.Run(t.Context(), args); err == nil || applied != 0 {
+		t.Fatalf("changed references applied=%d err=%v", applied, err)
+	}
+	os.WriteFile(bindings, []byte(`{"provider": {"version":"1", "secret_id":"projects/one/secrets/private-reference", "store":"gcp"}}`), 0600)
+	if err := runner.Run(t.Context(), args); err != nil || applied != 1 {
+		t.Fatalf("equivalent references applied=%d err=%v", applied, err)
 	}
 }

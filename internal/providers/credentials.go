@@ -90,6 +90,9 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
+		return access.Reply{}, err
+	}
 	// The stored reply discloses the provider, so the caller must still reach
 	// its project before a replay is served.
 	current, err := load(r.Context(), tx, id, false)
@@ -165,6 +168,9 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	defer tx.Rollback(r.Context())
 	p, err = a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
 		return access.Reply{}, err
 	}
 	// The stored reply discloses the provider, so the caller must still reach
@@ -498,6 +504,9 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	defer tx.Rollback(r.Context())
 	p, err := a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
 		return access.Reply{}, err
 	}
 	// The stored reply discloses the provider's slots, so the caller must

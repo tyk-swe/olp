@@ -37,3 +37,22 @@ it('drops paging and unknown query fields from history views', () => {
     )
   ).toBe('?route=assistant&status_code=503');
 });
+
+it.each(['usage', 'history'] as const)(
+  'preserves project, session and attribution scope in saved %s views',
+  (scope) => {
+    const search = new URLSearchParams({
+      project_id: first,
+      session_id: 'SessionCase/Alpha',
+      attribution_key: 'session',
+      attribution_value: 'SessionCase/Alpha'
+    });
+    saveFilters(sessionStorage, first, scope, [
+      { name: 'Scoped session', search: search.toString() }
+    ]);
+    const restored = new URLSearchParams(
+      readSavedFilters(sessionStorage, first, scope)[0].search
+    );
+    for (const [key, value] of search) expect(restored.get(key)).toBe(value);
+  }
+);

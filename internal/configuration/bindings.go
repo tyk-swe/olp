@@ -23,6 +23,13 @@ func plainBindings(values map[string]string) bindingSet {
 	return result
 }
 
+func (input *promotionInput) authorizeExternalBindings(p access.Principal) error {
+	if len(input.ExternalBindings) != 0 {
+		return p.Authorize(access.Settings)
+	}
+	return nil
+}
+
 func (input *promotionInput) bindings() (bindingSet, error) {
 	result := plainBindings(input.SecretBindings)
 	for name, reference := range input.ExternalBindings {

@@ -115,7 +115,8 @@ sent only to the destination and **never saved in the plan**. Supply them
 separately at both stages.
 
 The saved plan records the destination origin and its current export digest,
-the secret-free desired document, and actions, conflicts and blockers. Planning
+a digest of the external-reference bindings, the secret-free desired document,
+and actions, conflicts and blockers. Planning
 saves it even when blockers or conflicts cause a nonzero exit. Apply refuses
 such plans, a different destination, or a changed plan. The API checks the
 original destination digest again in its apply transaction, so a change

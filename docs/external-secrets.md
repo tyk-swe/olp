@@ -78,6 +78,15 @@ KV v2 uses `https://VAULT/v1/MOUNT/data/PATH`, a numeric version and the `field`
 containing the credential. Aliases such as `latest` are refused. References
 cannot be used for grant enrollment or provider network identities.
 
+Creating or rotating an external reference requires installation-wide
+`settings` authority in addition to provider configuration authority. This
+approves the exact pinned reference for its owning provider and project.
+Project managers can use already-approved versions belonging to that provider,
+but cannot introduce arbitrary references through creation, rotation or slots.
+The provider credential boundary also prevents moving an approved version to
+another endpoint, network identity or authentication profile. Configuration
+promotion with external bindings requires the same `settings` authority.
+
 The console offers an external-version choice when creating providers, adding
 slots or staging rotation. Validate the slot and certify its models before
 activation. Rotation resolves and validates the new version against the
@@ -104,8 +113,9 @@ in `secret_bindings`:
 ```
 
 The CLI accepts this map through `--external-bindings-file` on `config plan`
-and `config apply`. Saved plans exclude the binding map; supply it again when
-applying. Reference metadata participates in idempotency and desired-action
+and `config apply`. Saved plans retain only a digest of the external binding
+map; supply the same references again when applying. Changed references require
+a new plan. Reference metadata participates in idempotency and desired-action
 comparison. Imported providers remain drafts, and must validate their pinned
 destination credential before activation.
 

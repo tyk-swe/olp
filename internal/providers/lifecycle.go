@@ -108,6 +108,9 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
+		return access.Reply{}, err
+	}
 	claim, replayed, err := a.Replay(r, tx, p, input)
 	if err != nil {
 		return access.Reply{}, err

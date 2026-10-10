@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/tyk-swe/olp/sdk/management"
 )
@@ -303,7 +304,7 @@ func usageCSV(raw json.RawMessage) ([]byte, error) {
 			if err := json.Unmarshal(value, &values[i]); err != nil {
 				values[i] = string(value)
 			}
-			trimmed := strings.TrimLeft(values[i], " \t\r\n")
+			trimmed := strings.TrimLeftFunc(values[i], func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) || r == '\uFEFF' })
 			if trimmed != "" && strings.ContainsAny(trimmed[:1], "=+-@") {
 				values[i] = "'" + values[i]
 			}

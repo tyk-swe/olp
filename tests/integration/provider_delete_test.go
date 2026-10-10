@@ -55,7 +55,7 @@ func TestProviderDeletionRequiresUnusedDraftAndCleansOwnedSeals(t *testing.T) {
 		t.Fatalf("deletion erased provider-specific price history: %v", err)
 	}
 	var audits int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.audit WHERE action='provider.delete' AND resource_id=$1", draft["id"]).Scan(&audits); err != nil || audits != 1 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.audit WHERE action='provider.delete' AND resource_id=$1 AND project_id=$2", draft["id"], projectID).Scan(&audits); err != nil || audits != 1 {
 		t.Fatalf("successful deletion audit count=%d: %v", audits, err)
 	}
 }

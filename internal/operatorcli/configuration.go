@@ -2,6 +2,8 @@ package operatorcli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -13,11 +15,12 @@ import (
 // SavedPlan contains portable, non-secret desired state and the destination
 // digest observed at planning. Bindings are supplied separately at each stage.
 type SavedPlan struct {
-	Version           int                                `json:"version"`
-	Destination       string                             `json:"destination"`
-	DestinationDigest string                             `json:"destination_digest"`
-	Document          json.RawMessage                    `json:"document"`
-	Plan              contract.ConfigurationPlanResponse `json:"plan"`
+	Version                int                                `json:"version"`
+	Destination            string                             `json:"destination"`
+	DestinationDigest      string                             `json:"destination_digest"`
+	ExternalBindingsDigest string                             `json:"external_bindings_digest"`
+	Document               json.RawMessage                    `json:"document"`
+	Plan                   contract.ConfigurationPlanResponse `json:"plan"`
 }
 
 func (runner Runner) configuration(ctx context.Context, args []string) error {
@@ -114,7 +117,7 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 	default:
 		return errors.New("unknown config command; use export, plan or apply")
 	}
-	externalBindings := map[string]json.RawMessage{}
+	externalBindings := map[string]any{}
 	if path := opts.one("external-bindings-file"); path != "" {
 		data, err := readJSON(path)
 		if err != nil {
@@ -123,6 +126,17 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 		if json.Unmarshal(data, &externalBindings) != nil {
 			return errors.New("external bindings file must be an object of pinned references")
 		}
+	}
+	encodedBindings, err := json.Marshal(externalBindings)
+	if err != nil {
+		return err
+	}
+	bindingsHash := sha256.Sum256(encodedBindings)
+	bindingsDigest := hex.EncodeToString(bindingsHash[:])
+	if args[0] == "plan" {
+		saved.ExternalBindingsDigest = bindingsDigest
+	} else if saved.ExternalBindingsDigest != bindingsDigest {
+		return errors.New("external credential bindings changed since planning; compute a new plan")
 	}
 	request := map[string]any{"document": saved.Document, "expected_digest": saved.DestinationDigest, "secret_bindings": bindings, "external_credential_bindings": externalBindings}
 	result, err := call("plan_configuration", request)

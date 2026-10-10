@@ -221,7 +221,7 @@ func (w *Worker) deliverOne(ctx context.Context, sinkID, stream string) (bool, e
 	w.attempts.Add(1)
 
 	sendCtx, sendCancel := context.WithTimeout(ctx, DeliveryTimeout)
-	sendErr := w.Sender.Send(sendCtx, destination, credential, Record{ID: id, Stream: recStream, At: queuedAt, Data: json.RawMessage(data)})
+	sendErr := w.Sender.Send(sendCtx, destination, credential, Record{ID: id, Stream: recStream, At: occurredAt, Data: json.RawMessage(data)})
 	sendCancel()
 
 	finishCtx := ctx

@@ -72,6 +72,9 @@ func (s *Server) planEndpoint(r *http.Request, p access.Principal) (access.Reply
 			return access.Reply{}, err
 		}
 	}
+	if err := input.authorizeExternalBindings(p); err != nil {
+		return access.Reply{}, err
+	}
 	bindings, err := input.bindings()
 	if err != nil {
 		return access.Reply{}, err
@@ -108,6 +111,9 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	defer tx.Rollback(r.Context())
 	p, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = input.authorizeExternalBindings(p); err != nil {
 		return access.Reply{}, err
 	}
 	if err := authorizeIdentityPromotion(p, input.Document); err != nil {
@@ -155,6 +161,9 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 		defer tx.Rollback(r.Context())
 		p, err = s.Access.Reauthorize(r, tx)
 		if err != nil {
+			return access.Reply{}, err
+		}
+		if err = input.authorizeExternalBindings(p); err != nil {
 			return access.Reply{}, err
 		}
 		if err = authorizeIdentityPromotion(p, doc); err != nil {

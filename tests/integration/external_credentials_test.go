@@ -13,6 +13,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
@@ -192,4 +195,87 @@ func TestExternalCredentialAndWrappedMasterKeyRotationKeepPublishedVersionsPinne
 	headers = etagHeader(current)
 	headers["Idempotency-Key"] = "unavailable-reference"
 	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/credentials", map[string]any{"credential_reference": reference}, headers, 422)
+}
+
+func TestExternalReferencesRequireInstallationApprovalBeforeResolution(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	projectID := createProject(h, owner, "Approved external credentials")
+	manager := h.invite(owner, "external-manager@example.com", "operator")
+	profile := h.want(manager, "GET", "/api/v1/profile", nil, nil, 200)
+	managerID := profile["id"].(string)
+	h.want(owner, "PATCH", "/api/v1/users/"+managerID, map[string]any{"access_scope": "assigned"}, etagHeader(profile), 200)
+	addMember(h, owner, projectID, managerID, "manager")
+	manager = login(h, "external-manager@example.com")
+	var contacts atomic.Int32
+	vault := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		contacts.Add(1)
+		w.WriteHeader(503)
+	}))
+	defer vault.Close()
+	t.Setenv("OLP_VAULT_ADDR", vault.URL)
+	jwtFile := filepath.Join(t.TempDir(), "identity.jwt")
+	if err := os.WriteFile(jwtFile, []byte("fixture.workload.jwt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OLP_VAULT_ROLE", "olp")
+	t.Setenv("OLP_VAULT_JWT_FILE", jwtFile)
+	vendor := newVendor(t)
+	reference := secretstore.Reference{Store: "vault", SecretID: vault.URL + "/v1/secret/data/another-project", Version: "1", Field: "api_key"}
+	configuration := map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": vendor.URL + "/v1"}
+	body := map[string]any{"name": "Requires approval", "project_id": projectID, "configuration": configuration, "credential_reference": reference}
+	h.want(manager, "POST", "/api/v1/providers", body, idem("unapproved-external-create"), 403)
+	provider := createScopedProvider(h, manager, "Manager provider", vendor.URL+"/v1", projectID, 201)
+	path := "/api/v1/providers/" + provider["id"].(string)
+	h.want(manager, "POST", path+"/credentials", map[string]any{"credential_reference": reference}, withMatch(provider, idem("unapproved-external-rotate")), 403)
+	slots := h.want(manager, "GET", path+"/credential-slots", nil, nil, 200)
+	slotID := uuid.NewString()
+	h.want(manager, "PUT", path+"/credential-slots/"+slotID, map[string]any{
+		"slot": map[string]any{"id": slotID, "name": "Unapproved"}, "credential_reference": reference,
+	}, withMatch(slots, idem("unapproved-external-slot")), 403)
+	approved := h.want(owner, "POST", "/api/v1/providers", body, idem("approved-external-create"), 201)
+	otherConfiguration := map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": vault.URL + "/v1"}
+	h.want(manager, "PATCH", "/api/v1/providers/"+approved["id"].(string), map[string]any{"configuration": otherConfiguration}, withMatch(approved, idem("move-approved-reference")), 422)
+
+	document := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	bindings := map[string]secretstore.Reference{}
+	for _, entry := range document["providers"].([]any) {
+		for _, slot := range entry.(map[string]any)["slots"].([]any) {
+			if name, ok := slot.(map[string]any)["credential_ref"].(string); ok {
+				bindings[name] = reference
+			}
+		}
+	}
+	if len(bindings) == 0 {
+		t.Fatal("fixture has no credential bindings")
+	}
+	promotion := map[string]any{"document": document, "external_credential_bindings": bindings}
+	for _, settings := range []bool{false, true} {
+		scopes := []any{"read", "configure"}
+		if settings {
+			scopes = append(scopes, "settings")
+		}
+		token := h.want(owner, "POST", "/api/v1/management-tokens", map[string]any{
+			"name": "External reference approval", "scopes": scopes,
+			"expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		}, idem(uuid.NewString()), 201)["secret"].(string)
+		want := 403
+		if settings {
+			want = 200
+		}
+		if status, out := h.machine(token, "POST", "/api/v1/configuration/plan", promotion, nil); status != want {
+			t.Fatalf("settings=%v plan status=%d want=%d body=%v", settings, status, want, out)
+		}
+		if !settings {
+			if status, out := h.machine(token, "POST", "/api/v1/configuration/apply", promotion, idem("unapproved-promotion")); status != 403 {
+				t.Fatalf("unapproved promotion status=%d body=%v", status, out)
+			}
+			if status, out := h.machine(token, "POST", path+"/credentials", map[string]any{"credential_reference": reference}, withMatch(provider, idem("unapproved-token-rotate"))); status != 403 {
+				t.Fatalf("unapproved token rotation status=%d body=%v", status, out)
+			}
+		}
+	}
+	if contacts.Load() != 0 {
+		t.Fatalf("unapproved references contacted the secret store %d times", contacts.Load())
+	}
 }

@@ -24,6 +24,16 @@ func validateCredentialInput(plain *string, reference *secretstore.Reference) er
 	return nil
 }
 
+// External references spend the installation's workload authority. An
+// installation operator must approve the exact version for this provider;
+// project managers may use approved versions but cannot introduce references.
+func authorizeCredentialReference(p access.Principal, reference *secretstore.Reference) error {
+	if reference != nil {
+		return p.Authorize(access.Settings)
+	}
+	return nil
+}
+
 func (s *Server) resolveReference(ctx context.Context, reference secretstore.Reference) ([]byte, error) {
 	if s.ExternalSecrets == nil {
 		return nil, access.Fail(422, "external_secret_unavailable", "The external credential store could not resolve the pinned version.")

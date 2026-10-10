@@ -80,7 +80,7 @@ func (s *Server) deleteProvider(r *http.Request, _ access.Principal) (access.Rep
 	if _, err = access.AdvanceAuthority(r.Context(), tx); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.delete", "provider", id, "success"); err != nil {
+	if err = access.AuditForProject(r.Context(), tx, r, p.Actor(), "provider.delete", "provider", id, "success", current.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
 	result := access.Reply{Status: http.StatusNoContent}

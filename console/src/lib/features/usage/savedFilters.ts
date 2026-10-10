@@ -11,6 +11,8 @@ const fields: Record<FilterScope, string[]> = {
     'model',
     'provider_id',
     'api_key_id',
+    'project_id',
+    'session_id',
     'operation',
     'attribution_key',
     'attribution_value'
@@ -20,11 +22,15 @@ const fields: Record<FilterScope, string[]> = {
     'provider_id',
     'model',
     'api_key_id',
+    'project_id',
+    'session_id',
     'operation',
     'status_code',
     'error_class',
     'started_after',
-    'started_before'
+    'started_before',
+    'attribution_key',
+    'attribution_value'
   ]
 };
 

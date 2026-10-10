@@ -5026,7 +5026,7 @@ type ConfigurationPromotionRequest struct {
 	// ExpectedDigest Digest the destination must still export for the apply to proceed
 	ExpectedDigest nullable.Nullable[string] `json:"expected_digest,omitempty"`
 
-	// ExternalCredentialBindings Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings.
+	// ExternalCredentialBindings Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings. Introducing an external reference requires installation-wide settings authority in addition to configure authority.
 	ExternalCredentialBindings *map[string]ExternalCredentialReference `json:"external_credential_bindings,omitempty"`
 
 	// SecretBindings Write-only map from credential_ref to secret; never echoed, audited, or replayed. A slot a grant backs takes no binding.
@@ -5646,7 +5646,7 @@ type CreateProviderRequest struct {
 	Configuration ProviderConfiguration `json:"configuration"`
 	Credential    *string               `json:"credential,omitempty"`
 
-	// CredentialReference Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values.
+	// CredentialReference Introducing an external reference requires installation-wide settings authority in addition to configure authority.
 	CredentialReference *ExternalCredentialReference `json:"credential_reference,omitempty"`
 	DisplayName         nullable.Nullable[string]    `json:"display_name,omitempty"`
 
@@ -8481,7 +8481,7 @@ type RotateApiKeyResponse struct {
 type RotateCredentialRequest struct {
 	Credential *string `json:"credential,omitempty"`
 
-	// CredentialReference Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values.
+	// CredentialReference Introducing an external reference requires installation-wide settings authority in addition to configure authority.
 	CredentialReference *ExternalCredentialReference `json:"credential_reference,omitempty"`
 	union               json.RawMessage
 }
@@ -9654,7 +9654,7 @@ type SlotList struct {
 type SlotWrite struct {
 	Credential nullable.Nullable[string] `json:"credential,omitempty"`
 
-	// CredentialReference Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values.
+	// CredentialReference Introducing an external reference requires installation-wide settings authority in addition to configure authority.
 	CredentialReference *ExternalCredentialReference `json:"credential_reference,omitempty"`
 	Slot                CredentialSlot               `json:"slot"`
 }
