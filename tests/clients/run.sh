@@ -23,6 +23,7 @@ test_timeout_seconds=${OLP_CLIENTS_TEST_TIMEOUT_SECONDS:-180}
 # without a reason that cannot run fails.
 suites=(
   'harness|node|suites/harness|'
+  'operator-env|node|suites/operator-env|'
   'ai-sdk|node|suites/ai-sdk|'
   'go-sdks|go|gosdk|'
   'claude-code|node|suites/claude-code|'
@@ -185,6 +186,12 @@ results=()
 record() { results+=("$(printf '%-16s %-8s %s' "$1" "$2" "${3:-}")"); }
 
 if (( ${#runnable[@]} > 0 )); then
+  for suite in "${runnable[@]}"; do
+    if [[ $suite == operator-env || $suite == go-sdks ]]; then
+      (cd -- "$repo_dir" && mkdir -p .local/bin && go build -o .local/bin/olp ./cmd/olp)
+      break
+    fi
+  done
   fixture_bin=$repo_dir/.local/bin/clientfixture
   (cd -- "$repo_dir" && mkdir -p .local/bin && go build -o "$fixture_bin" ./tests/clientfixture)
   OLP_CLIENTS_METADATA=$metadata "$fixture_bin" >"$fixture_log" 2>&1 &
@@ -249,6 +256,7 @@ run_suite() { # name runner target
     "HOME=$dir/home" "XDG_CONFIG_HOME=$dir/config" "XDG_DATA_HOME=$dir/data"
     "XDG_CACHE_HOME=$dir/cache" "XDG_STATE_HOME=$dir/state" "TMPDIR=$dir/tmp"
     "OLP_CLIENTS_SCRATCH=$dir"
+    "OLP_CLIENTS_OPERATOR_BINARY=$repo_dir/.local/bin/olp"
     "DO_NOT_TRACK=1" "NO_UPDATE_NOTIFIER=1" "DISABLE_AUTOUPDATER=1" "DISABLE_TELEMETRY=1"
     "HTTP_PROXY=http://127.0.0.1:9" "HTTPS_PROXY=http://127.0.0.1:9" "ALL_PROXY=http://127.0.0.1:9"
     "NO_PROXY=127.0.0.1,localhost,::1" "NODE_USE_ENV_PROXY=1"

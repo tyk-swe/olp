@@ -18,6 +18,15 @@ func (runner Runner) clientEnv(args []string) error {
 	if len(args) == 0 {
 		return errors.New("client-env requires a client name")
 	}
+	clientName := args[0]
+	switch clientName {
+	case "openai-agents":
+		clientName = "agents"
+	case "ai-sdk":
+		clientName = "vercel"
+	case "llamaindex-ts":
+		clientName = "llamaindex"
+	}
 	opts, positional, err := parseOptions(args[1:])
 	if err != nil {
 		return err
@@ -25,7 +34,7 @@ func (runner Runner) clientEnv(args []string) error {
 	if len(positional) > 0 {
 		return errors.New("client-env takes named options")
 	}
-	if err = checkOptions(opts, "url", "key-file", "model", "output"); err != nil {
+	if err = checkOptions(opts, "url", "key-file", "model", "output", "format", "surface"); err != nil {
 		return err
 	}
 	u, err := url.Parse(opts.one("url"))
@@ -54,13 +63,46 @@ func (runner Runner) clientEnv(args []string) error {
 	if model == "" {
 		model = "assistant"
 	}
+	format, surface := opts.one("format"), opts.one("surface")
+	framework := clientName == "agents" || clientName == "vercel" || clientName == "langchain" || clientName == "llamaindex"
+	if format == "" {
+		format = "shell"
+		if framework {
+			format = "javascript"
+		}
+	}
+	if surface == "" {
+		surface = "openai"
+		if clientName == "anthropic" || clientName == "gemini" {
+			surface = clientName
+		}
+	}
+	if surface != "openai" && surface != "anthropic" && surface != "gemini" {
+		return errors.New("--surface must be openai, anthropic or gemini")
+	}
+	if format != "shell" {
+		if !framework && clientName != "openai" && clientName != "anthropic" && clientName != "gemini" {
+			return errors.New("code formats require a qualified SDK or framework")
+		}
+		if !framework && surface != clientName {
+			return errors.New("--surface must match the selected SDK")
+		}
+		code, codeErr := clientCode(clientName, format, surface, origin, path, model)
+		if codeErr != nil {
+			return codeErr
+		}
+		return runner.output(opts.one("output"), []byte(code))
+	}
+	if framework || opts.one("surface") != "" {
+		return errors.New("--surface requires a code format")
+	}
 	var out strings.Builder
-	switch args[0] {
+	switch clientName {
 	case "openai":
 		fmt.Fprintf(&out, "export OPENAI_BASE_URL=%s\nexport OPENAI_API_KEY=%s\n", shellQuote(origin+"/v1"), key)
 	case "anthropic", "claude-code":
 		fmt.Fprintf(&out, "export ANTHROPIC_BASE_URL=%s\nexport ANTHROPIC_API_KEY=%s\nexport ANTHROPIC_MODEL=%s\n", shellQuote(origin+"/anthropic"), key, shellQuote(model))
-		if args[0] == "claude-code" {
+		if clientName == "claude-code" {
 			fmt.Fprintf(&out, "export ANTHROPIC_DEFAULT_HAIKU_MODEL=%s\nexport ANTHROPIC_SMALL_FAST_MODEL=%s\nexport CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n", shellQuote(model), shellQuote(model))
 		}
 	case "gemini", "gemini-cli":
@@ -76,7 +118,7 @@ func (runner Runner) clientEnv(args []string) error {
 		}
 		out.WriteString(" \"$@\"; }\n")
 	default:
-		return errors.New("unsupported client; use openai, anthropic, gemini, claude-code, gemini-cli or codex")
+		return errors.New("unsupported client; use openai, anthropic, gemini, claude-code, gemini-cli, codex, openai-agents, vercel, langchain or llamaindex")
 	}
 	return runner.output(opts.one("output"), []byte(out.String()))
 }

@@ -208,8 +208,7 @@ rotates versions and passes accessibility checks; local and Helm gates pass.
 Terraform qualification covers all twelve resource types in the separate
 [provider repository](https://github.com/tyk-swe/terraform-provider-openllmproxy):
 projects, providers, credential slots, routes, routing policies, guardrails,
-export sinks, keys, budget groups, notification destinations and notification
-rules and upstream MCP servers. Terraform 1.16.5 and OpenTofu 1.13.1 run plan/create/update/import/no-change/
+export sinks, keys, budget groups, notification destinations, notification rules and upstream MCP servers. Terraform 1.16.5 and OpenTofu 1.13.1 run plan/create/update/import/no-change/
 destroy against fresh live installations built from the SDK's immutable module
 version. The full twelve-type suite passed under race in 140.698 seconds.
 See [provider operations](../terraform.md).
@@ -283,3 +282,13 @@ upstream drift, secret exclusion from saved-plan JSON/state and foreign
 saved-plan refusal. The complete twelve-type suite uses the same immutable SDK
 and built installation version. Export checkpoint health is separately tested
 for installation and regional summaries.
+
+Client setup qualification executes generated configuration with every named
+M1.3 family. The `operator-env` client suite completes 13 authenticated
+JavaScript/framework cases, checking the client's result and upstream request
+rewrite. `TestOperatorGeneratedGoClients` compiles and executes generated
+constructors for all three official Go SDKs. Generated Python constructors
+complete all three native requests through the smoke fixture, and
+`TestOperatorGeneratedPythonClients` runs that proof in the integration gate.
+Mounted credentials remain outside generated source. Path quoting, unsupported
+format/surface refusal, Go syntax, focused races and operator tests pass.

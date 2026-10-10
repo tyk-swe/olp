@@ -139,6 +139,35 @@ on strict routes; run `olp_codex exec "Hello"`. It does not change sandbox or
 permission settings. See [qualified clients](clients.md) for pinned releases
 and qualification boundaries.
 
+Qualified framework setup supports `openai-agents`, `vercel`, `langchain` and
+`llamaindex`. These names default to JavaScript modules, with `--surface openai`,
+`anthropic` or `gemini` selecting the qualified constructor. Agents uses the OpenAI
+Responses surface with tracing disabled and `store: false`; choose a route that
+supports those settings. Vercel uses Chat Completions for its OpenAI model. Native
+Anthropic/Google clients receive their required versioned endpoints. Frameworks
+that recognize model names require a compatible route name, as described in the
+[client qualification guide](clients.md).
+
+```sh
+olp client-env langchain --surface anthropic --url https://olp.example.com \
+  --key-file /run/secrets/inference-key --model claude-sonnet-4-6 \
+  --output olp-client.mjs
+```
+
+Import the exported `client` and `modelName` into your application; Vercel exports
+`model`, while Agents exports `runner` and `agent`. The generated module only
+configures clients and reads the mounted key when loaded. It makes no inference
+request. The aliases `agents`, `ai-sdk` and `llamaindex-ts` are also supported.
+
+The native `openai`, `anthropic` and `gemini` names accept `--format javascript`,
+`python` or `go` in addition to their default shell environment. Python exports
+`client` and `model_name`; Go produces a formatted `olpclient` package with `New`
+and `Model`. Code formats set explicit keys and base URLs instead of depending on
+SDK-specific environment behavior. OpenAI loopback Go setup opts into plain HTTP
+only after the CLI's origin validation. SDK/framework retries are disabled where
+supported so application retries remain an explicit choice. Generated files never
+contain the key value.
+
 ## Management MCP
 
 Point a Streamable HTTP client at `https://olp.example.com/api/v1/mcp`, with

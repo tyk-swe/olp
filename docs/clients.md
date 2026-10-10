@@ -116,7 +116,12 @@ OpenCode Go and GLM Coding Plan accounts, which one route may mix; see
 The pins and evidence for that are in the
 [code-mode qualification](qualification/code-mode.md), not in the tables below.
 
-### Claude Code
+#Generate mounted-key setup with [`olp client-env`](operator-cli.md#configure-qualified-clients).
+It supports the three coding clients, all four framework families and explicit
+JavaScript, Python and Go constructors for the official SDKs. Generated
+configuration runs against the same pinned libraries in client qualification.
+
+## Claude Code
 
 Claude Code treats `ANTHROPIC_BASE_URL` as the Anthropic API and sends the beta
 headers and request fields it sends `api.anthropic.com`. The fields of a beta
