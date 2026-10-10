@@ -87,7 +87,13 @@ func TestExternalCredentialCacheSharesFetchesWithoutBlockingEligibility(t *testi
 	}
 	<-started
 	checked := make(chan struct{})
-	go func() { cache.available("credential", time.Now()); close(checked) }()
+	go func() {
+		known, available := cache.available("credential")
+		if !known || available {
+			t.Error("unresolved external credential must already be ineligible")
+		}
+		close(checked)
+	}()
 	select {
 	case <-checked:
 	case <-time.After(time.Second):
@@ -100,6 +106,27 @@ func TestExternalCredentialCacheSharesFetchesWithoutBlockingEligibility(t *testi
 	}
 	if _, err := cache.read(t.Context(), resolver, "credential", externalReference("2")); !errors.Is(err, ErrCredentialUnavailable) {
 		t.Fatal("one credential ID changed its pinned version")
+	}
+}
+
+func TestEmptyExternalCredentialCacheDoesNotSerializeEligibility(t *testing.T) {
+	var cache externalCredentials
+	cache.mu.Lock()
+	checked := make(chan struct{})
+	go func() {
+		known, available := cache.available("sealed-credential")
+		if known || available {
+			t.Error("empty cache claimed an external credential")
+		}
+		close(checked)
+	}()
+	select {
+	case <-checked:
+		cache.mu.Unlock()
+	case <-time.After(time.Second):
+		cache.mu.Unlock()
+		<-checked
+		t.Fatal("empty external cache serialized local credential eligibility")
 	}
 }
 

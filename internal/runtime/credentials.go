@@ -67,7 +67,7 @@ func (m *Manager) Eligibility(credentialID string) Eligibility {
 	if eligibility != Eligible {
 		return eligibility
 	}
-	if known, available := m.external.available(credentialID, time.Now()); known && !available {
+	if known, available := m.external.available(credentialID); known && !available {
 		return ExternalUnavailable
 	}
 	return Eligible

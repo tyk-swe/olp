@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -27,15 +28,21 @@ type externalCredential struct {
 	loading           chan struct{}
 }
 type externalCredentials struct {
-	mu      sync.Mutex
-	entries map[string]*externalCredential
+	mu        sync.Mutex
+	entries   map[string]*externalCredential
+	populated atomic.Bool
 }
 
-func (c *externalCredentials) available(id string, now time.Time) (known, available bool) {
+func (c *externalCredentials) available(id string) (known, available bool) {
+	// Installations without external references need neither the cache lock nor
+	// another clock read on every credential eligibility check.
+	if !c.populated.Load() {
+		return false, false
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, known := c.entries[id]
-	return known, known && len(entry.value) > 0 && now.Before(entry.expires)
+	return known, known && len(entry.value) > 0 && time.Now().Before(entry.expires)
 }
 
 func (c *externalCredentials) read(ctx context.Context, resolver ExternalSecrets, id string, reference secretstore.Reference) ([]byte, error) {
@@ -90,6 +97,7 @@ func (c *externalCredentials) read(ctx context.Context, resolver ExternalSecrets
 			}
 			entry = &externalCredential{reference: reference, lastUsed: time.Now()}
 			c.entries[id] = entry
+			c.populated.Store(true)
 		}
 		entry.loading = make(chan struct{})
 		c.mu.Unlock()
