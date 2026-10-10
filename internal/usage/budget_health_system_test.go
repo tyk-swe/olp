@@ -7,10 +7,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestIntegrationBudgetAccountingLossSurvivesReplicaRestart(t *testing.T) {
 	pool := notificationPool(t)
+	liveConsumerHeartbeat(t, pool)
 	local := NewEmitter(1)
 	if err := CheckBudgetAccounting(t.Context(), pool, local); err != nil {
 		t.Fatal(err)
@@ -53,6 +56,7 @@ func TestIntegrationBudgetAccountingUsesEveryActiveCalendarWindow(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool := notificationPool(t)
+			liveConsumerHeartbeat(t, pool)
 			if tc.setup != "" {
 				if _, err := pool.Exec(t.Context(), tc.setup); err != nil {
 					t.Fatal(err)
@@ -77,6 +81,7 @@ func TestIntegrationBudgetAccountingUsesEveryActiveCalendarWindow(t *testing.T) 
 
 func TestIntegrationBudgetAccountingRetainsRolledUpLoss(t *testing.T) {
 	pool := notificationPool(t)
+	liveConsumerHeartbeat(t, pool)
 	local := NewEmitter(1)
 	local.Drop()
 	if err := RecordBudgetLoss(t.Context(), pool, local, "rolled-budget-test", nil); err != nil {
@@ -102,6 +107,7 @@ func TestIntegrationBudgetAccountingRetainsRolledUpLoss(t *testing.T) {
 
 func TestIntegrationBudgetAccountingRefusesStaleEpochWithoutDetector(t *testing.T) {
 	pool := notificationPool(t)
+	liveConsumerHeartbeat(t, pool)
 	crashed := NewEmitter(1)
 	crashed.startedAt = time.Now().Add(-3 * EpochStaleAfter)
 	// Production registers this zero-counter epoch before binding listeners.
@@ -147,11 +153,36 @@ func TestIntegrationBudgetAccountingRefusesUnconsumedBacklog(t *testing.T) {
 	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); err != nil {
 		t.Fatalf("fresh backlog blocked admission: %v", err)
 	}
-	// A stale check cannot speak for the group's pending entries.
+	// A stale heartbeat cannot speak for the group: a dead consumer leaves
+	// deliveries pending while producers keep writing, so admission stays
+	// closed until liveness is proven again.
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.request_metadata_consumer_health SET oldest_pending_at=$1, checked_at=$1`, old); err != nil {
 		t.Fatal(err)
 	}
+	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); !errors.Is(err, ErrIncompleteBudgetAccounting) {
+		t.Fatalf("silent consumer admitted: %v", err)
+	}
+	// A missing heartbeat cannot either: the consumer may never have run.
+	if _, err := pool.Exec(t.Context(), `DELETE FROM olp.request_metadata_consumer_health`); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); !errors.Is(err, ErrIncompleteBudgetAccounting) {
+		t.Fatalf("absent consumer admitted: %v", err)
+	}
+	// A fresh healthy heartbeat reopens admission.
+	liveConsumerHeartbeat(t, pool)
 	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); err != nil {
-		t.Fatalf("stale health check blocked admission: %v", err)
+		t.Fatalf("healthy consumer blocked admission: %v", err)
+	}
+}
+
+// liveConsumerHeartbeat seeds the single consumer health row the way a live
+// consumer's five-second checkpoint does, since a missing or stale heartbeat
+// closes cost-budget admission.
+func liveConsumerHeartbeat(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health VALUES(true,0,0,NULL,now())
+		ON CONFLICT (singleton) DO UPDATE SET pending_events=0, lag_events=0, oldest_pending_at=NULL, checked_at=now()`); err != nil {
+		t.Fatal(err)
 	}
 }
