@@ -20,6 +20,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -38,7 +39,7 @@ func TestIntegrationVideoCreateReservesAndSettlesSupplyCaps(t *testing.T) {
 				route.Budget = &runtime.CostLimits{DailyCostLimit: &ceiling}
 				owner = route.ID
 			case "provider":
-				provider.Limits = &runtime.Limits{DailyCostLimit: &ceiling}
+				provider.Limits = &runtime.Limits{Supply: runtime.Supply{DailyCostLimit: &ceiling}}
 				owner = provider.ID
 			case "slot":
 				provider.Slots[0].DailyCostLimit = &ceiling
@@ -403,14 +404,19 @@ func TestIntegrationMediaKeySettlementChargesDispatchedRequests(t *testing.T) {
 				t.Fatalf("consumed RPM refunded: status=%d calls=%d", resp.StatusCode, h.mock.count("a"))
 			}
 			authority.Policy.RequestsPerMinute = nil
-			_, err := limiter.Reserve(t.Context(), keyRequest(authority, 96, time.Second))
+			reserved := estimate.HeuristicBytesTokens(len(request)) + 1
+			if reserved <= 5 {
+				t.Fatalf("fixture does not exercise low provider usage: %d", reserved)
+			}
+			remaining := tpm - reserved
+			_, err := limiter.Reserve(t.Context(), keyRequest(authority, remaining+1, time.Second))
 			var exceeded *limits.ExceededError
 			if !errors.As(err, &exceeded) || exceeded.Dimension != limits.DimensionTokens {
-				t.Fatalf("final usage not reconciled: %v", err)
+				t.Fatalf("provider usage refunded the admission estimate: %v", err)
 			}
-			lease, err := limiter.Reserve(t.Context(), keyRequest(authority, 95, time.Second))
+			lease, err := limiter.Reserve(t.Context(), keyRequest(authority, remaining, time.Second))
 			if err != nil {
-				t.Fatalf("concurrency not released or usage overcharged: %v", err)
+				t.Fatalf("concurrency not released or reservation overcharged: %v", err)
 			}
 			if err := lease.Refund(t.Context()); err != nil {
 				t.Fatal(err)

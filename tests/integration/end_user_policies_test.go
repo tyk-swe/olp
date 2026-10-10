@@ -155,7 +155,7 @@ func TestEndUserTokenReservationsReconcileToObservedUsage(t *testing.T) {
 	for _, step := range []struct {
 		user   string
 		tokens string
-	}{{"one", "10"}, {"two", "10"}, {"one", "20"}} {
+	}{{"one", "17"}, {"two", "17"}, {"one", "34"}} {
 		digest := f.h.want(f.owner, "POST", "/api/v1/api-keys/"+id+"/end-user", map[string]any{"identifier": step.user}, nil, 200)["end_user_digest"].(string)
 		key, _ := limRateKeys(f.namespace, limits.EndUserLookup(limits.EndUserKeyID(id, digest)))
 		if status, err := endUserChat(t.Context(), f.h, secret, routeSlug, step.user); status != 200 || err != nil {
@@ -211,12 +211,12 @@ func TestEndUserTokenReservationsReconcileToObservedUsage(t *testing.T) {
 		}
 	}
 	if admitted == 0 || admitted > 5 || f.vendor.chats.Load()-before != int64(admitted) {
-		t.Fatalf("token limit admitted %d ten-token requests; dispatched %d", admitted, f.vendor.chats.Load()-before)
+		t.Fatalf("token limit admitted %d seventeen-token estimates; dispatched %d", admitted, f.vendor.chats.Load()-before)
 	}
 	digest := f.h.want(f.owner, "POST", "/api/v1/api-keys/"+id+"/end-user", map[string]any{"identifier": "concurrent"}, nil, 200)["end_user_digest"].(string)
 	key, _ := limRateKeys(f.namespace, limits.EndUserLookup(limits.EndUserKeyID(id, digest)))
 	glEventually(t, "concurrent tokens reconciled across replicas", func() bool {
-		return limHash(t, f.valkey, key)["tpm"] == fmt.Sprint(admitted*10)
+		return limHash(t, f.valkey, key)["tpm"] == fmt.Sprint(admitted*17)
 	})
 }
 

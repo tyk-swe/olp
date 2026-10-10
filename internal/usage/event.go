@@ -16,8 +16,10 @@ import (
 )
 
 // WireVersion is the envelope version this build writes and accepts. Every
-// event carries it; any other version is malformed.
+// event carries it; other versions wait for a compatible consumer.
 const WireVersion = 1
+
+var ErrUnsupportedVersion = errors.New("unsupported request metadata version")
 
 // Origins name whom a request was made for. A caller request is made for the
 // API key that sent it. The gateway makes the others on its own account:
@@ -278,7 +280,7 @@ func Decode(payload []byte) (*Event, error) {
 		return nil, errors.New("request metadata version is missing")
 	}
 	if *probe.Version != WireVersion {
-		return nil, fmt.Errorf("request metadata version %d is not supported", *probe.Version)
+		return nil, fmt.Errorf("%w: %d", ErrUnsupportedVersion, *probe.Version)
 	}
 	var wire wireEvent
 	if err := json.Unmarshal(payload, &wire); err != nil {

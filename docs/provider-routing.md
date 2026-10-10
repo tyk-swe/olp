@@ -614,6 +614,16 @@ and takes the larger of the caller's request and the provider's, which a
 simulation does not. An `estimated_input_tokens` the caller supplies stands for
 every target instead, with no provenance, and a `max_output_tokens` replaces the
 reply bound the request names.
+
+Native source indexing is limited to 65,536 JSON values, including containers,
+in addition to byte and nesting limits. Strict simulations share an 8 MiB
+input-policy inspection budget across targets and route legs, including unary
+and media operations. Each rule charges the bytes it actually inspects,
+including recursively decoded tool arguments and schema keys, with a minimum
+of one byte per match attempt for empty strings. Targets report
+`inspection_limit` before any match that would exceed the shared budget;
+reduce the request, rules or inspected targets before retrying.
+
 Route draft simulation also explains the adaptive behaviors for the request:
 the trace of each selector it evaluated (with `classifier_labels` standing in
 for classifier answers, keyed by selector), the route legs a selector delegation

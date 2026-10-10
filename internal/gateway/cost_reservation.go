@@ -26,21 +26,19 @@ type costReservation struct {
 	requestID string
 }
 
-// costBudgeted reports whether any cost budget applies to the key, so that a key
-// without one never has a cost estimated for it.
-func costBudgeted(authority access.Authority) bool {
-	policy := authority.Policy
-	return authority.ProjectAttributionBudgets.Matches(authority.Attribution) || policy.RouteLimits.CostBudgeted() || authority.OrganizationBudget.Limited() || authority.InstallationBudget.Limited() || authority.ProjectBudget.Limited() || policy.DailyCostLimit != nil || policy.MonthlyCostLimit != nil || policy.WeeklyCostLimit != nil ||
-		policy.EndUserPolicy.Limits(authority.EndUserDigest).CostBudgeted() || authority.ProjectEndUserPolicy.Limits(authority.EndUserDigest).CostBudgeted() ||
-		authority.BudgetGroupID != nil &&
-			(authority.BudgetGroupDailyCostLimit != nil || authority.BudgetGroupMonthlyCostLimit != nil || authority.BudgetGroupWeeklyCostLimit != nil)
+// costBudgeted reports whether this request spends against a caller budget.
+// Estimation and growth use the same named-route boundary as admission, even
+// after the request moves to a fallback route.
+func (x *execution) costBudgeted(authority access.Authority) bool {
+	authority = x.admissionAuthority(authority)
+	return callerCostBudgeted(&authority, x.limitRoute())
 }
 
 // attemptCostReservation holds the price of the one attempt a request runs on,
 // such as a video create, which never fails over because a second target would
 // mint a second job.
 func (x *execution) attemptCostReservation(authority access.Authority, attempt runtime.Attempt) costReservation {
-	if !costBudgeted(x.admissionAuthority(authority)) {
+	if !x.costBudgeted(authority) {
 		return costReservation{}
 	}
 	bound := x.attemptCostBound(attempt)
@@ -57,7 +55,7 @@ func (x *execution) attemptCostReservation(authority access.Authority, attempt r
 // included, so the bound is their sum; it is replaced by the cost of what was
 // actually dispatched.
 func (s *Server) costReservation(x *execution, authority access.Authority) costReservation {
-	if !costBudgeted(x.admissionAuthority(authority)) {
+	if !x.costBudgeted(authority) {
 		return costReservation{}
 	}
 	bound := s.routeCostBound(x)
@@ -89,7 +87,7 @@ func (s *Server) routeCostBound(x *execution) usage.Cost {
 // reserveFallbackCost covers the remaining route's work alongside the bound
 // already dispatched, even when an earlier attempt could not report its usage.
 func (s *Server) reserveFallbackCost(ctx context.Context, x *execution) *Error {
-	if x.lease == nil || !costBudgeted(x.admissionAuthority(x.authority)) {
+	if x.lease == nil || !x.costBudgeted(x.authority) {
 		return nil
 	}
 	bound := x.spentCost.Add(s.routeCostBound(x))
@@ -112,6 +110,9 @@ func (s *Server) reserveSessionCost(ctx context.Context, x *execution, authority
 }
 
 func (s *Server) growCost(ctx context.Context, lease *limits.Lease, amount, requestID string, ttl time.Duration) *Error {
+	if e := s.Admission.checkCostAccounting(ctx); e != nil {
+		return e
+	}
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
 	err := lease.GrowCost(decision, amount, requestID, ttl)

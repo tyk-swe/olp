@@ -152,6 +152,9 @@ func (s *Server) prepareUnary(ctx context.Context, x *execution) *Error {
 
 // planUnary plans x.route for a registered native operation.
 func (s *Server) planUnary(ctx context.Context, x *execution) *Error {
+	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
+		return e
+	}
 	var incompatible error
 	options := s.selectionOptions(ctx, x)
 	options.Accept = func(p runtime.Provider, t runtime.Target) error {

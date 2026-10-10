@@ -124,6 +124,13 @@ func hasOpaqueNative(value oif.Value) bool {
 // inspection. It never rewrites the request and never includes values in its
 // decisions/errors. Tool definitions and schemas are part of model input.
 func (p *Plan) CheckInput() ([]contentpolicy.Decision, error) {
+	return p.CheckInputWithBudget(nil)
+}
+
+// CheckInputWithBudget reserves work immediately before each regexp match.
+// Inspection callers can share one budget across plans, including decoded
+// argument strings; a nil callback leaves ordinary serving unchanged.
+func (p *Plan) CheckInputWithBudget(reserve func(int) error) ([]contentpolicy.Decision, error) {
 	if p.template.policy == nil || len(p.template.policy.Input) == 0 {
 		return nil, nil
 	}
@@ -137,6 +144,11 @@ func (p *Plan) CheckInput() ([]contentpolicy.Decision, error) {
 	for _, rule := range p.template.policy.Input {
 		decision := contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomePassed}
 		for _, text := range texts {
+			if reserve != nil {
+				if err := reserve(len(text)); err != nil {
+					return decisions, err
+				}
+			}
 			if rule.Re.MatchString(text) {
 				decision.Outcome = contentpolicy.OutcomeBlocked
 				decisions = append(decisions, decision)

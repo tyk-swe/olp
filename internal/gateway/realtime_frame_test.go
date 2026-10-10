@@ -24,7 +24,6 @@ func TestStrictRealtimeDecoderMatchesDuplicateSafeProjection(t *testing.T) {
 		`{"type":"response.done","response":{"id":null,"usage":{"input_tokens":null,"output_tokens":0,"input_token_details":{"cached_tokens":null}}}}`,
 		`{"type":"response.done","response_id":"resp_1","response":null}`,
 		`{"Type":"response.done","Response_ID":"resp_1"}`,
-		`{"type":"response.audio.delta","TYPE":"response.done","response_id":"resp_1"}`,
 		`{"\u0074ype":"response.done","response":{"id":"resp_1"}}`,
 		`{"type":"response.done","response":{"id":"resp_1","usage":{"input_tokens":3,"output_tokens":2},"unknown":{"nested":[true,null,0]}}}`,
 		`{"type":"response.done","response":{"id":"resp_1","usage":{"input_tokens":-0,"output_tokens":2}}}`,
@@ -169,5 +168,23 @@ func TestRealtimeManualCommitTurnCompletes(t *testing.T) {
 	s.providerFrame(websocket.MessageText, []byte(`{"type":"response.done","response":{"id":"r1"}}`), true)
 	if s.pending() {
 		t.Fatalf("manual commit turn left pending state: %+v", s)
+	}
+}
+
+func TestRealtimeCaseAliasesCannotDischargePendingResponse(t *testing.T) {
+	for _, frame := range []string{
+		`{"type":"response.audio.delta","TYPE":"response.done","response_id":"r"}`,
+		`{"type":5,"TYPE":"response.done","response":{"id":"r","usage":{"input_tokens":0,"output_tokens":0}}}`,
+		`{"type":"response.done","response":{"id":"r","usage":{"input_tokens":"bad","INPUT_TOKENS":0,"output_tokens":0}}}`,
+		`{"type":"response.done","response":5,"Response":{"id":"r","usage":{"input_tokens":0,"output_tokens":0}}}`,
+		`{"type":"response.done","response":{"id":"r","usage":5,"Usage":{"input_tokens":0,"output_tokens":0}}}`,
+		`{"type":"response.done","response":{"id":"r","usage":{"input_tokens":0,"output_tokens":0,"input_token_details":{"cached_tokens":"bad","CACHED_TOKENS":0}}}}`,
+	} {
+		var state realtimeResponseState
+		state.clientFrame(websocket.MessageText, []byte(`{"type":"response.create"}`))
+		state.providerFrame(websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"r"}}`), true)
+		if usage := state.providerFrame(websocket.MessageText, []byte(frame), true); usage != nil || !state.pending() || !state.unknown {
+			t.Fatalf("alias concealed malformed field: usage=%+v state=%+v", usage, state)
+		}
 	}
 }

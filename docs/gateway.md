@@ -269,8 +269,10 @@ such headers.
   per-minute limit and `remaining` what the limit leaves once this request's
   reservation is counted, never below zero. The token reservation is the
   admission estimate, a prompt plus the largest reply for every attempt the request
-  may dispatch, and not usage: settlement replaces it with the tokens the provider
-  reported, so the next response can show more remaining than this one implied.
+  may dispatch. Settlement increases the allowance consumed when reported usage
+  is higher, and retains the local admission allowance when usage is lower.
+  Legitimate short completions therefore keep their reserved allowance until
+  the minute rolls over. Work never dispatched still receives a full refund.
   The counts are not read again when the response is written, so a stream that
   commits after a long wait states the window as it was admitted.
 - **Reset.** Both dimensions reset when the minute ends. OpenAI's headers give the
@@ -561,8 +563,8 @@ attempt's first-byte or idle timeout does not bound a stream's total lifetime. A
 rejected slot refunds the connection reservation it already took, the attempt is
 recorded as a rate-limit failure with its `Retry-After`, and failover continues
 to the next target. When a request ends, a reservation that dispatched nothing
-is refunded in full; otherwise the token reservation is reconciled against the
-usage the upstream reported, the concurrency lease is released, and the cost
+is refunded in full; otherwise reported usage can increase the token charge but
+cannot refund the local admission allowance. The concurrency lease is released, and the cost
 reservation becomes the cost incurred. Settlement ignores client cancellation, so
 a caller that hangs up still returns its slot.
 
@@ -572,9 +574,10 @@ authoritative when available, and successful credential validation clears it.
 Without shared coordination, the gateway uses its local cooldowns. An unreadable
 shared cooldown is treated as absent.
 
-Cost budgets compare attributed spend with daily/monthly thresholds, using UTC
-windows and exact decimals. A request must satisfy both its key and any assigned
-budget group. Exhaustion returns `429 budget_exhausted`; so does a budget with room
+Cost budgets compare attributed spend with daily, weekly and monthly thresholds,
+using the configured budget calendar and exact decimals. A request must satisfy
+every applicable caller, aggregate and supply budget. Exhaustion returns
+`429 budget_exhausted`; so does a budget with room
 left that cannot hold the request's estimate beside what is spent and in flight,
 and its message says which it was. Missing, malformed, or
 wrong-window snapshots return `503 distributed_limits_unavailable` until
@@ -585,7 +588,7 @@ confirmed, and the gateway never invents a zero for a key whose spend it does no
 know. Only the worker plane's reconciliation pass, which runs every minute, and the
 accounting of a request that has finished, install the snapshot of a window. So a
 key created with a cost budget, a budget added to a key that had none, and a
-budgeted key whose UTC day or month has just rolled over, refuse requests with that
+budgeted key whose day, week or month has just rolled over, refuse requests with that
 503 until the next pass, which is up to a minute and which the gateway cannot
 shorten. A client sees an ordinary retryable 503. A provisioning script or a
 benchmark that creates a key and sends traffic at once waits for the first pass,
@@ -650,7 +653,7 @@ model has no price, or a price without a rate the request needs; any request
 while the gateway's price list is more than a minute old; and media and audio
 requests other than a video create, a video's retrieval, content and deletion,
 Bedrock invoke and stored-response lifecycle calls, whose cost is not known
-before they run. A video create, a realtime or Gemini Live session and a Gemini
+before they run. A video create, a realtime session and a Gemini
 Interaction create run on one target, so each reserves that target's price once
 it is selected and before anything is dispatched: a video its requested seconds,
 four when it names none, and the others their input estimate plus the default
@@ -786,3 +789,40 @@ steps must stay on the configured origin, and fetched products receive no
 credential. Both initial and follow-up errors use the collected credential
 redactions. Immediate video compensation can use the current request credential;
 background work cannot.
+
+### Unbounded work and incomplete accounting
+
+Batch submissions and Gemini Live sessions return `unbounded_work_budget` when
+an applicable token or cost budget cannot bound their future consumption. This
+includes key, shared group, route, end-user, project attribution, organization,
+project, installation, provider and credential-slot consumption budgets. Weekly
+cost budgets receive the same protection as daily and monthly budgets.
+Request-rate and concurrency-only controls remain supported. Live sessions
+recheck consumption budgets during authority refresh, including policies added
+to the current release after the route and target were pinned.
+
+Cost admission checks PostgreSQL for raw and hourly ingestion losses overlapping
+any active day, week or month in the configured budget calendar. A week may start
+before the current month, and a calendar transition may make the day the earliest
+window. Loss evidence lacks reliable ownership, so a gap conservatively affects
+all cost budgets, including shared, system and supply-side budgets. An unclosed
+producer epoch whose checkpoint is more than 60 seconds old also blocks cost
+admission, even when no recovery worker is running. A healthy heartbeat can clear
+this uncertainty; confirmed loss remains authoritative through hourly retention.
+
+The check is bounded and fails closed if PostgreSQL is unavailable. Admissions
+without cost budgets do not consult it. Local emitter loss
+participates immediately, and a bounded synchronous checkpoint shares the loss
+with other replicas. Periodic checkpoints recover a failed immediate write;
+startup registers the producer epoch before listeners bind or probes start.
+Control-only playground calls and worker-only health probes use the same
+delivery pipeline. Shutdown drains probe producers before closing metadata
+intake while consumers remain available to persist the delivered events; a
+forced probe shutdown leaves its epoch open. Already-admitted
+requests and replicas racing the checkpoint can still finish. This prevents
+additional admission based on incomplete evidence; it cannot reconstruct lost
+spend or guarantee a fixed recovery time.
+
+Unsupported usage-event versions stay in the original stream and pending set for
+a compatible consumer. Supported neighboring events continue to persist.
+Malformed events in the supported format still produce durable loss evidence.

@@ -194,7 +194,9 @@ func TestCodeForwardingDurableTreeUsageRateAndRefusals(t *testing.T) {
 		t.Fatalf("durable usage=%d err=%v", reported, err)
 	}
 	usage, err := limiter.ProviderUsage(t.Context(), lookup)
-	if err != nil || usage.ConcurrentRequests != 0 || usage.TokensThisMinute != 60 {
+	// Each request keeps its 16-token reservation: reported usage (15) can
+	// only raise the count, never refund the local allowance.
+	if err != nil || usage.ConcurrentRequests != 0 || usage.TokensThisMinute != 64 {
 		t.Fatalf("ordinary rate not reconciled: %+v %v", usage, err)
 	}
 	status, _ := codeForwardRequest(t, server, "orphan", "unknown")

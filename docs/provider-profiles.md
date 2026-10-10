@@ -309,3 +309,26 @@ a file cannot create authority. For an explicit profile the mounted
 configuration must match the published model-significant and network settings;
 only secret material is supplied locally. Current revocation still applies, and
 mounted secret values are excluded from serialization and diagnostic formatting.
+
+### Credential destination changes
+
+Stored static credentials belong to a provider's authentication and destination
+boundary. While a provider owns any unrevoked credential version, editing or restoring its
+kind, authentication mode, endpoint, cloud context, profile, credential headers,
+proxy or TLS trust roots requires a new provider with explicitly supplied
+credentials, or revocation of all existing versions before supplying new ones. Detaching a slot does not release this restriction because old
+versions can be selected again. Model, quota and connection timeout changes
+remain available. Vertex service-account and application-default credentials use
+Google's endpoint for the configured location and the system TLS trust roots.
+
+Grant enrollment records both the plugin digest and profile ID. Changing either
+requires re-enrollment before the draft can be probed, validated or activated;
+existing published revisions retain their historical serving configuration.
+This transition preserves the remaining credential boundary, including the
+endpoint and plugin options. Changing those still requires revoking old
+credentials or creating a new provider, even when changing the profile too.
+Unexpired retained resources keep their grants refreshable under the original
+provider revision until those resources expire or are deleted. Explicit
+credential revocation still takes effect. Grants created before profile
+provenance was recorded require re-enrollment; the migration does not infer
+their original profile from mutable drafts.

@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -195,6 +196,19 @@ func TestRouteFidelitySwitchesThroughRevisionsAndRefusesRetainedStrictResponses(
 	activated := h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem(uuid.NewString())), 200)
 	if activated["route_id"] != route["id"] || activated["revision"] != float64(2) {
 		t.Fatal("fidelity change did not publish a new revision of the same route", activated)
+	}
+	// The gateway has not polled the new release. It must refuse new strict
+	// work immediately after publication, before any provider request.
+	beforeRefresh := len(f.captured())
+	status, response, _ = h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(`{"model":"`+slug+`","input":"must not escape","store":false}`), map[string]string{"Content-Type": "application/json"})
+	if status != 503 || !strings.Contains(string(response), "route_fidelity_unavailable") || len(f.captured()) != beforeRefresh {
+		t.Fatalf("stale strict admission reached provider: %d %s", status, response)
+	}
+	// A failed authoritative read also refuses the strict admission.
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := h.Runtime.CheckRouteFidelity(cancelled, h.Runtime.Release().Snapshot.Routes[slug]); err == nil {
+		t.Fatal("a failed database read authorized strict work")
 	}
 	h.refresh()
 	if h.Runtime.Release().Snapshot.Routes[slug].Fidelity.Mode != "transformed" {

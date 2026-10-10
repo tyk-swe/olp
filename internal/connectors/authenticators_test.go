@@ -117,7 +117,11 @@ func TestAuthenticationFailuresTellARejectedCredentialFromATransientOne(t *testi
 			// Test-only token endpoints: production keeps Google's public-only client.
 			a.publicClient = a.client
 			c, secret := test.prepare(t, a)
-			req, _ := http.NewRequest("POST", "https://provider.example", nil)
+			endpoint := "https://provider.example"
+			if c.Kind == "vertex_ai" {
+				endpoint = "https://aiplatform.googleapis.com/v1"
+			}
+			req, _ := http.NewRequest("POST", endpoint, nil)
 			_, err := a.Apply(t.Context(), req, c, secret, nil)
 			if !errors.Is(err, ErrAuthentication) || errors.Is(err, ErrCredentialRejected) != test.rejected {
 				t.Fatalf("authentication failure %v: rejected=%t, want %t", err, errors.Is(err, ErrCredentialRejected), test.rejected)

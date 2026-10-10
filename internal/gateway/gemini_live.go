@@ -182,6 +182,11 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		x.failure, status = e, e.Status
 		return
 	}
+	if e := unboundedWorkLimits(x.admissionAuthority(x.authority), nil, nil, &route); e != nil {
+		client.Close(websocket.StatusPolicyViolation, "unbounded work cannot enforce budgets")
+		x.failure, status = e, e.Status
+		return
+	}
 	x.estimate = resourceEstimate
 	if e := s.reserveState(ctx, x, x.authority, geminiLiveSession); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "admission refused")
@@ -203,6 +208,11 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	})
 	if e != nil {
 		client.Close(websocket.StatusPolicyViolation, "provider unavailable")
+		x.failure, status = e, e.Status
+		return
+	}
+	if e := s.unboundedPinLimits(x.admissionAuthority(x.authority), p, &route); e != nil {
+		client.Close(websocket.StatusPolicyViolation, "unbounded work cannot enforce budgets")
 		x.failure, status = e, e.Status
 		return
 	}
@@ -496,6 +506,13 @@ loop:
 			if err != nil || authority.ID != x.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) || s.pinEligibility(p) != runtime.Eligible {
 				first.err = errGeminiLiveAuthority
 				client.Close(websocket.StatusPolicyViolation, "authority revoked")
+				break loop
+			}
+			current := *authority
+			current.EndUserDigest = x.endUserDigest
+			if e := s.unboundedPinLimits(x.admissionAuthority(current), p, x.route); e != nil {
+				first.err = errGeminiLiveAuthority
+				client.Close(websocket.StatusPolicyViolation, "consumption budget changed")
 				break loop
 			}
 		case <-heartbeat.C:

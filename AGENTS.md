@@ -12,7 +12,7 @@ OpenLLMProxy combines a Go gateway with a client-only SvelteKit console.
 
 ## Build, Test, and Development Commands
 
-Use Go 1.27.1, a C compiler/linker and glibc headers, Node.js 26, pnpm 11,
+Use Go 1.27.2, a C compiler/linker and glibc headers, Node.js 26, pnpm 11,
 Docker Compose, and the [contributor prerequisites](CONTRIBUTING.md). Run from
 the repository root:
 

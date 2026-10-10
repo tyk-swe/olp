@@ -346,7 +346,8 @@ accounting see as an ordinary response:
   uncertain, unless the stream reported usage, which is accounted as it would
   be for a streaming caller.
 - Aggregation is bounded by the gateway's response size limit
-  (`OLP_PROVIDER_MAX_RESPONSE_BYTES`). A larger result fails the request with
+  (`OLP_PROVIDER_MAX_RESPONSE_BYTES`) and at most 4,096 retained completed
+  output items. Exceeding either bound fails the request with
   `502 upstream_response_too_large`, without failing over, and the caller can
   stream instead.
 

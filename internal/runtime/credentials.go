@@ -23,7 +23,8 @@ const (
 	// Revoked marks a credential version an operator revoked.
 	Revoked Eligibility = "revoked"
 	// Lapsed marks a credential version whose grant lapsed: it can no longer
-	// be refreshed, and only a new grant enrollment replaces it.
+	// be refreshed, or whose original profile was not recorded. Only a new
+	// grant enrollment replaces it.
 	Lapsed Eligibility = "lapsed"
 	// StaleAuthority withholds every credential version: the last authority
 	// read is too old to vouch for any of them.
@@ -69,7 +70,8 @@ func (m *Manager) Eligibility(credentialID string) Eligibility {
 func ReadIneligible(ctx context.Context, q access.Queryer, ids []string) (map[string]Eligibility, error) {
 	rows, err := q.Query(ctx, `SELECT c.id::text,CASE WHEN c.revoked_at IS NOT NULL THEN 'revoked' ELSE 'lapsed' END
 		FROM olp.provider_credentials c LEFT JOIN olp.provider_grants g ON g.credential_id=c.id
-		WHERE (c.revoked_at IS NOT NULL OR g.lapsed_at IS NOT NULL) AND ($1::uuid[] IS NULL OR c.id=ANY($1))
+		WHERE (c.revoked_at IS NOT NULL OR g.lapsed_at IS NOT NULL OR c.plugin_digest IS NOT NULL AND c.profile_id IS NULL)
+		AND ($1::uuid[] IS NULL OR c.id=ANY($1))
 		UNION ALL SELECT id::text,'revoked' FROM olp.provider_network_credentials
 		WHERE revoked_at IS NOT NULL AND ($1::uuid[] IS NULL OR id=ANY($1))`, ids)
 	if err != nil {
@@ -113,6 +115,15 @@ func (m *Manager) Secret(ctx context.Context, release *Release, credentialID str
 		return nil, 0, err
 	}
 	defer tx.Rollback(ctx)
+	// Authority may have changed since the last poll. Historical credentials
+	// have no installed release to vouch for them at this read.
+	ineligible, err := ReadIneligible(ctx, tx, []string{credentialID})
+	if err != nil {
+		return nil, 0, err
+	}
+	if eligibility := ineligible[credentialID]; eligibility != Eligible {
+		return nil, 0, fmt.Errorf("credential %s: %s: %w", credentialID, eligibility, ErrCredentialUnavailable)
+	}
 	generations, err := ReadGrantGenerations(ctx, tx, []string{credentialID})
 	if err != nil {
 		return nil, 0, err

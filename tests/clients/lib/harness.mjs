@@ -14,6 +14,7 @@ function required(name) {
 
 export const origin = required('OLP_CLIENTS_ORIGIN');
 export const apiKey = required('OLP_CLIENTS_API_KEY');
+export const stateApiKey = required('OLP_CLIENTS_STATE_API_KEY');
 export const restrictedApiKey = required('OLP_CLIENTS_RESTRICTED_API_KEY');
 export const upstreamURL = required('OLP_CLIENTS_UPSTREAM_URL');
 export const defaultReply = required('OLP_CLIENTS_DEFAULT_REPLY');

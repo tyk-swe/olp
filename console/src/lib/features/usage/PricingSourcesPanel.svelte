@@ -121,8 +121,9 @@
       notice = 'Pricing source updated.';
     } catch (cause) {
       error = updateError(cause);
+      if (isEtagMismatch(cause)) editId = '';
     } finally {
-      // Refreshed even after a refusal: trying again needs the current ETag.
+      // A conflicted edit must be reopened from the refreshed values.
       await queryClient.invalidateQueries({ queryKey: pricingKeys.sources() });
       busy = '';
     }

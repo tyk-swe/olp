@@ -54,7 +54,7 @@ func (s *Server) validateBatchInput(part *media.Part, model string, provider *ru
 		if len(line) == 0 || len(seen) >= 10000 {
 			return "", 0, resources.ErrContract
 		}
-		doc, err := oif.ParseJSON(line, oif.Limits{MaxBytes: 1 << 20})
+		doc, err := parseObjectRequest(line, oif.Limits{MaxBytes: 1 << 20})
 		if err != nil || doc.Root().Kind() != oif.Object {
 			return "", 0, resources.ErrContract
 		}

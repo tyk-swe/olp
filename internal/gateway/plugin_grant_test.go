@@ -31,7 +31,7 @@ func TestPluginGrantBaseURLPlacesEachAttempt(t *testing.T) {
 			if !approved {
 				base = strings.Replace(base, "127.0.0.1", "127.0.0.2", 1)
 			}
-			grant, _ := json.Marshal(connectors.GrantCredential{AccessToken: "at-123", Facts: map[string]string{"api_base": base}})
+			grant, _ := json.Marshal(connectors.GrantCredential{PluginDigest: digest, ProfileID: profile.ID, AccessToken: "at-123", Facts: map[string]string{"api_base": base}})
 			h.pinPlugin(plugin, grant)
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/a/v1/chat/completions" || r.Host != strings.TrimPrefix(h.upstream.URL, "http://") || r.Header.Get("Authorization") != "Bearer at-123" {

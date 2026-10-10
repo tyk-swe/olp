@@ -232,7 +232,7 @@ func TestRotationKeepsInflightConcurrencyAndSettledTokens(t *testing.T) {
 		rate := f.namespace + ":{" + strings.Split(old, "_")[1] + "}:rate"
 		glEventually(t, "token reconciliation", func() bool {
 			value, err := f.valkey.Do(t.Context(), "HGET", rate, "tpm")
-			return err == nil && value == "10"
+			return err == nil && value == "17"
 		})
 		path := "/api/v1/api-keys/" + id
 		detail := f.h.want(f.owner, "GET", path, nil, nil, 200)

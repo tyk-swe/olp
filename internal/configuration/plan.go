@@ -84,6 +84,7 @@ type existingSlot struct {
 	// PluginDigest is the plugin build whose grant enrollment created the
 	// credential version, or "" for a pasted one.
 	PluginDigest string
+	ProfileID    string
 }
 
 type existingProvider struct {
@@ -186,7 +187,7 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	}
 	// A lapsed grant serves no more: the slot's credential reads as absent, so
 	// a grant provider plans its enrollment again.
-	slots, err := q.Query(ctx, `SELECT s.provider_id::text,s.name,s.id::text,c.id::text,coalesce(c.plugin_digest,'')
+	slots, err := q.Query(ctx, `SELECT s.provider_id::text,s.name,s.id::text,c.id::text,coalesce(c.plugin_digest,''),coalesce(c.profile_id,'')
         FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id AND c.revoked_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM olp.provider_grants g WHERE g.credential_id=c.id AND g.lapsed_at IS NOT NULL)`)
 	if err != nil {
@@ -200,12 +201,12 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	for slots.Next() {
 		var providerID, name, id string
 		var credentialID *string
-		var digest string
-		if err = slots.Scan(&providerID, &name, &id, &credentialID, &digest); err != nil {
+		var digest, profile string
+		if err = slots.Scan(&providerID, &name, &id, &credentialID, &digest, &profile); err != nil {
 			return nil, err
 		}
 		if p, ok := byProvider[providerID]; ok {
-			p.Slots[strings.TrimSpace(name)] = existingSlot{ID: id, CredentialID: credentialID, PluginDigest: digest}
+			p.Slots[strings.TrimSpace(name)] = existingSlot{ID: id, CredentialID: credentialID, PluginDigest: digest, ProfileID: profile}
 		}
 	}
 	if err = slots.Err(); err != nil {
@@ -847,7 +848,7 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			// The slot's credential version serves on only if the provider
 			// authenticates with it: a static credential, or a grant the
 			// plugin build it pins enrolled.
-			fits := current.CredentialID != nil && p.Configuration.Authenticates(current.PluginDigest)
+			fits := current.CredentialID != nil && p.Configuration.Authenticates(current.PluginDigest, current.ProfileID)
 			secret, supplied := bindings[ref]
 			switch {
 			case supplied:

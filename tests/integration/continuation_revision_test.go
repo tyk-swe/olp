@@ -28,7 +28,7 @@ func TestActiveContinuationKeepsCompatibleHistoricalRevisionAcrossRestart(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	var historicalCalls, replacementCalls atomic.Int64
+	var historicalCalls atomic.Int64
 	original := &strictProviderFixture{profile: "anthropic-messages"}
 	original.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -64,18 +64,6 @@ func TestActiveContinuationKeepsCompatibleHistoricalRevisionAcrossRestart(t *tes
 		_, _ = io.WriteString(w, `{"id":"msg-revision-final","type":"message","role":"assistant","model":"fixture-model","content":[{"type":"text","text":"Both tools completed."}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":30,"output_tokens":4}}`)
 	}))
 	t.Cleanup(original.Close)
-	replacement := &strictProviderFixture{profile: "anthropic-messages"}
-	replacement.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			writeJSON(w, map[string]any{"data": []any{map[string]string{"id": vendorModel}}})
-			return
-		}
-		replacementCalls.Add(1)
-		var probe map[string]json.RawMessage
-		_ = json.NewDecoder(r.Body).Decode(&probe)
-		kindGeneration(w, "anthropic", string(probe["stream"]) == "true")
-	}))
-	t.Cleanup(replacement.Close)
 	options := map[string]any{"bindings": map[string]any{vendorModel: map[string]any{"model": "fixture-model"}}, "operation_defaults": map[string]any{"generation": map[string]any{"dialect": "anthropic-messages", "values": map[string]any{"max_tokens": 2048, "thinking": map[string]any{"type": "enabled", "budget_tokens": 1024}}}}}
 	slug, _ := publishStrictProvider(t, h, owner, original, options, nil, "strict")
 	key := stateKey(t, h, owner, slug, true)
@@ -113,7 +101,6 @@ func TestActiveContinuationKeepsCompatibleHistoricalRevisionAcrossRestart(t *tes
 	h.want(owner, "POST", providerPath+"/credentials", map[string]any{"credential": "rotated-fixture-secret"}, withMatch(detail, idem(uuid.NewString())), 201)
 	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
 	configuration := detail["configuration"].(map[string]any)
-	configuration["endpoint"] = replacement.URL + "/v1"
 	configuration["options"].(map[string]any)["operation_defaults"].(map[string]any)["generation"].(map[string]any)["values"].(map[string]any)["max_tokens"] = 999
 	detail = h.want(owner, "PATCH", providerPath, map[string]any{"name": "Compatible replacement", "configuration": configuration}, etagHeader(detail), 200)
 	modelID := h.want(owner, "GET", providerPath+"/models", nil, nil, 200)["items"].([]any)[0].(map[string]any)["id"].(string)
@@ -121,7 +108,6 @@ func TestActiveContinuationKeepsCompatibleHistoricalRevisionAcrossRestart(t *tes
 	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
 	h.want(owner, "POST", providerPath+"/activate", nil, withMatch(detail, idem(uuid.NewString())), 200)
 	h.refresh()
-	probeCalls := replacementCalls.Load()
 	h = newAccessHarnessOn(t, h.Pool, h.DBURL)
 	h.refresh()
 	status, recovered, _ := h.gatewayRaw("GET", "/v1/continuations/"+handle, key, nil, map[string]string{"X-OLP-Continuation": continuationClientVersion})
@@ -142,14 +128,28 @@ func TestActiveContinuationKeepsCompatibleHistoricalRevisionAcrossRestart(t *tes
 	nextHeaders := continuationHeaders()
 	nextHeaders["X-OLP-Continuation-Handle"] = handle
 	status, final, _ := h.gatewayRaw("POST", "/v1/chat/completions", key, bytes.NewReader(nextBody), nextHeaders)
-	if status != 200 || !bytes.Contains(final, []byte("Both tools completed.")) || historicalCalls.Load() != 2 || replacementCalls.Load() != probeCalls {
-		t.Fatalf("historical route changed: %d old=%d new=%d probe=%d %s", status, historicalCalls.Load(), replacementCalls.Load(), probeCalls, final)
+	if status != 200 || !bytes.Contains(final, []byte("Both tools completed.")) || historicalCalls.Load() != 2 {
+		t.Fatalf("historical route changed: %d old=%d %s", status, historicalCalls.Load(), final)
+	}
+	// A compatible protocol revision does not preserve permission to start
+	// another turn after the owner removes this key from the active slot.
+	slots = h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, 200)
+	slotID := slots["items"].([]any)[0].(map[string]any)["id"].(string)
+	h.want(owner, "PUT", providerPath+"/credential-slots/"+slotID, map[string]any{"slot": map[string]any{"name": "default", "enabled": true, "allowed_api_keys": []string{uuid.NewString()}}}, withMatch(slots, idem(uuid.NewString())), 200)
+	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
+	h.want(owner, "POST", providerPath+"/activate", nil, withMatch(detail, idem(uuid.NewString())), 200)
+	h.refresh()
+	restrictedHeaders := continuationHeaders()
+	restrictedHeaders["X-OLP-Continuation-Handle"] = handle
+	status, restricted, _ := h.gatewayRaw("POST", "/v1/chat/completions", key, bytes.NewReader(nextBody), restrictedHeaders)
+	if status != http.StatusConflict || historicalCalls.Load() != 2 {
+		t.Fatalf("current slot restrictions bypassed: %d old=%d %s", status, historicalCalls.Load(), restricted)
 	}
 	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
 	h.want(owner, "POST", providerPath+"/credentials/"+historicalCredential+"/revoke", nil, withMatch(detail, idem(uuid.NewString())), 200)
 	h.refresh()
 	status, refused, _ := h.gatewayRaw("GET", "/v1/continuations/"+handle, key, nil, map[string]string{"X-OLP-Continuation": continuationClientVersion})
-	if status != 409 || !bytes.Contains(refused, []byte("provider_resource_credential_unavailable")) || historicalCalls.Load() != 2 || replacementCalls.Load() != probeCalls {
-		t.Fatalf("revoked historical credential recovered: %d old=%d new=%d probe=%d %s", status, historicalCalls.Load(), replacementCalls.Load(), probeCalls, refused)
+	if status != 409 || !bytes.Contains(refused, []byte("provider_resource_credential_unavailable")) || historicalCalls.Load() != 2 {
+		t.Fatalf("revoked historical credential recovered: %d old=%d %s", status, historicalCalls.Load(), refused)
 	}
 }

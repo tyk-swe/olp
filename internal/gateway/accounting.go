@@ -13,13 +13,13 @@ import (
 
 // AccountingSink hands every terminal request to the usage pipeline as the
 // content-free event the accounting tables are built from. Emitting is a
-// bounded handoff: it never blocks the request that produced it, and an event
-// the pipeline could not store is dropped here rather than poisoning the
-// stream for every request behind it.
+// bounded handoff. A rejected event checkpoints its loss with a bounded write
+// so other replicas can refuse admission against incomplete cost accounting.
 type AccountingSink struct {
-	Emitter *usage.Emitter
-	Log     *slog.Logger
-	Next    Sink
+	RecordLoss func(context.Context, string) error
+	Emitter    *usage.Emitter
+	Log        *slog.Logger
+	Next       Sink
 }
 
 // Terminal records one finished request.
@@ -36,11 +36,24 @@ func (a *AccountingSink) Terminal(e Envelope) {
 	}
 	if _, err := usage.Validate(event); err != nil {
 		a.Emitter.Drop()
+		a.recordLoss(e.RequestID)
 		a.logger().Warn("usage event dropped", "request_id", e.RequestID, "error", err.Error())
 		return
 	}
 	if err := a.Emitter.Emit(*event); err != nil {
+		a.recordLoss(e.RequestID)
 		a.logger().Warn("usage event not queued", "request_id", e.RequestID, "error", err.Error())
+	}
+}
+
+func (a *AccountingSink) recordLoss(requestID string) {
+	if a.RecordLoss == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := a.RecordLoss(ctx, requestID); err != nil {
+		a.logger().Error("accounting loss checkpoint failed", "request_id", requestID, "error", err)
 	}
 }
 
@@ -51,10 +64,9 @@ func (a *AccountingSink) logger() *slog.Logger {
 	return a.Log
 }
 
-// PersistingSink records each terminal request directly, for a process that
-// originates requests of its own but carries no metadata stream: the health
-// probe worker. Persist runs synchronously and its failures are logged, never
-// retried; a probe's record is evidence, not a ledger the caller depends on.
+// PersistingSink records terminal events directly for explicit persistence
+// integrations. Production request producers use AccountingSink so failures
+// remain visible through the metadata stream and durable producer epoch.
 type PersistingSink struct {
 	Persist func(ctx context.Context, event *usage.Event, payload []byte) error
 	Log     *slog.Logger

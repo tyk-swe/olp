@@ -27,6 +27,8 @@ type strictVideoUpstream struct {
 	*httptest.Server
 	mu                               sync.Mutex
 	creates, gets, contents, deletes int
+	activeGets, maxGets              int
+	getDelay                         time.Duration
 	fields                           []string
 	values                           [][]byte
 }
@@ -73,12 +75,17 @@ func newStrictVideoUpstream(t *testing.T) *strictVideoUpstream {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprintf(w, `{"id":"upstream-video-1","object":"video","model":%q,"status":"queued","progress":0,"created_at":1800000000,"seconds":"8","size":"1280x720","native":{"large":9007199254740993}}`, vendorModel)
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/videos/upstream-video-1":
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/videos/upstream-video-") && !strings.Contains(r.URL.Path[len("/v1/videos/"):], "/"):
 			f.mu.Lock()
 			f.gets++
+			f.activeGets++
+			f.maxGets = max(f.maxGets, f.activeGets)
+			delay := f.getDelay
 			f.mu.Unlock()
+			defer func() { f.mu.Lock(); f.activeGets--; f.mu.Unlock() }()
+			time.Sleep(delay)
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"id":"upstream-video-1","object":"video","model":%q,"status":"completed","progress":73.123456789,"created_at":1800000000,"completed_at":1800000060,"expires_at":4102444800,"seconds":"8","size":"1280x720","native":{"frame_ms":[-0,33.333333333],"large":9007199254740993}}`, vendorModel)
+			fmt.Fprintf(w, `{"id":%q,"object":"video","model":%q,"status":"completed","progress":73.123456789,"created_at":1800000000,"completed_at":1800000060,"expires_at":4102444800,"seconds":"8","size":"1280x720","native":{"frame_ms":[-0,33.333333333],"large":9007199254740993}}`, strings.TrimPrefix(r.URL.Path, "/v1/videos/"), vendorModel)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/videos/upstream-video-1/content":
 			f.mu.Lock()
 			f.contents++
@@ -90,7 +97,7 @@ func newStrictVideoUpstream(t *testing.T) *strictVideoUpstream {
 				w.Header().Set("Content-Type", `video/mp4; codecs="avc1.42E01E"`)
 				w.Write([]byte{0, 0, 0, 8, 'm', 'o', 'o', 'v'})
 			}
-		case r.Method == http.MethodDelete && r.URL.Path == "/v1/videos/upstream-video-1":
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/videos/upstream-video-") && !strings.Contains(r.URL.Path[len("/v1/videos/"):], "/"):
 			f.mu.Lock()
 			f.deletes++
 			f.mu.Unlock()
@@ -202,62 +209,13 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 	if status != 200 || !bytes.Contains(raw, []byte(localID)) {
 		t.Fatalf("owner-scoped video inventory lost job: %d %s", status, raw)
 	}
-	var ownerID string
-	if err := h.Pool.QueryRow(t.Context(), "SELECT api_key_id::text FROM olp.media_jobs WHERE id=$1 AND strict_contract AND native_source_id=$1", localID).Scan(&ownerID); err != nil {
-		t.Fatal(err)
+	var retained int
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose='media_job_source'").Scan(&retained); err != nil || retained != 0 {
+		t.Fatalf("video native content persisted: count=%d err=%v", retained, err)
 	}
-	var ciphertext []byte
-	if err := h.Pool.QueryRow(t.Context(), "SELECT ciphertext FROM olp.secrets WHERE id=$1 AND purpose='media_job_source'", localID).Scan(&ciphertext); err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(ciphertext, []byte("one frame")) || bytes.Contains(ciphertext, []byte("9007199254740993")) {
-		t.Fatal("native metadata stored as plaintext")
-	}
-	record, err := media.Job(t.Context(), h.Pool, localID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recovered := *h.Media
-	source, err := recovered.ReadNativeVideoSource(t.Context(), record, ownerID)
-	if err != nil || !bytes.Contains(source, []byte("9007199254740993")) {
-		t.Fatalf("restart source unavailable: %v", err)
-	}
-	orphanID := uuid.NewString()
-	_, err = recovered.AttachWithRetry(t.Context(), orphanID, "orphan-video", media.JobUpdate{State: media.StateQueued, LastPolledAt: time.Now()}, source)
-	if err == nil {
-		t.Fatal("unreserved video source activated")
-	}
-	var orphanSecrets int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE id=$1 AND purpose='media_job_source'", orphanID).Scan(&orphanSecrets); err != nil || orphanSecrets != 0 {
-		t.Fatalf("failed attachment committed a source secret: %d %v", orphanSecrets, err)
-	}
-	if _, err = recovered.ReadNativeVideoSource(t.Context(), record, uuid.NewString()); err == nil {
-		t.Fatal("wrong owner read native source")
-	}
-	past := time.Now().Add(-time.Second)
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.media_jobs SET expires_at=$2 WHERE id=$1", localID, past); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = recovered.ReadNativeVideoSource(t.Context(), record, ownerID); err == nil {
-		t.Fatal("expired job read native source")
-	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.media_jobs SET expires_at=$2 WHERE id=$1", localID, record.ExpiresAt); err != nil {
-		t.Fatal(err)
-	}
-	live := recovered.Credentials
-	recovered.Credentials = revokedCredentials{live}
-	if _, err = recovered.ReadNativeVideoSource(t.Context(), record, ownerID); err == nil {
-		t.Fatal("revoked provider read native source")
-	}
-	recovered.Credentials = live
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET ciphertext=$2 WHERE id=$1 AND purpose='media_job_source'", localID, []byte{0, 1, 2, 3}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = recovered.ReadNativeVideoSource(t.Context(), record, ownerID); err == nil {
-		t.Fatal("tampered video source authenticated")
-	}
-	if _, err := h.Pool.Exec(t.Context(), "UPDATE olp.secrets SET ciphertext=$2 WHERE id=$1 AND purpose='media_job_source'", localID, ciphertext); err != nil {
-		t.Fatal(err)
+	var sourceID *string
+	if err := h.Pool.QueryRow(t.Context(), "SELECT native_source_id::text FROM olp.media_jobs WHERE id=$1 AND strict_contract", localID).Scan(&sourceID); err != nil || sourceID != nil {
+		t.Fatalf("job retained a native source: %v %v", sourceID, err)
 	}
 
 	status, raw, _ = h.gatewayRaw("GET", "/v1/videos/"+localID, key, nil, nil)
@@ -296,7 +254,7 @@ func TestStrictVideoPublicOriginalAssetsAndDurableIdentity(t *testing.T) {
 	}
 }
 
-func TestStrictVideoNativeSourceSurvivesKeyRotation(t *testing.T) {
+func TestStrictVideoLifecycleSurvivesKeyRotationWithoutStoredContent(t *testing.T) {
 	h := newAccessHarness(t)
 	upstream := newStrictVideoUpstream(t)
 	slug, key := publishStrictVideo(t, h, h.owner(), upstream)
@@ -325,7 +283,7 @@ func TestStrictVideoNativeSourceSurvivesKeyRotation(t *testing.T) {
 	}
 	count, err := rotatedRing.Rotate(t.Context(), h.Pool, h.Server.Installation)
 	if err != nil || count == 0 {
-		t.Fatalf("master key rotation did not include video source: %d %v", count, err)
+		t.Fatalf("master key rotation did not include provider credentials: %d %v", count, err)
 	}
 	auth, err := secrets.DecodeKey(h.AuthHex)
 	if err != nil {
@@ -339,12 +297,12 @@ func TestStrictVideoNativeSourceSurvivesKeyRotation(t *testing.T) {
 	}
 	restarted := *h.Media
 	restarted.Keys, restarted.Credentials = rotatedRing, credentials
-	source, err := restarted.ReadNativeVideoSource(t.Context(), record, record.APIKeyID)
-	if err != nil || !bytes.Contains(source, []byte("9007199254740993")) {
-		t.Fatalf("rotated source unavailable: %v", err)
+	if target, _, code := restarted.JobTarget(t.Context(), &record); target == nil {
+		t.Fatalf("rotated provider unavailable: %s", code)
 	}
-	if _, err := h.Media.ReadNativeVideoSource(t.Context(), record, record.APIKeyID); err == nil {
-		t.Fatal("retired master key read rotated source")
+	var retained int
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE purpose='media_job_source'").Scan(&retained); err != nil || retained != 0 {
+		t.Fatalf("video native content persisted after rotation: count=%d err=%v", retained, err)
 	}
 }
 
@@ -450,5 +408,100 @@ func TestVideoJobOutsideTheKeysRoutesIsMissing(t *testing.T) {
 	status, raw, _ = h.gatewayRaw("GET", "/v1/videos/"+created.ID, key, nil, nil)
 	if status != 404 || !bytes.Contains(raw, []byte("video_not_found")) {
 		t.Fatalf("a video job outside the key's routes: %d %s", status, raw)
+	}
+}
+
+func TestVideoListDoesNotMultiplyUpstreamConcurrency(t *testing.T) {
+	h := newAccessHarness(t)
+	upstream := newStrictVideoUpstream(t)
+	slug, key := publishStrictVideo(t, h, h.owner(), upstream)
+	var upload bytes.Buffer
+	form := multipart.NewWriter(&upload)
+	form.WriteField("model", slug)
+	form.WriteField("prompt", "private video prompt")
+	form.Close()
+	status, raw, _ := h.gatewayRaw("POST", "/v1/videos", key, bytes.NewReader(upload.Bytes()), map[string]string{"Content-Type": form.FormDataContentType()})
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil || status != 201 {
+		t.Fatalf("create: %d %s %v", status, raw, err)
+	}
+	for i := 2; i <= 5; i++ {
+		_, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.media_jobs SELECT (jsonb_populate_record(NULL::olp.media_jobs,to_jsonb(j)||jsonb_build_object('id',$1::text,'upstream_job_id',$2::text))).* FROM olp.media_jobs j WHERE id=$3`, uuid.NewString(), fmt.Sprintf("upstream-video-%d", i), created.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	upstream.mu.Lock()
+	upstream.getDelay = 20 * time.Millisecond
+	upstream.mu.Unlock()
+	status, raw, _ = h.gatewayRaw("GET", "/v1/videos?limit=100", key, nil, nil)
+	if status != 200 {
+		t.Fatalf("list: %d %s", status, raw)
+	}
+	upstream.mu.Lock()
+	defer upstream.mu.Unlock()
+	if upstream.gets != 5 || upstream.maxGets != 1 {
+		t.Fatalf("list polls=%d max simultaneous=%d", upstream.gets, upstream.maxGets)
+	}
+}
+
+func TestVideoListPollsPendingJobsWithinOneAdmissionPermit(t *testing.T) {
+	h := newAccessHarness(t)
+	upstream := newStrictVideoUpstream(t)
+	slug, key := publishStrictVideo(t, h, h.owner(), upstream)
+	var upload bytes.Buffer
+	form := multipart.NewWriter(&upload)
+	form.WriteField("model", slug)
+	form.WriteField("prompt", "pending video")
+	form.Close()
+	status, raw, _ := h.gatewayRaw("POST", "/v1/videos", key, bytes.NewReader(upload.Bytes()), map[string]string{"Content-Type": form.FormDataContentType()})
+	var created struct{ ID string }
+	if status != http.StatusCreated || json.Unmarshal(raw, &created) != nil {
+		t.Fatalf("video creation: %d %s", status, raw)
+	}
+	first, err := media.Job(t.Context(), h.Pool, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const jobs = 8
+	for i := 2; i <= jobs; i++ {
+		reserved, err := media.ReserveJob(t.Context(), h.Pool, media.Reservation{
+			ID: uuid.NewString(), StrictContract: true, RuntimeGenerationID: first.RuntimeGenerationID,
+			ProviderRevisionID: first.ProviderRevisionID, APIKeyID: first.APIKeyID,
+			ProviderID: first.ProviderID, UpstreamModel: first.UpstreamModel, RouteSlug: slug,
+			Operation: media.OpVideoCreate, Surface: "openai", CredentialVersionID: first.CredentialVersionID,
+			SlotID: first.SlotID, StaleAfter: time.Now().Add(time.Minute),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.Media.AttachWithRetry(t.Context(), reserved.ID, fmt.Sprintf("upstream-video-%d", i), media.JobUpdate{State: media.StateQueued, LastPolledAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	upstream.mu.Lock()
+	upstream.getDelay = 20 * time.Millisecond
+	upstream.mu.Unlock()
+	status, raw, _ = h.gatewayRaw("GET", "/v1/videos?limit=100", key, nil, nil)
+	var page struct {
+		Data []struct {
+			ID, Status string
+		} `json:"data"`
+	}
+	if status != http.StatusOK || json.Unmarshal(raw, &page) != nil || len(page.Data) != jobs {
+		t.Fatalf("pending video page: %d %s", status, raw)
+	}
+	for _, job := range page.Data {
+		if job.Status != "completed" {
+			t.Fatalf("video %s was not refreshed: %s", job.ID, job.Status)
+		}
+	}
+	upstream.mu.Lock()
+	gets, concurrency := upstream.gets, upstream.maxGets
+	upstream.mu.Unlock()
+	if gets != jobs || concurrency != 1 {
+		t.Fatalf("one list made %d polls with concurrency %d; want %d serial polls", gets, concurrency, jobs)
 	}
 }

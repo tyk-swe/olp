@@ -86,7 +86,7 @@ func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (a
 }
 
 func nativeEndUser(body []byte, surface string) string {
-	document, err := oif.ParseJSON(body, oif.Limits{})
+	document, err := parseObjectRequest(body, oif.Limits{})
 	if err != nil {
 		return ""
 	}

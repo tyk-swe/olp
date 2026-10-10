@@ -200,7 +200,23 @@ func inspectorRequest(raw json.RawMessage, operation, surface, mode, dialect, sl
 	return parsed, nil
 }
 
-func inspectionAccept(route runtime.Route, parsed *openai.Request, context interaction.Context, demand *simulatedDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
+// Bound actual regexp input across every target and route leg in one inspection.
+// Each match costs at least one byte so empty strings cannot evade the budget.
+const maxInspectionPolicyBytes = 8 << 20
+
+type inspectionBudget struct{ used int }
+
+func (b *inspectionBudget) reserve(size int) error {
+	size = max(1, size)
+	if size > maxInspectionPolicyBytes-b.used {
+		b.used = maxInspectionPolicyBytes
+		return &inspectionDiagnostic{"inspection_limit", "/request", "policy_work_limit", "Reduce the request size, input policy rules or inspected targets."}
+	}
+	b.used += size
+	return nil
+}
+
+func inspectionAccept(route runtime.Route, parsed *openai.Request, context interaction.Context, demand *simulatedDemand, budget *inspectionBudget) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
 	inspections := map[string]*interactionInspection{}
 	if parsed == nil {
 		return nil, nil, inspections
@@ -304,7 +320,7 @@ func inspectionAccept(route runtime.Route, parsed *openai.Request, context inter
 			result.SemanticContext = append(result.SemanticContext, inspectedField{Field: "/query/" + name, Kind: "string", Origin: origin, Redacted: true})
 		}
 		slices.SortFunc(result.SemanticContext, func(a, b inspectedField) int { return strings.Compare(a.Field, b.Field) })
-		if _, err := plan.CheckInput(); err != nil {
+		if _, err := plan.CheckInputWithBudget(budget.reserve); err != nil {
 			safe := safeInspectionError(err)
 			if diagnostic, ok := safe.(*inspectionDiagnostic); ok && diagnostic.code == "content_policy_blocked" {
 				result.Status = "blocked"

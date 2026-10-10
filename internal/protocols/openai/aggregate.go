@@ -10,6 +10,8 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
+const maxAggregateItems = 4096
+
 // ErrAggregateTooLarge marks a stream whose non-streaming result exceeds the
 // bound it is aggregated within.
 var ErrAggregateTooLarge = errors.New("aggregated upstream stream exceeds the response size limit")
@@ -60,9 +62,12 @@ func aggregateResponses(r io.Reader, maxEventBytes, maxBytes int) (*Completion, 
 			if _, done := items[index]; done {
 				return &ProtocolError{Detail: "output item completed twice"}
 			}
-			if retained += len(fields["item"]); retained > maxBytes {
+			// Bound per-entry map and sorting overhead independently of payload
+			// bytes, including streams of tiny objects with sparse indexes.
+			if len(items) >= maxAggregateItems || len(fields["item"]) > maxBytes-retained {
 				return ErrAggregateTooLarge
 			}
+			retained += len(fields["item"])
 			items[index] = fields["item"]
 		case "response.completed", "response.incomplete":
 			terminal = event.Source().Fields()["response"]

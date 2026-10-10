@@ -41,10 +41,10 @@ func (a *CodeAuthorizer) AuthorizeCode(ctx context.Context, cfg runtime.Configur
 	var eligible bool
 	err = a.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.provider_credentials c
 		JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=c.provider_id
-		WHERE c.id=$1 AND c.provider_id=$2 AND p.project_id=$3 AND c.principal=$4 AND c.plugin_digest=$5
+		WHERE c.id=$1 AND c.provider_id=$2 AND p.project_id=$3 AND c.principal=$4 AND c.plugin_digest=$5 AND c.profile_id=$7
 		AND c.revoked_at IS NULL AND g.lapsed_at IS NULL
 		AND CASE WHEN $6 THEN g.expires_at IS NULL AND g.refresh_token_id IS NULL ELSE g.expires_at>now() END)`,
-		account.CredentialID, account.ProviderID, account.ProjectID, account.Principal, cfg.ProfileRevision, vendor.KeyGrant).Scan(&eligible)
+		account.CredentialID, account.ProviderID, account.ProjectID, account.Principal, cfg.ProfileRevision, vendor.KeyGrant, cfg.ProfileID).Scan(&eligible)
 	if err != nil || !eligible || !account.Enabled || account.Principal == "" || a.Credentials.Eligibility(account.CredentialID) != runtime.Eligible {
 		return codemode.Authorization{}, codemode.Refuse(503, "code_credential_unavailable")
 	}

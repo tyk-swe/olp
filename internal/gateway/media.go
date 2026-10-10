@@ -274,6 +274,9 @@ func (s *Server) prepareMedia(ctx context.Context, x *execution, authority acces
 
 // planMedia plans x.route for one media operation.
 func (s *Server) planMedia(ctx context.Context, x *execution) *Error {
+	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
+		return e
+	}
 	request := x.media
 	snapshot := x.snapshot()
 	route := *x.route

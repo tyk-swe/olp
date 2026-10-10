@@ -647,6 +647,26 @@ func TestBatchLifecycle(t *testing.T) {
 	if batch["input_file_id"] != fileID {
 		t.Fatalf("batch input file leaked upstream identifier: %v", batch)
 	}
+	// A row created before local_input_file_id existed must still never reveal
+	// its provider's input identifier, both on refresh and on inventory reads.
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET metadata=(metadata-'local_input_file_id') || '{"input_file_id":"file-up-1"}'::jsonb WHERE upstream_id='batch-up-1'`); err != nil {
+		t.Fatal(err)
+	}
+	fixture.mu.Lock()
+	fixture.batches["batch-up-1"]["input_file_id"] = "file-up-1"
+	fixture.mu.Unlock()
+	status, legacy, _ := h.gateway("GET", "/v1/batches/"+batchID, secret, nil)
+	if status != 200 || legacy["input_file_id"] != fileID {
+		t.Fatalf("legacy batch leaked provider input ID: %d %v", status, legacy)
+	}
+	status, inventory, _ := h.gateway("GET", "/v1/batches", secret, nil)
+	encodedInventory, _ := json.Marshal(inventory)
+	if status != 200 || bytes.Contains(encodedInventory, []byte("file-up-1")) {
+		t.Fatalf("legacy batch inventory leaked provider input ID: %d %s", status, encodedInventory)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET metadata=metadata || jsonb_build_object('local_input_file_id',$1::text) WHERE upstream_id='batch-up-1'`, fileID); err != nil {
+		t.Fatal(err)
+	}
 	sent, _ := fixture.lastReq.Load().(map[string]any)
 	if sent["input_file_id"] != "file-up-1" {
 		t.Fatalf("upstream did not receive the rewritten file identifier: %v", sent)
@@ -1713,5 +1733,23 @@ func TestBackgroundResponseStreamAccounting(t *testing.T) {
 	}
 	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.attempt_usage_facts WHERE request_id=$1", original.AccountingID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("duplicate stream billing: count=%d err=%v", count, err)
+	}
+}
+
+func TestTransformedResponsesWithoutStatePermissionDisableDefaultStorage(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	owner, _, slug, _ := provisionOpenAI(t, h, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"})
+	key := stateKey(t, h, owner, slug, false)
+	h.refresh()
+	for _, store := range []string{"", `,"store":null`} {
+		status, body, _ := h.gatewayRaw("POST", "/v1/responses", key, strings.NewReader(`{"model":"`+slug+`","input":"private"`+store+`}`), map[string]string{"Content-Type": "application/json"})
+		if status != 200 {
+			t.Fatalf("response: %d %s", status, body)
+		}
+		sent, _ := fixture.lastReq.Load().(map[string]any)
+		if sent["store"] != false {
+			t.Fatalf("provider retention was not disabled: %v", sent)
+		}
 	}
 }

@@ -15,29 +15,32 @@ import (
 var ErrInvalidCheckpoint = errors.New("invalid request metadata checkpoint")
 
 const reportConsumerHealthSQL = `INSERT INTO olp.request_metadata_consumer_health
-        (singleton, pending_events, lag_events, oldest_pending_at, checked_at)
-    VALUES (true, $1, $2, $3, $4)
+        (singleton, pending_events, lag_events, oldest_pending_at, oldest_lagged_at, checked_at)
+    VALUES (true, $1, $2, $3, $4, $5)
     ON CONFLICT (singleton) DO UPDATE SET
         pending_events = EXCLUDED.pending_events,
         lag_events = EXCLUDED.lag_events,
         oldest_pending_at = EXCLUDED.oldest_pending_at,
+        oldest_lagged_at = EXCLUDED.oldest_lagged_at,
         checked_at = EXCLUDED.checked_at
     WHERE request_metadata_consumer_health.checked_at <= EXCLUDED.checked_at`
 
 // ReportConsumerHealth records one sample of the stream backlog: how many
 // deliveries this group still owes, how far behind the tail it is, and how old
-// the oldest outstanding delivery is. Usage completeness reads it, so a sample
-// that contradicts itself (a backlog with no oldest delivery, or a reading from
-// the future) is rejected rather than published.
+// the oldest outstanding delivery and the oldest undelivered entry are. Usage
+// completeness reads it, so a sample that contradicts itself (a backlog with
+// no oldest delivery, or a reading from the future) is rejected rather than
+// published.
 //
 // An older sample never overwrites a newer one: several consumers report the
 // same group, and the freshest reading is the one that tells the truth.
 func ReportConsumerHealth(ctx context.Context, pool *pgxpool.Pool, pending, lag int64,
-	oldestPendingAt *time.Time, checkedAt time.Time) error {
+	oldestPendingAt, oldestLaggedAt *time.Time, checkedAt time.Time) error {
 	if pending < 0 || lag < 0 {
 		return fmt.Errorf("%w: negative consumer backlog", ErrInvalidCheckpoint)
 	}
-	if (pending == 0) != (oldestPendingAt == nil) {
+	if (pending == 0) != (oldestPendingAt == nil) ||
+		(lag == 0) != (oldestLaggedAt == nil) {
 		return fmt.Errorf("%w: consumer backlog and oldest delivery disagree", ErrInvalidCheckpoint)
 	}
 	tx, err := pool.Begin(ctx)
@@ -55,10 +58,12 @@ func ReportConsumerHealth(ctx context.Context, pool *pgxpool.Pool, pending, lag 
 	if checkedAt.After(databaseNow) {
 		checkedAt = databaseNow
 	}
-	if oldestPendingAt != nil && oldestPendingAt.After(checkedAt.Add(5*time.Minute)) {
-		return fmt.Errorf("%w: oldest delivery is after the sample", ErrInvalidCheckpoint)
+	for _, oldest := range []*time.Time{oldestPendingAt, oldestLaggedAt} {
+		if oldest != nil && oldest.After(checkedAt.Add(5*time.Minute)) {
+			return fmt.Errorf("%w: oldest delivery is after the sample", ErrInvalidCheckpoint)
+		}
 	}
-	if _, err = tx.Exec(ctx, reportConsumerHealthSQL, pending, lag, oldestPendingAt, checkedAt); err != nil {
+	if _, err = tx.Exec(ctx, reportConsumerHealthSQL, pending, lag, oldestPendingAt, oldestLaggedAt, checkedAt); err != nil {
 		return fmt.Errorf("report consumer health: %w", err)
 	}
 	// Sampling the backlog is the consumer's proof of life. Progress is

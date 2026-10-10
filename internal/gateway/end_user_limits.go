@@ -12,7 +12,7 @@ import (
 
 // Each boundary reserves independently. A later refusal refunds every earlier
 // reservation, while every dispatched request settles the complete chain.
-func (a *Admission) reserveEndUsers(ctx context.Context, authority *access.Authority, estimate int64, ttl time.Duration, hold costReservation) (*limits.Lease, *Error) {
+func (a *Admission) reserveEndUsers(ctx context.Context, authority *access.Authority, estimate int64, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
 	if authority.Policy.EndUserPolicy == nil && authority.ProjectEndUserPolicy == nil {
 		return nil, nil
 	}
@@ -32,6 +32,12 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *access.Autho
 		policy := boundary.policy.Limits(authority.EndUserDigest)
 		if !policy.Limited() {
 			continue
+		}
+		if policy.CostBudgeted() {
+			if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
+				settleKey(ctx, chain, false, nil, a.logger())
+				return nil, e
+			}
 		}
 		owner := limits.EndUserKeyID(authority.ID, authority.EndUserDigest)
 		if boundary.project {

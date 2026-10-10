@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -136,5 +137,34 @@ func TestOnlyResponsesStreamsAggregate(t *testing.T) {
 		if _, err := Aggregate(family, strings.NewReader(""), 4096, 4096); err == nil {
 			t.Errorf("aggregated a %s stream", family)
 		}
+	}
+}
+
+func TestAggregatedResponsesBoundsTinyItems(t *testing.T) {
+	var stream strings.Builder
+	stream.WriteString(responsesEvents(createdEvent))
+	for i := 0; i <= maxAggregateItems; i++ {
+		stream.WriteString(responsesEvents(itemDone(i, `{}`)))
+	}
+	c, err := Aggregate(FamilyResponses, strings.NewReader(stream.String()), 4096, 256<<20)
+	if !errors.Is(err, ErrAggregateTooLarge) || c != nil && len(c.Body) != 0 {
+		t.Fatalf("tiny item flood: completion=%+v error=%v", c, err)
+	}
+}
+
+func TestAggregatedResponsesAcceptsTheItemBoundary(t *testing.T) {
+	var stream strings.Builder
+	stream.WriteString(responsesEvents(createdEvent))
+	for i := range maxAggregateItems {
+		stream.WriteString(responsesEvents(itemDone(i*7, `{}`)))
+	}
+	stream.WriteString(responsesEvents(terminalEvent("response.completed", "completed", "[]")))
+	c, err := Aggregate(FamilyResponses, strings.NewReader(stream.String()), 4096, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct{ Output []json.RawMessage }
+	if err := json.Unmarshal(c.Body, &result); err != nil || len(result.Output) != maxAggregateItems {
+		t.Fatalf("boundary output: items=%d error=%v", len(result.Output), err)
 	}
 }
