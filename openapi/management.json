@@ -1550,6 +1550,13 @@
             "items": {
               "$ref": "#/components/schemas/ConfigurationSink"
             }
+          },
+          "mcp_servers": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationMCPServer"
+            }
           }
         },
         "required": [
@@ -1641,7 +1648,8 @@
               "pricing",
               "catalog_publication",
               "guardrail",
-              "sink"
+              "sink",
+              "mcp_server"
             ],
             "type": "string"
           }
@@ -17094,7 +17102,8 @@
               "attribution",
               "organization",
               "guardrail",
-              "sink"
+              "sink",
+              "mcp_server"
             ]
           },
           "id": {
@@ -20340,6 +20349,387 @@
               }
             ],
             "description": "Deterministic exported logical signing reference; destination bytes are supplied separately."
+          }
+        }
+      },
+      "MCPRegisteredTool": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "input_schema": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "input_schema"
+        ]
+      },
+      "MCPRegisteredCatalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol_version": {
+            "type": "string",
+            "enum": [
+              "2025-11-25",
+              "2025-06-18",
+              "2025-03-26"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/MCPRegisteredTool"
+            }
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "tools",
+          "digest"
+        ]
+      },
+      "CreateMCPServerRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "writeOnly": true,
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata."
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "streamable_http"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "endpoint",
+          "enabled",
+          "project_id",
+          "transport"
+        ]
+      },
+      "UpdateMCPServerRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "writeOnly": true,
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata."
+          }
+        },
+        "required": [
+          "name",
+          "endpoint",
+          "enabled"
+        ]
+      },
+      "MCPServerResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "streamable_http"
+            ]
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "has_credential": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/MCPRegisteredCatalog"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "retired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "transport",
+          "endpoint",
+          "enabled",
+          "has_credential",
+          "etag",
+          "revision_id",
+          "revision",
+          "catalog",
+          "certified_at",
+          "retired_at"
+        ]
+      },
+      "MCPServerSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "streamable_http"
+            ]
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "has_credential": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "retired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "transport",
+          "endpoint",
+          "enabled",
+          "has_credential",
+          "etag",
+          "revision_id",
+          "revision",
+          "certified_at",
+          "retired_at"
+        ]
+      },
+      "MCPServerListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MCPServerSummary"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "MCPServerRevisionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/MCPRegisteredCatalog"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "server_id",
+          "revision",
+          "endpoint",
+          "catalog",
+          "certified_at"
+        ]
+      },
+      "ConfigurationMCPServer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "project",
+          "transport",
+          "endpoint",
+          "enabled",
+          "catalog_digest"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "streamable_http"
+            ]
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "catalog_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Reviewed tool catalog. Destination certification must match before configuration changes commit."
+          },
+          "credential_ref": {
+            "type": "string",
+            "description": "Logical destination sealed bearer binding; never source credential bytes."
           }
         }
       }
@@ -49653,6 +50043,510 @@
           },
           "428": {
             "description": "Observed If-Match required"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers": {
+      "get": {
+        "operationId": "list_mcp_servers",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "list mcp servers",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerListResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_mcp_server",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "create mcp server",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Certified server created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMCPServerRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}": {
+      "get": {
+        "operationId": "get_mcp_server",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "get mcp server",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_mcp_server",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "update mcp server",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMCPServerRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_mcp_server",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "delete mcp server",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Server retired and credential removed"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}/revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_mcp_server_revision",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "get mcp server revision",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerRevisionResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
           }
         }
       }

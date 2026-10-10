@@ -227,6 +227,10 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 			doc.Pricing.Prices = append(doc.Pricing.Prices, entry)
 		}
 	}
+	doc.MCPServers, err = exportMCPServers(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	doc.Sinks, err = exportSinks(ctx, q)
 	if err != nil {
 		return nil, err

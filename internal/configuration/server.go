@@ -104,6 +104,10 @@ func (s *Server) applyEndpoint(r *http.Request, initial access.Principal) (acces
 	if err := s.prepareWorkloadIssuers(r.Context(), initial, input.Document); err != nil {
 		return access.Reply{}, err
 	}
+	preparedMCP, err := s.prepareMCPServers(r.Context(), initial, input.Document, bindings)
+	if err != nil {
+		return access.Reply{}, err
+	}
 	tx, err := s.Access.Begin(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -161,6 +165,9 @@ func (s *Server) applyEndpoint(r *http.Request, initial access.Principal) (acces
 		}
 	}
 	if err = s.applyDocument(r.Context(), tx, p, doc, bindings); err != nil {
+		return access.Reply{}, err
+	}
+	if err = s.applyMCPServers(r.Context(), tx, p, doc, bindings, preparedMCP); err != nil {
 		return access.Reply{}, err
 	}
 	if err := s.applySAMLDefinition(r, tx, p, input.Document.SAML); err != nil {

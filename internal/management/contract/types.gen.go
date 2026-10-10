@@ -208,6 +208,7 @@ const (
 	BudgetIncreaseTargetKindInstallation   BudgetIncreaseTargetKind = "installation"
 	BudgetIncreaseTargetKindKeyEndUser     BudgetIncreaseTargetKind = "key_end_user"
 	BudgetIncreaseTargetKindKeyRoute       BudgetIncreaseTargetKind = "key_route"
+	BudgetIncreaseTargetKindMcpServer      BudgetIncreaseTargetKind = "mcp_server"
 	BudgetIncreaseTargetKindOrganization   BudgetIncreaseTargetKind = "organization"
 	BudgetIncreaseTargetKindProject        BudgetIncreaseTargetKind = "project"
 	BudgetIncreaseTargetKindProjectEndUser BudgetIncreaseTargetKind = "project_end_user"
@@ -230,6 +231,8 @@ func (e BudgetIncreaseTargetKind) Valid() bool {
 	case BudgetIncreaseTargetKindKeyEndUser:
 		return true
 	case BudgetIncreaseTargetKindKeyRoute:
+		return true
+	case BudgetIncreaseTargetKindMcpServer:
 		return true
 	case BudgetIncreaseTargetKindOrganization:
 		return true
@@ -745,6 +748,21 @@ func (e ConfigurationGuardrailType) Valid() bool {
 	}
 }
 
+// Defines values for ConfigurationMCPServerTransport.
+const (
+	ConfigurationMCPServerTransportStreamableHttp ConfigurationMCPServerTransport = "streamable_http"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationMCPServerTransport enum.
+func (e ConfigurationMCPServerTransport) Valid() bool {
+	switch e {
+	case ConfigurationMCPServerTransportStreamableHttp:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConfigurationPlanItemAction.
 const (
 	ConfigurationPlanItemActionBind     ConfigurationPlanItemAction = "bind"
@@ -790,6 +808,7 @@ const (
 	ConfigurationPlanItemKindConfiguration      ConfigurationPlanItemKind = "configuration"
 	ConfigurationPlanItemKindCredential         ConfigurationPlanItemKind = "credential"
 	ConfigurationPlanItemKindGuardrail          ConfigurationPlanItemKind = "guardrail"
+	ConfigurationPlanItemKindMcpServer          ConfigurationPlanItemKind = "mcp_server"
 	ConfigurationPlanItemKindNetworkCredential  ConfigurationPlanItemKind = "network_credential"
 	ConfigurationPlanItemKindPlugin             ConfigurationPlanItemKind = "plugin"
 	ConfigurationPlanItemKindPricing            ConfigurationPlanItemKind = "pricing"
@@ -810,6 +829,8 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 	case ConfigurationPlanItemKindCredential:
 		return true
 	case ConfigurationPlanItemKindGuardrail:
+		return true
+	case ConfigurationPlanItemKindMcpServer:
 		return true
 	case ConfigurationPlanItemKindNetworkCredential:
 		return true
@@ -1060,6 +1081,21 @@ const (
 func (e CreateGuardrailRequestType) Valid() bool {
 	switch e {
 	case CreateGuardrailRequestTypeBuiltinRegex:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateMCPServerRequestTransport.
+const (
+	CreateMCPServerRequestTransportStreamableHttp CreateMCPServerRequestTransport = "streamable_http"
+)
+
+// Valid indicates whether the value is a known member of the CreateMCPServerRequestTransport enum.
+func (e CreateMCPServerRequestTransport) Valid() bool {
+	switch e {
+	case CreateMCPServerRequestTransportStreamableHttp:
 		return true
 	default:
 		return false
@@ -1474,6 +1510,57 @@ func (e KeyExpiringEventReason) Valid() bool {
 	case KeyExpiringEventReasonExpiry:
 		return true
 	case KeyExpiringEventReasonRotation:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPRegisteredCatalogProtocolVersion.
+const (
+	N20250326 MCPRegisteredCatalogProtocolVersion = "2025-03-26"
+	N20250618 MCPRegisteredCatalogProtocolVersion = "2025-06-18"
+	N20251125 MCPRegisteredCatalogProtocolVersion = "2025-11-25"
+)
+
+// Valid indicates whether the value is a known member of the MCPRegisteredCatalogProtocolVersion enum.
+func (e MCPRegisteredCatalogProtocolVersion) Valid() bool {
+	switch e {
+	case N20250326:
+		return true
+	case N20250618:
+		return true
+	case N20251125:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPServerResponseTransport.
+const (
+	MCPServerResponseTransportStreamableHttp MCPServerResponseTransport = "streamable_http"
+)
+
+// Valid indicates whether the value is a known member of the MCPServerResponseTransport enum.
+func (e MCPServerResponseTransport) Valid() bool {
+	switch e {
+	case MCPServerResponseTransportStreamableHttp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPServerSummaryTransport.
+const (
+	MCPServerSummaryTransportStreamableHttp MCPServerSummaryTransport = "streamable_http"
+)
+
+// Valid indicates whether the value is a known member of the MCPServerSummaryTransport enum.
+func (e MCPServerSummaryTransport) Valid() bool {
+	switch e {
+	case MCPServerSummaryTransportStreamableHttp:
 		return true
 	default:
 		return false
@@ -4203,6 +4290,7 @@ type ConfigurationDocument struct {
 
 	// InstallationBudget Installation cap. Omitted or null preserves destination policy; an empty policy clears it. Exports always include the current policy. Changes require settings permission.
 	InstallationBudget nullable.Nullable[BudgetPolicy] `json:"installation_budget,omitempty"`
+	McpServers         *[]ConfigurationMCPServer       `json:"mcp_servers,omitempty"`
 
 	// Organizations Portable organization names and budgets. Memberships remain destination-local. Creation requires access; changing a budget additionally requires manage_organization and authority over that organization.
 	Organizations *[]ConfigurationOrganizationEntry            `json:"organizations,omitempty"`
@@ -4252,6 +4340,23 @@ type ConfigurationGuardrail struct {
 
 // ConfigurationGuardrailType defines model for ConfigurationGuardrail.Type.
 type ConfigurationGuardrailType string
+
+// ConfigurationMCPServer defines model for ConfigurationMCPServer.
+type ConfigurationMCPServer struct {
+	// CatalogDigest Reviewed tool catalog. Destination certification must match before configuration changes commit.
+	CatalogDigest string `json:"catalog_digest"`
+
+	// CredentialRef Logical destination sealed bearer binding; never source credential bytes.
+	CredentialRef *string                         `json:"credential_ref,omitempty"`
+	Enabled       bool                            `json:"enabled"`
+	Endpoint      string                          `json:"endpoint"`
+	Name          string                          `json:"name"`
+	Project       string                          `json:"project"`
+	Transport     ConfigurationMCPServerTransport `json:"transport"`
+}
+
+// ConfigurationMCPServerTransport defines model for ConfigurationMCPServer.Transport.
+type ConfigurationMCPServerTransport string
 
 // ConfigurationModelEntry defines model for ConfigurationModelEntry.
 type ConfigurationModelEntry struct {
@@ -4796,6 +4901,20 @@ type CreateInvitationResponse struct {
 	// Token Returned only by the invitation-creation response.
 	Token *string `json:"token,omitempty"`
 }
+
+// CreateMCPServerRequest defines model for CreateMCPServerRequest.
+type CreateMCPServerRequest struct {
+	// Credential Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata.
+	Credential nullable.Nullable[string]       `json:"credential,omitempty"`
+	Enabled    bool                            `json:"enabled"`
+	Endpoint   string                          `json:"endpoint"`
+	Name       string                          `json:"name"`
+	ProjectId  openapi_types.UUID              `json:"project_id"`
+	Transport  CreateMCPServerRequestTransport `json:"transport"`
+}
+
+// CreateMCPServerRequestTransport defines model for CreateMCPServerRequest.Transport.
+type CreateMCPServerRequestTransport string
 
 // CreateManagementTokenRequest defines model for CreateManagementTokenRequest.
 type CreateManagementTokenRequest struct {
@@ -5506,6 +5625,78 @@ type LoginRequest struct {
 	Email    string  `json:"email"`
 	Password *string `json:"password,omitempty"`
 }
+
+// MCPRegisteredCatalog defines model for MCPRegisteredCatalog.
+type MCPRegisteredCatalog struct {
+	Digest          string                              `json:"digest"`
+	ProtocolVersion MCPRegisteredCatalogProtocolVersion `json:"protocol_version"`
+	Tools           []MCPRegisteredTool                 `json:"tools"`
+}
+
+// MCPRegisteredCatalogProtocolVersion defines model for MCPRegisteredCatalog.ProtocolVersion.
+type MCPRegisteredCatalogProtocolVersion string
+
+// MCPRegisteredTool defines model for MCPRegisteredTool.
+type MCPRegisteredTool struct {
+	Description string                 `json:"description"`
+	InputSchema map[string]interface{} `json:"input_schema"`
+	Name        string                 `json:"name"`
+}
+
+// MCPServerListResponse defines model for MCPServerListResponse.
+type MCPServerListResponse struct {
+	Items      []MCPServerSummary        `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// MCPServerResponse defines model for MCPServerResponse.
+type MCPServerResponse struct {
+	Catalog       MCPRegisteredCatalog         `json:"catalog"`
+	CertifiedAt   time.Time                    `json:"certified_at"`
+	Enabled       bool                         `json:"enabled"`
+	Endpoint      string                       `json:"endpoint"`
+	Etag          openapi_types.UUID           `json:"etag"`
+	HasCredential bool                         `json:"has_credential"`
+	Id            openapi_types.UUID           `json:"id"`
+	Name          string                       `json:"name"`
+	ProjectId     openapi_types.UUID           `json:"project_id"`
+	RetiredAt     nullable.Nullable[time.Time] `json:"retired_at"`
+	Revision      int64                        `json:"revision"`
+	RevisionId    openapi_types.UUID           `json:"revision_id"`
+	Transport     MCPServerResponseTransport   `json:"transport"`
+}
+
+// MCPServerResponseTransport defines model for MCPServerResponse.Transport.
+type MCPServerResponseTransport string
+
+// MCPServerRevisionResponse defines model for MCPServerRevisionResponse.
+type MCPServerRevisionResponse struct {
+	Catalog     MCPRegisteredCatalog `json:"catalog"`
+	CertifiedAt time.Time            `json:"certified_at"`
+	Endpoint    string               `json:"endpoint"`
+	Id          openapi_types.UUID   `json:"id"`
+	Revision    int64                `json:"revision"`
+	ServerId    openapi_types.UUID   `json:"server_id"`
+}
+
+// MCPServerSummary defines model for MCPServerSummary.
+type MCPServerSummary struct {
+	CertifiedAt   time.Time                    `json:"certified_at"`
+	Enabled       bool                         `json:"enabled"`
+	Endpoint      string                       `json:"endpoint"`
+	Etag          openapi_types.UUID           `json:"etag"`
+	HasCredential bool                         `json:"has_credential"`
+	Id            openapi_types.UUID           `json:"id"`
+	Name          string                       `json:"name"`
+	ProjectId     openapi_types.UUID           `json:"project_id"`
+	RetiredAt     nullable.Nullable[time.Time] `json:"retired_at"`
+	Revision      int64                        `json:"revision"`
+	RevisionId    openapi_types.UUID           `json:"revision_id"`
+	Transport     MCPServerSummaryTransport    `json:"transport"`
+}
+
+// MCPServerSummaryTransport defines model for MCPServerSummary.Transport.
+type MCPServerSummaryTransport string
 
 // MFABootstrapSession defines model for MFABootstrapSession.
 type MFABootstrapSession struct {
@@ -8954,6 +9145,15 @@ type UpdateInstallationBrandingRequest struct {
 	Name string `json:"name"`
 }
 
+// UpdateMCPServerRequest defines model for UpdateMCPServerRequest.
+type UpdateMCPServerRequest struct {
+	// Credential Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata.
+	Credential nullable.Nullable[string] `json:"credential,omitempty"`
+	Enabled    bool                      `json:"enabled"`
+	Endpoint   string                    `json:"endpoint"`
+	Name       string                    `json:"name"`
+}
+
 // UpdateNotificationDestinationRequest defines model for UpdateNotificationDestinationRequest.
 type UpdateNotificationDestinationRequest struct {
 	Enabled *bool   `json:"enabled,omitempty"`
@@ -9687,6 +9887,32 @@ type ManagementMcpJSONBody_Id struct {
 
 // ManagementMcpJSONBodyJsonrpc defines parameters for ManagementMcp.
 type ManagementMcpJSONBodyJsonrpc string
+
+// ListMcpServersParams defines parameters for ListMcpServers.
+type ListMcpServersParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateMcpServerParams defines parameters for CreateMcpServer.
+type CreateMcpServerParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteMcpServerParams defines parameters for DeleteMcpServer.
+type DeleteMcpServerParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// UpdateMcpServerParams defines parameters for UpdateMcpServer.
+type UpdateMcpServerParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
 
 // ListMediaJobsParams defines parameters for ListMediaJobs.
 type ListMediaJobsParams struct {
@@ -10882,6 +11108,12 @@ type CreateManagementTokenJSONRequestBody = CreateManagementTokenRequest
 
 // ManagementMcpJSONRequestBody defines body for ManagementMcp for application/json ContentType.
 type ManagementMcpJSONRequestBody ManagementMcpJSONBody
+
+// CreateMcpServerJSONRequestBody defines body for CreateMcpServer for application/json ContentType.
+type CreateMcpServerJSONRequestBody = CreateMCPServerRequest
+
+// UpdateMcpServerJSONRequestBody defines body for UpdateMcpServer for application/json ContentType.
+type UpdateMcpServerJSONRequestBody = UpdateMCPServerRequest
 
 // CreateNotificationDestinationJSONRequestBody defines body for CreateNotificationDestination for application/json ContentType.
 type CreateNotificationDestinationJSONRequestBody = CreateNotificationDestinationRequest

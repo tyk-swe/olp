@@ -63,6 +63,7 @@ var (
 	MFAWebAuthn          = SealPurpose{"mfa_webauthn"}
 	NotificationSecret   = SealPurpose{"notification_secret"}
 	SinkCredential       = SealPurpose{"sink_credential"}
+	MCPCredential        = SealPurpose{"mcp_credential"}
 	MutationReplay       = SealPurpose{"mutation_replay"}
 	OIDCClientSecret     = SealPurpose{"oidc_client"}
 	OIDCFlow             = SealPurpose{"oidc_flow"}
@@ -76,7 +77,7 @@ var (
 // SealPurposes lists every seal purpose.
 func SealPurposes() []SealPurpose {
 	return []SealPurpose{SAMLKey, SAMLFlow, MFATOTP, MFAWebAuthn, ProviderCredential, ProviderContinuation, NotificationSecret, MutationReplay,
-		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential}
+		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential}
 }
 
 // ParseSealPurpose returns the seal purpose a stored record names.

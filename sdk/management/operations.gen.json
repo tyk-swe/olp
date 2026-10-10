@@ -462,6 +462,13 @@
               "items": {
                 "$ref": "#/$defs/ConfigurationSink"
               }
+            },
+            "mcp_servers": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ConfigurationMCPServer"
+              }
             }
           },
           "required": [
@@ -3010,6 +3017,52 @@
             }
           }
         },
+        "ConfigurationMCPServer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "project",
+            "transport",
+            "endpoint",
+            "enabled",
+            "catalog_digest"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "project": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "transport": {
+              "type": "string",
+              "enum": [
+                "streamable_http"
+              ]
+            },
+            "endpoint": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "catalog_digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "Reviewed tool catalog. Destination certification must match before configuration changes commit."
+            },
+            "credential_ref": {
+              "type": "string",
+              "description": "Logical destination sealed bearer binding; never source credential bytes."
+            }
+          }
+        },
         "ExternalCredentialReference": {
           "type": "object",
           "additionalProperties": false,
@@ -3936,7 +3989,8 @@
                 "attribution",
                 "organization",
                 "guardrail",
-                "sink"
+                "sink",
+                "mcp_server"
               ]
             },
             "id": {
@@ -4510,6 +4564,91 @@
             "role"
           ],
           "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "create_mcp_server",
+    "group": "mcp-servers",
+    "method": "POST",
+    "path": "/api/v1/mcp-servers",
+    "description": "create mcp server",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/CreateMCPServerRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "CreateMCPServerRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "endpoint": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "credential": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "writeOnly": true,
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata."
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "transport": {
+              "type": "string",
+              "enum": [
+                "streamable_http"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "endpoint",
+            "enabled",
+            "project_id",
+            "transport"
+          ]
         }
       }
     }
@@ -7865,6 +8004,70 @@
     }
   },
   {
+    "name": "delete_mcp_server",
+    "group": "mcp-servers",
+    "method": "DELETE",
+    "path": "/api/v1/mcp-servers/{server_id}",
+    "description": "delete mcp server",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "server_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "server_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "delete_media_job",
     "group": "media-jobs",
     "method": "DELETE",
@@ -9825,6 +10028,100 @@
       "type": "object",
       "properties": {},
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_mcp_server",
+    "group": "mcp-servers",
+    "method": "GET",
+    "path": "/api/v1/mcp-servers/{server_id}",
+    "description": "get mcp server",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "server_id",
+        "in": "path",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "server_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_mcp_server_revision",
+    "group": "mcp-servers",
+    "method": "GET",
+    "path": "/api/v1/mcp-servers/{server_id}/revisions/{revision_id}",
+    "description": "get mcp server revision",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "server_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "revision_id",
+        "in": "path",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "server_id",
+            "revision_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
     }
   },
   {
@@ -12087,6 +12384,52 @@
       [
         "access_read",
         "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_mcp_servers",
+    "group": "mcp-servers",
+    "method": "GET",
+    "path": "/api/v1/mcp-servers",
+    "description": "list mcp servers",
+    "scopes": [
+      [
+        "read"
       ]
     ],
     "parameters": [
@@ -14959,6 +15302,13 @@
               "items": {
                 "$ref": "#/$defs/ConfigurationSink"
               }
+            },
+            "mcp_servers": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/ConfigurationMCPServer"
+              }
             }
           },
           "required": [
@@ -17504,6 +17854,52 @@
                 }
               ],
               "description": "Deterministic exported logical signing reference; destination bytes are supplied separately."
+            }
+          }
+        },
+        "ConfigurationMCPServer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "project",
+            "transport",
+            "endpoint",
+            "enabled",
+            "catalog_digest"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "project": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "transport": {
+              "type": "string",
+              "enum": [
+                "streamable_http"
+              ]
+            },
+            "endpoint": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "catalog_digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "Reviewed tool catalog. Destination certification must match before configuration changes commit."
+            },
+            "credential_ref": {
+              "type": "string",
+              "description": "Logical destination sealed bearer binding; never source credential bytes."
             }
           }
         },
@@ -26929,6 +27325,109 @@
               "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
             }
           }
+        }
+      }
+    }
+  },
+  {
+    "name": "update_mcp_server",
+    "group": "mcp-servers",
+    "method": "PUT",
+    "path": "/api/v1/mcp-servers/{server_id}",
+    "description": "update mcp server",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "server_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "server_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "server_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/UpdateMCPServerRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "UpdateMCPServerRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "endpoint": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "credential": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "writeOnly": true,
+              "minLength": 1,
+              "maxLength": 4096,
+              "description": "Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata."
+            }
+          },
+          "required": [
+            "name",
+            "endpoint",
+            "enabled"
+          ]
         }
       }
     }

@@ -112,6 +112,7 @@ upstream.
 | [Configuration Actions](docs/configuration-actions.md) | Reusable pull-request planning, review comments and merged configuration promotion |
 | [Terraform and OpenTofu](docs/terraform.md) | Individual resource automation and acceptance qualification |
 | [Named guardrails](docs/guardrails.md) | Reusable bounded policies, immutable revisions, and portable definitions |
+| [Upstream MCP servers](docs/mcp-servers.md) | Project-owned certified catalogs, immutable revisions, and sealed bearer bindings |
 | [Export sinks](docs/export-sinks.md) | Signed content-free facts, durable retries, scope isolation, and promotion |
 | [Operator console](docs/operator-console.md) | Installation identity, independent-installation bookmarks, bulk member editing, and session-scoped saved views |
 | [Model catalog](docs/model-catalog.md) | Scoped route discovery, SDK samples, and owner-controlled public catalogs |

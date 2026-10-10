@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/management"
+	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/modelcatalog"
 	"github.com/tyk-swe/olp/internal/observability"
@@ -62,6 +63,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	m.Access.Register(mux)
 	(&branding.Server{Access: m.Access}).Register(mux)
 	(&guardrails.Server{Access: m.Access}).Register(mux)
+	(&mcpservers.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)
 	catalogue := providers.New(m.Access, m.Egress, m.PluginHost)

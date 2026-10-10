@@ -267,3 +267,14 @@ actual signed delivery by the built installation worker, both scoped lifecycles,
 write-only values absent from saved-plan JSON and state, UUID imports, empty
 plans, foreign saved-plan refusal and signing-material cleanup. Both engines are
 included in the complete eleven-type suite.
+
+Upstream MCP registration now certifies bounded Streamable HTTP handshakes and
+schemas into project-owned immutable catalogs. The two-test live service suite
+passed under race in 21.659 seconds: project/revision isolation, replay without
+network rediscovery, concurrent retirement refusal, certification without held
+mutation locks, sealed-material cleanup, and destination promotion matching a
+reviewed digest with pinned reuse. JSON/SSE session handling, schema bounds,
+remote-loader refusal, reflected-credential rejection and exact numeric bounds
+have focused race coverage. Ordinary authorization, isolation and every generated
+SDK/CLI/MCP machine operation passed in 245.075 seconds; the full local gate and
+focused races pass. Terraform MCP server qualification remains pending.

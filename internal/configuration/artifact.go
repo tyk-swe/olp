@@ -19,6 +19,7 @@ import (
 const APIVersion = "openllmproxy.dev/config/v1"
 
 type Document struct {
+	MCPServers        []MCPServerEntry       `json:"mcp_servers,omitempty"`
 	Sinks             []SinkEntry            `json:"sinks,omitempty"`
 	Guardrails        []GuardrailEntry       `json:"guardrails,omitempty"`
 	SAML              *access.SAMLDefinition `json:"saml,omitempty"`
@@ -287,6 +288,13 @@ func sortCapabilities(c []CapabilityEntry) {
 }
 
 func (d *Document) canonicalize() {
+	slices.SortFunc(d.MCPServers, func(a, b MCPServerEntry) int {
+		ka, kb := mcpKey(a), mcpKey(b)
+		if c := strings.Compare(ka[0], kb[0]); c != 0 {
+			return c
+		}
+		return strings.Compare(ka[1], kb[1])
+	})
 	slices.SortFunc(d.Sinks, func(a, b SinkEntry) int {
 		ka, kb := sinkKey(a), sinkKey(b)
 		if c := strings.Compare(ka[0], kb[0]); c != 0 {

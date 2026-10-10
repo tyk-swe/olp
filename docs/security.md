@@ -156,7 +156,7 @@ names are bound into stored data and never change:
 | Kind | Purposes |
 | --- | --- |
 | Digest | `saml_state`, `saml_cookie`, `saml_assertion`, `mfa_challenge`, `mfa_recovery`, `api_key`, `workload_identity`, `end_user`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation` |
-| Seal | `saml_key`, `saml_flow`, `mfa_totp`, `mfa_webauthn`, `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source`, `provider_grant_refresh`, `grant_enrollment`, `sink_credential` |
+| Seal | `saml_key`, `saml_flow`, `mfa_totp`, `mfa_webauthn`, `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source`, `provider_grant_refresh`, `grant_enrollment`, `sink_credential`, `mcp_credential` |
 <!-- /purposes -->
 
 Passwords are hashed with Argon2id, with at most four concurrent hashes per

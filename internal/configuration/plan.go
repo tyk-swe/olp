@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/budgetcalendar"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -309,6 +310,9 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		return nil, access.Fail(422, "unsupported_api_version", "The artifact declares an unsupported api_version.")
 	}
 	normalizeDocument(doc)
+	if err := s.validateMCPServers(doc); err != nil {
+		return nil, err
+	}
 	if err := s.validateSinks(doc); err != nil {
 		return nil, err
 	}
@@ -660,6 +664,13 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 
 func validateBindings(doc *Document, bindings bindingSet) error {
 	refs, grants := map[string]bool{}, map[string]bool{}
+	mcpRefs := map[string]bool{}
+	for _, e := range doc.MCPServers {
+		if e.CredentialRef != nil {
+			refs[*e.CredentialRef] = true
+			mcpRefs[*e.CredentialRef] = true
+		}
+	}
 	sinkRefs := map[string]bool{}
 	for _, entry := range doc.Sinks {
 		if entry.CredentialRef != nil {
@@ -679,6 +690,16 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 		}
 	}
 	for name, secret := range bindings {
+		if mcpRefs[name] {
+			if secret.reference != nil {
+				return access.Invalid("external_credential_bindings", "MCP static bearer material uses sealed bindings.")
+			}
+			encoded, _ := json.Marshal(secret.secret)
+			if _, err := mcpservers.Credential(encoded); err != nil {
+				return err
+			}
+			continue
+		}
 		if sinkRefs[name] {
 			if secret.reference != nil || len(secret.secret) < 1 || len(secret.secret) > 4096 {
 				return access.Invalid("secret_bindings", "Sink signing credentials require 1–4096 sealed bytes.")
@@ -741,6 +762,9 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 	}
 	state, err := loadState(ctx, q)
 	if err != nil {
+		return nil, err
+	}
+	if err = s.planMCPServers(ctx, q, doc, bindings, state, result); err != nil {
 		return nil, err
 	}
 	if err = s.planSinks(ctx, q, doc, bindings, result); err != nil {
