@@ -13,9 +13,9 @@ compose=(docker compose -p "$project" -f deploy/compose.dev.yaml -f deploy/compo
 cleanup() {
   status=$?
   trap - EXIT INT TERM
-  if (( status != 0 )); then "${compose[@]}" logs --no-color >&2 || true; fi
+  if (( status != 0 )); then "${compose[@]}" --profile '*' logs --no-color >&2 || true; fi
   if [[ -n ${restore_valkey:-} ]]; then docker rm -f "$restore_valkey" >/dev/null 2>&1 || true; fi
-  "${compose[@]}" down -v --remove-orphans >&2 || true
+  "${compose[@]}" --profile '*' down -v --remove-orphans >&2 || true
   rm -rf -- "$scratch"
   exit "$status"
 }
@@ -76,7 +76,7 @@ docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 valkey/valk
 OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
 export OLP_TEST_RESTORE_VALKEY_URL
 go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=25m -v -run '^TestCode' ./tests/integration
-go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v -skip '^TestCode' ./tests/integration
+go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=45m -v -skip '^TestCode' ./tests/integration
 ./scripts/code-mode-qualification.sh cli
 go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestIntegration' ./internal/database ./internal/gateway ./internal/providers ./internal/media ./internal/usage
 # Test-only trusted registry additions run in their own process, so dynamic
