@@ -195,8 +195,10 @@ func redactMCP(value any) {
 	case map[string]any:
 		for key, child := range v {
 			name := strings.ToLower(key)
-			if name == "secret" || name == "token" || name == "password" || name == "csrf_token" || name == "recovery_codes" || name == "secret_bindings" || strings.HasSuffix(name, "_secret") || strings.HasSuffix(name, "_password") || strings.HasSuffix(name, "_token") || strings.Contains(name, "private_key") {
+			if mcpSecretName(name) {
 				delete(v, key)
+			} else if schema, ok := child.(map[string]any); name == "input_schema" && ok && schema["type"] == "object" {
+				redactMCPSchema(schema)
 			} else {
 				redactMCP(child)
 			}
@@ -209,3 +211,40 @@ func redactMCP(value any) {
 }
 
 var _ io.Writer = (*mcpWriter)(nil)
+
+func mcpSecretName(name string) bool {
+	return name == "secret" || name == "token" || name == "password" || name == "csrf_token" || name == "recovery_codes" || name == "secret_bindings" || strings.HasSuffix(name, "_secret") || strings.HasSuffix(name, "_password") || strings.HasSuffix(name, "_token") || strings.Contains(name, "private_key")
+}
+
+// Schema property and definition names describe inputs, rather than contain
+// credential values. Preserve those names, but redact data in examples,
+// defaults and extensions with the ordinary response rules.
+func redactMCPSchema(value any) {
+	switch schema := value.(type) {
+	case map[string]any:
+		for name, child := range schema {
+			if mcpSecretName(strings.ToLower(name)) {
+				delete(schema, name)
+				continue
+			}
+			switch name {
+			case "properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies":
+				if definitions, ok := child.(map[string]any); ok {
+					for _, definition := range definitions {
+						redactMCPSchema(definition)
+					}
+				} else {
+					redactMCP(child)
+				}
+			case "additionalProperties", "unevaluatedProperties", "propertyNames", "items", "additionalItems", "unevaluatedItems", "contains", "not", "if", "then", "else", "allOf", "anyOf", "oneOf", "prefixItems", "contentSchema":
+				redactMCPSchema(child)
+			default:
+				redactMCP(child)
+			}
+		}
+	case []any:
+		for _, child := range schema {
+			redactMCPSchema(child)
+		}
+	}
+}

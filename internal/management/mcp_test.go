@@ -59,3 +59,24 @@ func TestMCPRedactionPreservesExactSchemaNumbers(t *testing.T) {
 		t.Fatal("accepted multiple management responses")
 	}
 }
+
+func TestMCPRedactionPreservesSchemaNamesWithoutExposingData(t *testing.T) {
+	body := []byte(`{"access_token":"one-time-value","input_schema":{"type":"object","properties":{"access_token":{"type":"string"},"private_key":{"$ref":"#/$defs/password"}},"required":["access_token"],"$defs":{"password":{"type":"string"}},"examples":[{"access_token":"private-example"}]}}`)
+	value, err := decodeMCPBody(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	redactMCP(value)
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"access_token":{"type":"string"}`, `"private_key":{"$ref":"#/$defs/password"}`, `"password":{"type":"string"}`} {
+		if !strings.Contains(string(encoded), expected) {
+			t.Fatalf("schema identity lost: %s", encoded)
+		}
+	}
+	if strings.Contains(string(encoded), "one-time-value") || strings.Contains(string(encoded), "private-example") {
+		t.Fatalf("credential data retained: %s", encoded)
+	}
+}
