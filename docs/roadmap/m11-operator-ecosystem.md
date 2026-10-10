@@ -139,7 +139,7 @@ editing, and session-scoped saved filters for usage and request history.
 
 - [x] The CLI covers every operation it lists, passes the authorization sweep as
       a management-token client, and is generated from the contract in CI.
-- [ ] The Terraform provider creates, updates, imports and destroys each
+- [x] The Terraform provider creates, updates, imports and destroys each
       resource against a disposable installation.
 - [x] A KMS-wrapped master-key ring starts OLP with workload identity, and a
       referenced credential rotates through validation and activation.
@@ -205,14 +205,13 @@ wrapped ring. Cache races cover single-flight, bounded capacity and unavailable
 plan decisions. The packaged external-credential console journey creates and
 rotates versions and passes accessibility checks; local and Helm gates pass.
 
-Terraform qualification covers eleven resource types in the separate
+Terraform qualification covers all twelve resource types in the separate
 [provider repository](https://github.com/tyk-swe/terraform-provider-openllmproxy):
 projects, providers, credential slots, routes, routing policies, guardrails,
 export sinks, keys, budget groups, notification destinations and notification
-rules. Terraform 1.16.5 and OpenTofu 1.13.1 run plan/create/update/import/no-change/
+rules and upstream MCP servers. Terraform 1.16.5 and OpenTofu 1.13.1 run plan/create/update/import/no-change/
 destroy against fresh live installations built from the SDK's immutable module
-version. The full eleven-type suite passed under race in 143.233 seconds. The
-complete twelve-resource exit criterion remains pending for upstream MCP servers.
+version. The full twelve-type suite passed under race in 140.698 seconds.
 See [provider operations](../terraform.md).
 
 Budget/notification tests cover concurrent-edit refusal, explicit nullable-ceiling
@@ -266,7 +265,7 @@ operation passed in 188.450 seconds; focused races and the full local gate pass.
 actual signed delivery by the built installation worker, both scoped lifecycles,
 write-only values absent from saved-plan JSON and state, UUID imports, empty
 plans, foreign saved-plan refusal and signing-material cleanup. Both engines are
-included in the complete eleven-type suite.
+included in the complete twelve-type suite.
 
 Upstream MCP registration now certifies bounded Streamable HTTP handshakes and
 schemas into project-owned immutable catalogs. The two-test live service suite
@@ -277,4 +276,10 @@ reviewed digest with pinned reuse. JSON/SSE session handling, schema bounds,
 remote-loader refusal, reflected-credential rejection and exact numeric bounds
 have focused race coverage. Ordinary authorization, isolation and every generated
 SDK/CLI/MCP machine operation passed in 245.075 seconds; the full local gate and
-focused races pass. Terraform MCP server qualification remains pending.
+focused races pass. `TestCertifiedMCPServerLifecyclesWithTerraformAndOpenTofu` qualifies create,
+update, static bearer rotation, UUID import, no-change plans and retirement with
+both engines. It checks immutable old catalogs, no-network pinned reads after
+upstream drift, secret exclusion from saved-plan JSON/state and foreign
+saved-plan refusal. The complete twelve-type suite uses the same immutable SDK
+and built installation version. Export checkpoint health is separately tested
+for installation and regional summaries.

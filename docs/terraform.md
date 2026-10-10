@@ -1,12 +1,12 @@
 # Terraform and OpenTofu
 
 The [OpenLLMProxy provider](https://github.com/tyk-swe/terraform-provider-openllmproxy)
-lives in a separate repository. Its M11 implementation is in progress. Projects,
+lives in a separate repository. Projects,
 providers, credential slots, routes, routing policies, guardrails, export sinks, keys, budget groups,
-notification destinations and notification rules currently have
+notification destinations, notification rules and upstream MCP servers have
 live create, update, import and destroy qualification with Terraform 1.16.5 and
-OpenTofu 1.13.1. The remaining M11 resources are being implemented before the
-milestone is marked complete.
+OpenTofu 1.13.1. All twelve M11 resource types are represented; the milestone also requires its
+remaining client and final end-to-end qualification.
 
 Connect with `OLP_MANAGEMENT_URL` and `OLP_MANAGEMENT_TOKEN_FILE`. The provider
 uses the generated management contract and reads the private token file for
@@ -91,3 +91,11 @@ stable event IDs with exact-byte signatures and bounded retries; delivery counte
 do not change resource ETags. Destroy retires the destination and removes signing
 material while retaining identity/history. A saved plan refuses external edits.
 Project-owned history can prevent project deletion. See [Export sinks](export-sinks.md).
+
+`openllmproxy_mcp_server` conditionally certifies project-owned Streamable HTTP
+registrations into immutable, pinned tool catalogs. Its sensitive write-only
+bearer uses an ephemeral value and public change counter. UUID imports exclude
+authentication material; reads never adopt live upstream drift. Updates repeat
+project authority and ETag checks after network certification outside database
+locks. Saved plans refuse foreign edits. Destroy removes the bearer and retains
+registration/revision history. See [Upstream MCP servers](mcp-servers.md).
