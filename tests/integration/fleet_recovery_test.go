@@ -366,6 +366,15 @@ func TestBudgetsRecoverFromLostSpendState(t *testing.T) {
 	limiter := limLimiter(t, in.valkey, in.namespace)
 	day, month := in.costKeys(keyID)
 
+	// Budget admission first needs a live consumer heartbeat; this fixture
+	// runs no worker, so seed the row a healthy consumer would report.
+	if _, err := in.h.Pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health
+        VALUES(true,0,0,NULL,now())
+        ON CONFLICT (singleton) DO UPDATE SET pending_events=0, lag_events=0,
+            oldest_pending_at=NULL, checked_at=now()`); err != nil {
+		t.Fatal(err)
+	}
+
 	// Nothing has published a balance yet, so there is no amount to spend
 	// against and the request is refused rather than served unaccounted.
 	served := in.vendor.chats.Load()
