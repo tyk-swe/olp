@@ -59,6 +59,8 @@ func Certify(ctx context.Context, policy *egress.Policy, endpoint string, creden
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	c := &rpcConnection{client: policy.Client(10 * time.Second), endpoint: u.String(), token: string(credential)}
+	defer c.client.CloseIdleConnections()
+	defer c.close(ctx)
 	var init struct {
 		Protocol     string `json:"protocolVersion"`
 		Capabilities struct {
@@ -69,7 +71,6 @@ func Certify(ctx context.Context, policy *egress.Policy, endpoint string, creden
 		return nil, ErrCertification
 	}
 	c.protocol = init.Protocol
-	defer c.close(ctx)
 	if err = c.call(ctx, 0, "notifications/initialized", nil, nil); err != nil {
 		return nil, ErrCertification
 	}
