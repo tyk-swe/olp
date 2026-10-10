@@ -208,7 +208,7 @@ of [M3](m03-routing-resilience.md).
 | --- | --- | --- | --- | --- |
 | Admin console | [Admin UI](https://docs.litellm.ai/docs/proxy/ui) | Console for every management operation a member may perform | `Parity` | |
 | Playground | Test key | Playground with streaming, native operations and realtime traces | `Parity` | |
-| Configuration as code | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models | Digest-addressed export, plan and apply | `Ahead` | |
+| Configuration as code | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models | [Digest-addressed promotion](../configuration-actions.md) and [twelve individually qualified Terraform/OpenTofu resources](../terraform.md) with conditional plans | `Ahead` | |
 | Live configuration changes | [Database models](https://docs.litellm.ai/docs/proxy/model_management) | Atomic, digest-verified runtime generations pinned per request | `Ahead` | |
 | Management CLI | [lite CLI](https://docs.litellm.ai/docs/proxy/management_cli) | [Contract-generated commands](../operator-cli.md), ETags, saved configuration plans and management-token authorization sweeps | `Ahead` | |
 | Secret managers | [Enterprise](https://docs.litellm.ai/docs/secret_managers/overview) | AWS/GCP/Azure/Vault wrapped rings and pinned references, workload identity, bounded cache, explicit unavailable plan decisions and validated rotation ([runbook](../external-secrets.md)) | `Ahead` | M11.3 protocol, live rotation/promotion/startup and console qualification |

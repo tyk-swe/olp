@@ -120,9 +120,9 @@ editing, and session-scoped saved filters for usage and request history.
 
 | Change | Start here |
 | --- | --- |
-| CLI | `cmd/olp/`, generated client from `openapi/` |
-| KMS and secret references | `internal/secrets/`, `internal/runtime/credentials.go` |
-| Catalog | `internal/routes/`, new `console/src/lib/features/catalog/` |
+| CLI | `cmd/olp/`, `internal/operatorcli/`, generated `sdk/management/` from `openapi/` |
+| KMS and secret references | `internal/secretstore/`, `internal/secrets/`, `internal/runtime/credentials.go` |
+| Catalog | `internal/modelcatalog/`, `console/src/lib/features/model-catalog/` |
 | Read replicas and regions | `internal/database/`, `internal/runtime/`, `internal/limits/` |
 | Management MCP server | `internal/management/` |
 

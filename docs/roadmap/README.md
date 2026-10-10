@@ -54,7 +54,7 @@ and [gateway execution](../gateway.md) describe it.
 ### Where it falls short
 
 The [parity matrix](parity.md) is exhaustive. The largest gaps are provider and
-media breadth, a model catalog, response caching, a guardrail ecosystem,
+media breadth, response caching, a guardrail ecosystem,
 observability integrations, an MCP and agent gateway, cost management for
 chargeback, and published performance evidence: the [M1](m01-measured-advantage.md)
 benchmark harness and regression gate exist, but no full-rate results are
@@ -134,11 +134,13 @@ recomputed whenever a milestone closes:
 | Authorization coverage | Management operations exercised by the authorization and isolation sweeps (must stay 100%). |
 
 At the 0.1.0 baseline the matrix has 150 rows: 15 `Ahead`, 33 `Parity`, 30
-`Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 48 of 148 (32%). This historical scorecard remains unchanged until milestones close.
-The matrix also records ongoing implementation, including M4 end-user controls,
-network restrictions, route groups and explicit rotation with reminders; later tenancy requirements remain
-unfinished.
-Its current counts are 20 `Ahead`, 65 `Parity`, 16 `Partial`, 47 `Gap`, 2 `Excluded`.
+`Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 48 of 148 (32%).
+This historical scorecard is preserved for comparison.
+The current matrix includes M1–M4 qualification and the operator capabilities
+implemented for M11. Its counts are 23 `Ahead`, 70 `Parity`, 16 `Partial`, 39
+`Gap` and 2 `Excluded`: 93 of 148 non-excluded rows (63%). Remaining gaps retain
+their own milestones; named resources do not close the broader observability,
+guardrail execution or agent-gateway workstreams.
 
 ## Definition of done
 

@@ -17,7 +17,7 @@ describes.
 | OLP → Valkey | Limits, routing hints, accounting events | Carries metadata, never credentials or content. Installations sharing one Valkey stay isolated by namespace. |
 | OLP → providers | Inference and management calls | [Provider egress](#egress) validates every destination and pins every dial; provider errors are scrubbed of the credentials OLP sent. |
 | OLP → identity provider | OIDC discovery/tokens/keys; declared SAML metadata | Identity egress applies the provider denylist with no operator exceptions. |
-| Operator → CLI | Password recovery, key rotation, `doctor` | Requires the secret files and database access; secret files must not be readable by others. |
+| Operator → CLI | [Remote administration](operator-cli.md), recovery, key rotation and `doctor` | Remote commands use a mounted scoped management token and HTTPS. Local maintenance requires protected secret files and database access. |
 
 ## Principals
 
@@ -69,9 +69,10 @@ against the same file, so the console offers exactly what the server admits.
 
 ## Project boundaries
 
-Providers, routes, API keys, budget groups, and notification destinations and
-rules belong to a project or to the unassigned boundary, and media jobs and
-retained resources to their API key's. An installation-wide
+Providers, routes, API keys, budget groups, export sinks, and notification
+destinations and rules belong to a project or to the unassigned boundary.
+Guardrails and upstream MCP registrations require a project. Media jobs and
+retained resources inherit their API key's boundary. An installation-wide
 principal reaches everything; an assigned member reaches its member projects,
 and a management token reaches its listed projects that its creator also
 reaches. `Principal.Project` is the only decision: a resource beyond the

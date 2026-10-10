@@ -89,6 +89,9 @@ replica last performed a task. With Valkey configured, `worker` and `all` run:
   events queued in the stream, late and not lost, until more workers or a lull
   catches up, which `olp_request_metadata_consumer_lag_events` shows (see
   [performance](performance.md)).
+- **Export delivery:** leases durable content-free facts from PostgreSQL, sends
+  bounded [signed HTTPS events](export-sinks.md), and records retries or expiry
+  gaps. It runs independently of Valkey and never delays inference.
 - **Gateway epoch detection:** records an unclean gateway exit as a completeness
   gap after two confirming passes.
 - **Maintenance:** every 60 seconds, uses a detached PostgreSQL session and
@@ -146,8 +149,8 @@ returns an error), correct the cause and restart the process.
 `retention_enforced` from configured Valkey, not live worker health. Configuring
 Valkey without running a worker still reports these flags as true. Use task
 checkpoints to confirm retention is running. Without Valkey, `all` starts only
-media reconciliation and grant refresh: epoch detection and maintenance also
-remain stopped, although readiness still expects their checkpoints and can stay
+media reconciliation, grant refresh and PostgreSQL export delivery. Epoch
+detection and maintenance remain stopped, although readiness still expects their checkpoints and can stay
 degraded. Production accounting and retention require Valkey and a worker or
 `all` process.
 
@@ -176,6 +179,11 @@ connection, slot or route is skipped with a `*_budget_unavailable` plan reason
 instead of failing the request. An exhausted cap removes it from selection,
 which can start a route's `budget` fallback.
 
+Regional fleets read the same global PostgreSQL facts and install snapshots in
+their own Valkey stores. Leadership and local task health are region-scoped; see
+[regional fleets](deployment.md#regional-fleets) for count overrides, replica
+authority and the cost-overshoot bound.
+
 Reconciliation replaces malformed hashes (including non-integer `unpriced`
 fields or non-hash values) from matching authoritative snapshots, without
 lowering the other window's valid counter. Stale or future snapshots cannot
@@ -184,9 +192,9 @@ initialize a different current calendar window. Daily aggregation uses
 exhaust today. Inflated but otherwise valid counters require reviewed data
 repair; never reset them to zero or bypass migration-history/checksum checks.
 
-One dedicated PostgreSQL session holds the reconciliation advisory lock between
-minute ticks and performs current-period reconstruction on that same session. Followers
-record skipped passes. Error, shutdown, cancellation or the 120-second pass
+One dedicated PostgreSQL session per configured region holds its reconciliation
+advisory lock between minute ticks and performs current-period reconstruction on
+that same session. Followers record skipped passes. Error, shutdown, cancellation or the 120-second pass
 deadline closes the leader session, releasing leadership; a connection holding
 that session lock is never returned to the pool. Repeated timeouts require
 addressing scan/application load before enabling budgeted traffic. A follower's
