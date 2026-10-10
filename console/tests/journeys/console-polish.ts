@@ -78,14 +78,20 @@ export async function verifyConsolePolish(page: Page, info: TestInfo) {
       if (path === '/') {
         // Stress intrinsic sizing without changing the installation or account.
         const original = await page.evaluate(() => {
-          return ['.account-label', '.edition-name', '.endpoint-row code'].map(
-            (selector) => {
-              const node = document.querySelector(selector)!;
-              const text = node.textContent;
-              node.textContent = 'LongName'.repeat(20);
-              return { selector, text };
-            }
-          );
+          return [
+            '.account-label',
+            '.edition summary',
+            '.endpoint-row code'
+          ].map((selector) => {
+            const node = document.querySelector(selector)!;
+            const index = Array.from(node.childNodes).findIndex(
+              (child) => child.nodeType === Node.TEXT_NODE
+            );
+            if (index < 0) throw new Error(`${selector} has no label text`);
+            const text = node.childNodes[index].textContent;
+            node.childNodes[index].textContent = 'LongName'.repeat(20);
+            return { selector, index, text };
+          });
         });
         expect
           .soft(
@@ -96,8 +102,9 @@ export async function verifyConsolePolish(page: Page, info: TestInfo) {
           )
           .toBeLessThanOrEqual(0);
         await page.evaluate((entries) => {
-          for (const { selector, text } of entries)
-            document.querySelector(selector)!.textContent = text;
+          for (const { selector, index, text } of entries)
+            document.querySelector(selector)!.childNodes[index].textContent =
+              text;
         }, original);
       }
       expect
