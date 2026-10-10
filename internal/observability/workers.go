@@ -178,7 +178,7 @@ func ReadRegionalWorkerTaskHealth(ctx context.Context, q access.Queryer, region 
 		switch task.Name {
 		case string(usage.TaskRequestMetadataConsumer), string(usage.TaskEpochDetection),
 			string(usage.TaskMediaReconciliation), string(usage.TaskMaintenance),
-			string(usage.TaskCostReconciliation), string(usage.TaskNotificationDelivery),
+			string(usage.TaskCostReconciliation), string(usage.TaskNotificationDelivery), string(usage.TaskExportDelivery),
 			string(usage.TaskGrantRefresh), string(usage.TaskHealthProbes):
 		default:
 			return nil, fmt.Errorf("stored worker task %q is invalid", task.Name)

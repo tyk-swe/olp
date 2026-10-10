@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -261,5 +262,30 @@ func TestExportSinkPromotionBindsDestinationSecretsAndReusesUnchangedDefinitions
 	var remaining int
 	if err = destination.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.secrets WHERE id=$1", credential).Scan(&remaining); err != nil || remaining != 0 {
 		t.Fatalf("removed signing credential remains: %d %v", remaining, err)
+	}
+}
+
+func TestExportDeliveryCheckpointIsAcceptedByInstallationAndRegionalHealth(t *testing.T) {
+	h := newAccessHarness(t)
+	if err := usage.CheckpointTask(t.Context(), h.Pool, usage.TaskExportDelivery, usage.OutcomeSuccess, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, region := range []string{"", "west"} {
+		health, err := observability.ReadRegionalWorkerTaskHealth(t.Context(), h.Pool, region)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, task := range health.Tasks {
+			if task.Task == string(usage.TaskExportDelivery) {
+				found = true
+				if task.State != observability.TaskStateHealthy || task.SuccessesTotal != 1 {
+					t.Fatalf("export health in %q: %+v", region, task)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("export checkpoint omitted in %q", region)
+		}
 	}
 }
