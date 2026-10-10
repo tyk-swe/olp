@@ -65,6 +65,7 @@ func TestExternalCredentialAndWrappedMasterKeyRotationKeepPublishedVersionsPinne
 	}
 	t.Setenv("OLP_VAULT_ROLE", "olp")
 	t.Setenv("OLP_VAULT_JWT_FILE", jwtFile)
+	t.Setenv("OLP_VAULT_ADDR", vault.URL)
 	resolver := secretstore.New(*h.Server.Egress)
 	h.Runtime.ExternalSecrets = resolver
 	upstream := newVendor(t)
@@ -174,7 +175,7 @@ func TestExternalCredentialAndWrappedMasterKeyRotationKeepPublishedVersionsPinne
 	started := testutil.StartProcess(t, required(t, "OLP_TEST_BINARY"), "gateway", map[string]string{
 		"OLP_DATABASE_URL": h.DBURL, "OLP_VALKEY_URL": required(t, "OLP_TEST_VALKEY_URL"), "OLP_AUTH_HMAC_KEY_FILE": authFile, "OLP_MASTER_KEY_FILE": ringFile,
 		"OLP_LISTEN_ADDR": "127.0.0.1:0", "OLP_OBSERVABILITY_LISTEN_ADDR": "127.0.0.1:0", "OLP_PUBLIC_ORIGIN": "http://127.0.0.1:8080",
-		"OLP_PROVIDER_EGRESS_ALLOW_CIDRS": "127.0.0.0/8", "OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS": "127.0.0.1", "OLP_VAULT_ROLE": "olp", "OLP_VAULT_JWT_FILE": jwtFile,
+		"OLP_PROVIDER_EGRESS_ALLOW_CIDRS": "127.0.0.0/8", "OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS": "127.0.0.1", "OLP_VAULT_ROLE": "olp", "OLP_VAULT_JWT_FILE": jwtFile, "OLP_VAULT_ADDR": vault.URL,
 	})
 	if started == nil {
 		t.Fatal("wrapped ring did not start the gateway")

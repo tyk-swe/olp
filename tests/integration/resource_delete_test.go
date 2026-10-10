@@ -48,7 +48,7 @@ func TestConditionalBudgetAndNotificationDeletionRetainsDependencies(t *testing.
 	h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Retained key", "project_id": projectID, "budget_group_id": retained["id"]}, idem(uuid.NewString()), 201)
 	h.want(owner, "DELETE", "/api/v1/budget-groups/"+retained["id"].(string), nil, headers("/api/v1/budget-groups/"+retained["id"].(string)), 409)
 	var audited int
-	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.audit WHERE action IN ('budget_group.delete','notification_destination.delete','notification_rule.delete')").Scan(&audited); err != nil || audited != 3 {
+	if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.audit WHERE action IN ('budget_group.delete','notification_destination.delete','notification_rule.delete') AND project_id=$1", projectID).Scan(&audited); err != nil || audited != 3 {
 		t.Fatalf("audit count=%d: %v", audited, err)
 	}
 }

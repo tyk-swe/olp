@@ -136,8 +136,8 @@ func scanRuleSignal(row pgx.Row, rule signalRule, now time.Time, circuits map[st
 		signal.evidence = map[string]any{"route_slug": route, "project_id": project, "samples": count,
 			"metric": rule.configuration.Metric, "p95_ms": value, "window_seconds": rule.configuration.WindowSeconds}
 	case "worker.stale":
-		var task, age string
-		if err := row.Scan(&task, &age); err != nil {
+		var task, region, age string
+		if err := row.Scan(&task, &region, &age); err != nil {
 			return signal, err
 		}
 		seconds, err := decimal.NewFromString(age)
@@ -148,6 +148,10 @@ func scanRuleSignal(row pgx.Row, rule signalRule, now time.Time, circuits map[st
 		signal.subject, signal.known = task, staleAfter > 0
 		signal.active = seconds.Cmp(decimal.NewFromInt(staleAfter)) > 0
 		signal.evidence = map[string]any{"task": task, "age_seconds": age, "stale_after_seconds": staleAfter}
+		if region != "" {
+			signal.subject = "region:" + region + ":" + task
+			signal.evidence["region"] = region
+		}
 	case "runtime.install_failed":
 		var instance string
 		var desired, installed int64

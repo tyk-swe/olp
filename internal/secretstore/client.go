@@ -32,7 +32,8 @@ type credentialResult struct {
 }
 
 // Resolver uses ambient cloud workload identity. A Vault deployment supplies a
-// mounted JWT, role and auth mount; no access token belongs in a reference.
+// trusted origin, mounted JWT, role and auth mount; no access token belongs in
+// a reference.
 type Resolver struct {
 	client *http.Client
 	mu     sync.Mutex

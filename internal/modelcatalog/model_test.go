@@ -113,6 +113,33 @@ func TestCatalogKeepsUnknownPrivacyAndPartialPricesExplicit(t *testing.T) {
 	}
 }
 
+func TestCatalogOmitsUnavailablePricesAndKeepsCurrencyCoveragePartial(t *testing.T) {
+	snapshot, route, inputs, now := catalogFixture(t)
+	model := Describe(snapshot, route, nil, "https://gateway.example", true, false, now)
+	if len(model.Prices) != 0 {
+		t.Fatal("unavailable pricing input produced prices")
+	}
+	inputs.Prices[1].Currency = "EUR"
+	model = Describe(snapshot, route, inputs, "https://gateway.example", true, false, now)
+	if len(model.Prices) != 2 || model.Prices[0].Complete || model.Prices[1].Complete {
+		t.Fatalf("cross-currency ranges asserted full target coverage: %+v", model.Prices)
+	}
+}
+
+func TestCatalogGeminiEmbeddingSampleRequiresItsCertifiedSurface(t *testing.T) {
+	snapshot, route, inputs, now := catalogFixture(t)
+	route.Operations = []string{"embeddings"}
+	route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+	route.Targets = route.Targets[:1]
+	provider := snapshot.Providers["first"]
+	provider.Capabilities = []runtime.Capability{{Model: route.Targets[0].ProviderModel, Operation: "embeddings", Surface: "gemini", Mode: "unary"}}
+	snapshot.Providers["first"] = provider
+	model := Describe(snapshot, route, inputs, "https://gateway.example", false, false, now)
+	if len(model.Samples) != 1 || model.Samples[0].SDK != "gemini" {
+		t.Fatalf("samples did not follow the certified embedding surface: %+v", model.Samples)
+	}
+}
+
 func TestCatalogSamplesRespectCertifiedModesAndStrictNativeDialect(t *testing.T) {
 	snapshot, route, inputs, now := catalogFixture(t)
 	first := snapshot.Providers["first"]

@@ -10,6 +10,15 @@ import (
 )
 
 func (r *Resolver) vaultToken(ctx context.Context, resource *url.URL) (string, error) {
+	// References are writable by API callers; only the operator chooses where
+	// the mounted workload JWT may be exchanged. Refuse before opening it.
+	origin, err := url.Parse(r.getenv("OLP_VAULT_ADDR"))
+	if err != nil || origin.Host == "" || (origin.Scheme != "https" && origin.Scheme != "http") ||
+		origin.User != nil || origin.Opaque != "" || (origin.Path != "" && origin.Path != "/") ||
+		origin.RawQuery != "" || origin.ForceQuery || origin.Fragment != "" || origin.RawPath != "" ||
+		resource == nil || resource.Scheme != origin.Scheme || !strings.EqualFold(resource.Host, origin.Host) {
+		return "", ErrUnavailable
+	}
 	role, mount := r.getenv("OLP_VAULT_ROLE"), r.getenv("OLP_VAULT_AUTH_MOUNT")
 	if mount == "" {
 		mount = "jwt"

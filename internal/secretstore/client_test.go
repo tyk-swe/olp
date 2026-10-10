@@ -57,7 +57,7 @@ func resolverFixture(t *testing.T, transport roundTripFunc) *Resolver {
 		t.Fatal(err)
 	}
 	r.getenv = func(name string) string {
-		return map[string]string{"OLP_VAULT_ROLE": "operator", "OLP_VAULT_JWT_FILE": jwtFile}[name]
+		return map[string]string{"OLP_VAULT_ADDR": "https://vault.example", "OLP_VAULT_ROLE": "operator", "OLP_VAULT_JWT_FILE": jwtFile}[name]
 	}
 	return r
 }
@@ -181,6 +181,39 @@ func TestEverySecretStorePinsItsVersionAndRejectsChangedVersions(t *testing.T) {
 				t.Fatal("changed version was accepted or disclosed")
 			}
 		})
+	}
+}
+
+func TestVaultReferencesCannotRedirectWorkloadIdentity(t *testing.T) {
+	calls := 0
+	r := resolverFixture(t, func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("untrusted host was contacted")
+	})
+	for _, origin := range []string{"https://attacker.example", "https://vault.example.attacker.example", "https://vault.example:8443", "http://vault.example"} {
+		reference := Reference{Store: "vault", SecretID: origin + "/v1/secret/data/key", Version: "1", Field: "api_key"}
+		if _, err := r.Resolve(t.Context(), reference); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("untrusted reference accepted: %s, %v", origin, err)
+		}
+		key := WrappedKey{Store: "vault", KeyID: origin + "/v1/transit/keys/key", Ciphertext: "vault:v1:wrapped"}
+		if _, err := r.Unwrap(t.Context(), key); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("untrusted wrapped key accepted: %s, %v", origin, err)
+		}
+	}
+	getenv := r.getenv
+	for _, configured := range []string{"", "https://vault.example/path", "https://vault.example?query", "https://user@vault.example"} {
+		r.getenv = func(name string) string {
+			if name == "OLP_VAULT_ADDR" {
+				return configured
+			}
+			return getenv(name)
+		}
+		if _, err := r.Resolve(t.Context(), Reference{Store: "vault", SecretID: "https://vault.example/v1/secret/data/key", Version: "1", Field: "api_key"}); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("invalid Vault trust configuration accepted: %q, %v", configured, err)
+		}
+	}
+	if calls != 0 {
+		t.Fatal("workload identity was sent outside the operator's Vault origin")
 	}
 }
 

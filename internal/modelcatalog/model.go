@@ -146,6 +146,9 @@ func extend(bounds **Range, value *string) {
 
 func priceRanges(snapshot *runtime.Snapshot, route runtime.Route, inputs *usage.RoutingInputs, now time.Time) []Price {
 	result := []Price{}
+	if inputs == nil {
+		return result
+	}
 	for _, operation := range route.Operations {
 		byCurrency := map[string]*Price{}
 		missing := false
@@ -180,7 +183,7 @@ func priceRanges(snapshot *runtime.Snapshot, route runtime.Route, inputs *usage.
 			extend(&bounds.UnitPrice, price.UnitPrice)
 		}
 		for _, bounds := range byCurrency {
-			bounds.Complete = !missing
+			bounds.Complete = !missing && len(byCurrency) == 1
 			result = append(result, *bounds)
 		}
 	}
@@ -199,9 +202,6 @@ func certifiedSamples(snapshot *runtime.Snapshot, route runtime.Route, origin st
 	result := []Sample{}
 	for _, candidate := range samples(route, origin) {
 		surface := candidate.SDK
-		if candidate.Operation == "embeddings" {
-			surface = "openai"
-		}
 		if candidate.SDK == "gemini" && candidate.Operation == "embeddings" && !route.Fidelity.Strict() {
 			continue
 		}

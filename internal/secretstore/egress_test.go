@@ -27,6 +27,7 @@ func TestVaultStoreDestinationsUseProviderEgressAndRefuseRedirects(t *testing.T)
 	}
 	t.Setenv("OLP_VAULT_ROLE", "operator")
 	t.Setenv("OLP_VAULT_JWT_FILE", file)
+	t.Setenv("OLP_VAULT_ADDR", store.URL)
 	reference := Reference{Store: "vault", SecretID: store.URL + "/v1/secret/data/provider", Version: "1", Field: "api_key"}
 	if _, err := New(egress.Policy{}).Resolve(t.Context(), reference); err == nil || calls.Load() != 0 {
 		t.Fatal("store bypassed private-address/plaintext egress policy")

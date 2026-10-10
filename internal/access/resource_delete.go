@@ -92,7 +92,7 @@ func (s *Server) deleteResource(r *http.Request, _ Principal, spec deletableReso
 			return Reply{}, err
 		}
 	}
-	if err = Audit(r.Context(), tx, r, p.Actor(), spec.kind+".delete", spec.kind, id, "success"); err != nil {
+	if err = AuditForProject(r.Context(), tx, r, p.Actor(), spec.kind+".delete", spec.kind, id, "success", projectID); err != nil {
 		return Reply{}, err
 	}
 	result := Reply{Status: http.StatusNoContent}

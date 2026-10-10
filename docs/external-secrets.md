@@ -45,10 +45,14 @@ Azure uses `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and
 optional client ID. Grant only decrypt access for the selected wrapping keys
 and read access to the specified provider-secret versions.
 
-Vault exchanges a mounted JWT using `OLP_VAULT_ROLE`, `OLP_VAULT_JWT_FILE` and
-optional `OLP_VAULT_AUTH_MOUNT` (default `jwt`). The JWT file must be a regular
+Set `OLP_VAULT_ADDR` to the trusted Vault origin, for example
+`https://vault.example.com:8200`, without a path, query or credentials. All Vault
+references and wrapped keys must use that exact scheme, host and port. OLP
+refuses other origins before reading or sending the mounted workload JWT.
+Vault exchanges that JWT using `OLP_VAULT_ROLE`, `OLP_VAULT_JWT_FILE` and optional
+`OLP_VAULT_AUTH_MOUNT` (default `jwt`). The JWT file must be a regular
 owner-readable file with mode 0400, 0440, 0600 or 0640. OLP rereads it for each
-exchange and sends the returned token only to that Vault origin.
+exchange and sends the returned token only to the configured Vault origin.
 
 Private Vault and metadata-service destinations need explicit
 `OLP_PROVIDER_EGRESS_ALLOW_CIDRS` entries. Plain HTTP identity endpoints also
