@@ -80,6 +80,12 @@ necessarily never received it. `olp_export_pending`,
 sink outage degrades delivery but never the export task's health; only claim,
 outcome, or checkpoint failures make the worker unhealthy.
 
+Changing a sink destination with a stored write-only credential requires an
+explicit replacement `credential` or `null`. GCS tokens are sent only to
+`storage.googleapis.com` or bucket subdomains of that host. Azure storage tokens
+are sent only to account hosts under `blob.core.windows.net`. Both require HTTPS
+on the standard port; general egress exceptions cannot broaden this trust.
+
 Payload capture is owner-enabled, best-effort, and memory-only. An owner first
 enables installation capture; authorized installation and project managers then
 create bounded policies that pick an installation-owned sink, an include set
@@ -344,6 +350,9 @@ metadata-only — no request content or credential material.
   them once. The worker that records a lapse enqueues, in the same transaction,
   exactly one delivery for each enabled rule whose destination is enabled. A
   retired grant, which nothing used, is not a lapse to notify.
+
+A destination URL change requires explicit replacement or removal of any stored
+`secret`, including PagerDuty routing keys and SMTP credentials.
 
 A destination may carry a signing secret: it is write-only, stored encrypted in
 the keyring, and never returned by any read. When configured, deliveries sign

@@ -90,9 +90,13 @@ func matrixPolicy() *egress.Policy {
 
 type fakeCloudAuth struct{ t *testing.T }
 
-func (f *fakeCloudAuth) Apply(_ context.Context, req *http.Request, cfg connectors.Config, secret, _ []byte) (egress.Sensitive, error) {
-	if cfg.Kind != "vertex_ai" || cfg.AuthMode != "service_account" {
-		return egress.Sensitive{}, fmt.Errorf("unexpected Apply config %+v", cfg)
+func (f *fakeCloudAuth) Apply(context.Context, *http.Request, connectors.Config, []byte, []byte) (egress.Sensitive, error) {
+	return egress.Sensitive{}, fmt.Errorf("unexpected provider authentication for object storage")
+}
+
+func (f *fakeCloudAuth) ApplyGoogleStorage(_ context.Context, req *http.Request, mode string, secret []byte) (egress.Sensitive, error) {
+	if mode != "service_account" {
+		return egress.Sensitive{}, fmt.Errorf("unexpected Google storage mode %q", mode)
 	}
 	var v struct {
 		ClientEmail string `json:"client_email"`

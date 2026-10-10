@@ -350,6 +350,9 @@ func (m *Management) updateSink(r *http.Request, _ access.Principal) (access.Rep
 	if err := m.validateSink(&updated); err != nil {
 		return access.Reply{}, err
 	}
+	if updated.Destination != current.Destination && credentialID != nil && input.Credential == nil {
+		return access.Reply{}, access.Invalid("credential", "changing the destination requires a replacement credential or null")
+	}
 	etag = access.NewID()
 	if _, err := tx.Exec(r.Context(), updateSinkSQL, current.ID, updated.Name, updated.Destination, updated.Streams, canonicalFilter(updated.Filter), updated.Enabled, etag); err != nil {
 		return access.Reply{}, err

@@ -163,6 +163,37 @@ func serveSMTP(conn net.Conn, cert *tls.Certificate, implicit, starttls bool, me
 	}
 }
 
+func TestNotificationEndpointChangesRequireExplicitSecrets(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	for _, kind := range []string{"pagerduty", "email"} {
+		t.Run(kind, func(t *testing.T) {
+			endpoint, next := "https://events.example/enqueue", "https://other.example/enqueue"
+			secret := map[string]any{"routing_key": "private-routing-key"}
+			configuration := map[string]any{}
+			if kind == "email" {
+				endpoint, next = "smtps://mail.example:465", "smtps://other.example:465"
+				secret = map[string]any{"username": "operator", "password": "private-password"}
+				configuration = map[string]any{"from": "alerts@example.com", "to": []string{"ops@example.com"}}
+			}
+			destination := h.want(owner, "POST", "/api/v1/notifications/destinations", map[string]any{
+				"name": kind, "type": kind, "url": endpoint, "secret": secret, "configuration": configuration,
+			}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+			path := "/api/v1/notifications/destinations/" + destination["id"].(string)
+			h.want(owner, "PATCH", path, map[string]any{"url": next}, etagHeader(destination), 422)
+			unchanged := h.want(owner, "GET", path, nil, nil, 200)
+			if unchanged["url"] != endpoint || unchanged["etag"] != destination["etag"] {
+				t.Fatal("rejected update changed the secret destination")
+			}
+			destination = h.want(owner, "PATCH", path, map[string]any{"url": next, "secret": secret}, etagHeader(destination), 200)
+			destination = h.want(owner, "PATCH", path, map[string]any{"url": endpoint, "enabled": false, "secret": nil}, etagHeader(destination), 200)
+			if destination["secret_configured"] != false {
+				t.Fatal("explicit removal retained the old secret")
+			}
+		})
+	}
+}
+
 func TestNotificationChannelManagementAndDelivery(t *testing.T) {
 	h := newAccessHarness(t)
 	h.Server.Egress = alertPolicy()

@@ -4,4 +4,4 @@ package connectors
 
 import "net/url"
 
-func vertexTestDestination(*url.URL) bool { return false }
+func cloudTestDestination(*url.URL) bool { return false }

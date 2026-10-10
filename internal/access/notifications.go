@@ -351,6 +351,7 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ Principal) (Re
 	if err = json.Unmarshal(data, &current); err != nil {
 		return Reply{}, err
 	}
+	previousURL := current.URL
 	if raw, ok := patch["name"]; ok {
 		if err = json.Unmarshal(raw, &current.Name); err != nil {
 			return Reply{}, Invalid("name", "Use a non-empty destination name.")
@@ -393,6 +394,9 @@ func (s *Server) updateNotificationDestination(r *http.Request, _ Principal) (Re
 		return Reply{}, Fail(503, "egress_policy_unavailable", "Notification delivery is not configured on this installation.")
 	}
 	d := notifications.Destination{Type: current.Type, URL: strings.TrimSpace(current.URL), Configuration: current.Configuration}
+	if _, supplied := patch["secret"]; !supplied && current.SecretConfigured && d.URL != previousURL {
+		return Reply{}, Invalid("secret", "Changing the destination URL requires a replacement secret or null.")
+	}
 	var effectiveSecret []byte
 	secretCleared := false
 	if raw, ok := patch["secret"]; ok {
