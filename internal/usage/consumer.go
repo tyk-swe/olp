@@ -652,11 +652,11 @@ func (r *consumerRun) checkpointHealth(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	lag, err := r.groupLag(ctx, pending)
+	lag, oldestLagged, err := r.groupLag(ctx, pending)
 	if err != nil {
 		return err
 	}
-	return ReportConsumerHealth(ctx, r.pool, pending, lag, oldest, time.Now().UTC())
+	return ReportConsumerHealth(ctx, r.pool, pending, lag, oldest, oldestLagged, time.Now().UTC())
 }
 
 func (r *consumerRun) pendingSummary(ctx context.Context) (int64, *time.Time, error) {
@@ -692,43 +692,92 @@ func (r *consumerRun) pendingSummary(ctx context.Context) (int64, *time.Time, er
 	return count, &oldest, nil
 }
 
-// groupLag is how many entries the group has never been delivered. Valkey may
-// return an unknown lag while deliveries and deletions race; because every
-// acknowledged entry is deleted in the same step, the stream's remaining length
-// minus what is pending is a safe fallback.
-func (r *consumerRun) groupLag(ctx context.Context, pending int64) (int64, error) {
+// groupLag is how many entries the group has never been delivered, and when
+// the oldest of them was written. Undelivered entries are always the tail of
+// the stream, so the lag newest entries end at the oldest lagged one. Valkey
+// may return an unknown lag while deliveries and deletions race; because
+// every acknowledged entry is deleted in the same step, the stream's
+// remaining length minus what is pending is a safe fallback.
+func (r *consumerRun) groupLag(ctx context.Context, pending int64) (int64, *time.Time, error) {
 	command, cancel := context.WithTimeout(ctx, consumerCommandTimeout)
 	defer cancel()
 	reply, err := r.client.Do(command, "XINFO", "GROUPS", r.stream)
 	if err != nil {
-		return 0, fmt.Errorf("read request metadata group info: %w", err)
+		return 0, nil, fmt.Errorf("read request metadata group info: %w", err)
 	}
 	groups, ok := reply.([]any)
 	if !ok {
-		return 0, protocolError("invalid XINFO GROUPS reply")
+		return 0, nil, protocolError("invalid XINFO GROUPS reply")
 	}
+	var lag int64
 	for _, item := range groups {
 		fields, err := replyFields(item)
 		if err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		if name, ok := fields["name"].(string); !ok || name != Group {
 			continue
 		}
-		if lag, ok := fields["lag"].(int64); ok {
-			return max(lag, 0), nil
+		if reported, ok := fields["lag"].(int64); ok {
+			lag = max(reported, 0)
+		} else {
+			groupPending, ok := fields["pending"].(int64)
+			if !ok {
+				groupPending = pending
+			}
+			length, err := r.streamLength(ctx)
+			if err != nil {
+				return 0, nil, err
+			}
+			lag = max(length-groupPending, 0)
 		}
-		groupPending, ok := fields["pending"].(int64)
-		if !ok {
-			groupPending = pending
+		if lag == 0 {
+			return 0, nil, nil
 		}
-		length, err := r.streamLength(ctx)
+		oldest, err := r.oldestLaggedEntry(ctx, lag)
 		if err != nil {
-			return 0, err
+			return 0, nil, err
 		}
-		return max(length-groupPending, 0), nil
+		return lag, oldest, nil
 	}
-	return 0, protocolError("consumer group disappeared")
+	return 0, nil, protocolError("consumer group disappeared")
+}
+
+// oldestLaggedEntry reads back the lag newest entries — exactly the ones the
+// group has never been delivered — and returns when the earliest of them was
+// written. A reported lag whose entries are already gone cannot age, so the
+// sample fails rather than publish one.
+func (r *consumerRun) oldestLaggedEntry(ctx context.Context, lag int64) (*time.Time, error) {
+	command, cancel := context.WithTimeout(ctx, consumerCommandTimeout)
+	defer cancel()
+	reply, err := r.client.Do(command, "XREVRANGE", r.stream, "+", "-", "COUNT", strconv.FormatInt(lag, 10))
+	if err != nil {
+		return nil, fmt.Errorf("read request metadata lagged entries: %w", err)
+	}
+	entries, ok := reply.([]any)
+	if !ok {
+		return nil, protocolError("invalid lagged entries reply")
+	}
+	if len(entries) == 0 {
+		return nil, protocolError("reported consumer lag has no entries")
+	}
+	oldest, ok := entries[len(entries)-1].([]any)
+	if !ok || len(oldest) == 0 {
+		return nil, protocolError("invalid lagged entry reply")
+	}
+	id, ok := oldest[0].(string)
+	if !ok {
+		return nil, protocolError("invalid lagged entry id")
+	}
+	milliseconds, _, err := ParseStreamID(id)
+	if err != nil {
+		return nil, err
+	}
+	if milliseconds > 1<<62 {
+		return nil, protocolError("lagged stream ID overflow")
+	}
+	written := time.UnixMilli(int64(milliseconds)).UTC()
+	return &written, nil
 }
 
 func (r *consumerRun) streamLength(ctx context.Context) (int64, error) {

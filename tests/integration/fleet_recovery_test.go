@@ -369,9 +369,10 @@ func TestBudgetsRecoverFromLostSpendState(t *testing.T) {
 	// Budget admission first needs a live consumer heartbeat; this fixture
 	// runs no worker, so seed the row a healthy consumer would report.
 	if _, err := in.h.Pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health
+        (singleton, pending_events, lag_events, oldest_pending_at, checked_at)
         VALUES(true,0,0,NULL,now())
         ON CONFLICT (singleton) DO UPDATE SET pending_events=0, lag_events=0,
-            oldest_pending_at=NULL, checked_at=now()`); err != nil {
+            oldest_pending_at=NULL, oldest_lagged_at=NULL, checked_at=now()`); err != nil {
 		t.Fatal(err)
 	}
 

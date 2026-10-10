@@ -132,6 +132,21 @@ func TestIntegrationBudgetAccountingRefusesStaleEpochWithoutDetector(t *testing.
 	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); err != nil {
 		t.Fatalf("resumed healthy heartbeat did not recover: %v", err)
 	}
+	// An epoch whose stream writes are still retrying keeps checkpointing
+	// while terminal events sit in the producer's buffer: the reservation
+	// grace cannot outlast that backlog, so admission stays closed.
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.request_metadata_gateway_epochs SET retrying=true WHERE gateway_instance='crashed-before-checkpoint'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); !errors.Is(err, ErrIncompleteBudgetAccounting) {
+		t.Fatalf("retrying epoch admitted: %v", err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.request_metadata_gateway_epochs SET retrying=false WHERE gateway_instance='crashed-before-checkpoint'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); err != nil {
+		t.Fatalf("delivered epoch blocked admission: %v", err)
+	}
 }
 
 func TestIntegrationBudgetAccountingRefusesUnconsumedBacklog(t *testing.T) {
@@ -140,7 +155,9 @@ func TestIntegrationBudgetAccountingRefusesUnconsumedBacklog(t *testing.T) {
 	// A live consumer reporting entries pending past the stale window means
 	// durable usage is not reaching accounting; a version this build cannot
 	// decode stays pending until a compatible consumer processes it.
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health VALUES(true,1,0,$1,now())`, old); err != nil {
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health
+		(singleton, pending_events, lag_events, oldest_pending_at, checked_at)
+		VALUES(true,1,0,$1,now())`, old); err != nil {
 		t.Fatal(err)
 	}
 	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); !errors.Is(err, ErrIncompleteBudgetAccounting) {
@@ -152,6 +169,22 @@ func TestIntegrationBudgetAccountingRefusesUnconsumedBacklog(t *testing.T) {
 	}
 	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); err != nil {
 		t.Fatalf("fresh backlog blocked admission: %v", err)
+	}
+	// Stranded undelivered entries trail durable accounting the same way:
+	// reported usage stays behind the stream while producers keep writing.
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.request_metadata_consumer_health
+		SET lag_events=2, oldest_lagged_at=$1`, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); !errors.Is(err, ErrIncompleteBudgetAccounting) {
+		t.Fatalf("stranded lag admitted: %v", err)
+	}
+	// Fresh undelivered entries are ordinary in-flight work.
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.request_metadata_consumer_health SET oldest_lagged_at=now()`); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckBudgetAccounting(t.Context(), pool, NewEmitter(1)); err != nil {
+		t.Fatalf("fresh lag blocked admission: %v", err)
 	}
 	// A stale heartbeat cannot speak for the group: a dead consumer leaves
 	// deliveries pending while producers keep writing, so admission stays
@@ -181,8 +214,10 @@ func TestIntegrationBudgetAccountingRefusesUnconsumedBacklog(t *testing.T) {
 // closes cost-budget admission.
 func liveConsumerHeartbeat(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health VALUES(true,0,0,NULL,now())
-		ON CONFLICT (singleton) DO UPDATE SET pending_events=0, lag_events=0, oldest_pending_at=NULL, checked_at=now()`); err != nil {
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health
+		(singleton, pending_events, lag_events, oldest_pending_at, checked_at) VALUES(true,0,0,NULL,now())
+		ON CONFLICT (singleton) DO UPDATE SET pending_events=0, lag_events=0,
+			oldest_pending_at=NULL, oldest_lagged_at=NULL, checked_at=now()`); err != nil {
 		t.Fatal(err)
 	}
 }

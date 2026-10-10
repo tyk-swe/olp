@@ -23,24 +23,25 @@ SELECT EXISTS (
 ) OR EXISTS (
 	SELECT 1 FROM olp.request_metadata_gateway_epochs
 	WHERE gracefully_closed_at IS NULL AND stale_detected_at IS NULL
-	  AND updated_at < now() - make_interval(secs => $1)
+	  AND (updated_at < now() - make_interval(secs => $1) OR retrying)
 ) OR NOT EXISTS (
 	SELECT 1 FROM olp.request_metadata_consumer_health
 	WHERE checked_at >= now() - make_interval(secs => $1)
 ) OR EXISTS (
 	SELECT 1 FROM olp.request_metadata_consumer_health
 	WHERE checked_at >= now() - make_interval(secs => $1)
-	  AND pending_events > 0
-	  AND oldest_pending_at < now() - make_interval(secs => $1)
+	  AND ((pending_events > 0 AND oldest_pending_at < now() - make_interval(secs => $1))
+	    OR (lag_events > 0 AND oldest_lagged_at < now() - make_interval(secs => $1)))
 ) OR ($2::timestamptz IS NOT NULL AND $2 >= start_at) FROM boundary`
 
 // CheckBudgetAccounting checks durable loss through retention and restarts,
-// local loss before its checkpoint, stale unclosed epochs even when no
-// recovery worker is running, and consumer silence: a missing or stale
-// heartbeat cannot vouch for the backlog while producers keep writing, and a
-// live consumer reporting entries pending past the staleness window means
-// durable usage is not reaching accounting. A healthy heartbeat can clear
-// epoch uncertainty.
+// local loss before its checkpoint, epochs that are stale, unclosed, or
+// still retrying delivery even when no recovery worker is running, and
+// consumer silence: a missing or stale heartbeat cannot vouch for the backlog
+// while producers keep writing, and a live consumer reporting deliveries or
+// undelivered entries stranded past the staleness window means durable usage
+// is not reaching accounting. A healthy heartbeat can clear epoch
+// uncertainty.
 func CheckBudgetAccounting(ctx context.Context, pool *pgxpool.Pool, emitter *Emitter) error {
 	var lastLoss *time.Time
 	if emitter != nil {
