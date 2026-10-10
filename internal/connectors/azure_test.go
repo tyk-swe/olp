@@ -14,16 +14,21 @@ import (
 )
 
 type stubAzureCredential struct {
-	calls  atomic.Int32
-	token  string
-	expiry time.Time
-	err    error
+	calls     atomic.Int32
+	token     string
+	expiry    time.Time
+	err       error
+	wantScope string
 }
 
 func (c *stubAzureCredential) GetToken(ctx context.Context, opts policy.TokenRequestOptions) (azcore.AccessToken, error) {
 	c.calls.Add(1)
-	if len(opts.Scopes) != 1 || opts.Scopes[0] != cognitiveServicesScope {
-		return azcore.AccessToken{}, errors.New("unexpected scope")
+	want := c.wantScope
+	if want == "" {
+		want = cognitiveServicesScope
+	}
+	if len(opts.Scopes) != 1 || opts.Scopes[0] != want {
+		return azcore.AccessToken{}, errors.New("unexpected scope " + strings.Join(opts.Scopes, ","))
 	}
 	if c.err != nil {
 		return azcore.AccessToken{}, c.err
@@ -129,5 +134,41 @@ func TestAzureIdentityHostBoundary(t *testing.T) {
 	}
 	if azureIdentityHost("identity.other") {
 		t.Fatal("identity host broadened beyond the declared endpoint")
+	}
+}
+
+func TestAzureStorageScopeAndCacheSegregation(t *testing.T) {
+	a := NewAuth(localPolicy())
+	storage := &stubAzureCredential{token: "storage-token", expiry: time.Now().Add(time.Hour), wantScope: "https://storage.azure.com/.default"}
+	cognitive := &stubAzureCredential{token: "cognitive-token", expiry: time.Now().Add(time.Hour)}
+	factories := 0
+	a.azureFactory = func(mode string, secret []byte) (azcore.TokenCredential, error) {
+		factories++
+		if factories == 1 {
+			return storage, nil
+		}
+		return cognitive, nil
+	}
+	secret := []byte(`{"tenant_id":"tenant","client_id":"client","client_secret":"value"}`)
+	req, _ := http.NewRequest("PUT", "https://account.blob.core.windows.net/container/object", nil)
+	if _, err := a.ApplyAzureStorage(context.Background(), req, "azure_client_secret", secret); err != nil {
+		t.Fatal(err)
+	}
+	if req.Header.Get("Authorization") != "Bearer storage-token" {
+		t.Fatalf("storage authorization %q", req.Header.Get("Authorization"))
+	}
+	req2, _ := http.NewRequest("PUT", "https://account.blob.core.windows.net/container/other", nil)
+	if _, err := a.ApplyAzureStorage(context.Background(), req2, "azure_client_secret", secret); err != nil {
+		t.Fatal(err)
+	}
+	if factories != 1 || storage.calls.Load() != 1 {
+		t.Fatalf("storage token was not cached: factories=%d calls=%d", factories, storage.calls.Load())
+	}
+	openaiReq, _ := http.NewRequest("POST", "https://resource.example/openai/deployments/prod/responses", nil)
+	if _, err := a.Apply(context.Background(), openaiReq, Config{Kind: "azure_openai", AuthMode: "azure_client_secret"}, secret, nil); err != nil {
+		t.Fatal(err)
+	}
+	if openaiReq.Header.Get("Authorization") != "Bearer cognitive-token" || factories != 2 {
+		t.Fatalf("storage token leaked into OpenAI scope: %q factories=%d", openaiReq.Header.Get("Authorization"), factories)
 	}
 }

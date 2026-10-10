@@ -139,6 +139,34 @@ spec:
           annotations:
             summary: OpenLLMProxy asynchronous worker observability is unavailable
             description: A gateway or control target cannot read the durable worker summaries that feed asynchronous-plane alerts.
+        - alert: OLPExportDeliveryFailed
+          expr: sum(max by (namespace,sink,outcome) (increase(olp_export_deliveries_total{namespace={{ .Release.Namespace | quote }},service=~{{ $observabilityServices | quote }},outcome="failed"}[10m]))) > {{ .Values.monitoring.rules.exportDeliveryFailedThreshold }}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: OpenLLMProxy export deliveries are failing
+            description: Export records are being retried at-least-once; check sink destinations, credentials, and egress policy.
+        - alert: OLPExportPendingBacklog
+          expr: max(olp_export_pending{namespace={{ .Release.Namespace | quote }},service=~{{ $observabilityServices | quote }}}) > {{ .Values.monitoring.rules.exportPendingThreshold }}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: OpenLLMProxy export queue backlog is sustained
+            description: Queued durable export records remain above the configured threshold.
+        - alert: OLPCaptureDeliveryFailed
+          expr: increase(olp_capture_failed_total{namespace={{ .Release.Namespace | quote }},service=~{{ $observabilityServices | quote }}}[10m]) > {{ .Values.monitoring.rules.captureFailedThreshold }}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: OpenLLMProxy payload capture deliveries are failing
+            description: Best-effort capture records are failing to reach their sink; check the capture sink destination.
+        - alert: OLPBusinessMetricSeriesOverflow
+          expr: increase(olp_metrics_series_overflow_total{namespace={{ .Release.Namespace | quote }},service=~{{ $observabilityServices | quote }}}[10m]) > 0
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: OpenLLMProxy business metric series are overflowing the cap
+            description: Tenant-label cardinality exceeded the process series bound; raise metrics.seriesCap or narrow metrics.tenantLabels.
 {{ end }}
 {{ if $gatewayMonitored }}
         - alert: OLPDistributedLimiterUnavailable

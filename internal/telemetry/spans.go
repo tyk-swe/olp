@@ -11,6 +11,11 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
+const (
+	GenAISemconvVersion = "1.41.0"
+	SchemaURL           = "https://opentelemetry.io/schemas/" + GenAISemconvVersion
+)
+
 // Span attribute allowlists. Every recorded attribute is metadata: no prompts,
 // no file names, no provider payloads, and no header values ever appear on a
 // span.
@@ -28,6 +33,13 @@ var RequestAttributeKeys = []string{
 	"olp.time_to_first_byte_ms",
 	"olp.total_duration_ms",
 	"olp.cancelled",
+	"gen_ai.operation.name",
+	"gen_ai.provider.name",
+	"gen_ai.request.model",
+	"gen_ai.response.model",
+	"gen_ai.response.finish_reasons",
+	"gen_ai.usage.input_tokens",
+	"gen_ai.usage.output_tokens",
 }
 
 var AttemptAttributeKeys = []string{
@@ -41,11 +53,51 @@ var AttemptAttributeKeys = []string{
 	"olp.usage.cached_input_tokens",
 	"olp.usage.media_units",
 	"olp.pricing_provenance",
+	"gen_ai.operation.name",
+	"gen_ai.provider.name",
+	"gen_ai.request.model",
+	"gen_ai.response.model",
+	"gen_ai.response.finish_reasons",
+	"gen_ai.usage.input_tokens",
+	"gen_ai.usage.output_tokens",
 }
 
 // ErrorClassClientCancelled is the error class a span records when the client
 // went away before the response finished.
 const ErrorClassClientCancelled = "client_cancelled"
+
+func genAIOperation(operation, surface, family string) string {
+	if operation != "generation" {
+		return operation
+	}
+	switch {
+	case surface == "gemini":
+		return "generate_content"
+	case family == "mistral_fim":
+		return "text_completion"
+	}
+	return "chat"
+}
+
+func genAIProviderName(kind string) string {
+	switch kind {
+	case "anthropic":
+		return "anthropic"
+	case "azure_openai":
+		return "azure.ai.openai"
+	case "bedrock":
+		return "aws.bedrock"
+	case "gemini":
+		return "gcp.gemini"
+	case "openai":
+		return "openai"
+	case "vertex_ai":
+		return "gcp.vertex_ai"
+	case "watsonx":
+		return "ibm.watsonx.ai"
+	}
+	return kind
+}
 
 type contextKey struct{}
 
@@ -56,6 +108,8 @@ type RequestTrace struct {
 	span              trace.Span
 	propagateUpstream bool
 	recordRequest     bool
+	operation         string
+	requestModel      string
 }
 
 // RequestFromContext returns the trace a middleware installed, or a no-op one.
@@ -73,12 +127,19 @@ func (t *RequestTrace) withContext(ctx context.Context) context.Context {
 // AttemptsOnly keeps propagation and attempt spans but stops request-level
 // recording, for call sites that own the request span themselves.
 func (t *RequestTrace) AttemptsOnly() *RequestTrace {
-	return &RequestTrace{span: t.span, propagateUpstream: t.propagateUpstream}
+	return &RequestTrace{span: t.span, propagateUpstream: t.propagateUpstream, operation: t.operation, requestModel: t.requestModel}
 }
 
 // PropagateUpstream reports whether attempt spans inject their context into
 // provider requests.
 func (t *RequestTrace) PropagateUpstream() bool { return t != nil && t.propagateUpstream }
+
+func (t *RequestTrace) SpanContext() trace.SpanContext {
+	if t == nil {
+		return trace.SpanContext{}
+	}
+	return t.span.SpanContext()
+}
 
 // Context returns a context carrying the request span, for attempt parenting.
 func (t *RequestTrace) Context(ctx context.Context) context.Context {
@@ -87,11 +148,14 @@ func (t *RequestTrace) Context(ctx context.Context) context.Context {
 
 // RecordInferenceContext records the identity settled by authentication and
 // route resolution.
-func (t *RequestTrace) RecordInferenceContext(surface, operation, routeSlug, keyID, generation string) {
-	if t == nil || !t.recordRequest {
+func (t *RequestTrace) RecordInferenceContext(surface, operation, family, routeSlug, keyID, generation string) {
+	if t == nil {
 		return
 	}
-	t.RecordSessionContext(operation, routeSlug, generation)
+	t.RecordSessionContext(surface, operation, family, routeSlug, generation)
+	if !t.recordRequest {
+		return
+	}
 	t.span.SetAttributes(
 		attribute.String("olp.surface", surface),
 		attribute.String("olp.key_id", keyID),
@@ -99,15 +163,48 @@ func (t *RequestTrace) RecordInferenceContext(surface, operation, routeSlug, key
 }
 
 // RecordSessionContext records operation, route, and runtime generation.
-func (t *RequestTrace) RecordSessionContext(operation, routeSlug, generation string) {
-	if t == nil || !t.recordRequest {
+func (t *RequestTrace) RecordSessionContext(surface, operation, family, routeSlug, generation string) {
+	if t == nil {
 		return
 	}
-	t.span.SetAttributes(
+	t.operation = genAIOperation(operation, surface, family)
+	t.requestModel = routeSlug
+	if !t.recordRequest {
+		return
+	}
+	attrs := []attribute.KeyValue{
 		attribute.String("olp.operation", operation),
 		attribute.String("olp.route_slug", routeSlug),
 		attribute.String("olp.generation", generation),
-	)
+	}
+	if t.operation != "" {
+		attrs = append(attrs, attribute.String("gen_ai.operation.name", t.operation))
+	}
+	if routeSlug != "" {
+		attrs = append(attrs, attribute.String("gen_ai.request.model", routeSlug))
+	}
+	t.span.SetAttributes(attrs...)
+}
+
+func (t *RequestTrace) RecordResponse(providerKind, model string, inputTokens, outputTokens *int64, finishReasons []string) {
+	if t == nil || !t.recordRequest {
+		return
+	}
+	if providerKind != "" {
+		t.span.SetAttributes(attribute.String("gen_ai.provider.name", genAIProviderName(providerKind)))
+	}
+	if model != "" {
+		t.span.SetAttributes(attribute.String("gen_ai.response.model", model))
+	}
+	if inputTokens != nil {
+		t.span.SetAttributes(attribute.Int64("gen_ai.usage.input_tokens", *inputTokens))
+	}
+	if outputTokens != nil {
+		t.span.SetAttributes(attribute.Int64("gen_ai.usage.output_tokens", *outputTokens))
+	}
+	if len(finishReasons) != 0 {
+		t.span.SetAttributes(attribute.StringSlice("gen_ai.response.finish_reasons", finishReasons))
+	}
 }
 
 // RecordTerminal records the request's terminal accounting: status, error
@@ -147,7 +244,7 @@ type AttemptTrace struct {
 func (t *RequestTrace) Attempt(ctx context.Context, providerKind, providerRevision, model string) (context.Context, *AttemptTrace) {
 	var tracer trace.Tracer
 	if t != nil && t.span != nil {
-		tracer = t.span.TracerProvider().Tracer("openllmproxy")
+		tracer = t.span.TracerProvider().Tracer("openllmproxy", trace.WithSchemaURL(SchemaURL))
 	} else {
 		tracer = noopTracer()
 	}
@@ -155,18 +252,32 @@ func (t *RequestTrace) Attempt(ctx context.Context, providerKind, providerRevisi
 	if t != nil {
 		parent = trace.ContextWithSpan(ctx, t.span)
 	}
+	attrs := []attribute.KeyValue{
+		attribute.String("olp.provider_kind", providerKind),
+		attribute.String("olp.provider_revision", providerRevision),
+		attribute.String("olp.model", model),
+	}
+	if providerKind != "" {
+		attrs = append(attrs, attribute.String("gen_ai.provider.name", genAIProviderName(providerKind)))
+	}
+	if t != nil {
+		if t.operation != "" {
+			attrs = append(attrs, attribute.String("gen_ai.operation.name", t.operation))
+		}
+		if t.requestModel != "" {
+			attrs = append(attrs, attribute.String("gen_ai.request.model", t.requestModel))
+		}
+	}
 	actx, span := tracer.Start(parent, "attempt",
 		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(
-			attribute.String("olp.provider_kind", providerKind),
-			attribute.String("olp.provider_revision", providerRevision),
-			attribute.String("olp.model", model),
-		),
+		trace.WithAttributes(attrs...),
 	)
 	return actx, &AttemptTrace{span: span, ctx: actx}
 }
 
-func noopTracer() trace.Tracer { return noop.NewTracerProvider().Tracer("openllmproxy") }
+func noopTracer() trace.Tracer {
+	return noop.NewTracerProvider().Tracer("openllmproxy", trace.WithSchemaURL(SchemaURL))
+}
 
 // Context returns the context carrying the attempt span.
 func (a *AttemptTrace) Context() context.Context { return a.ctx }
@@ -177,16 +288,34 @@ func (a *AttemptTrace) SpanContext() trace.SpanContext { return a.span.SpanConte
 // RecordUsage records the accounting counters the attempt observed.
 func (a *AttemptTrace) RecordUsage(inputTokens, outputTokens, cachedInputTokens *int64, mediaUnits *string) {
 	if inputTokens != nil {
-		a.span.SetAttributes(attribute.Int64("olp.usage.input_tokens", *inputTokens))
+		a.span.SetAttributes(
+			attribute.Int64("olp.usage.input_tokens", *inputTokens),
+			attribute.Int64("gen_ai.usage.input_tokens", *inputTokens),
+		)
 	}
 	if outputTokens != nil {
-		a.span.SetAttributes(attribute.Int64("olp.usage.output_tokens", *outputTokens))
+		a.span.SetAttributes(
+			attribute.Int64("olp.usage.output_tokens", *outputTokens),
+			attribute.Int64("gen_ai.usage.output_tokens", *outputTokens),
+		)
 	}
 	if cachedInputTokens != nil {
 		a.span.SetAttributes(attribute.Int64("olp.usage.cached_input_tokens", *cachedInputTokens))
 	}
 	if mediaUnits != nil {
 		a.span.SetAttributes(attribute.String("olp.usage.media_units", *mediaUnits))
+	}
+}
+
+func (a *AttemptTrace) RecordResponse(model string, finishReasons []string) {
+	if a == nil {
+		return
+	}
+	if model != "" {
+		a.span.SetAttributes(attribute.String("gen_ai.response.model", model))
+	}
+	if len(finishReasons) != 0 {
+		a.span.SetAttributes(attribute.StringSlice("gen_ai.response.finish_reasons", finishReasons))
 	}
 }
 

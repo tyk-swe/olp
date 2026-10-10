@@ -94,9 +94,9 @@ const markReceiptPersistedSQL = `UPDATE olp.request_metadata_event_receipts
 const insertRequestSQL = `INSERT INTO olp.requests
         (id, runtime_generation_id, api_key_id, budget_group_id, route_slug, operation, surface,
          started_at, completed_at, status_code, error_class, total_latency_ms, first_byte_ms,
-         attempt_count, created_at, attribution, policy_decisions, origin, parent_request_id, end_user_digest, budget_boundary)
+         attempt_count, created_at, attribution, policy_decisions, origin, parent_request_id, end_user_digest, budget_boundary, payload_captured)
     VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, $14::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $8,
-            $15::jsonb, $16::jsonb, $17, $18::uuid, $19, $20)
+            $15::jsonb, $16::jsonb, $17, $18::uuid, $19, $20, $21)
     ON CONFLICT (id, started_at) DO NOTHING`
 
 const insertAttemptSQL = `INSERT INTO olp.attempts
@@ -360,7 +360,7 @@ func insertRequestRows(ctx context.Context, tx pgx.Tx, ev *Event, validated *Val
 		validated.StatusCode, ev.ErrorClass, validated.LatencyMS, validated.FirstByteMS,
 		validated.AttemptCount, ev.BudgetGroupID, string(AttributionJSON(ev.Attribution)),
 		string(contentpolicy.DecisionsJSON(ev.PolicyDecisions)), cmp.Or(ev.Origin, OriginCaller),
-		ev.ParentRequestID, ev.EndUserDigest, ev.BudgetBoundary); err != nil {
+		ev.ParentRequestID, ev.EndUserDigest, ev.BudgetBoundary, ev.PayloadCaptured); err != nil {
 		return fmt.Errorf("persist request metadata request: %w", err)
 	}
 	for _, attempt := range validated.Attempts {

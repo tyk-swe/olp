@@ -100,3 +100,35 @@ func TestInlineSecretsAreRefused(t *testing.T) {
 		}
 	}
 }
+
+func TestMetricsTenantLabelsAndSeriesCap(t *testing.T) {
+	env := map[string]string{"OLP_DATABASE_URL": "postgres://user:secret@localhost/db", "OLP_METRICS_TENANT_LABELS": "project,key,end_user"}
+	c, err := config.Parse([]string{"gateway"}, func(k string) string { return env[k] }, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.MetricsTenantLabels) != 3 || c.MetricsTenantLabels[0] != "project" || c.MetricsSeriesCap != 5000 {
+		t.Fatalf("labels=%v cap=%d", c.MetricsTenantLabels, c.MetricsSeriesCap)
+	}
+	for _, extra := range []map[string]string{
+		{"OLP_METRICS_TENANT_LABELS": "organization"},
+		{"OLP_METRICS_TENANT_LABELS": "project,unknown"},
+		{"OLP_METRICS_SERIES_CAP": "8"},
+		{"OLP_METRICS_SERIES_CAP": "1000001"},
+	} {
+		merged := map[string]string{"OLP_DATABASE_URL": "postgres://user:secret@localhost/db"}
+		for k, v := range extra {
+			merged[k] = v
+		}
+		if _, err := config.Parse([]string{"gateway"}, func(k string) string { return merged[k] }, io.Discard); err == nil {
+			t.Fatalf("invalid metrics config accepted: %v", extra)
+		}
+	}
+	c, err = config.Parse([]string{"gateway", "--metrics-tenant-labels=end_user", "--metrics-series-cap=64"}, func(k string) string { return env[k] }, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.MetricsTenantLabels) != 1 || c.MetricsTenantLabels[0] != "end_user" || c.MetricsSeriesCap != 64 {
+		t.Fatalf("flags labels=%v cap=%d", c.MetricsTenantLabels, c.MetricsSeriesCap)
+	}
+}

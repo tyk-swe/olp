@@ -27,6 +27,7 @@
   let capabilities = $state<AuthenticationCapabilities>({
     local_login_enabled: false,
     notifications_active: false,
+    payload_capture_active: false,
     oidc_login_enabled: false
   });
   let message = $state('');

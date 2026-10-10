@@ -22,7 +22,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
-	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -90,7 +89,7 @@ func Install(cfg Config) (*Handle, error) {
 	if cfg.SampleRatio < 0 || cfg.SampleRatio > 1 {
 		return nil, errors.New("OLP_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0")
 	}
-	h := &Handle{tracer: noop.NewTracerProvider().Tracer("openllmproxy"), runtime: RuntimeConfig{
+	h := &Handle{tracer: noopTracer(), runtime: RuntimeConfig{
 		PropagateUpstream: cfg.PropagateUpstream,
 		AcceptInbound:     cfg.AcceptInbound,
 	}}
@@ -131,7 +130,7 @@ func Install(cfg Config) (*Handle, error) {
 			attribute.String("olp.process.mode", cfg.Mode),
 		)),
 	)
-	h.tracer = h.provider.Tracer("openllmproxy")
+	h.tracer = h.provider.Tracer("openllmproxy", trace.WithSchemaURL(SchemaURL))
 	return h, nil
 }
 
@@ -149,7 +148,7 @@ func (h *Handle) Runtime() *RuntimeConfig {
 // no-op tracer, so instrumented call sites never branch on nil.
 func (h *Handle) Tracer() trace.Tracer {
 	if h == nil {
-		return noop.NewTracerProvider().Tracer("openllmproxy")
+		return noopTracer()
 	}
 	return h.tracer
 }

@@ -32,6 +32,7 @@ it('distinguishes capability failure from disabled sign-in and retries accessibl
     .mockResolvedValueOnce({
       local_login_enabled: true,
       notifications_active: false,
+      payload_capture_active: false,
       oidc_login_enabled: true
     });
   component = mount(LoginPage, { target: host });
@@ -59,6 +60,7 @@ it('shows administrative disabled state only after successful capability retriev
   vi.mocked(authenticationCapabilities).mockResolvedValue({
     local_login_enabled: false,
     notifications_active: false,
+    payload_capture_active: false,
     oidc_login_enabled: false
   });
   component = mount(LoginPage, { target: host });

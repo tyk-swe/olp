@@ -59,7 +59,7 @@ function fieldErrors(value: unknown): FieldErrors | undefined {
   return Object.fromEntries(entries) as FieldErrors;
 }
 
-function apiProblem(error: unknown, response: Response): ApiProblem {
+export function apiProblem(error: unknown, response: Response): ApiProblem {
   const value =
     error && typeof error === 'object'
       ? (error as Record<string, unknown>)

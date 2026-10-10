@@ -204,11 +204,10 @@ func ReadExperiments(ctx context.Context, q access.Queryer, f Filters) (Experime
 }
 
 func (s *Server) selectorSavings(r *http.Request, p access.Principal) (access.Reply, error) {
-	filters, err := usageFilters(r)
+	filters, err := usageFilters(r, p)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	filters.AllProjects, filters.AllowedProjects = p.AllProjects, p.ProjectIDs()
 	report, err := ReadSelectorSavings(r.Context(), s.Access.Pool, filters)
 	if err != nil {
 		return access.Reply{}, err
@@ -217,11 +216,10 @@ func (s *Server) selectorSavings(r *http.Request, p access.Principal) (access.Re
 }
 
 func (s *Server) shadowExperiments(r *http.Request, p access.Principal) (access.Reply, error) {
-	filters, err := usageFilters(r)
+	filters, err := usageFilters(r, p)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	filters.AllProjects, filters.AllowedProjects = p.AllProjects, p.ProjectIDs()
 	report, err := ReadExperiments(r.Context(), s.Access.Pool, filters)
 	if err != nil {
 		return access.Reply{}, err

@@ -66,9 +66,10 @@ docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 valkey/valk
 OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
 export OLP_TEST_RESTORE_VALKEY_URL
 go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=25m -v -run '^TestCode' ./tests/integration
-go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v -skip '^TestCode' ./tests/integration
+go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v -run '^Test[A-M]' -skip '^TestCode' ./tests/integration
+go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v -run '^Test($|[^A-M])' -skip '^TestCode' ./tests/integration
 ./scripts/code-mode-qualification.sh cli
-go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestIntegration' ./internal/database ./internal/gateway ./internal/providers ./internal/media ./internal/usage
+go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestIntegration' ./internal/database ./internal/export ./internal/gateway ./internal/providers ./internal/media ./internal/usage
 # Test-only trusted registry additions run in their own process, so dynamic
 # fixture profiles cannot change the normal suite's fixed catalogue inventory.
 go test -race -tags=integration,extension -count=1 -timeout=5m -v -run '^TestRegisteredExtensionsPublic$' ./tests/integration

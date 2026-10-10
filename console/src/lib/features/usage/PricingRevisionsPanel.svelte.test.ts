@@ -37,6 +37,7 @@ const capabilities = {
   gateway_available: true,
   limits_enforced: true,
   notifications_active: false,
+  payload_capture_active: false,
   retention_enforced: true
 };
 const revision: PricingRevision = {

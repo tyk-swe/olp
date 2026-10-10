@@ -415,6 +415,46 @@ func tokenFailure(err error) error {
 	return ErrAuthentication
 }
 
+func (a *Auth) ApplyAzureStorage(ctx context.Context, req *http.Request, mode string, secret []byte) (egress.Sensitive, error) {
+	if !storageDestination(req.URL, "azure_blob") {
+		return egress.Sensitive{}, ErrAuthentication
+	}
+	if mode != "azure_default" && mode != "azure_client_secret" {
+		return egress.Sensitive{}, ErrCredentialRejected
+	}
+	c := Config{Kind: "azure_blob", AuthMode: mode}
+	key := cacheKey(c, secret)
+	a.mu.Lock()
+	cached := a.azureTokens[key]
+	a.mu.Unlock()
+	var token azcore.AccessToken
+	if cached.Token != "" && cached.ExpiresOn.After(time.Now().Add(30*time.Second)) {
+		token = cached
+	} else {
+		credential, e := a.azureCredential(c, secret, key)
+		if e != nil {
+			return egress.Sensitive{}, ErrCredentialRejected
+		}
+		tctx, cancel := context.WithTimeout(ctx, authTimeout)
+		var err error
+		token, err = credential.GetToken(tctx, policy.TokenRequestOptions{Scopes: []string{"https://storage.azure.com/.default"}})
+		cancel()
+		if err != nil {
+			return egress.Sensitive{}, tokenFailure(err)
+		}
+		a.mu.Lock()
+		if len(a.azureTokens) >= 256 {
+			clear(a.azureTokens)
+		}
+		a.azureTokens[key] = token
+		a.mu.Unlock()
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	var sensitive egress.Sensitive
+	sensitive.Add(string(secret), token.Token)
+	return sensitive, nil
+}
+
 // sigV4Signature extracts the signature value a SigV4 Authorization header
 // carries as its ", Signature=<hex>" parameter.
 func sigV4Signature(authorization string) string {

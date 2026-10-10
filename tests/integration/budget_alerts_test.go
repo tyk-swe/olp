@@ -89,6 +89,11 @@ func alertInstallation(t *testing.T, h *accessHarness) string {
 // pass.
 func deliveryPass(t *testing.T, h *accessHarness, policy *egress.Policy) {
 	t.Helper()
+	deliveryPassWith(t, h, policy, usage.NotificationDependencies{})
+}
+
+func deliveryPassWith(t *testing.T, h *accessHarness, policy *egress.Policy, dependencies usage.NotificationDependencies) {
+	t.Helper()
 	ring, err := secrets.ParseRing([]byte(h.Ring))
 	if err != nil {
 		t.Fatalf("key ring: %v", err)
@@ -101,7 +106,7 @@ func deliveryPass(t *testing.T, h *accessHarness, policy *egress.Policy) {
 	go func() {
 		defer close(done)
 		usage.RunNotificationDelivery(ctx, h.Pool, ring, alertInstallation(t, h), policy,
-			slog.New(slog.NewTextHandler(io.Discard, nil)))
+			slog.New(slog.NewTextHandler(io.Discard, nil)), dependencies)
 	}()
 	deadline := time.Now().Add(20 * time.Second)
 	for {

@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -103,7 +104,9 @@ type Server struct {
 	Admission *Admission
 	// Media wires the bounded media substrate into the public surface. A nil
 	// Media leaves the media routes unregistered.
-	Media *MediaDeps
+	Media    *MediaDeps
+	Capture  *export.Manager
+	Business *telemetry.BusinessMetrics
 
 	Resources *resources.Store
 
@@ -629,6 +632,9 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
+		}
+		if s.Capture != nil && x.origin == "" && x.operationName() == "generation" {
+			x.capture = s.Capture.Resolve(x.captureProject(), x.named().Slug, x.keyID, x.endUserDigest, x.request.accountingID())
 		}
 
 		// Admission happens once the request is understood and before any

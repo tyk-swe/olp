@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { unwrap, unwrapPage } from '$lib/api/http';
+import { apiProblem, unwrap, unwrapPage } from '$lib/api/http';
 import type { CursorPage } from '$lib/api/http';
 import { compactQuery } from '$lib/api/query';
 
@@ -40,6 +40,10 @@ export type RequestFilters = {
   provider_id?: string;
   model?: string;
   api_key_id?: string;
+  project_id?: string;
+  session_id?: string;
+  attribution_key?: string;
+  attribution_value?: string;
   operation?: string;
   status_code?: number;
   error_class?: string;
@@ -62,4 +66,15 @@ export async function getRequest(requestId: string): Promise<RequestDetail> {
     { params: { path: { request_id: requestId } } }
   );
   return unwrap({ data, error, response });
+}
+
+export async function exportRequestsCsv(
+  filters: Omit<RequestFilters, 'cursor' | 'limit'>
+): Promise<string> {
+  const { data, error, response } = await apiClient.GET(
+    '/api/v1/requests/export.csv',
+    { params: { query: compactQuery(filters) }, parseAs: 'text' }
+  );
+  if (!response.ok) throw apiProblem(error, response);
+  return data as string;
 }

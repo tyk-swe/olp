@@ -292,6 +292,54 @@ func (e BudgetWindowKind) Valid() bool {
 	}
 }
 
+// Defines values for CapturePolicyInclude.
+const (
+	CapturePolicyIncludeInput     CapturePolicyInclude = "input"
+	CapturePolicyIncludeOutput    CapturePolicyInclude = "output"
+	CapturePolicyIncludeToolCalls CapturePolicyInclude = "tool_calls"
+)
+
+// Valid indicates whether the value is a known member of the CapturePolicyInclude enum.
+func (e CapturePolicyInclude) Valid() bool {
+	switch e {
+	case CapturePolicyIncludeInput:
+		return true
+	case CapturePolicyIncludeOutput:
+		return true
+	case CapturePolicyIncludeToolCalls:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CaptureSinkOptionType.
+const (
+	CaptureSinkOptionTypeAzureBlob CaptureSinkOptionType = "azure_blob"
+	CaptureSinkOptionTypeGcs       CaptureSinkOptionType = "gcs"
+	CaptureSinkOptionTypeHttps     CaptureSinkOptionType = "https"
+	CaptureSinkOptionTypeOtlpLogs  CaptureSinkOptionType = "otlp_logs"
+	CaptureSinkOptionTypeS3        CaptureSinkOptionType = "s3"
+)
+
+// Valid indicates whether the value is a known member of the CaptureSinkOptionType enum.
+func (e CaptureSinkOptionType) Valid() bool {
+	switch e {
+	case CaptureSinkOptionTypeAzureBlob:
+		return true
+	case CaptureSinkOptionTypeGcs:
+		return true
+	case CaptureSinkOptionTypeHttps:
+		return true
+	case CaptureSinkOptionTypeOtlpLogs:
+		return true
+	case CaptureSinkOptionTypeS3:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAccountAdapter.
 const (
 	CodeAccountAdapterCodex       CodeAccountAdapter = "codex"
@@ -516,19 +564,19 @@ func (e CodeClientConfigurationClient) Valid() bool {
 
 // Defines values for CodeClientConfigurationFormat.
 const (
-	Json  CodeClientConfigurationFormat = "json"
-	Shell CodeClientConfigurationFormat = "shell"
-	Toml  CodeClientConfigurationFormat = "toml"
+	CodeClientConfigurationFormatJson  CodeClientConfigurationFormat = "json"
+	CodeClientConfigurationFormatShell CodeClientConfigurationFormat = "shell"
+	CodeClientConfigurationFormatToml  CodeClientConfigurationFormat = "toml"
 )
 
 // Valid indicates whether the value is a known member of the CodeClientConfigurationFormat enum.
 func (e CodeClientConfigurationFormat) Valid() bool {
 	switch e {
-	case Json:
+	case CodeClientConfigurationFormatJson:
 		return true
-	case Shell:
+	case CodeClientConfigurationFormatShell:
 		return true
-	case Toml:
+	case CodeClientConfigurationFormatToml:
 		return true
 	default:
 		return false
@@ -925,6 +973,153 @@ func (e CreateBudgetIncreaseRequestWindow) Valid() bool {
 	}
 }
 
+// Defines values for CreateCapturePolicyRequestInclude.
+const (
+	CreateCapturePolicyRequestIncludeInput     CreateCapturePolicyRequestInclude = "input"
+	CreateCapturePolicyRequestIncludeOutput    CreateCapturePolicyRequestInclude = "output"
+	CreateCapturePolicyRequestIncludeToolCalls CreateCapturePolicyRequestInclude = "tool_calls"
+)
+
+// Valid indicates whether the value is a known member of the CreateCapturePolicyRequestInclude enum.
+func (e CreateCapturePolicyRequestInclude) Valid() bool {
+	switch e {
+	case CreateCapturePolicyRequestIncludeInput:
+		return true
+	case CreateCapturePolicyRequestIncludeOutput:
+		return true
+	case CreateCapturePolicyRequestIncludeToolCalls:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateExportSinkRequestFilterOutcome.
+const (
+	CreateExportSinkRequestFilterOutcomeFailure     CreateExportSinkRequestFilterOutcome = "failure"
+	CreateExportSinkRequestFilterOutcomeLessThannil CreateExportSinkRequestFilterOutcome = "<nil>"
+	CreateExportSinkRequestFilterOutcomeSuccess     CreateExportSinkRequestFilterOutcome = "success"
+)
+
+// Valid indicates whether the value is a known member of the CreateExportSinkRequestFilterOutcome enum.
+func (e CreateExportSinkRequestFilterOutcome) Valid() bool {
+	switch e {
+	case CreateExportSinkRequestFilterOutcomeFailure:
+		return true
+	case CreateExportSinkRequestFilterOutcomeLessThannil:
+		return true
+	case CreateExportSinkRequestFilterOutcomeSuccess:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateExportSinkRequestFormat.
+const (
+	CreateExportSinkRequestFormatJson  CreateExportSinkRequestFormat = "json"
+	CreateExportSinkRequestFormatJsonl CreateExportSinkRequestFormat = "jsonl"
+	CreateExportSinkRequestFormatOtlp  CreateExportSinkRequestFormat = "otlp"
+)
+
+// Valid indicates whether the value is a known member of the CreateExportSinkRequestFormat enum.
+func (e CreateExportSinkRequestFormat) Valid() bool {
+	switch e {
+	case CreateExportSinkRequestFormatJson:
+		return true
+	case CreateExportSinkRequestFormatJsonl:
+		return true
+	case CreateExportSinkRequestFormatOtlp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateExportSinkRequestStreams.
+const (
+	CreateExportSinkRequestStreamsAttempts           CreateExportSinkRequestStreams = "attempts"
+	CreateExportSinkRequestStreamsAudit              CreateExportSinkRequestStreams = "audit"
+	CreateExportSinkRequestStreamsGuardrailDecisions CreateExportSinkRequestStreams = "guardrail_decisions"
+	CreateExportSinkRequestStreamsRequests           CreateExportSinkRequestStreams = "requests"
+	CreateExportSinkRequestStreamsUsageRollups       CreateExportSinkRequestStreams = "usage_rollups"
+)
+
+// Valid indicates whether the value is a known member of the CreateExportSinkRequestStreams enum.
+func (e CreateExportSinkRequestStreams) Valid() bool {
+	switch e {
+	case CreateExportSinkRequestStreamsAttempts:
+		return true
+	case CreateExportSinkRequestStreamsAudit:
+		return true
+	case CreateExportSinkRequestStreamsGuardrailDecisions:
+		return true
+	case CreateExportSinkRequestStreamsRequests:
+		return true
+	case CreateExportSinkRequestStreamsUsageRollups:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateExportSinkRequestType.
+const (
+	CreateExportSinkRequestTypeAzureBlob CreateExportSinkRequestType = "azure_blob"
+	CreateExportSinkRequestTypeGcs       CreateExportSinkRequestType = "gcs"
+	CreateExportSinkRequestTypeHttps     CreateExportSinkRequestType = "https"
+	CreateExportSinkRequestTypeOtlpLogs  CreateExportSinkRequestType = "otlp_logs"
+	CreateExportSinkRequestTypeS3        CreateExportSinkRequestType = "s3"
+)
+
+// Valid indicates whether the value is a known member of the CreateExportSinkRequestType enum.
+func (e CreateExportSinkRequestType) Valid() bool {
+	switch e {
+	case CreateExportSinkRequestTypeAzureBlob:
+		return true
+	case CreateExportSinkRequestTypeGcs:
+		return true
+	case CreateExportSinkRequestTypeHttps:
+		return true
+	case CreateExportSinkRequestTypeOtlpLogs:
+		return true
+	case CreateExportSinkRequestTypeS3:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateNotificationDestinationRequestType.
+const (
+	CreateNotificationDestinationRequestTypeDiscord   CreateNotificationDestinationRequestType = "discord"
+	CreateNotificationDestinationRequestTypeEmail     CreateNotificationDestinationRequestType = "email"
+	CreateNotificationDestinationRequestTypeMsteams   CreateNotificationDestinationRequestType = "msteams"
+	CreateNotificationDestinationRequestTypePagerduty CreateNotificationDestinationRequestType = "pagerduty"
+	CreateNotificationDestinationRequestTypeSlack     CreateNotificationDestinationRequestType = "slack"
+	CreateNotificationDestinationRequestTypeWebhook   CreateNotificationDestinationRequestType = "webhook"
+)
+
+// Valid indicates whether the value is a known member of the CreateNotificationDestinationRequestType enum.
+func (e CreateNotificationDestinationRequestType) Valid() bool {
+	switch e {
+	case CreateNotificationDestinationRequestTypeDiscord:
+		return true
+	case CreateNotificationDestinationRequestTypeEmail:
+		return true
+	case CreateNotificationDestinationRequestTypeMsteams:
+		return true
+	case CreateNotificationDestinationRequestTypePagerduty:
+		return true
+	case CreateNotificationDestinationRequestTypeSlack:
+		return true
+	case CreateNotificationDestinationRequestTypeWebhook:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CredentialRequirement.
 const (
 	CredentialRequirementForbidden CredentialRequirement = "forbidden"
@@ -940,6 +1135,102 @@ func (e CredentialRequirement) Valid() bool {
 	case CredentialRequirementGrant:
 		return true
 	case CredentialRequirementRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExportSinkFilterOutcome.
+const (
+	ExportSinkFilterOutcomeFailure     ExportSinkFilterOutcome = "failure"
+	ExportSinkFilterOutcomeLessThannil ExportSinkFilterOutcome = "<nil>"
+	ExportSinkFilterOutcomeSuccess     ExportSinkFilterOutcome = "success"
+)
+
+// Valid indicates whether the value is a known member of the ExportSinkFilterOutcome enum.
+func (e ExportSinkFilterOutcome) Valid() bool {
+	switch e {
+	case ExportSinkFilterOutcomeFailure:
+		return true
+	case ExportSinkFilterOutcomeLessThannil:
+		return true
+	case ExportSinkFilterOutcomeSuccess:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExportSinkFormat.
+const (
+	ExportSinkFormatJson  ExportSinkFormat = "json"
+	ExportSinkFormatJsonl ExportSinkFormat = "jsonl"
+	ExportSinkFormatOtlp  ExportSinkFormat = "otlp"
+)
+
+// Valid indicates whether the value is a known member of the ExportSinkFormat enum.
+func (e ExportSinkFormat) Valid() bool {
+	switch e {
+	case ExportSinkFormatJson:
+		return true
+	case ExportSinkFormatJsonl:
+		return true
+	case ExportSinkFormatOtlp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExportSinkStreams.
+const (
+	ExportSinkStreamsAttempts           ExportSinkStreams = "attempts"
+	ExportSinkStreamsAudit              ExportSinkStreams = "audit"
+	ExportSinkStreamsGuardrailDecisions ExportSinkStreams = "guardrail_decisions"
+	ExportSinkStreamsRequests           ExportSinkStreams = "requests"
+	ExportSinkStreamsUsageRollups       ExportSinkStreams = "usage_rollups"
+)
+
+// Valid indicates whether the value is a known member of the ExportSinkStreams enum.
+func (e ExportSinkStreams) Valid() bool {
+	switch e {
+	case ExportSinkStreamsAttempts:
+		return true
+	case ExportSinkStreamsAudit:
+		return true
+	case ExportSinkStreamsGuardrailDecisions:
+		return true
+	case ExportSinkStreamsRequests:
+		return true
+	case ExportSinkStreamsUsageRollups:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExportSinkType.
+const (
+	ExportSinkTypeAzureBlob ExportSinkType = "azure_blob"
+	ExportSinkTypeGcs       ExportSinkType = "gcs"
+	ExportSinkTypeHttps     ExportSinkType = "https"
+	ExportSinkTypeOtlpLogs  ExportSinkType = "otlp_logs"
+	ExportSinkTypeS3        ExportSinkType = "s3"
+)
+
+// Valid indicates whether the value is a known member of the ExportSinkType enum.
+func (e ExportSinkType) Valid() bool {
+	switch e {
+	case ExportSinkTypeAzureBlob:
+		return true
+	case ExportSinkTypeGcs:
+		return true
+	case ExportSinkTypeHttps:
+		return true
+	case ExportSinkTypeOtlpLogs:
+		return true
+	case ExportSinkTypeS3:
 		return true
 	default:
 		return false
@@ -1498,21 +1789,81 @@ func (e NotificationDeliveryStatus) Valid() bool {
 	}
 }
 
+// Defines values for NotificationDestinationType.
+const (
+	NotificationDestinationTypeDiscord   NotificationDestinationType = "discord"
+	NotificationDestinationTypeEmail     NotificationDestinationType = "email"
+	NotificationDestinationTypeMsteams   NotificationDestinationType = "msteams"
+	NotificationDestinationTypePagerduty NotificationDestinationType = "pagerduty"
+	NotificationDestinationTypeSlack     NotificationDestinationType = "slack"
+	NotificationDestinationTypeWebhook   NotificationDestinationType = "webhook"
+)
+
+// Valid indicates whether the value is a known member of the NotificationDestinationType enum.
+func (e NotificationDestinationType) Valid() bool {
+	switch e {
+	case NotificationDestinationTypeDiscord:
+		return true
+	case NotificationDestinationTypeEmail:
+		return true
+	case NotificationDestinationTypeMsteams:
+		return true
+	case NotificationDestinationTypePagerduty:
+		return true
+	case NotificationDestinationTypeSlack:
+		return true
+	case NotificationDestinationTypeWebhook:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NotificationEvent.
 const (
-	NotificationEventBudgetThreshold     NotificationEvent = "budget.threshold"
-	NotificationEventKeyExpiring         NotificationEvent = "key.expiring"
-	NotificationEventProviderGrantLapsed NotificationEvent = "provider.grant.lapsed"
+	NotificationEventBudgetExhausted           NotificationEvent = "budget.exhausted"
+	NotificationEventBudgetThreshold           NotificationEvent = "budget.threshold"
+	NotificationEventKeyExpiring               NotificationEvent = "key.expiring"
+	NotificationEventModelRetirement           NotificationEvent = "model.retirement"
+	NotificationEventProviderCircuitClosed     NotificationEvent = "provider.circuit.closed"
+	NotificationEventProviderCircuitOpen       NotificationEvent = "provider.circuit.open"
+	NotificationEventProviderCredentialFailing NotificationEvent = "provider.credential.failing"
+	NotificationEventProviderErrorRate         NotificationEvent = "provider.error_rate"
+	NotificationEventProviderGrantLapsed       NotificationEvent = "provider.grant.lapsed"
+	NotificationEventReportSpend               NotificationEvent = "report.spend"
+	NotificationEventRouteLatency              NotificationEvent = "route.latency"
+	NotificationEventRuntimeInstallFailed      NotificationEvent = "runtime.install_failed"
+	NotificationEventWorkerStale               NotificationEvent = "worker.stale"
 )
 
 // Valid indicates whether the value is a known member of the NotificationEvent enum.
 func (e NotificationEvent) Valid() bool {
 	switch e {
+	case NotificationEventBudgetExhausted:
+		return true
 	case NotificationEventBudgetThreshold:
 		return true
 	case NotificationEventKeyExpiring:
 		return true
+	case NotificationEventModelRetirement:
+		return true
+	case NotificationEventProviderCircuitClosed:
+		return true
+	case NotificationEventProviderCircuitOpen:
+		return true
+	case NotificationEventProviderCredentialFailing:
+		return true
+	case NotificationEventProviderErrorRate:
+		return true
 	case NotificationEventProviderGrantLapsed:
+		return true
+	case NotificationEventReportSpend:
+		return true
+	case NotificationEventRouteLatency:
+		return true
+	case NotificationEventRuntimeInstallFailed:
+		return true
+	case NotificationEventWorkerStale:
 		return true
 	default:
 		return false
@@ -2656,6 +3007,78 @@ func (e UpdateApiKeyRequestEndUserSource) Valid() bool {
 	}
 }
 
+// Defines values for UpdateCapturePolicyRequestInclude.
+const (
+	UpdateCapturePolicyRequestIncludeInput     UpdateCapturePolicyRequestInclude = "input"
+	UpdateCapturePolicyRequestIncludeOutput    UpdateCapturePolicyRequestInclude = "output"
+	UpdateCapturePolicyRequestIncludeToolCalls UpdateCapturePolicyRequestInclude = "tool_calls"
+)
+
+// Valid indicates whether the value is a known member of the UpdateCapturePolicyRequestInclude enum.
+func (e UpdateCapturePolicyRequestInclude) Valid() bool {
+	switch e {
+	case UpdateCapturePolicyRequestIncludeInput:
+		return true
+	case UpdateCapturePolicyRequestIncludeOutput:
+		return true
+	case UpdateCapturePolicyRequestIncludeToolCalls:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateExportSinkRequestFilterOutcome.
+const (
+	UpdateExportSinkRequestFilterOutcomeFailure     UpdateExportSinkRequestFilterOutcome = "failure"
+	UpdateExportSinkRequestFilterOutcomeLessThannil UpdateExportSinkRequestFilterOutcome = "<nil>"
+	UpdateExportSinkRequestFilterOutcomeSuccess     UpdateExportSinkRequestFilterOutcome = "success"
+)
+
+// Valid indicates whether the value is a known member of the UpdateExportSinkRequestFilterOutcome enum.
+func (e UpdateExportSinkRequestFilterOutcome) Valid() bool {
+	switch e {
+	case UpdateExportSinkRequestFilterOutcomeFailure:
+		return true
+	case UpdateExportSinkRequestFilterOutcomeLessThannil:
+		return true
+	case UpdateExportSinkRequestFilterOutcomeSuccess:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateNotificationDestinationRequestType.
+const (
+	UpdateNotificationDestinationRequestTypeDiscord   UpdateNotificationDestinationRequestType = "discord"
+	UpdateNotificationDestinationRequestTypeEmail     UpdateNotificationDestinationRequestType = "email"
+	UpdateNotificationDestinationRequestTypeMsteams   UpdateNotificationDestinationRequestType = "msteams"
+	UpdateNotificationDestinationRequestTypePagerduty UpdateNotificationDestinationRequestType = "pagerduty"
+	UpdateNotificationDestinationRequestTypeSlack     UpdateNotificationDestinationRequestType = "slack"
+	UpdateNotificationDestinationRequestTypeWebhook   UpdateNotificationDestinationRequestType = "webhook"
+)
+
+// Valid indicates whether the value is a known member of the UpdateNotificationDestinationRequestType enum.
+func (e UpdateNotificationDestinationRequestType) Valid() bool {
+	switch e {
+	case UpdateNotificationDestinationRequestTypeDiscord:
+		return true
+	case UpdateNotificationDestinationRequestTypeEmail:
+		return true
+	case UpdateNotificationDestinationRequestTypeMsteams:
+		return true
+	case UpdateNotificationDestinationRequestTypePagerduty:
+		return true
+	case UpdateNotificationDestinationRequestTypeSlack:
+		return true
+	case UpdateNotificationDestinationRequestTypeWebhook:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UpdateUserRoleRequestAccessScope.
 const (
 	UpdateUserRoleRequestAccessScopeAssigned UpdateUserRoleRequestAccessScope = "assigned"
@@ -2863,6 +3286,96 @@ func (e ListProviderResourcesParamsKind) Valid() bool {
 	case ListProviderResourcesParamsKindStrictFile:
 		return true
 	case ListProviderResourcesParamsKindStrictResponse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UsageBreakdownParamsDimension.
+const (
+	UsageBreakdownParamsDimensionApiKey             UsageBreakdownParamsDimension = "api_key"
+	UsageBreakdownParamsDimensionAttribution        UsageBreakdownParamsDimension = "attribution"
+	UsageBreakdownParamsDimensionEndUser            UsageBreakdownParamsDimension = "end_user"
+	UsageBreakdownParamsDimensionEstimateProvenance UsageBreakdownParamsDimension = "estimate_provenance"
+	UsageBreakdownParamsDimensionModel              UsageBreakdownParamsDimension = "model"
+	UsageBreakdownParamsDimensionModelFamily        UsageBreakdownParamsDimension = "model_family"
+	UsageBreakdownParamsDimensionOperation          UsageBreakdownParamsDimension = "operation"
+	UsageBreakdownParamsDimensionProject            UsageBreakdownParamsDimension = "project"
+	UsageBreakdownParamsDimensionProvider           UsageBreakdownParamsDimension = "provider"
+	UsageBreakdownParamsDimensionRoute              UsageBreakdownParamsDimension = "route"
+	UsageBreakdownParamsDimensionSession            UsageBreakdownParamsDimension = "session"
+)
+
+// Valid indicates whether the value is a known member of the UsageBreakdownParamsDimension enum.
+func (e UsageBreakdownParamsDimension) Valid() bool {
+	switch e {
+	case UsageBreakdownParamsDimensionApiKey:
+		return true
+	case UsageBreakdownParamsDimensionAttribution:
+		return true
+	case UsageBreakdownParamsDimensionEndUser:
+		return true
+	case UsageBreakdownParamsDimensionEstimateProvenance:
+		return true
+	case UsageBreakdownParamsDimensionModel:
+		return true
+	case UsageBreakdownParamsDimensionModelFamily:
+		return true
+	case UsageBreakdownParamsDimensionOperation:
+		return true
+	case UsageBreakdownParamsDimensionProject:
+		return true
+	case UsageBreakdownParamsDimensionProvider:
+		return true
+	case UsageBreakdownParamsDimensionRoute:
+		return true
+	case UsageBreakdownParamsDimensionSession:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExportUsageCsvParamsDimension.
+const (
+	ExportUsageCsvParamsDimensionApiKey             ExportUsageCsvParamsDimension = "api_key"
+	ExportUsageCsvParamsDimensionAttribution        ExportUsageCsvParamsDimension = "attribution"
+	ExportUsageCsvParamsDimensionEndUser            ExportUsageCsvParamsDimension = "end_user"
+	ExportUsageCsvParamsDimensionEstimateProvenance ExportUsageCsvParamsDimension = "estimate_provenance"
+	ExportUsageCsvParamsDimensionModel              ExportUsageCsvParamsDimension = "model"
+	ExportUsageCsvParamsDimensionModelFamily        ExportUsageCsvParamsDimension = "model_family"
+	ExportUsageCsvParamsDimensionOperation          ExportUsageCsvParamsDimension = "operation"
+	ExportUsageCsvParamsDimensionProject            ExportUsageCsvParamsDimension = "project"
+	ExportUsageCsvParamsDimensionProvider           ExportUsageCsvParamsDimension = "provider"
+	ExportUsageCsvParamsDimensionRoute              ExportUsageCsvParamsDimension = "route"
+	ExportUsageCsvParamsDimensionSession            ExportUsageCsvParamsDimension = "session"
+)
+
+// Valid indicates whether the value is a known member of the ExportUsageCsvParamsDimension enum.
+func (e ExportUsageCsvParamsDimension) Valid() bool {
+	switch e {
+	case ExportUsageCsvParamsDimensionApiKey:
+		return true
+	case ExportUsageCsvParamsDimensionAttribution:
+		return true
+	case ExportUsageCsvParamsDimensionEndUser:
+		return true
+	case ExportUsageCsvParamsDimensionEstimateProvenance:
+		return true
+	case ExportUsageCsvParamsDimensionModel:
+		return true
+	case ExportUsageCsvParamsDimensionModelFamily:
+		return true
+	case ExportUsageCsvParamsDimensionOperation:
+		return true
+	case ExportUsageCsvParamsDimensionProject:
+		return true
+	case ExportUsageCsvParamsDimensionProvider:
+		return true
+	case ExportUsageCsvParamsDimensionRoute:
+		return true
+	case ExportUsageCsvParamsDimensionSession:
 		return true
 	default:
 		return false
@@ -3189,8 +3702,9 @@ type AuthenticationCapabilities struct {
 	ManagementNetworkRestricted *bool `json:"management_network_restricted,omitempty"`
 
 	// NotificationsActive Whether the installation runs the notification delivery worker, so stored rules actually notify.
-	NotificationsActive bool `json:"notifications_active"`
-	OidcLoginEnabled    bool `json:"oidc_login_enabled"`
+	NotificationsActive  bool `json:"notifications_active"`
+	OidcLoginEnabled     bool `json:"oidc_login_enabled"`
+	PayloadCaptureActive bool `json:"payload_capture_active"`
 
 	// RetentionEnforced Whether stored retention policies are applied by workers.
 	RetentionEnforced *bool `json:"retention_enforced,omitempty"`
@@ -3394,6 +3908,52 @@ type CapabilityResponse struct {
 	Operation   string                       `json:"operation"`
 	Source      string                       `json:"source"`
 	Surface     string                       `json:"surface"`
+}
+
+// CaptureConfiguration defines model for CaptureConfiguration.
+type CaptureConfiguration struct {
+	Enabled bool               `json:"enabled"`
+	Etag    openapi_types.UUID `json:"etag"`
+}
+
+// CapturePolicy defines model for CapturePolicy.
+type CapturePolicy struct {
+	Enabled        bool                                  `json:"enabled"`
+	EndUserDigests []string                              `json:"end_user_digests"`
+	Etag           openapi_types.UUID                    `json:"etag"`
+	Id             openapi_types.UUID                    `json:"id"`
+	Include        []CapturePolicyInclude                `json:"include"`
+	KeyIds         []openapi_types.UUID                  `json:"key_ids"`
+	MaxBytes       int32                                 `json:"max_bytes"`
+	ProjectId      nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	Redact         []string                              `json:"redact"`
+	RouteSlug      nullable.Nullable[string]             `json:"route_slug"`
+	SampleRatio    string                                `json:"sample_ratio"`
+	Sink           openapi_types.UUID                    `json:"sink"`
+}
+
+// CapturePolicyInclude defines model for CapturePolicy.Include.
+type CapturePolicyInclude string
+
+// CapturePolicyListResponse defines model for CapturePolicyListResponse.
+type CapturePolicyListResponse struct {
+	Items      []CapturePolicy           `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// CaptureSinkOption defines model for CaptureSinkOption.
+type CaptureSinkOption struct {
+	ExportSinkId openapi_types.UUID    `json:"export_sink_id"`
+	Name         string                `json:"name"`
+	Type         CaptureSinkOptionType `json:"type"`
+}
+
+// CaptureSinkOptionType defines model for CaptureSinkOption.Type.
+type CaptureSinkOptionType string
+
+// CaptureSinkOptionList defines model for CaptureSinkOptionList.
+type CaptureSinkOptionList struct {
+	Items []CaptureSinkOption `json:"items"`
 }
 
 // CatalogCapabilityHints Capabilities the vendor documents; an absent hint is unknown. Hints never certify a capability.
@@ -4339,6 +4899,53 @@ type CreateBudgetIncreaseRequest struct {
 // CreateBudgetIncreaseRequestWindow defines model for CreateBudgetIncreaseRequest.Window.
 type CreateBudgetIncreaseRequestWindow string
 
+// CreateCapturePolicyRequest defines model for CreateCapturePolicyRequest.
+type CreateCapturePolicyRequest struct {
+	Enabled        *bool                                 `json:"enabled,omitempty"`
+	EndUserDigests *[]string                             `json:"end_user_digests,omitempty"`
+	Include        []CreateCapturePolicyRequestInclude   `json:"include"`
+	KeyIds         *[]openapi_types.UUID                 `json:"key_ids,omitempty"`
+	MaxBytes       int32                                 `json:"max_bytes"`
+	ProjectId      nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	Redact         *[]string                             `json:"redact,omitempty"`
+	RouteSlug      nullable.Nullable[string]             `json:"route_slug,omitempty"`
+	SampleRatio    string                                `json:"sample_ratio"`
+	Sink           openapi_types.UUID                    `json:"sink"`
+}
+
+// CreateCapturePolicyRequestInclude defines model for CreateCapturePolicyRequest.Include.
+type CreateCapturePolicyRequestInclude string
+
+// CreateExportSinkRequest defines model for CreateExportSinkRequest.
+type CreateExportSinkRequest struct {
+	// Credential Write-only sink credential document.
+	Credential  nullable.Nullable[map[string]interface{}] `json:"credential,omitempty"`
+	Destination string                                    `json:"destination"`
+	Enabled     *bool                                     `json:"enabled,omitempty"`
+	Filter      nullable.Nullable[struct {
+		Outcome nullable.Nullable[CreateExportSinkRequestFilterOutcome] `json:"outcome,omitempty"`
+		Project nullable.Nullable[openapi_types.UUID]                   `json:"project,omitempty"`
+		Route   nullable.Nullable[string]                               `json:"route,omitempty"`
+	}] `json:"filter,omitempty"`
+	Format    CreateExportSinkRequestFormat         `json:"format"`
+	Name      string                                `json:"name"`
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	Streams   []CreateExportSinkRequestStreams      `json:"streams"`
+	Type      CreateExportSinkRequestType           `json:"type"`
+}
+
+// CreateExportSinkRequestFilterOutcome defines model for CreateExportSinkRequest.Filter.Outcome.
+type CreateExportSinkRequestFilterOutcome string
+
+// CreateExportSinkRequestFormat defines model for CreateExportSinkRequest.Format.
+type CreateExportSinkRequestFormat string
+
+// CreateExportSinkRequestStreams defines model for CreateExportSinkRequest.Streams.
+type CreateExportSinkRequestStreams string
+
+// CreateExportSinkRequestType defines model for CreateExportSinkRequest.Type.
+type CreateExportSinkRequestType string
+
 // CreateInvitationRequest defines model for CreateInvitationRequest.
 type CreateInvitationRequest struct {
 	Email string `json:"email"`
@@ -4394,6 +5001,9 @@ type CreateNetworkCredentialRequest struct {
 
 // CreateNotificationDestinationRequest defines model for CreateNotificationDestinationRequest.
 type CreateNotificationDestinationRequest struct {
+	// Configuration Per-channel configuration object; required for email destinations.
+	Configuration *map[string]interface{} `json:"configuration,omitempty"`
+
 	// Enabled Defaults to true.
 	Enabled *bool  `json:"enabled,omitempty"`
 	Name    string `json:"name"`
@@ -4401,21 +5011,40 @@ type CreateNotificationDestinationRequest struct {
 	// ProjectId Owning project; omit or null for an installation-wide destination.
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
 
-	// Secret Optional HMAC-SHA256 signing secret. Write-only; never returned.
-	Secret nullable.Nullable[string] `json:"secret,omitempty"`
+	// Secret Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {"webhook_url"} carrying the full tokenized URL; PagerDuty {"routing_key"}; email optional {"username","password"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.
+	Secret nullable.Nullable[CreateNotificationDestinationRequest_Secret] `json:"secret,omitempty"`
 
-	// Url Webhook URL validated by the installation egress policy.
+	// Type Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook.
+	Type *CreateNotificationDestinationRequestType `json:"type,omitempty"`
+
+	// Url Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.
 	Url string `json:"url"`
 }
 
-// CreateNotificationRuleRequest A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent, and its subject and destination belong to its project. A provider event rule takes none of them and is installation-wide: project_id is null or omitted, and its destination is installation-wide. A key.expiring rule requires subject_kind=api_key and subject_id, no window or threshold, and a subject/destination in the rule project.
+// CreateNotificationDestinationRequestSecret0 defines model for CreateNotificationDestinationRequest.Secret.0.
+type CreateNotificationDestinationRequestSecret0 = string
+
+// CreateNotificationDestinationRequestSecret1 defines model for CreateNotificationDestinationRequest.Secret.1.
+type CreateNotificationDestinationRequestSecret1 map[string]interface{}
+
+// CreateNotificationDestinationRequest_Secret Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {"webhook_url"} carrying the full tokenized URL; PagerDuty {"routing_key"}; email optional {"username","password"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.
+type CreateNotificationDestinationRequest_Secret struct {
+	union json.RawMessage
+}
+
+// CreateNotificationDestinationRequestType Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook.
+type CreateNotificationDestinationRequestType string
+
+// CreateNotificationRuleRequest A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent; key.expiring requires subject_kind=api_key and subject_id. Generic events take no subject/window/threshold fields and accept an event-specific configuration object; only budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped.
 type CreateNotificationRuleRequest struct {
-	DestinationId openapi_types.UUID `json:"destination_id"`
+	// Configuration Event-specific rule configuration; unsupported fields are rejected, missing fields take their defaults.
+	Configuration *map[string]interface{} `json:"configuration,omitempty"`
+	DestinationId openapi_types.UUID      `json:"destination_id"`
 
 	// Enabled Defaults to true.
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation. key.expiring: an API key expires or reaches its declared rotation date within 24 hours, or is overdue. One metadata-only delivery per rule, key, reason and date; never creates or transmits a secret.
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 	Event NotificationEvent `json:"event"`
 	Name  string            `json:"name"`
 
@@ -4631,6 +5260,60 @@ type ExperimentSide struct {
 	OutputTokens     string                     `json:"output_tokens"`
 	Successes        int64                      `json:"successes"`
 	UnpricedRequests int64                      `json:"unpriced_requests"`
+}
+
+// ExportSink defines model for ExportSink.
+type ExportSink struct {
+	CredentialConfigured bool               `json:"credential_configured"`
+	Destination          string             `json:"destination"`
+	Enabled              bool               `json:"enabled"`
+	Etag                 openapi_types.UUID `json:"etag"`
+	ExportSinkId         openapi_types.UUID `json:"export_sink_id"`
+	Filter               nullable.Nullable[struct {
+		Outcome nullable.Nullable[ExportSinkFilterOutcome] `json:"outcome,omitempty"`
+		Project nullable.Nullable[openapi_types.UUID]      `json:"project,omitempty"`
+		Route   nullable.Nullable[string]                  `json:"route,omitempty"`
+	}] `json:"filter"`
+	Format    ExportSinkFormat                      `json:"format"`
+	Name      string                                `json:"name"`
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	Status    []map[string]interface{}              `json:"status"`
+	Streams   []ExportSinkStreams                   `json:"streams"`
+	Type      ExportSinkType                        `json:"type"`
+}
+
+// ExportSinkFilterOutcome defines model for ExportSink.Filter.Outcome.
+type ExportSinkFilterOutcome string
+
+// ExportSinkFormat defines model for ExportSink.Format.
+type ExportSinkFormat string
+
+// ExportSinkStreams defines model for ExportSink.Streams.
+type ExportSinkStreams string
+
+// ExportSinkType defines model for ExportSink.Type.
+type ExportSinkType string
+
+// ExportSinkGap defines model for ExportSinkGap.
+type ExportSinkGap struct {
+	FirstOccurredAt time.Time          `json:"first_occurred_at"`
+	Id              openapi_types.UUID `json:"id"`
+	LastOccurredAt  time.Time          `json:"last_occurred_at"`
+	Reason          string             `json:"reason"`
+	RecordCount     int64              `json:"record_count"`
+	Stream          string             `json:"stream"`
+}
+
+// ExportSinkGapListResponse defines model for ExportSinkGapListResponse.
+type ExportSinkGapListResponse struct {
+	Items      []ExportSinkGap           `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// ExportSinkListResponse defines model for ExportSinkListResponse.
+type ExportSinkListResponse struct {
+	Items      []ExportSink              `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
 // FallbackCondition exhausted: every attempt failed with a retryable class. context_window, content_filter, rate_limit: the route ended on that failure class. budget: a supply-side spend cap removed or refused the route's targets.
@@ -5188,7 +5871,7 @@ type NotificationDelivery struct {
 	DeliveredAt         nullable.Nullable[time.Time]          `json:"delivered_at"`
 	DueAt               nullable.Nullable[time.Time]          `json:"due_at,omitempty"`
 
-	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation. key.expiring: an API key expires or reaches its declared rotation date within 24 hours, or is overdue. One metadata-only delivery per rule, key, reason and date; never creates or transmits a secret.
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 	Event         NotificationEvent            `json:"event"`
 	Id            openapi_types.UUID           `json:"id"`
 	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at"`
@@ -5231,6 +5914,8 @@ type NotificationDeliveryListResponse struct {
 
 // NotificationDestination defines model for NotificationDestination.
 type NotificationDestination struct {
+	// Configuration Per-channel configuration object; required for email destinations (from/to/subject_prefix/ca_certificate).
+	Configuration  map[string]interface{}                `json:"configuration"`
 	CreatedAt      time.Time                             `json:"created_at"`
 	CreatedBy      openapi_types.UUID                    `json:"created_by"`
 	CreatedByEmail string                                `json:"created_by_email"`
@@ -5240,9 +5925,20 @@ type NotificationDestination struct {
 	Name           string                                `json:"name"`
 	ProjectId      nullable.Nullable[openapi_types.UUID] `json:"project_id"`
 	ProjectName    nullable.Nullable[string]             `json:"project_name"`
-	UpdatedAt      time.Time                             `json:"updated_at"`
-	Url            string                                `json:"url"`
+
+	// SecretConfigured Whether a credential secret is stored; the secret itself is never returned.
+	SecretConfigured bool `json:"secret_configured"`
+
+	// Type Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook.
+	Type      NotificationDestinationType `json:"type"`
+	UpdatedAt time.Time                   `json:"updated_at"`
+
+	// Url Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.
+	Url string `json:"url"`
 }
+
+// NotificationDestinationType Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook.
+type NotificationDestinationType string
 
 // NotificationDestinationListResponse defines model for NotificationDestinationListResponse.
 type NotificationDestinationListResponse struct {
@@ -5250,20 +5946,22 @@ type NotificationDestinationListResponse struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
-// NotificationEvent What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation. key.expiring: an API key expires or reaches its declared rotation date within 24 hours, or is overdue. One metadata-only delivery per rule, key, reason and date; never creates or transmits a secret.
+// NotificationEvent What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 type NotificationEvent string
 
-// NotificationRule A notification rule subscribes a destination to an event. A budget.threshold rule names the subject, window and threshold it watches; a provider event rule names none of them and is installation-wide.
+// NotificationRule A notification rule subscribes a destination to an event. budget.threshold rules name a subject, window and threshold; key.expiring names an api_key subject and takes lead_time_seconds; generic events carry configuration only. Generic rules are capped at 1000 per installation.
 type NotificationRule struct {
-	CreatedAt       time.Time          `json:"created_at"`
-	CreatedBy       openapi_types.UUID `json:"created_by"`
-	CreatedByEmail  string             `json:"created_by_email"`
-	DestinationId   openapi_types.UUID `json:"destination_id"`
-	DestinationName string             `json:"destination_name"`
-	Enabled         bool               `json:"enabled"`
-	Etag            openapi_types.UUID `json:"etag"`
+	// Configuration Canonical event-specific rule configuration (thresholds, windows, cooldowns, lead time, metric, period).
+	Configuration   map[string]interface{} `json:"configuration"`
+	CreatedAt       time.Time              `json:"created_at"`
+	CreatedBy       openapi_types.UUID     `json:"created_by"`
+	CreatedByEmail  string                 `json:"created_by_email"`
+	DestinationId   openapi_types.UUID     `json:"destination_id"`
+	DestinationName string                 `json:"destination_name"`
+	Enabled         bool                   `json:"enabled"`
+	Etag            openapi_types.UUID     `json:"etag"`
 
-	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation. key.expiring: an API key expires or reaches its declared rotation date within 24 hours, or is overdue. One metadata-only delivery per rule, key, reason and date; never creates or transmits a secret.
+	// Event What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.
 	Event NotificationEvent  `json:"event"`
 	Id    openapi_types.UUID `json:"id"`
 	Name  string             `json:"name"`
@@ -6857,6 +7555,7 @@ type RequestDetailResponse struct {
 
 	// ParentRequestId The caller request a shadow or classifier request derives from.
 	ParentRequestId nullable.Nullable[openapi_types.UUID] `json:"parent_request_id,omitempty"`
+	PayloadCaptured bool                                  `json:"payload_captured"`
 
 	// PolicyDecisions Metadata-only content policy decisions recorded for this request.
 	PolicyDecisions     []PolicyDecision         `json:"policy_decisions"`
@@ -6962,6 +7661,7 @@ type RequestSummary struct {
 
 	// ParentRequestId The caller request a shadow or classifier request derives from.
 	ParentRequestId nullable.Nullable[openapi_types.UUID] `json:"parent_request_id,omitempty"`
+	PayloadCaptured bool                                  `json:"payload_captured"`
 
 	// PolicyDecisions Metadata-only content policy decisions recorded for this request.
 	PolicyDecisions     []PolicyDecision         `json:"policy_decisions"`
@@ -8306,22 +9006,81 @@ type UpdateBudgetGroupRequest struct {
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
-// UpdateNotificationDestinationRequest defines model for UpdateNotificationDestinationRequest.
-type UpdateNotificationDestinationRequest struct {
-	Enabled *bool   `json:"enabled,omitempty"`
-	Name    *string `json:"name,omitempty"`
-
-	// Secret A string replaces the signing secret, null removes it, absent keeps it.
-	Secret nullable.Nullable[string] `json:"secret,omitempty"`
-	Url    *string                   `json:"url,omitempty"`
+// UpdateCaptureConfigurationRequest defines model for UpdateCaptureConfigurationRequest.
+type UpdateCaptureConfigurationRequest struct {
+	Enabled bool `json:"enabled"`
 }
 
-// UpdateNotificationRuleRequest A rule's event and project never change. Only budget.threshold rules take subject, window and threshold fields.
+// UpdateCapturePolicyRequest defines model for UpdateCapturePolicyRequest.
+type UpdateCapturePolicyRequest struct {
+	Enabled        *bool                                `json:"enabled,omitempty"`
+	EndUserDigests *[]string                            `json:"end_user_digests,omitempty"`
+	Include        *[]UpdateCapturePolicyRequestInclude `json:"include,omitempty"`
+	KeyIds         *[]openapi_types.UUID                `json:"key_ids,omitempty"`
+	MaxBytes       *int32                               `json:"max_bytes,omitempty"`
+	Redact         *[]string                            `json:"redact,omitempty"`
+	SampleRatio    *string                              `json:"sample_ratio,omitempty"`
+	Sink           *openapi_types.UUID                  `json:"sink,omitempty"`
+}
+
+// UpdateCapturePolicyRequestInclude defines model for UpdateCapturePolicyRequest.Include.
+type UpdateCapturePolicyRequestInclude string
+
+// UpdateExportSinkRequest defines model for UpdateExportSinkRequest.
+type UpdateExportSinkRequest struct {
+	Credential  nullable.Nullable[map[string]interface{}] `json:"credential,omitempty"`
+	Destination *string                                   `json:"destination,omitempty"`
+	Enabled     *bool                                     `json:"enabled,omitempty"`
+	Filter      nullable.Nullable[struct {
+		Outcome nullable.Nullable[UpdateExportSinkRequestFilterOutcome] `json:"outcome,omitempty"`
+		Project nullable.Nullable[openapi_types.UUID]                   `json:"project,omitempty"`
+		Route   nullable.Nullable[string]                               `json:"route,omitempty"`
+	}] `json:"filter,omitempty"`
+	Name *string `json:"name,omitempty"`
+}
+
+// UpdateExportSinkRequestFilterOutcome defines model for UpdateExportSinkRequest.Filter.Outcome.
+type UpdateExportSinkRequestFilterOutcome string
+
+// UpdateNotificationDestinationRequest Replace parts of a destination; send the latest record's ETag with If-Match. type is immutable; url is an origin for chat/PagerDuty channels so changing it requires a matching sealed secret.
+type UpdateNotificationDestinationRequest struct {
+	// Configuration Replaces the channel configuration; null clears it to {}.
+	Configuration nullable.Nullable[map[string]interface{}] `json:"configuration,omitempty"`
+	Enabled       *bool                                     `json:"enabled,omitempty"`
+	Name          *string                                   `json:"name,omitempty"`
+
+	// Secret Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {"webhook_url"} carrying the full tokenized URL; PagerDuty {"routing_key"}; email optional {"username","password"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.
+	Secret nullable.Nullable[UpdateNotificationDestinationRequest_Secret] `json:"secret,omitempty"`
+
+	// Type Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook.
+	Type *UpdateNotificationDestinationRequestType `json:"type,omitempty"`
+
+	// Url Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.
+	Url *string `json:"url,omitempty"`
+}
+
+// UpdateNotificationDestinationRequestSecret0 defines model for UpdateNotificationDestinationRequest.Secret.0.
+type UpdateNotificationDestinationRequestSecret0 = string
+
+// UpdateNotificationDestinationRequestSecret1 defines model for UpdateNotificationDestinationRequest.Secret.1.
+type UpdateNotificationDestinationRequestSecret1 map[string]interface{}
+
+// UpdateNotificationDestinationRequest_Secret Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {"webhook_url"} carrying the full tokenized URL; PagerDuty {"routing_key"}; email optional {"username","password"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.
+type UpdateNotificationDestinationRequest_Secret struct {
+	union json.RawMessage
+}
+
+// UpdateNotificationDestinationRequestType Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook.
+type UpdateNotificationDestinationRequestType string
+
+// UpdateNotificationRuleRequest Replace parts of a notification rule; send the latest record's ETag with If-Match. budget.threshold rules keep their subject_kind/subject_id, window_kind and threshold_percent; key.expiring rules keep their api_key subject and take lead_time_seconds in configuration; generic events carry configuration only.
 type UpdateNotificationRuleRequest struct {
-	DestinationId *openapi_types.UUID `json:"destination_id,omitempty"`
-	Enabled       *bool               `json:"enabled,omitempty"`
-	Name          *string             `json:"name,omitempty"`
-	SubjectId     *openapi_types.UUID `json:"subject_id,omitempty"`
+	// Configuration Replaces the rule configuration; null resets to the event defaults.
+	Configuration nullable.Nullable[map[string]interface{}] `json:"configuration,omitempty"`
+	DestinationId *openapi_types.UUID                       `json:"destination_id,omitempty"`
+	Enabled       *bool                                     `json:"enabled,omitempty"`
+	Name          *string                                   `json:"name,omitempty"`
+	SubjectId     *openapi_types.UUID                       `json:"subject_id,omitempty"`
 
 	// SubjectKind Whose spend a budget.threshold rule watches.
 	SubjectKind      *BudgetSubjectKind `json:"subject_kind,omitempty"`
@@ -9021,6 +9780,75 @@ type UpdateNotificationRuleParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// UpdateCaptureConfigurationParams defines parameters for UpdateCaptureConfiguration.
+type UpdateCaptureConfigurationParams struct {
+	// IfMatch Concurrency token returned with the resource
+	IfMatch string `json:"If-Match"`
+}
+
+// ListCapturePoliciesParams defines parameters for ListCapturePolicies.
+type ListCapturePoliciesParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateCapturePolicyParams defines parameters for CreateCapturePolicy.
+type CreateCapturePolicyParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteCapturePolicyParams defines parameters for DeleteCapturePolicy.
+type DeleteCapturePolicyParams struct {
+	// IfMatch Concurrency token returned with the resource
+	IfMatch string `json:"If-Match"`
+}
+
+// UpdateCapturePolicyParams defines parameters for UpdateCapturePolicy.
+type UpdateCapturePolicyParams struct {
+	// IfMatch Concurrency token returned with the resource
+	IfMatch string `json:"If-Match"`
+}
+
+// ListExportSinksParams defines parameters for ListExportSinks.
+type ListExportSinksParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateExportSinkParams defines parameters for CreateExportSink.
+type CreateExportSinkParams struct {
+	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteExportSinkParams defines parameters for DeleteExportSink.
+type DeleteExportSinkParams struct {
+	// IfMatch Concurrency token returned with the resource
+	IfMatch string `json:"If-Match"`
+}
+
+// UpdateExportSinkParams defines parameters for UpdateExportSink.
+type UpdateExportSinkParams struct {
+	// IfMatch Concurrency token returned with the resource
+	IfMatch string `json:"If-Match"`
+}
+
+// ListExportSinkGapsParams defines parameters for ListExportSinkGaps.
+type ListExportSinkGapsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // CallbackParams defines parameters for Callback.
 type CallbackParams struct {
 	// Code Authorization code
@@ -9563,6 +10391,37 @@ type ListRequestsParams struct {
 
 	// AttributionValue Only usage whose attribution_key carries this value. Requires attribution_key.
 	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
+
+	// ProjectId Restrict to requests or usage owned by one project; the caller must already have access to it.
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// SessionId Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.
+	SessionId *string `form:"session_id,omitempty" json:"session_id,omitempty"`
+}
+
+// ExportRequestsCsvParams defines parameters for ExportRequestsCsv.
+type ExportRequestsCsvParams struct {
+	Route         *string             `form:"route,omitempty" json:"route,omitempty"`
+	ProviderId    *openapi_types.UUID `form:"provider_id,omitempty" json:"provider_id,omitempty"`
+	Model         *string             `form:"model,omitempty" json:"model,omitempty"`
+	ApiKeyId      *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+	Operation     *string             `form:"operation,omitempty" json:"operation,omitempty"`
+	StatusCode    *int32              `form:"status_code,omitempty" json:"status_code,omitempty"`
+	ErrorClass    *string             `form:"error_class,omitempty" json:"error_class,omitempty"`
+	StartedAfter  *time.Time          `form:"started_after,omitempty" json:"started_after,omitempty"`
+	StartedBefore *time.Time          `form:"started_before,omitempty" json:"started_before,omitempty"`
+
+	// AttributionKey Only usage carrying this attribution key. Requires attribution_value outside breakdowns.
+	AttributionKey *string `form:"attribution_key,omitempty" json:"attribution_key,omitempty"`
+
+	// AttributionValue Only usage whose attribution_key carries this value. Requires attribution_key.
+	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
+
+	// ProjectId Restrict to requests or usage owned by one project; the caller must already have access to it.
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// SessionId Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.
+	SessionId *string `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
 
 // ListRouteDraftsParams defines parameters for ListRouteDrafts.
@@ -9758,7 +10617,7 @@ type UsageBreakdownParams struct {
 	Operation  *string             `form:"operation,omitempty" json:"operation,omitempty"`
 
 	// Dimension Break down by route, provider, model, model_family, estimate_provenance, api_key, end_user, operation, or attribution (requires attribution_key). model_family and estimate_provenance group by the tokenizer family of each attempt's model and the method behind its input estimate. An attempt that was never estimated, such as a stored-response call, a realtime session or a job poll, still has its model's family and appears as none under estimate_provenance; unknown appears only for attempts recorded before families were. A request counts once, under its first attempt, while token totals follow each attempt. end_user groups by a project-scoped HMAC digest; unidentified requests appear as unidentified.
-	Dimension string `form:"dimension" json:"dimension"`
+	Dimension *UsageBreakdownParamsDimension `form:"dimension,omitempty" json:"dimension,omitempty"`
 
 	// Limit Maximum number of breakdown rows
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
@@ -9768,7 +10627,16 @@ type UsageBreakdownParams struct {
 
 	// AttributionValue Only usage whose attribution_key carries this value. Requires attribution_key.
 	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
+
+	// ProjectId Restrict to requests or usage owned by one project; the caller must already have access to it.
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// SessionId Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.
+	SessionId *string `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
+
+// UsageBreakdownParamsDimension defines parameters for UsageBreakdown.
+type UsageBreakdownParamsDimension string
 
 // UsageCompletenessParams defines parameters for UsageCompleteness.
 type UsageCompletenessParams struct {
@@ -9779,13 +10647,66 @@ type UsageCompletenessParams struct {
 	Model      *string             `form:"model,omitempty" json:"model,omitempty"`
 	ApiKeyId   *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	Operation  *string             `form:"operation,omitempty" json:"operation,omitempty"`
+
+	// ProjectId Restrict to requests or usage owned by one project; the caller must already have access to it.
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// SessionId Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.
+	SessionId *string `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// AttributionKey Restrict to records carrying this attribution key.
+	AttributionKey *string `form:"attribution_key,omitempty" json:"attribution_key,omitempty"`
+
+	// AttributionValue Restrict to records whose attribution key carries this exact value; requires attribution_key.
+	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
 }
+
+// ExportUsageCsvParams defines parameters for ExportUsageCsv.
+type ExportUsageCsvParams struct {
+	Start      time.Time           `form:"start" json:"start"`
+	End        time.Time           `form:"end" json:"end"`
+	Route      *string             `form:"route,omitempty" json:"route,omitempty"`
+	ProviderId *openapi_types.UUID `form:"provider_id,omitempty" json:"provider_id,omitempty"`
+	Model      *string             `form:"model,omitempty" json:"model,omitempty"`
+	ApiKeyId   *openapi_types.UUID `form:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+	Operation  *string             `form:"operation,omitempty" json:"operation,omitempty"`
+
+	// Dimension Break down by route, provider, model, model_family, estimate_provenance, api_key, end_user, operation, or attribution (requires attribution_key). model_family and estimate_provenance group by the tokenizer family of each attempt's model and the method behind its input estimate. An attempt that was never estimated, such as a stored-response call, a realtime session or a job poll, still has its model's family and appears as none under estimate_provenance; unknown appears only for attempts recorded before families were. A request counts once, under its first attempt, while token totals follow each attempt. end_user groups by a project-scoped HMAC digest; unidentified requests appear as unidentified.
+	Dimension *ExportUsageCsvParamsDimension `form:"dimension,omitempty" json:"dimension,omitempty"`
+
+	// ProjectId Restrict to requests or usage owned by one project; the caller must already have access to it.
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// SessionId Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.
+	SessionId *string `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// AttributionKey Restrict to records carrying this attribution key.
+	AttributionKey *string `form:"attribution_key,omitempty" json:"attribution_key,omitempty"`
+
+	// AttributionValue Restrict to records whose attribution key carries this exact value; requires attribution_key.
+	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
+}
+
+// ExportUsageCsvParamsDimension defines parameters for ExportUsageCsv.
+type ExportUsageCsvParamsDimension string
 
 // UsageSelectorSavingsParams defines parameters for UsageSelectorSavings.
 type UsageSelectorSavingsParams struct {
 	Start time.Time `form:"start" json:"start"`
 	End   time.Time `form:"end" json:"end"`
 	Route *string   `form:"route,omitempty" json:"route,omitempty"`
+
+	// ProjectId Restrict to records owned by one project; the caller must already have access to it.
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// SessionId Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.
+	SessionId *string `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// AttributionKey Restrict to records carrying this attribution key.
+	AttributionKey *string `form:"attribution_key,omitempty" json:"attribution_key,omitempty"`
+
+	// AttributionValue Restrict to records whose attribution key carries this exact value; requires attribution_key.
+	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
 }
 
 // UsageShadowExperimentsParams defines parameters for UsageShadowExperiments.
@@ -9793,6 +10714,18 @@ type UsageShadowExperimentsParams struct {
 	Start time.Time `form:"start" json:"start"`
 	End   time.Time `form:"end" json:"end"`
 	Route *string   `form:"route,omitempty" json:"route,omitempty"`
+
+	// ProjectId Restrict to records owned by one project; the caller must already have access to it.
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// SessionId Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.
+	SessionId *string `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// AttributionKey Restrict to records carrying this attribution key.
+	AttributionKey *string `form:"attribution_key,omitempty" json:"attribution_key,omitempty"`
+
+	// AttributionValue Restrict to records whose attribution key carries this exact value; requires attribution_key.
+	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
 }
 
 // UsageSummaryParams defines parameters for UsageSummary.
@@ -9810,6 +10743,12 @@ type UsageSummaryParams struct {
 
 	// AttributionValue Only usage whose attribution_key carries this value. Requires attribution_key.
 	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
+
+	// ProjectId Restrict to requests or usage owned by one project; the caller must already have access to it.
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// SessionId Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.
+	SessionId *string `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
 
 // UsageTimeSeriesParams defines parameters for UsageTimeSeries.
@@ -9830,6 +10769,12 @@ type UsageTimeSeriesParams struct {
 
 	// AttributionValue Only usage whose attribution_key carries this value. Requires attribution_key.
 	AttributionValue *string `form:"attribution_value,omitempty" json:"attribution_value,omitempty"`
+
+	// ProjectId Restrict to requests or usage owned by one project; the caller must already have access to it.
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// SessionId Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.
+	SessionId *string `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
 
 // ListUsersParams defines parameters for ListUsers.
@@ -10033,6 +10978,21 @@ type CreateNotificationRuleJSONRequestBody = CreateNotificationRuleRequest
 
 // UpdateNotificationRuleJSONRequestBody defines body for UpdateNotificationRule for application/json ContentType.
 type UpdateNotificationRuleJSONRequestBody = UpdateNotificationRuleRequest
+
+// UpdateCaptureConfigurationJSONRequestBody defines body for UpdateCaptureConfiguration for application/json ContentType.
+type UpdateCaptureConfigurationJSONRequestBody = UpdateCaptureConfigurationRequest
+
+// CreateCapturePolicyJSONRequestBody defines body for CreateCapturePolicy for application/json ContentType.
+type CreateCapturePolicyJSONRequestBody = CreateCapturePolicyRequest
+
+// UpdateCapturePolicyJSONRequestBody defines body for UpdateCapturePolicy for application/json ContentType.
+type UpdateCapturePolicyJSONRequestBody = UpdateCapturePolicyRequest
+
+// CreateExportSinkJSONRequestBody defines body for CreateExportSink for application/json ContentType.
+type CreateExportSinkJSONRequestBody = CreateExportSinkRequest
+
+// UpdateExportSinkJSONRequestBody defines body for UpdateExportSink for application/json ContentType.
+type UpdateExportSinkJSONRequestBody = UpdateExportSinkRequest
 
 // PutConfigurationJSONRequestBody defines body for PutConfiguration for application/json ContentType.
 type PutConfigurationJSONRequestBody = OidcConfigurationRequest
@@ -10732,6 +11692,68 @@ func (a SCIMUser) MarshalJSON() ([]byte, error) {
 	return json.Marshal(object)
 }
 
+// AsCreateNotificationDestinationRequestSecret0 returns the union data inside the CreateNotificationDestinationRequest_Secret as a CreateNotificationDestinationRequestSecret0
+func (t CreateNotificationDestinationRequest_Secret) AsCreateNotificationDestinationRequestSecret0() (CreateNotificationDestinationRequestSecret0, error) {
+	var body CreateNotificationDestinationRequestSecret0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCreateNotificationDestinationRequestSecret0 overwrites any union data inside the CreateNotificationDestinationRequest_Secret as the provided CreateNotificationDestinationRequestSecret0
+func (t *CreateNotificationDestinationRequest_Secret) FromCreateNotificationDestinationRequestSecret0(v CreateNotificationDestinationRequestSecret0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeCreateNotificationDestinationRequestSecret0 performs a merge with any union data inside the CreateNotificationDestinationRequest_Secret, using the provided CreateNotificationDestinationRequestSecret0
+func (t *CreateNotificationDestinationRequest_Secret) MergeCreateNotificationDestinationRequestSecret0(v CreateNotificationDestinationRequestSecret0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsCreateNotificationDestinationRequestSecret1 returns the union data inside the CreateNotificationDestinationRequest_Secret as a CreateNotificationDestinationRequestSecret1
+func (t CreateNotificationDestinationRequest_Secret) AsCreateNotificationDestinationRequestSecret1() (CreateNotificationDestinationRequestSecret1, error) {
+	var body CreateNotificationDestinationRequestSecret1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCreateNotificationDestinationRequestSecret1 overwrites any union data inside the CreateNotificationDestinationRequest_Secret as the provided CreateNotificationDestinationRequestSecret1
+func (t *CreateNotificationDestinationRequest_Secret) FromCreateNotificationDestinationRequestSecret1(v CreateNotificationDestinationRequestSecret1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeCreateNotificationDestinationRequestSecret1 performs a merge with any union data inside the CreateNotificationDestinationRequest_Secret, using the provided CreateNotificationDestinationRequestSecret1
+func (t *CreateNotificationDestinationRequest_Secret) MergeCreateNotificationDestinationRequestSecret1(v CreateNotificationDestinationRequestSecret1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t CreateNotificationDestinationRequest_Secret) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *CreateNotificationDestinationRequest_Secret) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // AsPlaygroundResponseFormat0 returns the union data inside the PlaygroundResponseFormat as a PlaygroundResponseFormat0
 func (t PlaygroundResponseFormat) AsPlaygroundResponseFormat0() (PlaygroundResponseFormat0, error) {
 	var body PlaygroundResponseFormat0
@@ -10888,6 +11910,68 @@ func (t RoutingPolicy_Defaults) MarshalJSON() ([]byte, error) {
 }
 
 func (t *RoutingPolicy_Defaults) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsUpdateNotificationDestinationRequestSecret0 returns the union data inside the UpdateNotificationDestinationRequest_Secret as a UpdateNotificationDestinationRequestSecret0
+func (t UpdateNotificationDestinationRequest_Secret) AsUpdateNotificationDestinationRequestSecret0() (UpdateNotificationDestinationRequestSecret0, error) {
+	var body UpdateNotificationDestinationRequestSecret0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromUpdateNotificationDestinationRequestSecret0 overwrites any union data inside the UpdateNotificationDestinationRequest_Secret as the provided UpdateNotificationDestinationRequestSecret0
+func (t *UpdateNotificationDestinationRequest_Secret) FromUpdateNotificationDestinationRequestSecret0(v UpdateNotificationDestinationRequestSecret0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeUpdateNotificationDestinationRequestSecret0 performs a merge with any union data inside the UpdateNotificationDestinationRequest_Secret, using the provided UpdateNotificationDestinationRequestSecret0
+func (t *UpdateNotificationDestinationRequest_Secret) MergeUpdateNotificationDestinationRequestSecret0(v UpdateNotificationDestinationRequestSecret0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsUpdateNotificationDestinationRequestSecret1 returns the union data inside the UpdateNotificationDestinationRequest_Secret as a UpdateNotificationDestinationRequestSecret1
+func (t UpdateNotificationDestinationRequest_Secret) AsUpdateNotificationDestinationRequestSecret1() (UpdateNotificationDestinationRequestSecret1, error) {
+	var body UpdateNotificationDestinationRequestSecret1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromUpdateNotificationDestinationRequestSecret1 overwrites any union data inside the UpdateNotificationDestinationRequest_Secret as the provided UpdateNotificationDestinationRequestSecret1
+func (t *UpdateNotificationDestinationRequest_Secret) FromUpdateNotificationDestinationRequestSecret1(v UpdateNotificationDestinationRequestSecret1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeUpdateNotificationDestinationRequestSecret1 performs a merge with any union data inside the UpdateNotificationDestinationRequest_Secret, using the provided UpdateNotificationDestinationRequestSecret1
+func (t *UpdateNotificationDestinationRequest_Secret) MergeUpdateNotificationDestinationRequestSecret1(v UpdateNotificationDestinationRequestSecret1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t UpdateNotificationDestinationRequest_Secret) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *UpdateNotificationDestinationRequest_Secret) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }

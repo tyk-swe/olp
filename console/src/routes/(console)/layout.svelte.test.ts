@@ -40,6 +40,7 @@ const capabilities: AuthenticationCapabilities = {
   local_login_enabled: true,
   oidc_login_enabled: false,
   notifications_active: false,
+  payload_capture_active: false,
   gateway_available: true
 };
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/telemetry"
 )
 
 type Mode string
@@ -86,6 +87,8 @@ type Config struct {
 	TraceSampleRatio       float64
 	TracePropagateUpstream bool
 	TraceAcceptInbound     bool
+	MetricsTenantLabels    []string
+	MetricsSeriesCap       int
 }
 
 // Parse gives flags precedence over environment variables. File-backed URLs are
@@ -153,6 +156,9 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	f.Int64Var(&c.MaxMediaBodyBytes, "http-max-media-body-bytes", 67108864, "largest raw or multipart media request body")
 	f.Int64Var(&c.ProviderMaxResponseBytes, "provider-max-response-bytes", 16777216, "largest buffered provider response body")
 	f.Int64Var(&c.ProviderMaxEventBytes, "provider-max-event-bytes", 1048576, "largest single streamed provider event")
+	var metricsTenantLabels string
+	f.StringVar(&metricsTenantLabels, "metrics-tenant-labels", "", "comma-separated business metric tenant labels: project, key, end_user (OLP_METRICS_TENANT_LABELS)")
+	f.IntVar(&c.MetricsSeriesCap, "metrics-series-cap", 5000, "business metric series admitted per process")
 	if err := f.Parse(args[1:]); err != nil {
 		return c, err
 	}
@@ -231,6 +237,9 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 		if host = strings.ToLower(strings.TrimSpace(host)); host != "" {
 			c.ProviderEgressAllowHTTPHosts = append(c.ProviderEgressAllowHTTPHosts, host)
 		}
+	}
+	if c.MetricsTenantLabels, err = telemetry.ParseMetricsTenantLabels(metricsTenantLabels); err != nil {
+		return c, err
 	}
 	if err = c.LogLevel.UnmarshalText([]byte(level)); err != nil {
 		return c, errors.New("OLP_LOG_LEVEL must be debug, info, warn, or error")
@@ -349,6 +358,9 @@ func (c Config) Validate() error {
 	}
 	if c.TraceSampleRatio < 0 || c.TraceSampleRatio > 1 {
 		return errors.New("OLP_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0")
+	}
+	if c.MetricsSeriesCap < 64 || c.MetricsSeriesCap > 1000000 {
+		return errors.New("OLP_METRICS_SERIES_CAP must be between 64 and 1000000")
 	}
 	if c.UnconfinedPluginDir != "" && !filepath.IsAbs(c.UnconfinedPluginDir) {
 		return errors.New("OLP_UNCONFINED_PLUGIN_DIR must be an absolute path")

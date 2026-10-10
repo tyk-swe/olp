@@ -15,13 +15,17 @@ const dimensions = [
   'api_key',
   'end_user',
   'operation',
-  'attribution'
+  'attribution',
+  'project',
+  'session'
 ] as const satisfies readonly UsageDimension[];
 const resources = [
   'route',
   'model',
   'provider_id',
   'api_key_id',
+  'project_id',
+  'session_id',
   'operation',
   'attribution_key',
   'attribution_value'
@@ -76,15 +80,22 @@ export function usageProblem(state: UsageState): string | null {
     end,
     provider_id,
     api_key_id,
+    project_id,
+    session_id,
     attribution_key,
     attribution_value
   } = state.filters;
+  if (session_id && attribution_key && attribution_key !== 'session')
+    return 'The session filter conflicts with the attribution key.';
+  if (session_id && attribution_value && attribution_value !== session_id)
+    return 'The session filter conflicts with the attribution value.';
   if (!timeValid(start, true) || !timeValid(end, true))
     return 'Enter valid start and end times.';
   if (timeOrder(start) >= timeOrder(end)) return 'End must be after start.';
   if (provider_id && !UUID.test(provider_id))
     return 'Provider ID must be a UUID.';
   if (api_key_id && !UUID.test(api_key_id)) return 'API key ID must be a UUID.';
+  if (project_id && !UUID.test(project_id)) return 'Project ID must be a UUID.';
   if (attribution_value && !attribution_key)
     return 'An attribution value needs its attribution key.';
   if (state.dimension === 'attribution' && !attribution_key)
@@ -105,7 +116,12 @@ export function readUsageState(
   for (const field of resources) {
     const value = search.get(field)?.trim();
     if (value)
-      filters[field] = field.endsWith('_id') ? value.toLowerCase() : value;
+      filters[field] =
+        field === 'provider_id' ||
+        field === 'api_key_id' ||
+        field === 'project_id'
+          ? value.toLowerCase()
+          : value;
   }
   return {
     filters,
@@ -137,6 +153,8 @@ export function usageDraft(state: UsageState): UsageDraft {
     model: state.filters.model ?? '',
     provider_id: state.filters.provider_id ?? '',
     api_key_id: state.filters.api_key_id ?? '',
+    project_id: state.filters.project_id ?? '',
+    session_id: state.filters.session_id ?? '',
     operation: state.filters.operation ?? '',
     attribution_key: state.filters.attribution_key ?? '',
     attribution_value: state.filters.attribution_value ?? '',

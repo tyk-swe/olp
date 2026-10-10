@@ -23,6 +23,10 @@ export type RequestForm = {
   providerId: string;
   model: string;
   apiKeyId: string;
+  projectId: string;
+  sessionId: string;
+  attributionKey: string;
+  attributionValue: string;
   operation: string;
   statusCode: string;
   errorClass: string;
@@ -38,6 +42,10 @@ const params = {
   providerId: 'provider_id',
   model: 'model',
   apiKeyId: 'api_key_id',
+  projectId: 'project_id',
+  sessionId: 'session_id',
+  attributionKey: 'attribution_key',
+  attributionValue: 'attribution_value',
   operation: 'operation',
   statusCode: 'status_code',
   errorClass: 'error_class',
@@ -55,6 +63,10 @@ export function requestFilters(
     provider_id: state.providerId.trim() || undefined,
     model: state.model.trim() || undefined,
     api_key_id: state.apiKeyId.trim() || undefined,
+    project_id: state.projectId.trim() || undefined,
+    session_id: state.sessionId.trim() || undefined,
+    attribution_key: state.attributionKey.trim() || undefined,
+    attribution_value: state.attributionValue.trim() || undefined,
     operation: state.operation.trim() || undefined,
     status_code: state.statusCode ? Number(state.statusCode) : undefined,
     error_class: state.errorClass.trim() || undefined,
@@ -69,6 +81,10 @@ export const requestList = filteredListState({
     providerId: '',
     model: '',
     apiKeyId: '',
+    projectId: '',
+    sessionId: '',
+    attributionKey: '',
+    attributionValue: '',
     operation: '',
     statusCode: '',
     errorClass: '',
@@ -85,9 +101,17 @@ export function requestProblem(
 ): string | null {
   const ids = uuidProblem([
     [form.providerId, 'Provider ID'],
-    [form.apiKeyId, 'API key ID']
+    [form.apiKeyId, 'API key ID'],
+    [form.projectId, 'Project ID']
   ]);
   if (ids) return ids;
+  const session = form.sessionId.trim();
+  const attributionKey = form.attributionKey.trim();
+  const attributionValue = form.attributionValue.trim();
+  if (session && attributionKey && attributionKey !== 'session')
+    return 'The session filter conflicts with the attribution key.';
+  if (session && attributionValue && attributionValue !== session)
+    return 'The session filter conflicts with the attribution value.';
   const operation = form.operation.trim();
   if (operation && !(operationKinds as readonly string[]).includes(operation))
     return `Unknown operation: ${form.operation}`;

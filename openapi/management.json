@@ -909,12 +909,16 @@
           },
           "saml_login_enabled": {
             "type": "boolean"
+          },
+          "payload_capture_active": {
+            "type": "boolean"
           }
         },
         "required": [
           "local_login_enabled",
           "oidc_login_enabled",
-          "notifications_active"
+          "notifications_active",
+          "payload_capture_active"
         ],
         "type": "object"
       },
@@ -2997,6 +3001,11 @@
       },
       "CreateNotificationDestinationRequest": {
         "properties": {
+          "configuration": {
+            "description": "Per-channel configuration object; required for email destinations.",
+            "type": "object",
+            "additionalProperties": true
+          },
           "enabled": {
             "description": "Defaults to true.",
             "type": "boolean"
@@ -3013,14 +3022,34 @@
             ]
           },
           "secret": {
-            "description": "Optional HMAC-SHA256 signing secret. Write-only; never returned.",
-            "type": [
-              "string",
-              "null"
+            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
             ]
           },
+          "type": {
+            "enum": [
+              "webhook",
+              "slack",
+              "msteams",
+              "discord",
+              "pagerduty",
+              "email"
+            ],
+            "type": "string",
+            "description": "Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook."
+          },
           "url": {
-            "description": "Webhook URL validated by the installation egress policy.",
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.",
             "type": "string"
           }
         },
@@ -3031,8 +3060,13 @@
         "type": "object"
       },
       "CreateNotificationRuleRequest": {
-        "description": "A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent, and its subject and destination belong to its project. A provider event rule takes none of them and is installation-wide: project_id is null or omitted, and its destination is installation-wide. A key.expiring rule requires subject_kind=api_key and subject_id, no window or threshold, and a subject/destination in the rule project.",
+        "description": "A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent; key.expiring requires subject_kind=api_key and subject_id. Generic events take no subject/window/threshold fields and accept an event-specific configuration object; only budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped.",
         "properties": {
+          "configuration": {
+            "description": "Event-specific rule configuration; unsupported fields are rejected, missing fields take their defaults.",
+            "type": "object",
+            "additionalProperties": true
+          },
           "destination_id": {
             "format": "uuid",
             "type": "string"
@@ -4808,6 +4842,11 @@
       },
       "NotificationDestination": {
         "properties": {
+          "configuration": {
+            "description": "Per-channel configuration object; required for email destinations (from/to/subject_prefix/ca_certificate).",
+            "type": "object",
+            "additionalProperties": true
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -4846,26 +4885,46 @@
               "null"
             ]
           },
+          "secret_configured": {
+            "description": "Whether a credential secret is stored; the secret itself is never returned.",
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "webhook",
+              "slack",
+              "msteams",
+              "discord",
+              "pagerduty",
+              "email"
+            ],
+            "type": "string",
+            "description": "Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook."
+          },
           "updated_at": {
             "format": "date-time",
             "type": "string"
           },
           "url": {
-            "type": "string"
+            "type": "string",
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
           }
         },
         "required": [
-          "id",
-          "name",
-          "url",
-          "project_id",
-          "project_name",
-          "enabled",
-          "etag",
+          "configuration",
+          "created_at",
           "created_by",
           "created_by_email",
-          "created_at",
-          "updated_at"
+          "enabled",
+          "etag",
+          "id",
+          "name",
+          "project_id",
+          "project_name",
+          "secret_configured",
+          "type",
+          "updated_at",
+          "url"
         ],
         "type": "object"
       },
@@ -4890,17 +4949,32 @@
         "type": "object"
       },
       "NotificationEvent": {
-        "description": "What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation. key.expiring: an API key expires or reaches its declared rotation date within 24 hours, or is overdue. One metadata-only delivery per rule, key, reason and date; never creates or transmits a secret.",
+        "description": "What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.",
         "enum": [
+          "budget.exhausted",
           "budget.threshold",
+          "key.expiring",
+          "model.retirement",
+          "provider.circuit.closed",
+          "provider.circuit.open",
+          "provider.credential.failing",
+          "provider.error_rate",
           "provider.grant.lapsed",
-          "key.expiring"
+          "report.spend",
+          "route.latency",
+          "runtime.install_failed",
+          "worker.stale"
         ],
         "type": "string"
       },
       "NotificationRule": {
-        "description": "A notification rule subscribes a destination to an event. A budget.threshold rule names the subject, window and threshold it watches; a provider event rule names none of them and is installation-wide.",
+        "description": "A notification rule subscribes a destination to an event. budget.threshold rules name a subject, window and threshold; key.expiring names an api_key subject and takes lead_time_seconds; generic events carry configuration only. Generic rules are capped at 1000 per installation.",
         "properties": {
+          "configuration": {
+            "description": "Canonical event-specific rule configuration (thresholds, windows, cooldowns, lead time, metric, period).",
+            "type": "object",
+            "additionalProperties": true
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -5002,24 +5076,25 @@
           }
         },
         "required": [
-          "id",
-          "name",
-          "project_id",
-          "project_name",
-          "event",
-          "subject_kind",
-          "subject_id",
-          "subject_name",
-          "window_kind",
-          "threshold_percent",
+          "configuration",
+          "created_at",
+          "created_by",
+          "created_by_email",
           "destination_id",
           "destination_name",
           "enabled",
           "etag",
-          "created_by",
-          "created_by_email",
-          "created_at",
-          "updated_at"
+          "event",
+          "id",
+          "name",
+          "project_id",
+          "project_name",
+          "subject_id",
+          "subject_kind",
+          "subject_name",
+          "threshold_percent",
+          "updated_at",
+          "window_kind"
         ],
         "type": "object"
       },
@@ -9387,6 +9462,9 @@
               "installation"
             ],
             "description": "Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs."
+          },
+          "payload_captured": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -9400,7 +9478,8 @@
           "attempt_count",
           "attribution",
           "policy_decisions",
-          "origin"
+          "origin",
+          "payload_captured"
         ],
         "type": "object"
       },
@@ -11955,6 +12034,14 @@
       },
       "UpdateNotificationDestinationRequest": {
         "properties": {
+          "configuration": {
+            "description": "Replaces the channel configuration; null clears it to {}.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -11962,21 +12049,51 @@
             "type": "string"
           },
           "secret": {
-            "description": "A string replaces the signing secret, null removes it, absent keeps it.",
-            "type": [
-              "string",
-              "null"
+            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
             ]
           },
+          "type": {
+            "enum": [
+              "webhook",
+              "slack",
+              "msteams",
+              "discord",
+              "pagerduty",
+              "email"
+            ],
+            "type": "string",
+            "description": "Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook."
+          },
           "url": {
-            "type": "string"
+            "type": "string",
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
           }
         },
-        "type": "object"
+        "type": "object",
+        "description": "Replace parts of a destination; send the latest record's ETag with If-Match. type is immutable; url is an origin for chat/PagerDuty channels so changing it requires a matching sealed secret."
       },
       "UpdateNotificationRuleRequest": {
-        "description": "A rule's event and project never change. Only budget.threshold rules take subject, window and threshold fields.",
+        "description": "Replace parts of a notification rule; send the latest record's ETag with If-Match. budget.threshold rules keep their subject_kind/subject_id, window_kind and threshold_percent; key.expiring rules keep their api_key subject and take lead_time_seconds in configuration; generic events carry configuration only.",
         "properties": {
+          "configuration": {
+            "description": "Replaces the rule configuration; null resets to the event defaults.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
           "destination_id": {
             "format": "uuid",
             "type": "string"
@@ -18954,6 +19071,643 @@
           "group_role_mappings"
         ],
         "description": "Portable public SAML trust and role mappings. Promotion creates or preserves a destination-local SP signing key and certificate; link state, subjects, flows, sessions and private material never travel."
+      },
+      "CaptureConfiguration": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "etag"
+        ]
+      },
+      "UpdateCaptureConfigurationRequest": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
+      "CapturePolicy": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "route_slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sink": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "sample_ratio": {
+            "type": "string"
+          },
+          "include": {
+            "items": {
+              "enum": [
+                "input",
+                "output",
+                "tool_calls"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "redact": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "key_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "end_user_digests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_bytes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "route_slug",
+          "sink",
+          "sample_ratio",
+          "include",
+          "redact",
+          "key_ids",
+          "end_user_digests",
+          "max_bytes",
+          "enabled",
+          "etag"
+        ]
+      },
+      "CreateCapturePolicyRequest": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "route_slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sink": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "sample_ratio": {
+            "type": "string"
+          },
+          "include": {
+            "items": {
+              "enum": [
+                "input",
+                "output",
+                "tool_calls"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "redact": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "key_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "end_user_digests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_bytes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sink",
+          "sample_ratio",
+          "include",
+          "max_bytes"
+        ]
+      },
+      "UpdateCapturePolicyRequest": {
+        "type": "object",
+        "properties": {
+          "sink": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "sample_ratio": {
+            "type": "string"
+          },
+          "include": {
+            "items": {
+              "enum": [
+                "input",
+                "output",
+                "tool_calls"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "redact": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "key_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "end_user_digests": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_bytes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CapturePolicyListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CapturePolicy"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "ExportSink": {
+        "type": "object",
+        "properties": {
+          "export_sink_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "enum": [
+              "https",
+              "otlp_logs",
+              "s3",
+              "gcs",
+              "azure_blob"
+            ],
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "streams": {
+            "items": {
+              "enum": [
+                "requests",
+                "attempts",
+                "usage_rollups",
+                "guardrail_decisions",
+                "audit"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "otlp",
+              "jsonl"
+            ],
+            "type": "string"
+          },
+          "filter": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "project": {
+                "format": "uuid",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "route": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "success",
+                  "failure",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "credential_configured": {
+            "type": "boolean"
+          },
+          "etag": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "export_sink_id",
+          "name",
+          "project_id",
+          "type",
+          "destination",
+          "streams",
+          "format",
+          "filter",
+          "enabled",
+          "credential_configured",
+          "etag",
+          "status"
+        ]
+      },
+      "CreateExportSinkRequest": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "https",
+              "otlp_logs",
+              "s3",
+              "gcs",
+              "azure_blob"
+            ],
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "streams": {
+            "items": {
+              "enum": [
+                "requests",
+                "attempts",
+                "usage_rollups",
+                "guardrail_decisions",
+                "audit"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "otlp",
+              "jsonl"
+            ],
+            "type": "string"
+          },
+          "filter": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "project": {
+                "format": "uuid",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "route": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "success",
+                  "failure",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "credential": {
+            "description": "Write-only sink credential document.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "destination",
+          "streams",
+          "format",
+          "name"
+        ]
+      },
+      "UpdateExportSinkRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "filter": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "project": {
+                "format": "uuid",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "route": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "enum": [
+                  "success",
+                  "failure",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "credential": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ExportSinkListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExportSink"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "ExportSinkGap": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "stream": {
+            "type": "string"
+          },
+          "record_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "first_occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "stream",
+          "record_count",
+          "first_occurred_at",
+          "last_occurred_at",
+          "reason"
+        ]
+      },
+      "ExportSinkGapListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExportSinkGap"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "CaptureSinkOption": {
+        "type": "object",
+        "required": [
+          "export_sink_id",
+          "name",
+          "type"
+        ],
+        "properties": {
+          "export_sink_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "https",
+              "otlp_logs",
+              "s3",
+              "gcs",
+              "azure_blob"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "CaptureSinkOptionList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaptureSinkOption"
+            }
+          }
+        },
+        "additionalProperties": false
       }
     },
     "securitySchemes": {
@@ -29374,6 +30128,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -31845,9 +32616,23 @@
             "description": "Break down by route, provider, model, model_family, estimate_provenance, api_key, end_user, operation, or attribution (requires attribution_key). model_family and estimate_provenance group by the tokenizer family of each attempt's model and the method behind its input estimate. An attempt that was never estimated, such as a stored-response call, a realtime session or a job poll, still has its model's family and appears as none under estimate_provenance; unknown appears only for attempts recorded before families were. A request counts once, under its first attempt, while token totals follow each attempt. end_user groups by a project-scoped HMAC digest; unidentified requests appear as unidentified.",
             "in": "query",
             "name": "dimension",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "route",
+                "provider",
+                "model",
+                "model_family",
+                "estimate_provenance",
+                "api_key",
+                "end_user",
+                "operation",
+                "attribution",
+                "project",
+                "session"
+              ],
+              "default": "route"
             }
           },
           {
@@ -31876,6 +32661,23 @@
             "in": "query",
             "name": "attribution_value",
             "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
             "schema": {
               "type": "string"
             }
@@ -31983,6 +32785,39 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_key",
+            "in": "query",
+            "description": "Restrict to records carrying this attribution key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_value",
+            "in": "query",
+            "description": "Restrict to records whose attribution key carries this exact value; requires attribution_key.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -32044,6 +32879,39 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to records owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_key",
+            "in": "query",
+            "description": "Restrict to records carrying this attribution key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_value",
+            "in": "query",
+            "description": "Restrict to records whose attribution key carries this exact value; requires attribution_key.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -32102,6 +32970,39 @@
             "in": "query",
             "name": "route",
             "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to records owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_key",
+            "in": "query",
+            "description": "Restrict to records carrying this attribution key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_value",
+            "in": "query",
+            "description": "Restrict to records whose attribution key carries this exact value; requires attribution_key.",
             "schema": {
               "type": "string"
             }
@@ -32214,6 +33115,23 @@
             "in": "query",
             "name": "attribution_value",
             "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
             "schema": {
               "type": "string"
             }
@@ -32335,6 +33253,23 @@
             "in": "query",
             "name": "attribution_value",
             "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
             "schema": {
               "type": "string"
             }
@@ -45862,6 +46797,1464 @@
         "tags": [
           "saml"
         ]
+      }
+    },
+    "/api/v1/observability/capture": {
+      "get": {
+        "operationId": "get_capture_configuration",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureConfiguration"
+                }
+              }
+            },
+            "description": "Capture configuration"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "patch": {
+        "operationId": "update_capture_configuration",
+        "parameters": [
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCaptureConfigurationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureConfiguration"
+                }
+              }
+            },
+            "description": "Capture configuration updated"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Only an owner may change capture configuration"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/capture-policies": {
+      "get": {
+        "operationId": "list_capture_policies",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapturePolicyListResponse"
+                }
+              }
+            },
+            "description": "Capture policies visible to the caller"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "post": {
+        "operationId": "create_capture_policy",
+        "parameters": [
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCapturePolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapturePolicy"
+                }
+              }
+            },
+            "description": "Capture policy created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Only an owner may manage capture policies"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A policy for this project and route already exists, or an idempotency conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid policy fields, or capture is disabled"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/capture-policies/{capture_policy_id}": {
+      "get": {
+        "operationId": "get_capture_policy",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "capture_policy_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapturePolicy"
+                }
+              }
+            },
+            "description": "Capture policy detail"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Policy not found or outside the caller's scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "patch": {
+        "operationId": "update_capture_policy",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "capture_policy_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCapturePolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapturePolicy"
+                }
+              }
+            },
+            "description": "Capture policy updated"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Only an owner may manage capture policies"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Policy not found or outside the caller's scope"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid policy fields, or capture is disabled"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_capture_policy",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "capture_policy_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Capture policy deleted"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Only an owner may manage capture policies"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Policy not found or outside the caller's scope"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/sinks": {
+      "get": {
+        "operationId": "list_export_sinks",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSinkListResponse"
+                }
+              }
+            },
+            "description": "Export sinks visible to the caller"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Malformed query parameters, or an invalid cursor or page size"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "post": {
+        "operationId": "create_export_sink",
+        "parameters": [
+          {
+            "description": "Unique mutation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateExportSinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSink"
+                }
+              }
+            },
+            "description": "Export sink created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the settings permission or keys manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Project is not visible to the caller"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink name is already taken in this scope, or an idempotency conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid sink fields or a destination the egress policy refuses"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/sinks/{export_sink_id}": {
+      "get": {
+        "operationId": "get_export_sink",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSink"
+                }
+              }
+            },
+            "description": "Export sink detail and per-stream delivery status"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found or outside the caller's scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "patch": {
+        "operationId": "update_export_sink",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateExportSinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSink"
+                }
+              }
+            },
+            "description": "Export sink updated"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the settings permission or keys manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found or outside the caller's scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink name is already taken in this scope"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid sink fields or a destination the egress policy refuses"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_export_sink",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Export sink deleted"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks the settings permission or keys manager write access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found or outside the caller's scope"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/sinks/{export_sink_id}/gaps": {
+      "get": {
+        "operationId": "list_export_sink_gaps",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportSinkGapListResponse"
+                }
+              }
+            },
+            "description": "Recorded export delivery gaps for the sink"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found or outside the caller's scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/v1/observability/capture-sinks": {
+      "get": {
+        "summary": "List capture sink options",
+        "description": "Enabled installation-wide export sinks a capture policy may write to; ids and names only, never destinations or credentials.",
+        "tags": [
+          "Observability"
+        ],
+        "operationId": "listCaptureSinks",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Available capture sinks.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureSinkOptionList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/requests/export.csv": {
+      "get": {
+        "summary": "Export requests as CSV",
+        "description": "Download the filtered request history as CSV. At most 10000 records and 32MiB; larger exports answer 422.",
+        "tags": [
+          "requests"
+        ],
+        "operationId": "exportRequestsCsv",
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error_class",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "started_after",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "started_before",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage carrying this attribution key. Requires attribution_value outside breakdowns.",
+            "in": "query",
+            "name": "attribution_key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only usage whose attribution_key carries this value. Requires attribution_key.",
+            "in": "query",
+            "name": "attribution_value",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV export.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Export exceeds the bounded record or byte limit."
+          }
+        }
+      }
+    },
+    "/api/v1/usage/export.csv": {
+      "get": {
+        "summary": "Export breakdown as CSV",
+        "description": "Download the usage summary plus a breakdown as CSV. At most 10000 groups and 32MiB; larger exports answer 422.",
+        "tags": [
+          "usage"
+        ],
+        "operationId": "exportUsageCsv",
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "route",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Break down by route, provider, model, model_family, estimate_provenance, api_key, end_user, operation, or attribution (requires attribution_key). model_family and estimate_provenance group by the tokenizer family of each attempt's model and the method behind its input estimate. An attempt that was never estimated, such as a stored-response call, a realtime session or a job poll, still has its model's family and appears as none under estimate_provenance; unknown appears only for attempts recorded before families were. A request counts once, under its first attempt, while token totals follow each attempt. end_user groups by a project-scoped HMAC digest; unidentified requests appear as unidentified.",
+            "in": "query",
+            "name": "dimension",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "route",
+                "provider",
+                "model",
+                "model_family",
+                "estimate_provenance",
+                "api_key",
+                "end_user",
+                "operation",
+                "attribution",
+                "project",
+                "session"
+              ],
+              "default": "route"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Restrict to requests or usage owned by one project; the caller must already have access to it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "description": "Restrict to records carrying attribution key 'session' with this value; conflicts with explicit attribution_key/attribution_value filters.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_key",
+            "in": "query",
+            "description": "Restrict to records carrying this attribution key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attribution_value",
+            "in": "query",
+            "description": "Restrict to records whose attribution key carries this exact value; requires attribution_key.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV export.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Export exceeds the bounded record or byte limit."
+          }
+        }
       }
     }
   },

@@ -5,11 +5,13 @@ import { goto } from '$app/navigation';
 import { ApiProblem } from '$lib/api/http';
 import { getApiKey, type ApiKey } from '$lib/features/access/api-keys/api';
 import {
+  exportUsageCsv,
   usageBreakdown,
   usageCompleteness,
   usageSeries,
   usageSummary
 } from './api/usage';
+vi.mock('$lib/download', () => ({ downloadBlob: vi.fn() }));
 import { page } from './test/pageState.svelte';
 import UsagePageProbe from './test/UsagePageProbe.svelte';
 
@@ -20,7 +22,8 @@ vi.mock('./api/usage', () => ({
   usageBreakdown: vi.fn(),
   usageCompleteness: vi.fn(),
   usageSeries: vi.fn(),
-  usageSummary: vi.fn()
+  usageSummary: vi.fn(),
+  exportUsageCsv: vi.fn()
 }));
 
 const keyId = '01980000-0000-7000-8000-000000000103';
@@ -199,7 +202,9 @@ it('offers the model family and estimate provenance breakdowns', async () => {
     'estimate_provenance',
     'api_key',
     'operation',
-    'attribution'
+    'attribution',
+    'project',
+    'session'
   ]);
   expect(select.value).toBe('model_family');
   expect(usageBreakdown).toHaveBeenCalledWith(
@@ -284,4 +289,49 @@ it('takes a fresh default window when the URL returns to bare /usage', async () 
     ),
     expect.objectContaining({ replaceState: true })
   );
+});
+
+it('exports the applied filters and current dimension as CSV', async () => {
+  const { downloadBlob } = await import('$lib/download');
+  vi.mocked(exportUsageCsv).mockResolvedValue('row_type,count\nsummary,1\n');
+  render(`${window}&dimension=session&session_id=SessionCase`);
+  await vi.waitFor(() =>
+    expect(host.querySelector('[aria-label="Usage summary"]')).not.toBeNull()
+  );
+
+  const button = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+    (candidate) => candidate.textContent === 'Export CSV'
+  )!;
+  button.click();
+  await vi.waitFor(() => expect(vi.mocked(exportUsageCsv)).toHaveBeenCalled());
+
+  expect(exportUsageCsv).toHaveBeenCalledWith(
+    expect.objectContaining({ session_id: 'SessionCase' }),
+    'session'
+  );
+  expect(vi.mocked(downloadBlob)).toHaveBeenCalled();
+});
+
+it('surfaces an export failure without downloading', async () => {
+  const { downloadBlob } = await import('$lib/download');
+  vi.mocked(exportUsageCsv).mockRejectedValue(
+    new ApiProblem({
+      type: 'urn:olp:problem:export_too_large',
+      title: 'The export is too large',
+      status: 422
+    })
+  );
+  render(`${window}&dimension=route`);
+  await vi.waitFor(() =>
+    expect(host.querySelector('[aria-label="Usage summary"]')).not.toBeNull()
+  );
+
+  const button = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+    (candidate) => candidate.textContent === 'Export CSV'
+  )!;
+  button.click();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('The export is too large')
+  );
+  expect(vi.mocked(downloadBlob)).not.toHaveBeenCalled();
 });

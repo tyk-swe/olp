@@ -70,12 +70,13 @@ var (
 	ProviderGrantRefresh = SealPurpose{"provider_grant_refresh"}
 	// GrantEnrollment holds short-lived plugin enrollment state.
 	GrantEnrollment = SealPurpose{"grant_enrollment"}
+	SinkCredential  = SealPurpose{"sink_credential"}
 )
 
 // SealPurposes lists every seal purpose.
 func SealPurposes() []SealPurpose {
 	return []SealPurpose{SAMLKey, SAMLFlow, MFATOTP, MFAWebAuthn, ProviderCredential, ProviderContinuation, NotificationSecret, MutationReplay,
-		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment}
+		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential}
 }
 
 // ParseSealPurpose returns the seal purpose a stored record names.

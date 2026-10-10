@@ -7,6 +7,7 @@
   import PricingSourcesPanel from '$lib/features/usage/PricingSourcesPanel.svelte';
   import { settingsKeys } from '$lib/features/settings/settingsKeys';
   import PricingRevisionsPanel from '$lib/features/usage/PricingRevisionsPanel.svelte';
+  import ObservabilityPanel from '$lib/features/observability/ObservabilityPanel.svelte';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -332,6 +333,8 @@
   />
   <ConfigurationPanel />
 {/if}
+
+<ObservabilityPanel />
 
 <style>
   .settings-section {

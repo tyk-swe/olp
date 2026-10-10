@@ -29,6 +29,7 @@ type RequestFilters struct {
 	StartedBefore    *time.Time
 	AllProjects      bool
 	AllowedProjects  []string
+	ProjectID        *string
 }
 
 // Cursor is a position in a list ordered by timestamp and identifier.
@@ -70,6 +71,7 @@ type RequestSummary struct {
 	EndUserDigest           string                   `json:"end_user_digest"`
 	Attribution             map[string]string        `json:"attribution"`
 	PolicyDecisions         []contentpolicy.Decision `json:"policy_decisions"`
+	PayloadCaptured         bool                     `json:"payload_captured"`
 }
 
 // AttemptDetail is one provider attempt of a request, with the routing
@@ -120,7 +122,7 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
         r.attempt_count::int, u.input_tokens, u.output_tokens, u.cached_input_tokens,
         u.cache_write_input_tokens, u.cache_write_5m_input_tokens, u.cache_write_1h_input_tokens,
         u.estimated_cost, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions, r.end_user_digest,
-        r.origin, r.parent_request_id::text, r.budget_boundary
+        r.origin, r.parent_request_id::text, r.budget_boundary, r.payload_captured
     FROM olp.requests r LEFT JOIN LATERAL (
       SELECT SUM(f.input_tokens)::bigint AS input_tokens,
              SUM(f.output_tokens)::bigint AS output_tokens,
@@ -142,7 +144,7 @@ func (s *RequestSummary) scanTargets() []any {
 		&s.FirstByteMS, &s.AttemptCount, &s.InputTokens, &s.OutputTokens, &s.CachedInputTokens,
 		&s.CacheWriteInputTokens, &s.CacheWrite5MInputTokens, &s.CacheWrite1HInputTokens,
 		&s.EstimatedCost, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions, &s.EndUserDigest,
-		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary}
+		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary, &s.PayloadCaptured}
 }
 
 // normalize pins the timestamps to UTC so the JSON always renders as Z.
@@ -204,6 +206,9 @@ func (f RequestFilters) push(q *filterQuery) {
 	if !f.AllProjects {
 		q.push(" AND r.api_key_id IN (SELECT id FROM olp.api_keys WHERE project_id = ANY(" + q.bind(f.AllowedProjects) + "::uuid[]))")
 	}
+	if f.ProjectID != nil {
+		q.push(" AND " + requestProjectExpression + " = " + q.bind(*f.ProjectID) + "::uuid")
+	}
 	if f.Route != nil {
 		q.pushBind(" AND r.route_slug = ", *f.Route)
 	}
@@ -242,6 +247,34 @@ func (f RequestFilters) push(q *filterQuery) {
 	if f.StartedBefore != nil {
 		q.pushBind(" AND r.started_at < ", *f.StartedBefore)
 	}
+}
+
+func ReadRequestExport(ctx context.Context, q access.Queryer, filters RequestFilters) ([]RequestSummary, error) {
+	if err := filters.Validate(); err != nil {
+		return nil, err
+	}
+	var query filterQuery
+	query.push(requestColumns + " WHERE true")
+	filters.push(&query)
+	query.push(" ORDER BY r.started_at DESC,r.id DESC LIMIT 10001")
+	rows, err := q.Query(ctx, query.sql(), query.args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RequestSummary{}
+	for rows.Next() {
+		if len(items) == 10000 {
+			return nil, access.Fail(422, "export_too_large", "Narrow the request filters to at most 10000 requests.")
+		}
+		var item RequestSummary
+		if err := rows.Scan(item.scanTargets()...); err != nil {
+			return nil, err
+		}
+		item.normalize()
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider_id::text, p.name,

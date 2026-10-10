@@ -258,14 +258,40 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
     .click();
   await page.getByLabel('Daily hard token limit (UTC)').fill('12000');
   await page.getByLabel('Monthly hard token limit (UTC)').fill('200000');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  {
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/v1/code/budgets'
+    );
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    const response = await saved;
+    expect(response.status()).toBe(201);
+    const body = await response.json();
+    expect(body.route_id).toBeNull();
+    expect(body.daily_tokens).toBe(12000);
+    expect(body.monthly_tokens).toBe(200000);
+  }
   await expect(page.getByText('12,000', { exact: true })).toBeVisible();
   await page
     .getByRole('button', { name: 'Create budget', exact: true })
     .click();
   await page.getByLabel('Route scope').selectOption(route.id);
   await page.getByLabel('Daily hard token limit (UTC)').fill('5000');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  {
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/v1/code/budgets'
+    );
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    const response = await saved;
+    expect(response.status()).toBe(201);
+    const body = await response.json();
+    expect(body.route_id).toBe(route.id);
+    expect(body.daily_tokens).toBe(5000);
+    expect(body.monthly_tokens).toBeNull();
+  }
   const budgets = await manage<{ items: CodeBudget[] }>(
     page,
     'GET',

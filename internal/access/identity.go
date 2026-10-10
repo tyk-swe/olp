@@ -139,9 +139,9 @@ func (s *Server) setupStatus(r *http.Request) (Reply, error) {
 	return OK(map[string]bool{"setup_required": !complete}), err
 }
 func (s *Server) capabilities(r *http.Request) (Reply, error) {
-	var local, oidc, samlEnabled bool
-	err := s.Pool.QueryRow(r.Context(), `SELECT COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.local_login_enabled'),true),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.oidc_configuration WHERE singleton),false),COALESCE((SELECT (document->>'enabled')::boolean FROM olp.saml_configuration WHERE singleton),false)`).Scan(&local, &oidc, &samlEnabled)
-	return OK(map[string]bool{"local_login_enabled": local && !s.LocalLoginDisabled, "oidc_login_enabled": oidc, "saml_login_enabled": samlEnabled, "gateway_available": true, "limits_enforced": s.LimitsEnforced, "management_network_restricted": s.ManagementNetworkRestricted, "retention_enforced": s.RetentionEnforced, "notifications_active": s.NotificationsActive}), err
+	var local, oidc, samlEnabled, captureEnabled bool
+	err := s.Pool.QueryRow(r.Context(), authenticationCapabilitiesSQL).Scan(&local, &oidc, &samlEnabled, &captureEnabled)
+	return OK(map[string]bool{"local_login_enabled": local && !s.LocalLoginDisabled, "oidc_login_enabled": oidc, "saml_login_enabled": samlEnabled, "gateway_available": true, "limits_enforced": s.LimitsEnforced, "management_network_restricted": s.ManagementNetworkRestricted, "retention_enforced": s.RetentionEnforced, "notifications_active": s.NotificationsActive, "payload_capture_active": captureEnabled}), err
 }
 
 func (s *Server) passwordWork(r *http.Request, work func()) error {
