@@ -275,8 +275,8 @@ reviewed digest with pinned reuse. JSON/SSE session handling, schema bounds,
 remote-loader refusal, reflected-credential rejection and exact numeric bounds
 have focused race coverage. Ordinary authorization, isolation and every generated
 SDK/CLI/MCP machine operation passed in 245.075 seconds; the full local gate and
-focused races pass. `TestCertifiedMCPServerLifecyclesWithTerraformAndOpenTofu` qualifies create,
-update, static bearer rotation, UUID import, no-change plans and retirement with
+focused races pass.
+`TestCertifiedMCPServerLifecyclesWithTerraformAndOpenTofu` qualifies create, update, static bearer rotation, UUID import, no-change plans and retirement with
 both engines. It checks immutable old catalogs, no-network pinned reads after
 upstream drift, secret exclusion from saved-plan JSON/state and foreign
 saved-plan refusal. The complete twelve-type suite uses the same immutable SDK
@@ -292,3 +292,12 @@ complete all three native requests through the smoke fixture, and
 `TestOperatorGeneratedPythonClients` runs that proof in the integration gate.
 Mounted credentials remain outside generated source. Path quoting, unsupported
 format/surface refusal, Go syntax, focused races and operator tests pass.
+
+The default merge-base benchmark gate passes ten paired samples across all seven
+shared packages and 93 benchmarks, with no additions or removals and no
+statistically significant regression above the 10% budget. The first full
+comparison exposed unnecessary synchronization in empty external-credential
+caches; the eligibility fast path was corrected and the entire gate rerun.
+External-reference freshness, failure and concurrent-fetch behavior retain
+focused race coverage. Final integrated qualification and milestone closure
+remain pending.
