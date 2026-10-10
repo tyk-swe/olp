@@ -36,3 +36,26 @@ func TestMCPWriterBoundsResultsAndPreservesFirstStatus(t *testing.T) {
 		t.Fatal("unbounded response")
 	}
 }
+
+func TestMCPRedactionPreservesExactSchemaNumbers(t *testing.T) {
+	value, err := decodeMCPBody([]byte(`{"catalog":{"minimum":9007199254740993,"multipleOf":0.1234567890123456789},"items":[{"input_tokens":9007199254740993,"access_token":"private"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	redactMCP(value)
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, exact := range []string{`"minimum":9007199254740993`, `"multipleOf":0.1234567890123456789`, `"input_tokens":9007199254740993`} {
+		if !strings.Contains(string(encoded), exact) {
+			t.Fatalf("management result changed: %s", encoded)
+		}
+	}
+	if strings.Contains(string(encoded), "private") {
+		t.Fatal("credential survived redaction")
+	}
+	if _, err := decodeMCPBody([]byte(`{} {}`)); err == nil {
+		t.Fatal("accepted multiple management responses")
+	}
+}

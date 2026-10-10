@@ -69,7 +69,7 @@ func TestMCPServerCertificationPinsCatalogsAndRechecksAuthorityWithoutLocks(t *t
 		case "initialize":
 			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
 		case "tools/list":
-			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "description": description.Load(), "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}}}}}
+			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "description": description.Load(), "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}, "count": map[string]any{"type": "integer", "minimum": int64(9007199254740993)}}}}}}
 		default:
 			t.Errorf("certification invoked %s", request.Method)
 			w.WriteHeader(400)
@@ -88,6 +88,15 @@ func TestMCPServerCertificationPinsCatalogsAndRechecksAuthorityWithoutLocks(t *t
 	encoded, _ := json.Marshal(created)
 	if strings.Contains(string(encoded), credential) || !created["has_credential"].(bool) {
 		t.Fatal("credential leaked or was not stored")
+	}
+	_, readToken := createToken(h, owner, "Precise MCP metadata", []string{"read"})
+	status, _, rawResult := h.call(sweepCaller{token: readToken}, "POST", "/api/v1/mcp", map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{
+			"name": "get_mcp_server", "arguments": map[string]any{"path": map[string]string{"server_id": id}},
+		},
+	}, nil)
+	if status != 200 || !strings.Contains(rawResult, `"minimum":9007199254740993`) || strings.Contains(rawResult, credential) {
+		t.Fatalf("MCP changed precise schema metadata or exposed its credential: status %d", status)
 	}
 	before := requests.Load()
 	replay := h.want(owner, "POST", "/api/v1/mcp-servers", input, headers, 201)

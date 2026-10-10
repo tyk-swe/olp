@@ -129,7 +129,7 @@ func (server *MCP) serveMCP(r *http.Request, principal access.Principal) (access
 		if failed {
 			body = map[string]any{"status": reply.status, "error": "management_operation_failed"}
 		} else if reply.body.Len() != 0 {
-			if err = json.Unmarshal(reply.body.Bytes(), &body); err != nil {
+			if body, err = decodeMCPBody(reply.body.Bytes()); err != nil {
 				body = map[string]any{"error": "unsupported_response"}
 				failed = true
 			}
@@ -176,6 +176,19 @@ func (writer *mcpWriter) Write(data []byte) (int, error) {
 func (*mcpWriter) SetReadDeadline(time.Time) error  { return nil }
 func (*mcpWriter) SetWriteDeadline(time.Time) error { return nil }
 func (*mcpWriter) Flush()                           {}
+
+// Preserve exact schema numbers and counters while inspecting nested secrets.
+// float64 conversion can change a certified schema without changing its digest.
+func decodeMCPBody(data []byte) (any, error) {
+	if !json.Valid(data) {
+		return nil, errors.New("invalid management JSON response")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var value any
+	err := decoder.Decode(&value)
+	return value, err
+}
 
 func redactMCP(value any) {
 	switch v := value.(type) {
