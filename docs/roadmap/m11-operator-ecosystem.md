@@ -2,14 +2,13 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| In progress | [M4](m04-tenancy-identity.md) | Automation-first and multi-region operation |
+| Implemented | [M4](m04-tenancy-identity.md) | Automation-first and multi-region operation |
 
-OLP is operated through its console, its management API and configuration
-promotion, with one PostgreSQL primary and file-mounted secrets. LiteLLM adds a
-management CLI, secret managers, a model hub, multi-region topologies and
-administration through agents. This milestone delivers those capabilities on
-OLP's existing contracts: every tool is a client of the declared management
-API, so authorization, ETags, idempotency and audit apply unchanged.
+OLP operators use the console, a generated CLI, Terraform/OpenTofu and scoped
+management MCP tools against the same declared management API. Authorization,
+ETags, idempotency and audit protect each client. Regional fleets, cloud-backed
+secrets and a caller-visible catalog extend that boundary without changing
+installation ownership or request-pinned serving configuration.
 
 ## Outcome
 
@@ -25,7 +24,7 @@ API, so authorization, ETags, idempotency and audit apply unchanged.
 | | OLP today | LiteLLM reference |
 | --- | --- | --- |
 | CLI | [Contract-generated management commands](../operator-cli.md), saved configuration plans and qualified-client environment setup, alongside process and recovery commands | [lite CLI](https://docs.litellm.ai/docs/proxy/management_cli) for models, credentials, keys, teams and users |
-| Desired state | [Export, plan and apply](../configuration.md#configuration-promotion-artifacts) with canonical digests | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models |
+| Desired state | [Export, plan and apply](../configuration.md#configuration-promotion-artifacts) with canonical digests and [twelve conditional Terraform/OpenTofu resources](../terraform.md) | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models |
 | Secrets | Workload-identity wrapped rings and immutable AWS/GCP/Azure/Vault credential references with validated rotation ([external secrets](../external-secrets.md)) | [Secret managers](https://docs.litellm.ai/docs/secret_managers/overview) (Enterprise) |
 | Topology | [Regional fleets](../deployment.md#regional-fleets), explicit key overrides, global cost reconciliation and [replica-aware runtime authority](../deployment.md#regional-read-replicas) and the [independent-installation console switcher](../operator-console.md#independent-installations) | [Read replicas](https://docs.litellm.ai/docs/proxy/db_read_replica), [multi-region](https://docs.litellm.ai/docs/proxy/multi_region) and a [global control plane](https://docs.litellm.ai/docs/proxy/global_control_plane) (Enterprise) |
 | Discovery | [Member/key-visible model catalog](../model-catalog.md), SDK examples, explicit upstream disclosure and independently priced owner-enabled public catalogs | [AI Hub](https://docs.litellm.ai/docs/proxy/ai_hub) |
@@ -149,7 +148,7 @@ editing, and session-scoped saved filters for usage and request history.
       global cost budgets within the documented overshoot bound.
 - [x] The management MCP server refuses every operation the token's scopes do
       not admit.
-- [ ] The [parity matrix](parity.md) administration rows are `Parity` or better.
+- [x] The [parity matrix](parity.md) administration rows are `Parity` or better.
 
 Replica qualification: `TestManagementReadReplicaLagConsumesTheRevocationDeadline`
 uses a physical PostgreSQL standby, pauses replay after revocation, checks
@@ -299,5 +298,30 @@ statistically significant regression above the 10% budget. The first full
 comparison exposed unnecessary synchronization in empty external-credential
 caches; the eligibility fast path was corrected and the entire gate rerun.
 External-reference freshness, failure and concurrent-fetch behavior retain
-focused race coverage. Final integrated qualification and milestone closure
-remain pending.
+focused race coverage.
+
+## Final qualification
+
+The complete default `make integration` gate passes against the final
+implementation. Its Code and remaining root race suites pass in 1,131 and
+2,355 seconds, followed by the internal and extension suites, official SDKs,
+all pinned coding clients and frameworks, and all 36 packaged/Vite browser
+journeys. The packaged recovery drill passes all six fresh journeys and the
+restored journey, preserving six historical requests and recording nine after
+restored inference. Keyboard, accessibility, responsive sizing and cross-tab
+logout checks remain enabled.
+
+The local check includes uncached Go and benchmark-harness races, 134 console
+test files with 1,045 tests, 87 script tests, formatting, vet, types and lint.
+Contract drift, release-version consistency, the distribution build and Helm
+profile/Kubernetes validation also pass. The companion
+[Terraform/OpenTofu provider PR](https://github.com/tyk-swe/terraform-provider-openllmproxy/pull/1)
+has independent passing check and two-engine acceptance jobs. Reviewed
+[console](../operator-console.md), [catalog](../model-catalog.md) and
+[external-secret](../external-secrets.md) screenshots accompany the runbooks.
+
+All 14 administration/deployment comparison rows are `Parity` or `Ahead`.
+The [LiteLLM management CLI documentation](https://docs.litellm.ai/docs/proxy/management_cli)
+and [release notes](https://docs.litellm.ai/release_notes) were reviewed at
+closure on 2026-10-10. Broader observability, guardrail execution and agent
+gateway work remains in M5, M7 and M10.
