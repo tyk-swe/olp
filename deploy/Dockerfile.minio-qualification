@@ -1,0 +1,13 @@
+FROM golang:1.27.1-trixie@sha256:3b77fc618ec235a1ab412de7737f120dd507c57e8d87de4cbb7994fb94275ed5 AS build
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local
+RUN git clone --depth 1 --branch RELEASE.2025-04-22T22-12-26Z https://github.com/minio/minio.git /src
+WORKDIR /src
+RUN test "$(git rev-parse HEAD)" = "0d7408fc9969caf07de6a8c3a84f9fbb10a6739e" && \
+    go build -mod=readonly -trimpath -o /out/minio .
+
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && \
+    apt-get clean && rm -r /var/lib/apt/lists/*
+COPY --from=build /out/minio /usr/local/bin/minio
+COPY --from=build /src/LICENSE /usr/share/doc/minio/LICENSE
+ENTRYPOINT ["/usr/local/bin/minio"]

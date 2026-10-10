@@ -203,6 +203,7 @@ config:
   # the management API can't enable it. Empty runs plugins confined only.
   unconfinedPluginDir: ""
   databaseMaxConnections: 20
+
   # HTTP/2 connections receive GOAWAY at this age so clients rebalance.
   httpConnectionMaxAgeSeconds: 300
   # Draining connections get this long, extended while responses still
@@ -224,6 +225,10 @@ tolerations: []
 affinity: {}
 topologySpreadConstraints: []
 
+metrics:
+  tenantLabels: ""
+  seriesCap: 5000
+
 monitoring:
   enabled: false
   namespace: ""
@@ -236,6 +241,9 @@ monitoring:
     # request-metadata backlog warns. Raise it only with a documented
     # installation-specific noise budget.
     requestMetadataPendingThreshold: 0
+    exportDeliveryFailedThreshold: 0
+    exportPendingThreshold: 500
+    captureFailedThreshold: 0
 
 networkPolicy:
   enabled: false

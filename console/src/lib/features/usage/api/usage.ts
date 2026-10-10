@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { unwrap } from '$lib/api/http';
+import { apiProblem, unwrap } from '$lib/api/http';
 import { compactQuery } from '$lib/api/query';
 
 export type UsagePoint = components['schemas']['UsagePointResponse'];
@@ -14,6 +14,8 @@ export type UsageFilters = {
   provider_id?: string;
   model?: string;
   api_key_id?: string;
+  project_id?: string;
+  session_id?: string;
   operation?: string;
   attribution_key?: string;
   attribution_value?: string;
@@ -55,7 +57,9 @@ export type UsageDimension =
   | 'api_key'
   | 'end_user'
   | 'operation'
-  | 'attribution';
+  | 'attribution'
+  | 'project'
+  | 'session';
 
 export async function usageBreakdown(
   filters: UsageFilters,
@@ -76,4 +80,19 @@ export async function usageCompleteness(
     { params: { query: compactQuery(filters) } }
   );
   return unwrap({ data, error, response });
+}
+
+export async function exportUsageCsv(
+  filters: UsageFilters,
+  dimension: UsageDimension
+): Promise<string> {
+  const { data, error, response } = await apiClient.GET(
+    '/api/v1/usage/export.csv',
+    {
+      params: { query: compactQuery({ ...filters, dimension }) },
+      parseAs: 'text'
+    }
+  );
+  if (!response.ok) throw apiProblem(error, response);
+  return data as string;
 }

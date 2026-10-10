@@ -116,6 +116,7 @@ func accountingEvent(e Envelope) *usage.Event {
 		StatusCode:          optionalStatus(e.Status),
 		ErrorClass:          optionalText(e.ErrorClass),
 		LatencyMS:           milliseconds(e.Duration),
+		PayloadCaptured:     e.PayloadCaptured,
 		Attempts:            make([]usage.Attempt, 0, len(e.Attempts)),
 	}
 	for index := range e.Attempts {

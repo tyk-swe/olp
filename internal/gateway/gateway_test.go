@@ -222,6 +222,10 @@ type harness struct {
 }
 
 func newHarness(t *testing.T, cfg Config) *harness {
+	return newHarnessWrapped(t, cfg, func(h http.Handler) http.Handler { return h })
+}
+
+func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Handler) *harness {
 	t.Helper()
 	m := &mock{handlers: map[string]http.HandlerFunc{}, calls: map[string]int{}}
 	m.set("a", completion(modelA, answerText))
@@ -274,7 +278,7 @@ func newHarness(t *testing.T, cfg Config) *harness {
 	gw.Sink = sink
 	mux := http.NewServeMux()
 	gw.Register(mux)
-	server := httptest.NewServer(mux)
+	server := httptest.NewServer(wrap(mux))
 	t.Cleanup(server.Close)
 	return &harness{t: t, rt: rt, mock: m, sink: sink, gateway: gw, server: server, keyID: keyID, slotA: slotA, credA: credA, upstream: upstream}
 }

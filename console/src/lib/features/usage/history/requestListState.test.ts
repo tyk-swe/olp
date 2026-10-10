@@ -109,3 +109,29 @@ describe('request applied URL filters', () => {
     }
   });
 });
+
+it('rejects a malformed project UUID and a conflicting session filter', () => {
+  const form = readRequestForm(new URLSearchParams());
+  form.projectId = 'not-a-uuid';
+  expect(requestProblem(form, false)).toContain('Project ID must be a UUID');
+  form.projectId = '01980000-0000-7000-8000-000000000901';
+  form.sessionId = 'sess-42';
+  form.attributionKey = 'team';
+  expect(requestProblem(form, false)).toContain('conflicts');
+  form.attributionKey = 'session';
+  form.attributionValue = 'other-session';
+  expect(requestProblem(form, false)).toContain('conflicts');
+  form.attributionKey = 'session';
+  form.attributionValue = 'sess-42';
+  expect(requestProblem(form, false)).toBeNull();
+});
+
+it('reads project_id and session_id from the URL preserving session case', () => {
+  const form = readRequestForm(
+    new URLSearchParams(
+      'project_id=01980000-0000-7000-8000-000000000901&session_id=SessionCase'
+    )
+  );
+  expect(form.projectId).toBe('01980000-0000-7000-8000-000000000901');
+  expect(form.sessionId).toBe('SessionCase');
+});

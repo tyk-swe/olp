@@ -36,6 +36,11 @@ type attemptOutcome[Result any] struct {
 // the loop continues on the fallback route within the same deadline and
 // attempt budget.
 func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapter attemptAdapter[Result]) attemptOutcome[Result] {
+	var generation string
+	if x.request.release != nil && x.request.release.Snapshot != nil {
+		generation = x.request.release.Snapshot.Generation.ID
+	}
+	x.request.trace.RecordSessionContext(x.surfaceName(), x.operationName(), string(x.family), x.named().Slug, generation)
 	for {
 		out, conditions := runRoute(ctx, s, x, adapter)
 		if len(conditions) == 0 || !s.fallBack(ctx, x, conditions) {

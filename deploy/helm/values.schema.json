@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["image", "gateway", "control", "ingress", "worker", "migration", "tracing", "config", "mediaSpool", "monitoring", "networkPolicy", "preStopDelaySeconds", "terminationGracePeriodSeconds", "podSecurityContext", "containerSecurityContext"],
+  "required": ["image", "gateway", "control", "ingress", "worker", "migration", "tracing", "config", "mediaSpool", "monitoring", "networkPolicy", "preStopDelaySeconds", "terminationGracePeriodSeconds", "podSecurityContext", "containerSecurityContext", "metrics"],
   "additionalProperties": false,
   "properties": {
     "image": {
@@ -236,6 +236,15 @@
         "volumeSizeLimit": { "type": "string", "minLength": 2 }
       }
     },
+    "metrics": {
+      "type": "object",
+      "required": ["tenantLabels", "seriesCap"],
+      "additionalProperties": false,
+      "properties": {
+        "tenantLabels": { "type": "string" },
+        "seriesCap": { "type": "integer", "minimum": 64, "maximum": 1000000 }
+      }
+    },
     "monitoring": {
       "type": "object",
       "required": ["enabled", "namespace", "labels", "interval", "scrapeTimeout", "rules"],
@@ -247,10 +256,13 @@
         "scrapeTimeout": { "type": "string", "pattern": "^[1-9][0-9]*[smh]$" },
         "rules": {
           "type": "object",
-          "required": ["enabled", "requestMetadataPendingThreshold"],
+          "required": ["enabled", "requestMetadataPendingThreshold", "exportDeliveryFailedThreshold", "exportPendingThreshold", "captureFailedThreshold"],
           "properties": {
             "enabled": { "type": "boolean" },
-            "requestMetadataPendingThreshold": { "type": "integer", "minimum": 0 }
+            "requestMetadataPendingThreshold": { "type": "integer", "minimum": 0 },
+            "exportDeliveryFailedThreshold": { "type": "integer", "minimum": 0 },
+            "exportPendingThreshold": { "type": "integer", "minimum": 0 },
+            "captureFailedThreshold": { "type": "integer", "minimum": 0 }
           }
         }
       }

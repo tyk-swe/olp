@@ -2,6 +2,7 @@ package vendors
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -14,9 +15,22 @@ func TestConfigurationGuideListsEveryPreset(t *testing.T) {
 		t.Fatal(err)
 	}
 	guide := string(raw)
-	table := guide[strings.Index(guide, "| ID | Provider | Endpoint | Profile |"):]
+	header := regexp.MustCompile(`(?m)^\|\s*ID\s*\|\s*Provider\s*\|\s*Endpoint\s*\|\s*Profile\s*\|`)
+	found := header.FindStringIndex(guide)
+	if found == nil {
+		t.Fatal("docs/configuration.md lacks the preset table header")
+	}
+	table := guide[found[0]:]
 	table = table[:strings.Index(table, "\n\n")+1]
-	listed := strings.Count(table, "\n| `")
+	pipes := regexp.MustCompile(`\s*\|\s*`)
+	canonical := func(row string) string {
+		return pipes.ReplaceAllString(strings.TrimSpace(row), "|")
+	}
+	canonicalTable := ""
+	for _, line := range strings.Split(table, "\n") {
+		canonicalTable += canonical(line) + "\n"
+	}
+	listed := strings.Count(canonicalTable, "\n|`")
 	presets := 0
 	for _, c := range All() {
 		if c.Preset == nil {
@@ -31,8 +45,8 @@ func TestConfigurationGuideListsEveryPreset(t *testing.T) {
 		if c.Preset.Profile != nil {
 			profile = "`" + c.Preset.Profile.ID + "`"
 		}
-		row := "| `" + c.ID + "` | " + c.Name + " | " + endpoint + " | " + profile + " |"
-		if !strings.Contains(table, row+"\n") {
+		row := "|`" + c.ID + "`|" + c.Name + "|" + endpoint + "|" + profile + "|"
+		if !strings.Contains(canonicalTable, row+"\n") {
 			t.Errorf("docs/configuration.md lacks the preset row %s", row)
 		}
 	}

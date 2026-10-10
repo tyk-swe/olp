@@ -9,51 +9,62 @@ bind.
 
 ## Runtime variables
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `OLP_DATABASE_URL` | required | PostgreSQL URL. |
-| `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Pool size (1–10000), excluding detached worker sessions; see [connection budget](deployment.md#production-example-and-connection-budget). |
-| `OLP_DATABASE_URL_FILE`, `OLP_VALKEY_URL_FILE` | unset | Read the corresponding URL from a mounted file; mutually exclusive with its inline setting. |
-| `OLP_VALKEY_TLS_CA_FILE` | unset | PEM trust roots for Valkey TLS; requires `OLP_VALKEY_URL`. |
-| `OLP_VALKEY_URL` | optional for `all`, `gateway`, `control`; required for `worker` | Valkey for installation-scoped limits, hints, and streams. |
-| `OLP_LISTEN_ADDR` | `127.0.0.1:8080` | Public listener; containers override to `0.0.0.0:8080`. |
-| `OLP_OBSERVABILITY_LISTEN_ADDR` | `127.0.0.1:9090` | Private health and metrics listener. |
-| `OLP_OTLP_TRACES_ENDPOINT` | unset | Complete HTTP or HTTPS OTLP traces endpoint. Unset disables tracing. |
-| `OLP_OTLP_HEADERS_FILE` | unset | JSON object of additional OTLP exporter headers, read only when tracing is enabled. |
-| `OLP_TRACE_SAMPLE_RATIO` | `1.0` | Sampling ratio from `0.0` through `1.0` for locally rooted traces. |
-| `OLP_TRACE_PROPAGATE_UPSTREAM` | `true` | Inject the current W3C trace context into provider attempts. |
-| `OLP_TRACE_ACCEPT_INBOUND` | `true` | Accept a valid inbound W3C trace context as the request parent. |
-| `OLP_HTTP_MAX_CONNECTIONS` | `1024` | Admitted TCP connections. |
-| `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS` | `256` | Inference work admission (1–100000); excess work receives 503. |
-| `OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS` | `32` | Management and console work admission (1–100000). |
-| `OLP_HTTP_ADMISSION_QUEUE_DEPTH` | `0` | Inference requests that may wait for a full pool (0–100000), dequeued weighted fair by priority. `0` answers 503 at once. |
-| `OLP_HTTP_ADMISSION_QUEUE_TIMEOUT` | `2s` | Longest admission-queue wait (1ms–1m), never beyond the route deadline. |
-| `OLP_HTTP_MAX_IN_FLIGHT_SHADOW_REQUESTS` | `16` | Mirrored shadow attempts in flight per gateway (1–100000); excess mirrors are dropped, never queued. |
-| `OLP_HTTP_CONNECTION_MAX_AGE_SECONDS` | `300` | Age at which HTTP/2 connections receive GOAWAY (1–86400). |
-| `OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS` | `30` | Grace period for draining connections (1–600). |
-| `OLP_PUBLIC_ORIGIN` | `http://127.0.0.1:8080` | OIDC redirects and generated links. |
-| `OLP_LOCAL_LOGIN_ENABLED` | `true` | Keep local sign-in available after setup. |
-| `OLP_TRUSTED_PROXY_CIDRS` | empty | Proxies allowed to supply `X-Forwarded-For`. |
-| `OLP_MANAGEMENT_ALLOWED_CIDRS` | empty | Up to 64 client CIDRs allowed to reach management and the console, resolved through trusted proxies. Empty allows all; see [Management network restrictions](access.md#management-network-restrictions). |
-| `OLP_GATEWAY_CORS_ALLOWED_ORIGINS` | empty | Browser origins allowed to call the inference gateway cross-origin; wildcards are refused and the management API stays same-origin. |
-| `OLP_PROVIDER_EGRESS_ALLOW_CIDRS` | empty | CIDRs exempt from the non-public provider egress denylist; see [Provider egress policy](#provider-egress-policy). |
-| `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS` | empty | Hostnames or IP literals whose provider endpoints may use plain HTTP. |
-| `OLP_HTTP_MAX_JSON_BODY_BYTES` | `2097152` | Largest JSON request body, before and after gzip inflation (64 KiB–64 MiB). |
-| `OLP_HTTP_MAX_MEDIA_BODY_BYTES` | `67108864` | Largest raw or multipart media request body (1 MiB–1 GiB); see [Body size caps](#body-size-caps). |
-| `OLP_HTTP_MAX_INLINE_MEDIA_ITEMS` | `4` | Inline base64 media items accepted per JSON request (1–64). |
-| `OLP_HTTP_MAX_INLINE_MEDIA_ITEM_BYTES` | `1048576` | Decoded cap for one inline media item (1 KiB–64 MiB). |
-| `OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES` | `2097152` | Decoded cap for all inline media in one request (1 KiB–64 MiB). |
-| `OLP_PROVIDER_MAX_RESPONSE_BYTES` | `16777216` | Largest provider response body buffered for non-streaming operations, including a stream aggregated for a non-streaming caller (1 MiB–256 MiB). |
-| `OLP_PROVIDER_MAX_EVENT_BYTES` | `1048576` | Largest single streamed provider event (64 KiB up to the response cap). |
-| `OLP_CONSOLE_DIR` | `console/build` | Static console directory. |
-| `OLP_MEDIA_SPOOL_DIR` | unset | On-disk media spool; defaults to the system temp directory. |
-| `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Spool capacity (1 GiB; at least 256 MiB). |
-| `OLP_CONNECTOR_CONFIG_FILE` | unset | Optional file-backed connector mapping. |
-| `OLP_UNCONFINED_PLUGIN_DIR` | unset | Experimental. Absolute directory of the image that holds unconfined plugin executables. Setting it enables the [unconfined plugin tier](plugins.md#unconfined-plugins-experimental); nothing else can. |
-| `OLP_LOG_LEVEL` | `info` | JSON log severity: debug, info, warn, error. |
-| `OLP_SHUTDOWN_TIMEOUT` | `30s` | Shared HTTP, metadata, delivery and worker shutdown budget (1ms–10m). |
-| `OLP_DEPENDENCY_REQUEST_TIMEOUT` | `2s` | Per-request dependency deadline (1ms–1m). |
-| `OLP_STARTUP_TIMEOUT` | `10s` | Startup and ordinary maintenance deadline (1ms–1m). |
+| Variable                                       | Default                                                         | Purpose                                                                                                                                                                                                  |
+| ---------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OLP_DATABASE_URL`                             | required                                                        | PostgreSQL URL.                                                                                                                                                                                          |
+| `OLP_DATABASE_MAX_CONNECTIONS`                 | `20`                                                            | Pool size (1–10000), excluding detached worker sessions; see [connection budget](deployment.md#production-example-and-connection-budget).                                                                |
+| `OLP_DATABASE_URL_FILE`, `OLP_VALKEY_URL_FILE` | unset                                                           | Read the corresponding URL from a mounted file; mutually exclusive with its inline setting.                                                                                                              |
+| `OLP_VALKEY_TLS_CA_FILE`                       | unset                                                           | PEM trust roots for Valkey TLS; requires `OLP_VALKEY_URL`.                                                                                                                                               |
+| `OLP_VALKEY_URL`                               | optional for `all`, `gateway`, `control`; required for `worker` | Valkey for installation-scoped limits, hints, and streams.                                                                                                                                               |
+| `OLP_LISTEN_ADDR`                              | `127.0.0.1:8080`                                                | Public listener; containers override to `0.0.0.0:8080`.                                                                                                                                                  |
+| `OLP_OBSERVABILITY_LISTEN_ADDR`                | `127.0.0.1:9090`                                                | Private health and metrics listener.                                                                                                                                                                     |
+| `OLP_OTLP_TRACES_ENDPOINT`                     | unset                                                           | Complete HTTP or HTTPS OTLP traces endpoint. Unset disables tracing.                                                                                                                                     |
+| `OLP_OTLP_HEADERS_FILE`                        | unset                                                           | JSON object of additional OTLP exporter headers, read only when tracing is enabled.                                                                                                                      |
+| `OLP_TRACE_SAMPLE_RATIO`                       | `1.0`                                                           | Sampling ratio from `0.0` through `1.0` for locally rooted traces.                                                                                                                                       |
+| `OLP_TRACE_PROPAGATE_UPSTREAM`                 | `true`                                                          | Inject the current W3C trace context into provider attempts.                                                                                                                                             |
+| `OLP_TRACE_ACCEPT_INBOUND`                     | `true`                                                          | Accept a valid inbound W3C trace context as the request parent.                                                                                                                                          |
+| `OLP_METRICS_TENANT_LABELS`                    | empty                                                           | Optional business-metric tenant labels from `project`, `key`, `end_user`. Empty keeps only the metric's route, provider kind, direction or currency labels.                                              |
+| `OLP_METRICS_SERIES_CAP`                       | `5000`                                                          | Per-process bound on active business-metric series (64–1000000); overflow is counted at `olp_metrics_series_overflow_total`.                                                                             |
+| `OLP_HTTP_MAX_CONNECTIONS`                     | `1024`                                                          | Admitted TCP connections.                                                                                                                                                                                |
+| `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS`    | `256`                                                           | Inference work admission (1–100000); excess work receives 503.                                                                                                                                           |
+| `OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS`   | `32`                                                            | Management and console work admission (1–100000).                                                                                                                                                        |
+| `OLP_HTTP_ADMISSION_QUEUE_DEPTH`               | `0`                                                             | Inference requests that may wait for a full pool (0–100000), dequeued weighted fair by priority. `0` answers 503 at once.                                                                                |
+| `OLP_HTTP_ADMISSION_QUEUE_TIMEOUT`             | `2s`                                                            | Longest admission-queue wait (1ms–1m), never beyond the route deadline.                                                                                                                                  |
+| `OLP_HTTP_MAX_IN_FLIGHT_SHADOW_REQUESTS`       | `16`                                                            | Mirrored shadow attempts in flight per gateway (1–100000); excess mirrors are dropped, never queued.                                                                                                     |
+| `OLP_HTTP_CONNECTION_MAX_AGE_SECONDS`          | `300`                                                           | Age at which HTTP/2 connections receive GOAWAY (1–86400).                                                                                                                                                |
+| `OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS`    | `30`                                                            | Grace period for draining connections (1–600).                                                                                                                                                           |
+| `OLP_PUBLIC_ORIGIN`                            | `http://127.0.0.1:8080`                                         | OIDC redirects and generated links.                                                                                                                                                                      |
+| `OLP_LOCAL_LOGIN_ENABLED`                      | `true`                                                          | Keep local sign-in available after setup.                                                                                                                                                                |
+| `OLP_TRUSTED_PROXY_CIDRS`                      | empty                                                           | Proxies allowed to supply `X-Forwarded-For`.                                                                                                                                                             |
+| `OLP_MANAGEMENT_ALLOWED_CIDRS`                 | empty                                                           | Up to 64 client CIDRs allowed to reach management and the console, resolved through trusted proxies. Empty allows all; see [Management network restrictions](access.md#management-network-restrictions). |
+| `OLP_GATEWAY_CORS_ALLOWED_ORIGINS`             | empty                                                           | Browser origins allowed to call the inference gateway cross-origin; wildcards are refused and the management API stays same-origin.                                                                      |
+| `OLP_PROVIDER_EGRESS_ALLOW_CIDRS`              | empty                                                           | CIDRs exempt from the non-public provider egress denylist; see [Provider egress policy](#provider-egress-policy).                                                                                        |
+| `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS`         | empty                                                           | Hostnames or IP literals whose provider endpoints may use plain HTTP.                                                                                                                                    |
+| `OLP_HTTP_MAX_JSON_BODY_BYTES`                 | `2097152`                                                       | Largest JSON request body, before and after gzip inflation (64 KiB–64 MiB).                                                                                                                              |
+| `OLP_HTTP_MAX_MEDIA_BODY_BYTES`                | `67108864`                                                      | Largest raw or multipart media request body (1 MiB–1 GiB); see [Body size caps](#body-size-caps).                                                                                                        |
+| `OLP_HTTP_MAX_INLINE_MEDIA_ITEMS`              | `4`                                                             | Inline base64 media items accepted per JSON request (1–64).                                                                                                                                              |
+| `OLP_HTTP_MAX_INLINE_MEDIA_ITEM_BYTES`         | `1048576`                                                       | Decoded cap for one inline media item (1 KiB–64 MiB).                                                                                                                                                    |
+| `OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES`        | `2097152`                                                       | Decoded cap for all inline media in one request (1 KiB–64 MiB).                                                                                                                                          |
+| `OLP_PROVIDER_MAX_RESPONSE_BYTES`              | `16777216`                                                      | Largest provider response body buffered for non-streaming operations, including a stream aggregated for a non-streaming caller (1 MiB–256 MiB).                                                          |
+| `OLP_PROVIDER_MAX_EVENT_BYTES`                 | `1048576`                                                       | Largest single streamed provider event (64 KiB up to the response cap).                                                                                                                                  |
+| `OLP_CONSOLE_DIR`                              | `console/build`                                                 | Static console directory.                                                                                                                                                                                |
+| `OLP_MEDIA_SPOOL_DIR`                          | unset                                                           | On-disk media spool; defaults to the system temp directory.                                                                                                                                              |
+| `OLP_MEDIA_SPOOL_CAPACITY_BYTES`               | `1073741824`                                                    | Spool capacity (1 GiB; at least 256 MiB).                                                                                                                                                                |
+| `OLP_CONNECTOR_CONFIG_FILE`                    | unset                                                           | Optional file-backed connector mapping.                                                                                                                                                                  |
+| `OLP_UNCONFINED_PLUGIN_DIR`                    | unset                                                           | Experimental. Absolute directory of the image that holds unconfined plugin executables. Setting it enables the [unconfined plugin tier](plugins.md#unconfined-plugins-experimental); nothing else can.   |
+| `OLP_LOG_LEVEL`                                | `info`                                                          | JSON log severity: debug, info, warn, error.                                                                                                                                                             |
+| `OLP_SHUTDOWN_TIMEOUT`                         | `30s`                                                           | Shared HTTP, metadata, delivery and worker shutdown budget (1ms–10m).                                                                                                                                    |
+| `OLP_DEPENDENCY_REQUEST_TIMEOUT`               | `2s`                                                            | Per-request dependency deadline (1ms–1m).                                                                                                                                                                |
+| `OLP_STARTUP_TIMEOUT`                          | `10s`                                                           | Startup and ordinary maintenance deadline (1ms–1m).                                                                                                                                                      |
+
+Durable export sinks and bounded payload capture are managed through the API,
+not environment variables — see the
+[export/capture runbook](operations.md#export-sinks-payload-capture-and-business-metrics).
+Sinks carry type, destination, stream, format, filter, and sealed credential
+fields. The installation capture switch is owner-only; policies pick an
+installation sink and bound `sample_ratio`, include sets, selectors, and
+`max_bytes`. `payload_capture_active` in the authentication capabilities response
+reports that installation switch, not an acknowledgement of capture delivery.
 
 At maximum connection age the server stops admitting requests on that connection
 and sends HTTP/2 GOAWAY. Existing streams have the configured drain interval to
@@ -87,6 +98,20 @@ canonical lowercase hyphenated UUID `x-request-id` values enter the trace
 attribute. See [tracing operations](operations.md#distributed-tracing) for
 sampling, monitoring, and local exploration.
 
+Request and attempt spans also carry the GenAI keys of the OpenTelemetry
+semantic conventions pinned at schema `1.41.0`, a convention set still at
+development status upstream: `gen_ai.operation.name`, `gen_ai.provider.name`,
+`gen_ai.request.model`, `gen_ai.response.model`,
+`gen_ai.response.finish_reasons`, `gen_ai.usage.input_tokens`, and
+`gen_ai.usage.output_tokens`. `gen_ai.request.model` is the route slug the
+caller named; `gen_ai.response.model`, finish reasons, and usage are recorded
+only when the provider reports them. Provider and operation names use the
+conventions' well-known values where the provider kind or request surface maps
+to one (`openai`, `anthropic`, `gcp.gemini`, `gcp.vertex_ai`, `aws.bedrock`,
+`azure.ai.openai`, `ibm.watsonx.ai`; `chat`, `generate_content`,
+`text_completion`, `embeddings`), and the gateway's own names otherwise.
+Prompt, output, and tool payload capture stays out of spans.
+
 All HTTP modes (`all`, `gateway`, `control`) require PostgreSQL and the
 authentication HMAC key. Configure Valkey for production: without it, runtime
 hints fall back to polling and hard-limited keys fail closed. `worker` requires
@@ -109,17 +134,19 @@ setup. Workers require both the HMAC and master keys, including with mounted
 connectors. Every command refuses to start when `OLP_AUTH_HMAC_KEY`,
 `OLP_MASTER_KEY`, or `OLP_BOOTSTRAP_TOKEN` is set inline.
 
-| Variable | Required by | File contents |
-| --- | --- | --- |
-| `OLP_MASTER_KEY_FILE` | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | JSON master-key ring shown below. |
-| `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `worker`, `doctor`, `master-key` | 32 random bytes, encoded as hex or standard base64. |
-| `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run | Random 32–256-byte token for one-time owner setup. |
-| `OLP_OTLP_HEADERS_FILE` | traced `all`, `gateway`, `control`, or `worker` | Optional JSON object of OTLP exporter headers. |
+| Variable                   | Required by                                                                                            | File contents                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
+| `OLP_MASTER_KEY_FILE`      | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | JSON master-key ring shown below.                   |
+| `OLP_AUTH_HMAC_KEY_FILE`   | `all`, `gateway`, `control`, `worker`, `doctor`, `master-key`                                          | 32 random bytes, encoded as hex or standard base64. |
+| `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run                                                                           | Random 32–256-byte token for one-time owner setup.  |
+| `OLP_OTLP_HEADERS_FILE`    | traced `all`, `gateway`, `control`, or `worker`                                                        | Optional JSON object of OTLP exporter headers.      |
 
 ```json
 {
   "active_version": 1,
-  "keys": [{ "version": 1, "key": "<32 random bytes encoded as hex or base64>" }]
+  "keys": [
+    { "version": 1, "key": "<32 random bytes encoded as hex or base64>" }
+  ]
 }
 ```
 
@@ -172,58 +199,58 @@ documentation is silent. A preset whose vendor speaks Chat Completions exactly
 selects the `compatible-chat` profile, so it can serve strict routes; choose
 **Automatic** to use parameter defaults instead.
 
-| ID | Provider | Endpoint | Profile |
-| --- | --- | --- | --- |
-| `groq` | Groq | `https://api.groq.com/openai/v1` | `compatible-chat` |
-| `mistral` | Mistral | `https://api.mistral.ai/v1` |  |
-| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | `compatible-chat` |
-| `together` | Together AI | `https://api.together.ai/v1` |  |
-| `vllm` | vLLM | `https://vllm.example.internal/v1` (placeholder) |  |
-| `deepseek` | DeepSeek | `https://api.deepseek.com` |  |
-| `fireworks` | Fireworks | `https://api.fireworks.ai/inference/v1` | `compatible-chat` |
-| `deepinfra` | DeepInfra | `https://api.deepinfra.com/v1/openai` |  |
-| `huggingface` | Hugging Face | `https://router.huggingface.co/v1` |  |
-| `cohere` | Cohere | `https://api.cohere.ai/compatibility/v1` |  |
-| `cohere-native-v2` | Cohere native v2 | `https://api.cohere.ai/v2` | `cohere-v2` |
-| `jina` | Jina AI | `https://api.jina.ai/v1` |  |
-| `elevenlabs` | ElevenLabs | `https://api.elevenlabs.io/v1` |  |
-| `deepgram` | Deepgram | `https://api.deepgram.com/v1` |  |
-| `assemblyai` | AssemblyAI | `https://api.assemblyai.com` |  |
-| `runway` | Runway | `https://api.dev.runwayml.com/v1` |  |
-| `stability` | Stability AI | `https://api.stability.ai` |  |
-| `recraft` | Recraft | `https://external.api.recraft.ai/v1` |  |
-| `bfl` | Black Forest Labs | `https://api.bfl.ai/v1` |  |
-| `voyage` | Voyage AI | `https://api.voyageai.com/v1` |  |
-| `xai` | xAI | `https://api.x.ai/v1` | `compatible-chat` |
-| `cerebras` | Cerebras | `https://api.cerebras.ai/v1` | `compatible-chat` |
-| `sambanova` | SambaNova | `https://api.sambanova.ai/v1` | `compatible-chat` |
-| `nebius` | Nebius Token Factory | `https://api.tokenfactory.nebius.com/v1` | `compatible-chat` |
-| `novita` | Novita AI | `https://api.novita.ai/openai/v1` |  |
-| `nvidia-nim` | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` |  |
-| `featherless` | Featherless | `https://api.featherless.ai/v1` |  |
-| `baseten` | Baseten | `https://inference.baseten.co/v1` |  |
-| `moonshot` | Moonshot AI | `https://api.moonshot.ai/v1` | `compatible-chat` |
-| `moonshot-cn` | Moonshot AI (China) | `https://api.moonshot.cn/v1` | `compatible-chat` |
-| `dashscope` | Alibaba Cloud Model Studio | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `compatible-chat` |
-| `dashscope-cn` | Alibaba Cloud Model Studio (China) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `compatible-chat` |
-| `zai` | Z.ai | `https://api.z.ai/api/paas/v4` |  |
-| `zhipu` | Zhipu BigModel | `https://open.bigmodel.cn/api/paas/v4` |  |
-| `minimax` | MiniMax | `https://api.minimax.io/v1` | `compatible-chat` |
-| `minimax-cn` | MiniMax (China) | `https://api.minimax.cn/v1` | `compatible-chat` |
-| `volcengine-ark` | Volcengine Ark | `https://ark.cn-beijing.volces.com/api/v3` | `compatible-chat` |
-| `byteplus-modelark` | BytePlus ModelArk | `https://ark.ap-southeast.bytepluses.com/api/v3` | `compatible-chat` |
-| `scaleway` | Scaleway Generative APIs | `https://api.scaleway.ai/v1` | `compatible-chat` |
-| `ovhcloud` | OVHcloud AI Endpoints | `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1` | `compatible-chat` |
-| `nscale` | Nscale | `https://inference.api.nscale.com/v1` | `compatible-chat` |
-| `databricks` | Databricks | `https://your-workspace.cloud.databricks.com/ai-gateway/mlflow/v1` (placeholder) |  |
-| `snowflake-cortex` | Snowflake Cortex | `https://your-account.snowflakecomputing.com/api/v2/cortex/v1` (placeholder) |  |
-| `cloudflare-workers-ai` | Cloudflare Workers AI | `https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/v1` (placeholder) |  |
-| `vercel-ai-gateway` | Vercel AI Gateway | `https://ai-gateway.vercel.sh/v1` |  |
-| `ollama` | Ollama | `https://ollama.example.internal/v1` (placeholder) |  |
-| `lmstudio` | LM Studio | `https://lmstudio.example.internal/v1` (placeholder) |  |
-| `llamacpp` | llama.cpp server | `https://llamacpp.example.internal/v1` (placeholder) |  |
-| `infinity` | Infinity | `https://infinity.example.internal` (placeholder) |  |
-| `docker-model-runner` | Docker Model Runner | `https://model-runner.example.internal/engines/v1` (placeholder) |  |
+| ID                      | Provider                           | Endpoint                                                                            | Profile           |
+| ----------------------- | ---------------------------------- | ----------------------------------------------------------------------------------- | ----------------- |
+| `groq`                  | Groq                               | `https://api.groq.com/openai/v1`                                                    | `compatible-chat` |
+| `mistral`               | Mistral                            | `https://api.mistral.ai/v1`                                                         |                   |
+| `openrouter`            | OpenRouter                         | `https://openrouter.ai/api/v1`                                                      | `compatible-chat` |
+| `together`              | Together AI                        | `https://api.together.ai/v1`                                                        |                   |
+| `vllm`                  | vLLM                               | `https://vllm.example.internal/v1` (placeholder)                                    |                   |
+| `deepseek`              | DeepSeek                           | `https://api.deepseek.com`                                                          |                   |
+| `fireworks`             | Fireworks                          | `https://api.fireworks.ai/inference/v1`                                             | `compatible-chat` |
+| `deepinfra`             | DeepInfra                          | `https://api.deepinfra.com/v1/openai`                                               |                   |
+| `huggingface`           | Hugging Face                       | `https://router.huggingface.co/v1`                                                  |                   |
+| `cohere`                | Cohere                             | `https://api.cohere.ai/compatibility/v1`                                            |                   |
+| `cohere-native-v2`      | Cohere native v2                   | `https://api.cohere.ai/v2`                                                          | `cohere-v2`       |
+| `jina`                  | Jina AI                            | `https://api.jina.ai/v1`                                                            |                   |
+| `elevenlabs`            | ElevenLabs                         | `https://api.elevenlabs.io/v1`                                                      |                   |
+| `deepgram`              | Deepgram                           | `https://api.deepgram.com/v1`                                                       |                   |
+| `assemblyai`            | AssemblyAI                         | `https://api.assemblyai.com`                                                        |                   |
+| `runway`                | Runway                             | `https://api.dev.runwayml.com/v1`                                                   |                   |
+| `stability`             | Stability AI                       | `https://api.stability.ai`                                                          |                   |
+| `recraft`               | Recraft                            | `https://external.api.recraft.ai/v1`                                                |                   |
+| `bfl`                   | Black Forest Labs                  | `https://api.bfl.ai/v1`                                                             |                   |
+| `voyage`                | Voyage AI                          | `https://api.voyageai.com/v1`                                                       |                   |
+| `xai`                   | xAI                                | `https://api.x.ai/v1`                                                               | `compatible-chat` |
+| `cerebras`              | Cerebras                           | `https://api.cerebras.ai/v1`                                                        | `compatible-chat` |
+| `sambanova`             | SambaNova                          | `https://api.sambanova.ai/v1`                                                       | `compatible-chat` |
+| `nebius`                | Nebius Token Factory               | `https://api.tokenfactory.nebius.com/v1`                                            | `compatible-chat` |
+| `novita`                | Novita AI                          | `https://api.novita.ai/openai/v1`                                                   |                   |
+| `nvidia-nim`            | NVIDIA NIM                         | `https://integrate.api.nvidia.com/v1`                                               |                   |
+| `featherless`           | Featherless                        | `https://api.featherless.ai/v1`                                                     |                   |
+| `baseten`               | Baseten                            | `https://inference.baseten.co/v1`                                                   |                   |
+| `moonshot`              | Moonshot AI                        | `https://api.moonshot.ai/v1`                                                        | `compatible-chat` |
+| `moonshot-cn`           | Moonshot AI (China)                | `https://api.moonshot.cn/v1`                                                        | `compatible-chat` |
+| `dashscope`             | Alibaba Cloud Model Studio         | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`                            | `compatible-chat` |
+| `dashscope-cn`          | Alibaba Cloud Model Studio (China) | `https://dashscope.aliyuncs.com/compatible-mode/v1`                                 | `compatible-chat` |
+| `zai`                   | Z.ai                               | `https://api.z.ai/api/paas/v4`                                                      |                   |
+| `zhipu`                 | Zhipu BigModel                     | `https://open.bigmodel.cn/api/paas/v4`                                              |                   |
+| `minimax`               | MiniMax                            | `https://api.minimax.io/v1`                                                         | `compatible-chat` |
+| `minimax-cn`            | MiniMax (China)                    | `https://api.minimax.cn/v1`                                                         | `compatible-chat` |
+| `volcengine-ark`        | Volcengine Ark                     | `https://ark.cn-beijing.volces.com/api/v3`                                          | `compatible-chat` |
+| `byteplus-modelark`     | BytePlus ModelArk                  | `https://ark.ap-southeast.bytepluses.com/api/v3`                                    | `compatible-chat` |
+| `scaleway`              | Scaleway Generative APIs           | `https://api.scaleway.ai/v1`                                                        | `compatible-chat` |
+| `ovhcloud`              | OVHcloud AI Endpoints              | `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1`                                  | `compatible-chat` |
+| `nscale`                | Nscale                             | `https://inference.api.nscale.com/v1`                                               | `compatible-chat` |
+| `databricks`            | Databricks                         | `https://your-workspace.cloud.databricks.com/ai-gateway/mlflow/v1` (placeholder)    |                   |
+| `snowflake-cortex`      | Snowflake Cortex                   | `https://your-account.snowflakecomputing.com/api/v2/cortex/v1` (placeholder)        |                   |
+| `cloudflare-workers-ai` | Cloudflare Workers AI              | `https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/v1` (placeholder) |                   |
+| `vercel-ai-gateway`     | Vercel AI Gateway                  | `https://ai-gateway.vercel.sh/v1`                                                   |                   |
+| `ollama`                | Ollama                             | `https://ollama.example.internal/v1` (placeholder)                                  |                   |
+| `lmstudio`              | LM Studio                          | `https://lmstudio.example.internal/v1` (placeholder)                                |                   |
+| `llamacpp`              | llama.cpp server                   | `https://llamacpp.example.internal/v1` (placeholder)                                |                   |
+| `infinity`              | Infinity                           | `https://infinity.example.internal` (placeholder)                                   |                   |
+| `docker-model-runner`   | Docker Model Runner                | `https://model-runner.example.internal/engines/v1` (placeholder)                    |                   |
 
 A preset is not provider or model certification. Creation and edits still run
 HTTPS, public-egress, SSRF, and reachability checks unless the host or address

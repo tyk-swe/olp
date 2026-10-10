@@ -35,7 +35,7 @@ func (w *notificationWorker) claimKeyReminders(ctx context.Context, tx pgx.Tx) (
  jsonb_build_object('api_key_id',due.id,'api_key_name',due.name,'project_id',due.project_id,'due_at',due.due_at,'reason',due.reason),'pending'
  FROM due JOIN olp.notification_rules r ON r.event='key.expiring' AND r.subject_kind='api_key' AND r.subject_id=due.id AND r.project_id IS NOT DISTINCT FROM due.project_id
  JOIN olp.notification_destinations d ON d.id=r.destination_id
- WHERE r.enabled AND d.enabled AND due.due_at<=now()+interval '24 hours'
+ WHERE r.enabled AND d.enabled AND due.due_at<=now()+make_interval(secs=>COALESCE((r.configuration->>'lead_time_seconds')::integer,86400))
  ON CONFLICT DO NOTHING`)
 	return int(tag.RowsAffected()), err
 }

@@ -55,24 +55,111 @@
   let error = $state('');
   let notice = $state('');
 
+  type DestinationType = NonNullable<NotificationDestination['type']>;
+  const destinationTypes: { value: DestinationType; label: string }[] = [
+    { value: 'webhook', label: 'Webhook' },
+    { value: 'slack', label: 'Slack' },
+    { value: 'msteams', label: 'Microsoft Teams' },
+    { value: 'discord', label: 'Discord' },
+    { value: 'pagerduty', label: 'PagerDuty' },
+    { value: 'email', label: 'Email (SMTP)' }
+  ];
+  const isChat = (type: DestinationType) =>
+    type === 'slack' || type === 'msteams' || type === 'discord';
+  const secretRequired = (type: DestinationType) =>
+    isChat(type) || type === 'pagerduty';
+
   let destName = $state('');
+  let destType = $state<DestinationType>('webhook');
   let destUrl = $state('');
+  let destWebhookUrl = $state('');
+  let destRoutingKey = $state('');
+  let destEmailFrom = $state('');
+  let destEmailTo = $state('');
+  let destEmailSubjectPrefix = $state('');
+  let destEmailCa = $state('');
+  let destEmailUsername = $state('');
+  let destEmailPassword = $state('');
   let destProjectId = $state('');
   let destSecret = $state('');
   let destBusy = $state(false);
 
-  let editDestId = $state('');
-  let editDestName = $state('');
-  let editDestUrl = $state('');
-  let editDestSecret = $state('');
-  let editDestBusy = $state(false);
+  function resetDestinationForm() {
+    destName = '';
+    destUrl = '';
+    destWebhookUrl = '';
+    destRoutingKey = '';
+    destEmailFrom = '';
+    destEmailTo = '';
+    destEmailSubjectPrefix = '';
+    destEmailCa = '';
+    destEmailUsername = '';
+    destEmailPassword = '';
+    destSecret = '';
+  }
 
-  function startDestEdit(destination: NotificationDestination) {
-    editDestId = destination.id;
-    editDestName = destination.name;
-    editDestUrl = destination.url;
-    editDestSecret = '';
-    error = '';
+  function destinationEmailConfiguration() {
+    const configuration: Record<string, unknown> = {
+      from: destEmailFrom.trim(),
+      to: destEmailTo
+        .split(',')
+        .map((address) => address.trim())
+        .filter(Boolean)
+    };
+    if (destEmailSubjectPrefix.trim())
+      configuration.subject_prefix = destEmailSubjectPrefix.trim();
+    if (destEmailCa.trim()) configuration.ca_certificate = destEmailCa.trim();
+    return configuration;
+  }
+
+  function destinationCreateBody() {
+    const name = destName.trim();
+    const project_id = destProjectId || null;
+    switch (destType) {
+      case 'slack':
+      case 'msteams':
+      case 'discord':
+        return {
+          name,
+          type: destType,
+          url: destUrl.trim(),
+          project_id,
+          secret: { webhook_url: destWebhookUrl.trim() }
+        };
+      case 'pagerduty':
+        return {
+          name,
+          type: destType,
+          url: destUrl.trim(),
+          project_id,
+          secret: { routing_key: destRoutingKey.trim() }
+        };
+      case 'email': {
+        const secret =
+          destEmailUsername.trim() || destEmailPassword
+            ? {
+                username: destEmailUsername.trim(),
+                password: destEmailPassword
+              }
+            : null;
+        return {
+          name,
+          type: destType,
+          url: destUrl.trim(),
+          project_id,
+          configuration: destinationEmailConfiguration(),
+          secret
+        };
+      }
+      default:
+        return {
+          name,
+          type: 'webhook' as const,
+          url: destUrl.trim(),
+          project_id,
+          secret: destSecret.trim() || null
+        };
+    }
   }
 
   async function submitDestination(event: SubmitEvent) {
@@ -81,13 +168,8 @@
     destBusy = true;
     error = notice = '';
     try {
-      await createNotificationDestination({
-        name: destName.trim(),
-        url: destUrl.trim(),
-        project_id: destProjectId || null,
-        secret: destSecret.trim() || null
-      });
-      destName = destUrl = destSecret = '';
+      await createNotificationDestination(destinationCreateBody());
+      resetDestinationForm();
       notice = 'Destination created.';
       await queryClient.invalidateQueries({
         queryKey: notificationKeys.root
@@ -97,6 +179,43 @@
     } finally {
       destBusy = false;
     }
+  }
+
+  let editDestId = $state('');
+  let editDestName = $state('');
+  let editDestUrl = $state('');
+  let editDestSecret = $state('');
+  let editDestClear = $state(false);
+  let editDestBusy = $state(false);
+
+  let editEmailFrom = $state('');
+  let editEmailTo = $state('');
+  let editEmailPrefix = $state('');
+  let editEmailCa = $state('');
+
+  function startDestEdit(destination: NotificationDestination) {
+    editDestId = destination.id;
+    editDestName = destination.name;
+    editDestUrl = destination.url;
+    editDestSecret = '';
+    editDestClear = false;
+    const config = (destination.configuration ?? {}) as Record<string, unknown>;
+    editEmailFrom = String(config.from ?? '');
+    editEmailTo = Array.isArray(config.to)
+      ? (config.to as string[]).join(', ')
+      : '';
+    editEmailPrefix = String(config.subject_prefix ?? '');
+    editEmailCa = String(config.ca_certificate ?? '');
+    error = '';
+  }
+
+  function editSecretValue(destination: NotificationDestination) {
+    const type = destination.type ?? 'webhook';
+    const raw = editDestSecret.trim();
+    if (isChat(type)) return { webhook_url: raw };
+    if (type === 'pagerduty') return { routing_key: raw };
+    if (type === 'email') return JSON.parse(raw) as Record<string, string>;
+    return raw;
   }
 
   async function saveDestination(destination: NotificationDestination) {
@@ -110,12 +229,35 @@
     editDestBusy = true;
     error = notice = '';
     try {
+      const isEmail = (destination.type ?? 'webhook') === 'email';
       await updateNotificationDestination(destination, {
         name: editDestName.trim(),
         url: editDestUrl.trim(),
-        ...(editDestSecret.trim() ? { secret: editDestSecret.trim() } : {})
+        ...(isEmail
+          ? {
+              configuration: {
+                from: editEmailFrom.trim(),
+                to: editEmailTo
+                  .split(',')
+                  .map((address) => address.trim())
+                  .filter(Boolean),
+                ...(editEmailPrefix.trim()
+                  ? { subject_prefix: editEmailPrefix.trim() }
+                  : {}),
+                ...(editEmailCa.trim()
+                  ? { ca_certificate: editEmailCa.trim() }
+                  : {})
+              }
+            }
+          : {}),
+        ...(editDestClear
+          ? { secret: null }
+          : editDestSecret.trim()
+            ? { secret: editSecretValue(destination) }
+            : {})
       });
       editDestId = '';
+      editDestSecret = '';
       notice = 'Destination updated.';
       await queryClient.invalidateQueries({
         queryKey: notificationKeys.root
@@ -142,10 +284,156 @@
     }
   }
 
+  const eventLabels: Record<NotificationEvent, string> = {
+    'budget.threshold': 'Budget threshold',
+    'budget.exhausted': 'Budget exhausted',
+    'provider.grant.lapsed': 'Grant lapsed',
+    'provider.circuit.open': 'Provider circuit opened',
+    'provider.circuit.closed': 'Provider circuit closed',
+    'provider.error_rate': 'Provider error rate',
+    'provider.credential.failing': 'Provider credential failing',
+    'route.latency': 'Route latency',
+    'model.retirement': 'Model retirement',
+    'runtime.install_failed': 'Runtime install failed',
+    'worker.stale': 'Worker stale',
+    'key.expiring': 'Key expiry or rotation due',
+    'report.spend': 'Spend report'
+  };
+
+  const projectScopedEvents = new Set<NotificationEvent>([
+    'budget.threshold',
+    'key.expiring',
+    'budget.exhausted',
+    'route.latency',
+    'model.retirement',
+    'report.spend'
+  ]);
+
+  const eventConfigFields: Record<
+    string,
+    { key: string; label: string; inputmode?: 'numeric' | 'decimal' }[]
+  > = {
+    'provider.error_rate': [
+      { key: 'threshold', label: 'Error-rate threshold', inputmode: 'decimal' },
+      {
+        key: 'recovery_threshold',
+        label: 'Recovery threshold',
+        inputmode: 'decimal'
+      },
+      { key: 'window_seconds', label: 'Window seconds', inputmode: 'numeric' },
+      {
+        key: 'minimum_samples',
+        label: 'Minimum samples',
+        inputmode: 'numeric'
+      },
+      {
+        key: 'cooldown_seconds',
+        label: 'Cooldown seconds',
+        inputmode: 'numeric'
+      }
+    ],
+    'route.latency': [
+      { key: 'threshold', label: 'Latency threshold ms', inputmode: 'decimal' },
+      {
+        key: 'recovery_threshold',
+        label: 'Recovery threshold ms',
+        inputmode: 'decimal'
+      },
+      { key: 'window_seconds', label: 'Window seconds', inputmode: 'numeric' },
+      {
+        key: 'minimum_samples',
+        label: 'Minimum samples',
+        inputmode: 'numeric'
+      },
+      {
+        key: 'cooldown_seconds',
+        label: 'Cooldown seconds',
+        inputmode: 'numeric'
+      }
+    ],
+    'provider.credential.failing': [
+      {
+        key: 'threshold',
+        label: 'Failure count threshold',
+        inputmode: 'decimal'
+      },
+      {
+        key: 'recovery_threshold',
+        label: 'Recovery threshold',
+        inputmode: 'decimal'
+      },
+      { key: 'window_seconds', label: 'Window seconds', inputmode: 'numeric' },
+      {
+        key: 'minimum_samples',
+        label: 'Minimum samples',
+        inputmode: 'numeric'
+      },
+      {
+        key: 'cooldown_seconds',
+        label: 'Cooldown seconds',
+        inputmode: 'numeric'
+      }
+    ],
+    'model.retirement': [
+      { key: 'lead_days', label: 'Lead days', inputmode: 'numeric' },
+      {
+        key: 'cooldown_seconds',
+        label: 'Cooldown seconds',
+        inputmode: 'numeric'
+      }
+    ],
+    'runtime.install_failed': [
+      {
+        key: 'cooldown_seconds',
+        label: 'Cooldown seconds',
+        inputmode: 'numeric'
+      }
+    ],
+    'worker.stale': [
+      {
+        key: 'cooldown_seconds',
+        label: 'Cooldown seconds',
+        inputmode: 'numeric'
+      }
+    ],
+    'provider.circuit.open': [
+      {
+        key: 'cooldown_seconds',
+        label: 'Cooldown seconds',
+        inputmode: 'numeric'
+      }
+    ],
+    'provider.circuit.closed': [
+      {
+        key: 'cooldown_seconds',
+        label: 'Cooldown seconds',
+        inputmode: 'numeric'
+      }
+    ],
+    'budget.exhausted': [
+      {
+        key: 'cooldown_seconds',
+        label: 'Cooldown seconds',
+        inputmode: 'numeric'
+      }
+    ],
+    'key.expiring': [
+      {
+        key: 'lead_time_seconds',
+        label: 'Lead time seconds',
+        inputmode: 'numeric'
+      }
+    ]
+  };
+
   let ruleName = $state('');
   let ruleEvent = $state<NotificationEvent>('budget.threshold');
   const watchesBudget = $derived(ruleEvent === 'budget.threshold');
   const watchesKey = $derived(ruleEvent === 'key.expiring');
+  const genericRule = $derived(
+    !watchesBudget && ruleEvent !== 'provider.grant.lapsed'
+  );
+  const ruleProjectScoped = $derived(projectScopedEvents.has(ruleEvent));
   $effect(() => {
     if (watchesKey) ruleSubjectKind = 'api_key';
   });
@@ -154,8 +442,16 @@
   let ruleSubjectId = $state('');
   let ruleWindow = $state<'day' | 'week' | 'month'>('month');
   let ruleThreshold = $state('80');
+  let ruleMetric = $state<'ttft' | 'latency'>('ttft');
+  let rulePeriod = $state<'daily' | 'weekly' | 'monthly'>('daily');
+  let ruleConfig = $state<Record<string, string>>({});
   let ruleDestinationId = $state('');
   let ruleBusy = $state(false);
+
+  $effect(() => {
+    void ruleEvent;
+    ruleConfig = {};
+  });
 
   const subjectOptions = $derived(
     ruleSubjectKind === 'api_key'
@@ -170,7 +466,7 @@
     (destinations.data ?? []).filter(
       (destination) =>
         (destination.project_id ?? null) ===
-        (watchesBudget || watchesKey ? ruleProjectId || null : null)
+        (ruleProjectScoped ? ruleProjectId || null : null)
     )
   );
 
@@ -188,6 +484,29 @@
     )
       ruleDestinationId = '';
   });
+
+  function ruleConfiguration() {
+    const configuration: Record<string, unknown> = {};
+    for (const field of eventConfigFields[ruleEvent] ?? []) {
+      const value = (ruleConfig[field.key] ?? '').trim();
+      if (!value) continue;
+      configuration[field.key] = /^(threshold|recovery_threshold)$/.test(
+        field.key
+      )
+        ? value
+        : /^\d+$/.test(value)
+          ? Number(value)
+          : value;
+    }
+    if (ruleEvent === 'route.latency') configuration.metric = ruleMetric;
+    if (ruleEvent === 'report.spend') configuration.period = rulePeriod;
+    if (
+      ruleEvent === 'key.expiring' &&
+      (ruleConfig.lead_time_seconds ?? '').trim()
+    )
+      configuration.lead_time_seconds = Number(ruleConfig.lead_time_seconds);
+    return Object.keys(configuration).length ? configuration : undefined;
+  }
 
   async function submitRule(event: SubmitEvent) {
     event.preventDefault();
@@ -209,6 +528,7 @@
     }
     ruleBusy = true;
     error = notice = '';
+    const configuration = ruleConfiguration();
     try {
       await createNotificationRule(
         watchesBudget
@@ -229,17 +549,23 @@
                 project_id: ruleProjectId || null,
                 subject_kind: 'api_key',
                 subject_id: ruleSubjectId,
-                destination_id: ruleDestinationId
+                destination_id: ruleDestinationId,
+                ...(configuration ? { configuration } : {})
               }
             : {
                 name: ruleName.trim(),
                 event: ruleEvent,
-                destination_id: ruleDestinationId
+                destination_id: ruleDestinationId,
+                ...(ruleProjectScoped
+                  ? { project_id: ruleProjectId || null }
+                  : {}),
+                ...(configuration ? { configuration } : {})
               }
       );
       ruleName = '';
       ruleSubjectId = '';
       ruleDestinationId = '';
+      ruleConfig = {};
       notice = 'Rule created.';
       await queryClient.invalidateQueries({
         queryKey: notificationKeys.root
@@ -248,6 +574,78 @@
       error = errorMessage(cause, 'The rule could not be created.');
     } finally {
       ruleBusy = false;
+    }
+  }
+
+  let editRuleId = $state('');
+  let editRuleName = $state('');
+  let editRuleDestinationId = $state('');
+  let editRuleConfig = $state<Record<string, string>>({});
+  let editRuleMetric = $state<'ttft' | 'latency'>('ttft');
+  let editRulePeriod = $state<'daily' | 'weekly' | 'monthly'>('daily');
+  let editRuleBusy = $state(false);
+
+  function startRuleEdit(rule: NotificationRule) {
+    editRuleId = rule.id;
+    editRuleName = rule.name;
+    editRuleDestinationId = rule.destination_id;
+    const config = (rule.configuration ?? {}) as Record<string, unknown>;
+    editRuleConfig = {};
+    for (const field of eventConfigFields[rule.event] ?? []) {
+      const value = config[field.key];
+      if (value !== undefined && value !== null)
+        editRuleConfig[field.key] = String(value);
+    }
+    if (typeof config.metric === 'string')
+      editRuleMetric = config.metric === 'latency' ? 'latency' : 'ttft';
+    if (typeof config.period === 'string')
+      editRulePeriod = config.period as 'daily' | 'weekly' | 'monthly';
+    error = '';
+  }
+
+  function editRuleConfiguration(rule: NotificationRule) {
+    const configuration: Record<string, unknown> = {};
+    for (const field of eventConfigFields[rule.event] ?? []) {
+      const value = (editRuleConfig[field.key] ?? '').trim();
+      if (!value) continue;
+      configuration[field.key] = /^(threshold|recovery_threshold)$/.test(
+        field.key
+      )
+        ? value
+        : /^\d+$/.test(value)
+          ? Number(value)
+          : value;
+    }
+    if (rule.event === 'route.latency') configuration.metric = editRuleMetric;
+    if (rule.event === 'report.spend') configuration.period = editRulePeriod;
+    return configuration;
+  }
+
+  async function saveRule(rule: NotificationRule) {
+    if (
+      !canManage ||
+      editRuleBusy ||
+      !editRuleName.trim() ||
+      !editRuleDestinationId
+    )
+      return;
+    editRuleBusy = true;
+    error = notice = '';
+    try {
+      await updateNotificationRule(rule, {
+        name: editRuleName.trim(),
+        destination_id: editRuleDestinationId,
+        configuration: editRuleConfiguration(rule)
+      });
+      editRuleId = '';
+      notice = 'Rule updated.';
+      await queryClient.invalidateQueries({
+        queryKey: notificationKeys.root
+      });
+    } catch (cause) {
+      error = errorMessage(cause, 'The rule could not be updated.');
+    } finally {
+      editRuleBusy = false;
     }
   }
 
@@ -264,15 +662,19 @@
     }
   }
 
-  const eventLabels: Record<NotificationEvent, string> = {
-    'budget.threshold': 'Budget threshold',
-    'provider.grant.lapsed': 'Grant lapsed',
-    'key.expiring': 'Key expiry or rotation due'
-  };
-
   function subjectLabel(rule: NotificationRule) {
     if (rule.event === 'provider.grant.lapsed') return 'Every provider';
+    if (rule.subject_id == null) return '—';
     return `${rule.subject_kind === 'api_key' ? 'API key' : 'Budget group'} · ${rule.subject_name ?? rule.subject_id}`;
+  }
+
+  function configurationLabel(rule: NotificationRule) {
+    const config = (rule.configuration ?? {}) as Record<string, unknown>;
+    const parts: string[] = [];
+    for (const [key, value] of Object.entries(config)) {
+      parts.push(`${key}=${String(value)}`);
+    }
+    return parts.length ? parts.join(', ') : '—';
   }
 
   // Budget windows follow the installation's budget time zone, which may
@@ -299,11 +701,11 @@
   <p class="eyebrow">Notifications</p>
   <h2 id="notifications-heading">Notification destinations and rules</h2>
   <p class="section-help">
-    {#if services.notificationsActive}Budget thresholds, lapsed provider grants,
-      and key expiry or rotation dates send metadata-only webhooks. Failed
-      deliveries retry with backoff.{:else}Rules and destinations are stored,
-      but this installation is not running the delivery worker, so no
-      notifications will be sent yet.{/if}
+    {#if services.notificationsActive}Budget thresholds, provider signals,
+      runtime health and key expiry or rotation dates send metadata-only
+      notifications. Failed deliveries retry with backoff.{:else}Rules and
+      destinations are stored, but this installation is not running the delivery
+      worker, so no notifications will be sent yet.{/if}
   </p>
 
   {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
@@ -321,12 +723,31 @@
           />
         </div>
         <div class="form-field">
-          <label for="dest-url">Webhook URL</label><input
+          <label for="dest-type">Type</label><select
+            id="dest-type"
+            bind:value={destType}
+            >{#each destinationTypes as option (option.value)}<option
+                value={option.value}>{option.label}</option
+              >{/each}</select
+          >
+        </div>
+        <div class="form-field">
+          <label for="dest-url">
+            {#if isChat(destType)}Channel origin URL{:else if destType === 'pagerduty'}Events
+              API endpoint{:else if destType === 'email'}SMTP URL{:else}Webhook
+              URL{/if}</label
+          ><input
             id="dest-url"
             type="url"
             bind:value={destUrl}
             required
-            placeholder="https://hooks.example.com/olp"
+            placeholder={isChat(destType)
+              ? 'https://hooks.slack.com'
+              : destType === 'pagerduty'
+                ? 'https://events.pagerduty.com/v2/enqueue'
+                : destType === 'email'
+                  ? 'smtps://smtp.example.com:465'
+                  : 'https://hooks.example.com/olp'}
           />
         </div>
         <ProjectScopeField
@@ -334,14 +755,87 @@
           bind:value={destProjectId}
           unassigned={installationWide}
         />
-        <div class="form-field">
-          <label for="dest-secret">Signing secret</label><input
-            id="dest-secret"
-            bind:value={destSecret}
-            autocomplete="off"
-            placeholder="Optional HMAC secret"
-          />
-        </div>
+        {#if isChat(destType)}
+          <div class="form-field">
+            <label for="dest-webhook-url">Channel webhook URL</label><input
+              id="dest-webhook-url"
+              bind:value={destWebhookUrl}
+              autocomplete="off"
+              required
+              placeholder="Full tokenized webhook URL, sealed"
+            />
+            <p class="section-help">
+              Stored sealed; never shown again. Must share the origin URL above.
+            </p>
+          </div>
+        {:else if destType === 'pagerduty'}
+          <div class="form-field">
+            <label for="dest-routing-key">Routing key</label><input
+              id="dest-routing-key"
+              bind:value={destRoutingKey}
+              autocomplete="off"
+              required
+              placeholder="PagerDuty Events API routing key, sealed"
+            />
+          </div>
+        {:else if destType === 'email'}
+          <div class="form-field">
+            <label for="dest-email-from">From address</label><input
+              id="dest-email-from"
+              bind:value={destEmailFrom}
+              required
+              placeholder="alerts@example.com"
+            />
+          </div>
+          <div class="form-field">
+            <label for="dest-email-to">To addresses</label><input
+              id="dest-email-to"
+              bind:value={destEmailTo}
+              required
+              placeholder="ops@example.com, dev@example.com"
+            />
+          </div>
+          <div class="form-field">
+            <label for="dest-email-prefix">Subject prefix</label><input
+              id="dest-email-prefix"
+              bind:value={destEmailSubjectPrefix}
+              placeholder="Optional [OLP] prefix"
+            />
+          </div>
+          <div class="form-field">
+            <label for="dest-email-ca">CA certificate (PEM)</label><textarea
+              id="dest-email-ca"
+              bind:value={destEmailCa}
+              rows="3"
+              placeholder="Optional pinned CA bundle"></textarea>
+          </div>
+          <div class="form-field">
+            <label for="dest-email-username">SMTP username</label><input
+              id="dest-email-username"
+              bind:value={destEmailUsername}
+              autocomplete="off"
+              placeholder="Optional"
+            />
+          </div>
+          <div class="form-field">
+            <label for="dest-email-password">SMTP password</label><input
+              id="dest-email-password"
+              type="password"
+              bind:value={destEmailPassword}
+              autocomplete="new-password"
+              placeholder="Optional, sealed"
+            />
+          </div>
+        {:else}
+          <div class="form-field">
+            <label for="dest-secret">Signing secret</label><input
+              id="dest-secret"
+              bind:value={destSecret}
+              autocomplete="off"
+              placeholder="Optional HMAC secret"
+            />
+          </div>
+        {/if}
       </div>
       <div class="form-actions">
         <button
@@ -373,9 +867,11 @@
       <table class="data-table">
         <thead
           ><tr
-            ><th scope="col">Name</th><th scope="col">URL</th><th scope="col"
-              >Project</th
-            ><th scope="col">Enabled</th>{#if canManage}<th scope="col"
+            ><th scope="col">Name</th><th scope="col">Type</th><th scope="col"
+              >URL</th
+            ><th scope="col">Project</th><th scope="col">Secret</th><th
+              scope="col">Enabled</th
+            >{#if canManage}<th scope="col"
                 ><span class="sr-only">Actions</span></th
               >{/if}</tr
           ></thead
@@ -390,21 +886,54 @@
                     bind:value={editDestName}
                     required
                   /></td
-                ><td
+                ><td>{destination.type ?? 'webhook'}</td><td
                   ><input
-                    aria-label="Webhook URL"
+                    aria-label="Destination URL"
                     type="url"
                     bind:value={editDestUrl}
                     required
                   /></td
                 ><td>{destination.project_name ?? 'Installation-wide'}</td><td
-                  >{destination.enabled ? 'Yes' : 'No'}</td
-                ><td
                   ><input
-                    aria-label="New signing secret"
+                    aria-label="Replacement secret"
                     bind:value={editDestSecret}
-                    placeholder="Keep current"
-                  /><button
+                    placeholder={isChat(destination.type ?? 'webhook')
+                      ? 'New tokenized webhook URL'
+                      : destination.type === 'pagerduty'
+                        ? 'New routing key'
+                        : destination.type === 'email'
+                          ? '{"username":"…","password":"…"}'
+                          : 'Keep current'}
+                  />{#if !secretRequired(destination.type ?? 'webhook') || !destination.enabled}<label
+                      class="inline-check"
+                      ><input
+                        type="checkbox"
+                        bind:checked={editDestClear}
+                      />Clear credential</label
+                    >{/if}
+                  {#if (destination.type ?? 'webhook') === 'email'}<div
+                      class="form-grid"
+                    >
+                      <input
+                        aria-label="From address"
+                        bind:value={editEmailFrom}
+                        placeholder="From"
+                      /><input
+                        aria-label="To addresses"
+                        bind:value={editEmailTo}
+                        placeholder="To, comma-separated"
+                      /><input
+                        aria-label="Subject prefix"
+                        bind:value={editEmailPrefix}
+                        placeholder="Subject prefix"
+                      /><input
+                        aria-label="CA certificate"
+                        bind:value={editEmailCa}
+                        placeholder="CA certificate (PEM)"
+                      />
+                    </div>{/if}</td
+                ><td>{destination.enabled ? 'Yes' : 'No'}</td><td
+                  ><button
                     class="text-button"
                     type="button"
                     disabled={editDestBusy}
@@ -414,17 +943,21 @@
                     class="text-button"
                     type="button"
                     disabled={editDestBusy}
-                    onclick={() => (editDestId = '')}>Cancel</button
+                    onclick={() => {
+                      editDestId = '';
+                      editDestSecret = '';
+                    }}>Cancel</button
                   ></td
                 ></tr
               >
             {:else}
               <tr
                 ><td><strong>{destination.name}</strong></td><td
-                  ><span class="mono">{destination.url}</span></td
-                ><td>{destination.project_name ?? 'Installation-wide'}</td><td
-                  >{destination.enabled ? 'Yes' : 'No'}</td
-                >{#if canManage}<td
+                  >{destination.type ?? 'webhook'}</td
+                ><td><span class="mono">{destination.url}</span></td><td
+                  >{destination.project_name ?? 'Installation-wide'}</td
+                ><td>{destination.secret_configured ? 'Configured' : '—'}</td
+                ><td>{destination.enabled ? 'Yes' : 'No'}</td>{#if canManage}<td
                     ><button
                       class="text-button"
                       type="button"
@@ -455,28 +988,26 @@
             required
           />
         </div>
-        {#if installationWide}
-          <div class="form-field">
-            <label for="rule-event">Event</label><select
-              id="rule-event"
-              bind:value={ruleEvent}
-              ><option value="budget.threshold"
-                >{eventLabels['budget.threshold']}</option
-              ><option value="key.expiring"
-                >{eventLabels['key.expiring']}</option
-              >
-              <option value="provider.grant.lapsed"
-                >{eventLabels['provider.grant.lapsed']}</option
-              ></select
-            >
-          </div>
-        {/if}
-        {#if watchesBudget || watchesKey}
+        <div class="form-field">
+          <label for="rule-event">Event</label><select
+            id="rule-event"
+            bind:value={ruleEvent}
+            >{#each Object.entries(eventLabels) as [value, label] (value)}<option
+                {value}
+                disabled={!installationWide &&
+                  !projectScopedEvents.has(value as NotificationEvent)}
+                >{label}</option
+              >{/each}</select
+          >
+        </div>
+        {#if ruleProjectScoped}
           <ProjectScopeField
             id="rule-project"
             bind:value={ruleProjectId}
             unassigned={installationWide}
           />
+        {/if}
+        {#if watchesBudget || watchesKey}
           <div class="form-field">
             <label for="rule-subject-kind">Subject</label><select
               id="rule-subject-kind"
@@ -517,10 +1048,44 @@
                 required
               />
             </div>
-          {:else}<p class="section-help">
-              Sends once for each expiry or declared rotation date within 24
-              hours, or when overdue. No secret is generated or sent.
-            </p>{/if}
+          {/if}
+        {/if}
+        {#each eventConfigFields[ruleEvent] ?? [] as field (field.key)}
+          <div class="form-field">
+            <label for="rule-config-{field.key}">{field.label}</label><input
+              id="rule-config-{field.key}"
+              inputmode={field.inputmode}
+              value={ruleConfig[field.key] ?? ''}
+              oninput={(e) =>
+                (ruleConfig = {
+                  ...ruleConfig,
+                  [field.key]: (e.target as HTMLInputElement).value
+                })}
+              placeholder="Default"
+            />
+          </div>
+        {/each}
+        {#if ruleEvent === 'route.latency'}
+          <div class="form-field">
+            <label for="rule-metric">Metric</label><select
+              id="rule-metric"
+              bind:value={ruleMetric}
+              ><option value="ttft">Time to first token</option><option
+                value="latency">Total latency</option
+              ></select
+            >
+          </div>
+        {/if}
+        {#if ruleEvent === 'report.spend'}
+          <div class="form-field">
+            <label for="rule-period">Period</label><select
+              id="rule-period"
+              bind:value={rulePeriod}
+              ><option value="daily">Daily</option><option value="weekly"
+                >Weekly</option
+              ><option value="monthly">Monthly</option></select
+            >
+          </div>
         {/if}
         <div class="form-field">
           <label for="rule-destination">Destination</label><select
@@ -544,11 +1109,14 @@
             !ruleDestinationId}>{ruleBusy ? 'Creating…' : 'Create rule'}</button
         >
       </div>
-      {#if !watchesBudget && !watchesKey}<p class="section-help">
-          A grant lapses when its provider plugin can no longer refresh it. Each
-          lapse, on any provider, notifies an installation-wide destination
-          once.
-        </p>{/if}
+      <p class="section-help">
+        {#if watchesBudget}A delivery is sent when a subject's accrued spend
+          crosses the threshold within the window.{:else if watchesKey}Sent once
+          when the key expires or reaches its rotation date within the lead
+          time.{:else if genericRule}Metadata-only trigger and recovery
+          deliveries; cooldown repeats share the incident key.{:else}A grant
+          lapses when its provider plugin can no longer refresh it.{/if}
+      </p>
     </form>
   {/if}
 
@@ -569,7 +1137,7 @@
           ><tr
             ><th scope="col">Name</th><th scope="col">Event</th><th scope="col"
               >Subject</th
-            ><th scope="col">Window</th><th scope="col">Threshold</th><th
+            ><th scope="col">Window</th><th scope="col">Configuration</th><th
               scope="col">Destination</th
             ><th scope="col">Enabled</th>{#if canManage}<th scope="col"
                 ><span class="sr-only">Actions</span></th
@@ -578,27 +1146,94 @@
         >
         <tbody>
           {#each rules.data ?? [] as rule (rule.id)}
-            <tr
-              ><td
-                ><strong>{rule.name}</strong><br /><small
-                  >{rule.project_name ?? 'Installation-wide'}</small
-                ></td
-              ><td>{eventLabels[rule.event]}</td><td>{subjectLabel(rule)}</td
-              ><td>{windowLabel(rule.window_kind)}</td><td
-                >{rule.threshold_percent == null
-                  ? '—'
-                  : `${rule.threshold_percent}%`}</td
-              ><td>{rule.destination_name}</td><td
-                >{rule.enabled ? 'Yes' : 'No'}</td
-              >{#if canManage}<td
+            {#if editRuleId === rule.id}
+              <tr
+                ><td
+                  ><input
+                    aria-label="Rule name"
+                    bind:value={editRuleName}
+                    required
+                  /><br /><small
+                    >{rule.project_name ?? 'Installation-wide'}</small
+                  ></td
+                ><td>{eventLabels[rule.event]}</td><td>{subjectLabel(rule)}</td
+                ><td>{windowLabel(rule.window_kind)}</td><td
+                  ><div class="form-grid">
+                    {#each eventConfigFields[rule.event] ?? [] as field (field.key)}
+                      <input
+                        aria-label={field.label}
+                        inputmode={field.inputmode}
+                        value={editRuleConfig[field.key] ?? ''}
+                        oninput={(e) =>
+                          (editRuleConfig = {
+                            ...editRuleConfig,
+                            [field.key]: (e.target as HTMLInputElement).value
+                          })}
+                        placeholder={`${field.key} (default)`}
+                      />
+                    {/each}
+                    {#if rule.event === 'route.latency'}<select
+                        aria-label="Metric"
+                        bind:value={editRuleMetric}
+                        ><option value="ttft">Time to first token</option
+                        ><option value="latency">Total latency</option></select
+                      >{/if}
+                    {#if rule.event === 'report.spend'}<select
+                        aria-label="Period"
+                        bind:value={editRulePeriod}
+                        ><option value="daily">Daily</option><option
+                          value="weekly">Weekly</option
+                        ><option value="monthly">Monthly</option></select
+                      >{/if}
+                  </div></td
+                ><td
+                  ><select
+                    aria-label="Destination"
+                    bind:value={editRuleDestinationId}
+                    >{#each (destinations.data ?? []).filter((d) => (d.project_id ?? null) === (rule.project_id ?? null)) as destination (destination.id)}<option
+                        value={destination.id}>{destination.name}</option
+                      >{/each}</select
+                  ></td
+                ><td>{rule.enabled ? 'Yes' : 'No'}</td><td
                   ><button
                     class="text-button"
                     type="button"
-                    onclick={() => toggleRule(rule)}
-                    >{rule.enabled ? 'Disable' : 'Enable'}</button
+                    disabled={editRuleBusy}
+                    onclick={() => saveRule(rule)}
+                    >{editRuleBusy ? 'Saving…' : 'Save'}</button
+                  ><button
+                    class="text-button"
+                    type="button"
+                    disabled={editRuleBusy}
+                    onclick={() => (editRuleId = '')}>Cancel</button
                   ></td
-                >{/if}</tr
-            >
+                ></tr
+              >
+            {:else}
+              <tr
+                ><td
+                  ><strong>{rule.name}</strong><br /><small
+                    >{rule.project_name ?? 'Installation-wide'}</small
+                  ></td
+                ><td>{eventLabels[rule.event]}</td><td>{subjectLabel(rule)}</td
+                ><td>{windowLabel(rule.window_kind)}</td><td
+                  ><span class="mono">{configurationLabel(rule)}</span></td
+                ><td>{rule.destination_name}</td><td
+                  >{rule.enabled ? 'Yes' : 'No'}</td
+                >{#if canManage}<td
+                    ><button
+                      class="text-button"
+                      type="button"
+                      onclick={() => startRuleEdit(rule)}>Edit</button
+                    ><button
+                      class="text-button"
+                      type="button"
+                      onclick={() => toggleRule(rule)}
+                      >{rule.enabled ? 'Disable' : 'Enable'}</button
+                    ></td
+                  >{/if}</tr
+              >
+            {/if}
           {/each}
         </tbody>
       </table>
@@ -724,5 +1359,12 @@
   }
   .badge.danger {
     color: var(--danger);
+  }
+  .inline-check {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: var(--text-caption);
+    color: var(--foreground-muted);
   }
 </style>

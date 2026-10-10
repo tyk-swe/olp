@@ -315,6 +315,13 @@ func CollectMetrics(ctx context.Context, s *State) (string, error) {
 	// Provider health series.
 	writeProviderMetrics(&body, providers)
 
+	if s.Export != nil {
+		s.Export(ctx, &body)
+	}
+	if s.Business != nil {
+		s.Business.WritePrometheus(&body)
+	}
+
 	return body.String(), nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -412,4 +413,314 @@ func (f *notificationDeliveryFixture) assertDelivered(t *testing.T, wantAttempts
 	if got := f.requests.Load(); got != 1 {
 		t.Fatalf("webhook requests = %d, want 1", got)
 	}
+}
+
+func TestIntegrationIncidentLockSerializesReplicas(t *testing.T) {
+	ctx := t.Context()
+	pool := notificationPool(t)
+	policy := &egress.Policy{
+		AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")},
+		PlainHTTPHosts:  []string{"127.0.0.1"},
+	}
+	release := make(chan struct{})
+	var once sync.Once
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(func() {
+		once.Do(func() { close(release) })
+		hook.Close()
+	})
+	owner := uuid.NewString()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec("INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1,$2,'Owner','owner',$3)",
+		owner, owner+"@example.test", uuid.NewString())
+	destinationID, ruleID := uuid.NewString(), uuid.NewString()
+	exec("INSERT INTO olp.notification_destinations(id,name,url,etag,created_by) VALUES($1,$2,$3,$4,$5)",
+		destinationID, "incident", hook.URL, uuid.NewString(), owner)
+	exec("INSERT INTO olp.notification_rules(id,name,event,destination_id,etag,created_by) VALUES($1,'stale','worker.stale',$2,$3,$4)",
+		ruleID, destinationID, uuid.NewString(), owner)
+	exec("INSERT INTO olp.notification_signal_states(rule_id,subject,active,incident) VALUES($1,'notification_delivery',true,1)", ruleID)
+	payload := func(resolved bool) []byte {
+		body, err := json.Marshal(map[string]any{
+			"subject": "notification_delivery", "incident": 1,
+			"incident_key": "olp:incident:1", "resolved": resolved,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	triggerID, resolveID := uuid.NewString(), uuid.NewString()
+	exec(`INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status)
+		VALUES($1,$2,'worker.stale','olp:incident:1',false,$3,'pending')`, triggerID, ruleID, payload(false))
+	exec(`INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status)
+		VALUES($1,$2,'worker.stale','olp:incident:1',true,$3,'pending')`, resolveID, ruleID, payload(true))
+
+	worker := &notificationWorker{
+		pool: pool, policy: policy, client: webhookClient(policy), log: slog.New(slog.DiscardHandler),
+		newID: uuid7,
+	}
+	trigger := delivery{id: triggerID, ruleID: ruleID, event: "worker.stale",
+		ruleName: "stale", payload: payload(false)}
+	resolve := delivery{id: resolveID, ruleID: ruleID, event: "worker.stale",
+		ruleName: "stale", payload: payload(true), resolved: true}
+	done := make(chan bool, 1)
+	go func() { done <- worker.deliver(ctx, trigger) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var attempts int
+		if err := pool.QueryRow(ctx, "SELECT attempts FROM olp.notification_deliveries WHERE id=$1", triggerID).Scan(&attempts); err == nil && attempts == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("trigger was not claimed while the receiver stalled")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if worker.deliver(ctx, resolve) {
+		t.Fatal("resolve claimed while the incident lock was held")
+	}
+	once.Do(func() { close(release) })
+	if !<-done {
+		t.Fatal("trigger delivery was not attempted")
+	}
+	resolveAttempted := make(chan bool, 1)
+	go func() { resolveAttempted <- worker.deliver(ctx, resolve) }()
+	if !<-resolveAttempted {
+		t.Fatal("resolve delivery was not attempted after the lock released")
+	}
+	var resolveStatus string
+	if err := pool.QueryRow(ctx, "SELECT status FROM olp.notification_deliveries WHERE id=$1", resolveID).Scan(&resolveStatus); err != nil {
+		t.Fatal(err)
+	}
+	if resolveStatus != "delivered" {
+		t.Fatalf("resolve status %q", resolveStatus)
+	}
+}
+
+func TestIntegrationIncidentLockSingleConnectionPool(t *testing.T) {
+	ctx := t.Context()
+	pool := notificationPool(t)
+	var dbName string
+	if err := pool.QueryRow(ctx, "SELECT current_database()").Scan(&dbName); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := pgxpool.ParseConfig(os.Getenv(notificationTestEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConnConfig.Database = dbName
+	cfg.MaxConns = 1
+	single, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(single.Close)
+	policy := &egress.Policy{
+		AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")},
+		PlainHTTPHosts:  []string{"127.0.0.1"},
+	}
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(hook.Close)
+	owner := uuid.NewString()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec("INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1,$2,'Owner','owner',$3)",
+		owner, owner+"@example.test", uuid.NewString())
+	destinationID, ruleID := uuid.NewString(), uuid.NewString()
+	exec("INSERT INTO olp.notification_destinations(id,name,url,etag,created_by) VALUES($1,$2,$3,$4,$5)",
+		destinationID, "single", hook.URL, uuid.NewString(), owner)
+	exec("INSERT INTO olp.notification_rules(id,name,event,destination_id,etag,created_by) VALUES($1,'inc','worker.stale',$2,$3,$4)",
+		ruleID, destinationID, uuid.NewString(), owner)
+	exec("INSERT INTO olp.notification_signal_states(rule_id,subject,active,incident) VALUES($1,'task',true,1)", ruleID)
+	payload := func(resolved bool) []byte {
+		body, _ := json.Marshal(map[string]any{
+			"subject": "task", "incident": 1, "incident_key": "olp:incident:single", "resolved": resolved,
+		})
+		return body
+	}
+	exec(`INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status)
+		VALUES($1,$2,'worker.stale','olp:incident:single',false,$3,'pending')`, uuid.NewString(), ruleID, payload(false))
+	exec(`INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status)
+		VALUES($1,$2,'worker.stale','olp:incident:single',true,$3,'pending')`, uuid.NewString(), ruleID, payload(true))
+
+	worker := &notificationWorker{
+		pool: single, policy: policy, client: webhookClient(policy), log: slog.New(slog.DiscardHandler),
+		newID: uuid7,
+	}
+	deliveries, err := worker.pending(ctx)
+	if err != nil || len(deliveries) != 1 {
+		t.Fatalf("single-pool pending = %d, %v", len(deliveries), err)
+	}
+	if !worker.deliver(ctx, deliveries[0]) {
+		t.Fatal("trigger delivery not attempted on a single-connection pool")
+	}
+	deliveries, err = worker.pending(ctx)
+	if err != nil || len(deliveries) != 1 {
+		t.Fatalf("single-pool second pending = %d, %v", len(deliveries), err)
+	}
+	if !worker.deliver(ctx, deliveries[0]) {
+		t.Fatal("resolve delivery not attempted on a single-connection pool")
+	}
+	locked, err := single.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backendPID := locked.Conn().PgConn().PID()
+	locked.Release()
+	var held bool
+	if err = single.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND granted AND pid=$1)`,
+		backendPID).Scan(&held); err != nil {
+		t.Fatal(err)
+	}
+	if held {
+		t.Fatal("backend still holds the advisory lock")
+	}
+	var statuses []string
+	rows, err := single.Query(ctx, "SELECT status FROM olp.notification_deliveries WHERE rule_id=$1 ORDER BY created_at", ruleID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var status string
+		if err = rows.Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		statuses = append(statuses, status)
+	}
+	rows.Close()
+	if len(statuses) != 2 || statuses[0] != "delivered" || statuses[1] != "delivered" {
+		t.Fatalf("delivery statuses %v", statuses)
+	}
+}
+
+func TestIntegrationIncidentLockRetiresBrokenConn(t *testing.T) {
+	ctx := t.Context()
+	pool := notificationPool(t)
+	var dbName string
+	if err := pool.QueryRow(ctx, "SELECT current_database()").Scan(&dbName); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := pgxpool.ParseConfig(os.Getenv(notificationTestEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConnConfig.Database = dbName
+	cfg.MaxConns = 1
+	single, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := &egress.Policy{
+		AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")},
+		PlainHTTPHosts:  []string{"127.0.0.1"},
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		hook.Close()
+	})
+	owner := uuid.NewString()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec("INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1,$2,'Owner','owner',$3)",
+		owner, owner+"@example.test", uuid.NewString())
+	destinationID, ruleID := uuid.NewString(), uuid.NewString()
+	exec("INSERT INTO olp.notification_destinations(id,name,url,etag,created_by) VALUES($1,$2,$3,$4,$5)",
+		destinationID, "broken", hook.URL, uuid.NewString(), owner)
+	exec("INSERT INTO olp.notification_rules(id,name,event,destination_id,etag,created_by) VALUES($1,'inc','worker.stale',$2,$3,$4)",
+		ruleID, destinationID, uuid.NewString(), owner)
+	exec("INSERT INTO olp.notification_signal_states(rule_id,subject,active,incident) VALUES($1,'task',true,1)", ruleID)
+	payload, _ := json.Marshal(map[string]any{
+		"subject": "task", "incident": 1, "incident_key": "olp:incident:broken", "resolved": false,
+	})
+	exec(`INSERT INTO olp.notification_deliveries(id,rule_id,event,dedup_key,resolved,payload,status)
+		VALUES($1,$2,'worker.stale','olp:incident:broken',false,$3,'pending')`, uuid.NewString(), ruleID, payload)
+
+	worker := &notificationWorker{
+		pool: single, policy: policy, client: webhookClient(policy), log: slog.New(slog.DiscardHandler),
+		newID: uuid7,
+	}
+	probe, err := single.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var backendPID uint32
+	if err := probe.Conn().QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&backendPID); err != nil {
+		probe.Release()
+		t.Fatal(err)
+	}
+	probe.Release()
+	deliveries, err := worker.pending(ctx)
+	if err != nil || len(deliveries) != 1 {
+		t.Fatalf("pending = %d, %v", len(deliveries), err)
+	}
+	attempted := make(chan bool, 1)
+	go func() { attempted <- worker.deliver(ctx, deliveries[0]) }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		releaseOnce.Do(func() { close(release) })
+		t.Fatal("delivery never reached the hook")
+	}
+	var terminated bool
+	if err := pool.QueryRow(ctx, "SELECT pg_terminate_backend($1)", backendPID).Scan(&terminated); err != nil || !terminated {
+		releaseOnce.Do(func() { close(release) })
+		t.Fatalf("backend termination = %v, %v", terminated, err)
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case <-attempted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("delivery never completed after backend termination")
+	}
+	var held bool
+	if err = pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND granted AND pid=$1)`, backendPID).Scan(&held); err != nil {
+		t.Fatal(err)
+	}
+	if held {
+		t.Fatal("terminated backend still holds the advisory lock")
+	}
+	acquireCtx, acquireCancel := context.WithTimeout(ctx, 5*time.Second)
+	replacement, err := single.Acquire(acquireCtx)
+	acquireCancel()
+	if err != nil {
+		t.Fatalf("pool cannot replace the terminated connection: %v", err)
+	}
+	var newPID uint32
+	if err := replacement.Conn().QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&newPID); err != nil {
+		replacement.Release()
+		t.Fatal(err)
+	}
+	replacement.Release()
+	if newPID == backendPID {
+		t.Fatal("pool returned the terminated backend")
+	}
+	single.Close()
 }

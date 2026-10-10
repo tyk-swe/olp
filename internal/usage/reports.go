@@ -128,6 +128,8 @@ const (
 	DimensionOperation   = "operation"
 	DimensionAttribution = "attribution"
 	DimensionEndUser     = "end_user"
+	DimensionProject     = "project"
+	DimensionSession     = "session"
 	// DimensionModelFamily groups by the tokenizer family each attempt's input
 	// estimate was counted for, and DimensionEstimateProvenance by how that
 	// estimate was produced; together with a route they show where estimation
@@ -388,6 +390,18 @@ func ReadCompleteness(ctx context.Context, q access.Queryer, f Filters, now time
 // dimension as well as the filters: breaking down by provider counts provider
 // attempts, unless a model filter already narrowed the question to one target.
 func ReadBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension string, limit int) (Breakdown, error) {
+	return readBreakdown(ctx, q, f, dimension, limit, 200)
+}
+
+func ReadBreakdownExport(ctx context.Context, q access.Queryer, f Filters, dimension string) (Breakdown, error) {
+	report, err := readBreakdown(ctx, q, f, dimension, 10001, 10001)
+	if err == nil && len(report.Items) > 10000 {
+		return Breakdown{}, access.Fail(422, "export_too_large", "Narrow the usage filters to at most 10000 groups.")
+	}
+	return report, err
+}
+
+func readBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension string, limit, maximum int) (Breakdown, error) {
 	if err := f.Validate(); err != nil {
 		return Breakdown{}, err
 	}
@@ -412,6 +426,10 @@ func ReadBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension s
 		}
 	case DimensionEndUser:
 		expression = "COALESCE(NULLIF(end_user_digest, ''), 'unidentified')"
+	case DimensionProject:
+		expression = projectDimensionExpression
+	case DimensionSession:
+		expression = sessionDimensionExpression
 	case DimensionAPIKey:
 		expression = "COALESCE(api_key_id::text, 'system')"
 	case DimensionOperation:
@@ -434,13 +452,13 @@ func ReadBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension s
 		expression = "attribution->>$attribution_key$"
 	default:
 		return Breakdown{}, access.Fail(400, "invalid_dimension",
-			"Dimension must be route, provider, model, model_family, estimate_provenance, api_key, end_user, operation, or attribution.")
+			"Dimension must be route, provider, model, model_family, estimate_provenance, api_key, end_user, project, session, operation, or attribution.")
 	}
 	if limit < 1 {
 		limit = 1
 	}
-	if limit > 200 {
-		limit = 200
+	if limit > maximum {
+		limit = maximum
 	}
 	var query filterQuery
 	f.usageRows(&query, scope)

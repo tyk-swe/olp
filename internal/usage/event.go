@@ -81,6 +81,7 @@ type Event struct {
 	MediaUnits              *string                  `json:"media_units"`
 	UsageComplete           bool                     `json:"usage_complete"`
 	Unpriced                bool                     `json:"unpriced"`
+	PayloadCaptured         bool                     `json:"payload_captured"`
 	Attempts                []Attempt                `json:"attempts"`
 }
 

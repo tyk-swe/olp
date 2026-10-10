@@ -11,10 +11,12 @@
     statusLabel,
     statusTone
   } from '$lib/format';
-  import { timeInputType } from '$lib/lists/filters';
+  import { timeInputType, timeOrder } from '$lib/lists/filters';
   import type { RequestListState } from '$lib/features/usage/history/requestListState';
 
   import type { CreateQueryResult } from '@tanstack/svelte-query';
+  import { downloadBlob } from '$lib/download';
+  import { exportRequestsCsv } from '$lib/features/usage/history/api';
   import type { RequestSummary } from '$lib/features/usage/history/api';
   import type { CursorPage } from '$lib/api/http';
   let {
@@ -32,6 +34,23 @@
     problem: string | null;
     queryProblem: string | null;
   } = $props();
+
+  let exporting = $state(false);
+  let exportError = $state('');
+
+  async function exportCsv() {
+    if (exporting) return;
+    exporting = true;
+    exportError = '';
+    try {
+      const csv = await exportRequestsCsv(listState.applied);
+      downloadBlob(new Blob([csv], { type: 'text/csv' }), 'olp-requests.csv');
+    } catch (cause) {
+      exportError = errorMessage(cause, 'The export could not be created.');
+    } finally {
+      exporting = false;
+    }
+  }
 </script>
 
 <form class="card filters" aria-label="Request filters" onsubmit={applyFilters}>
@@ -80,6 +99,32 @@
       /></label
     >
     <label
+      >Project ID <input
+        bind:value={listState.projectId}
+        name="project"
+        class="mono"
+      /></label
+    >
+    <label
+      >Session ID <input
+        bind:value={listState.sessionId}
+        name="session"
+        class="mono"
+      /></label
+    >
+    <label
+      >Attribution key <input
+        bind:value={listState.attributionKey}
+        name="attribution_key"
+      /></label
+    >
+    <label
+      >Attribution value <input
+        bind:value={listState.attributionValue}
+        name="attribution_value"
+      /></label
+    >
+    <label
       >Started after <input
         bind:value={listState.startedAfter}
         name="after"
@@ -104,6 +149,50 @@
 
 {#if problem}<div class="inline-problem" role="alert">{problem}</div>{/if}
 
+{#if !queryProblem && listState.applied.session_id && requests.data && !requests.isPending && !requests.isError && !requests.isPlaceholderData}
+  {@const sessionItems = [...requests.data.items].sort((a, b) =>
+    timeOrder(a.started_at) < timeOrder(b.started_at)
+      ? -1
+      : timeOrder(a.started_at) > timeOrder(b.started_at)
+        ? 1
+        : a.id < b.id
+          ? -1
+          : 1
+  )}
+  <section class="card session-card" aria-labelledby="session-heading">
+    <h2 id="session-heading">
+      Session timeline <small class="mono">{listState.applied.session_id}</small
+      >
+    </h2>
+    <p class="section-help">
+      Current page, oldest first; use request pagination for earlier or later
+      pages.
+    </p>
+    {#if sessionItems.length}
+      <ol class="session-list">
+        {#each sessionItems as request (request.id)}
+          <li>
+            <time datetime={request.started_at}
+              >{formatDate(request.started_at)}</time
+            >
+            <span
+              >{request.route} · {request.operation} · {statusLabel(
+                request.status_code,
+                request.error_class
+              )}</span
+            >
+            <a href={resolve(`/requests/${request.id}${page.url.search}`)}
+              >View</a
+            >
+          </li>
+        {/each}
+      </ol>
+    {:else}
+      <p class="section-help">No requests on this page.</p>
+    {/if}
+  </section>
+{/if}
+
 {#if !queryProblem}
   <div class="toolbar">
     <p class="result-note" aria-live="polite">
@@ -112,10 +201,18 @@
     <button
       class="text-button"
       type="button"
+      onclick={exportCsv}
+      disabled={exporting}>{exporting ? 'Exporting…' : 'Export CSV'}</button
+    ><button
+      class="text-button"
+      type="button"
       onclick={() => requests.refetch()}
       disabled={requests.isFetching}>Refresh</button
     >
   </div>
+  {#if exportError}<div class="inline-problem" role="alert">
+      {exportError}
+    </div>{/if}
 
   {#if requests.isPending}
     <div class="loading-state" role="status">Loading request metadata…</div>
@@ -183,7 +280,11 @@
                     request.error_class
                   )}"
                   >{statusLabel(request.status_code, request.error_class)}</span
-                ></td
+                >{#if request.payload_captured}<br /><small
+                    class="capture-note"
+                    title="Queued in the volatile capture queue — does not guarantee delivery"
+                    >Capture queued</small
+                  >{/if}</td
               >
               <td>{request.attempt_count}</td>
               <td
@@ -237,6 +338,11 @@
                 request.error_class
               )}">{statusLabel(request.status_code, request.error_class)}</span
             >
+            {#if request.payload_captured}<small
+                class="capture-note"
+                title="Queued in the volatile capture queue — does not guarantee delivery"
+                >Capture queued</small
+              >{/if}
           </div>
           <dl>
             <div>
@@ -310,6 +416,40 @@
 {/if}
 
 <style>
+  .session-card {
+    display: grid;
+    gap: 0.75rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  .session-card h2 {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+  .session-list {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.8rem;
+    color: var(--foreground-muted);
+  }
+  .session-list li {
+    display: flex;
+    flex-wrap: wrap;
+    min-width: 0;
+    gap: 0.75rem;
+    align-items: baseline;
+    padding: 0.15rem 0;
+    overflow-wrap: anywhere;
+  }
+  .session-heading,
+  .session-card small {
+    overflow-wrap: anywhere;
+  }
+  .capture-note {
+    color: var(--warning);
+    font-size: var(--text-caption);
+  }
   .filters {
     margin-top: 1.5rem;
     padding: 1.5rem;

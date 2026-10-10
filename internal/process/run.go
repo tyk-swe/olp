@@ -23,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
@@ -181,6 +182,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	var mediaSpool *media.Spool
 	var pluginHost *plugins.Host
 	var policy egress.Policy
+	var business *telemetry.BusinessMetrics
+	var exporter *export.Worker
+	var capturer *export.Manager
 	// The public listener's process-local admission pools. The inference pool
 	// is shared with the gateway so middleware and direct handler calls bound
 	// one capacity; media reconciliation gaps and durable metadata loss are
@@ -204,6 +208,11 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			return err
 		}
 		policy = egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}
+		business = telemetry.NewBusinessMetrics(c.MetricsSeriesCap, c.MetricsTenantLabels)
+		sender := export.NewSender(&policy)
+		sender.Installation = installation
+		exporter = &export.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
+		capturer = &export.Manager{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		rt = runtime.NewManager(pool, installation, auth, keys, log)
 		if c.ConnectorConfigFile != "" {
 			rt.Mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
@@ -248,6 +257,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				Carrier:            pluginHost,
 				UnconfinedPlugins:  unconfined != nil,
 			}, log)
+			gw.Business = business
 			rt.GrantRefreshed = gw.GrantRefreshed
 			if limiter != nil {
 				var policy func() limits.OutagePolicy
@@ -270,6 +280,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				Carrier:           pluginHost,
 				UnconfinedPlugins: unconfined != nil,
 			}, log)
+			prober.Business = business
 			prober.Admission = gateway.NewAdmission(limiter, nil, log)
 			prober.Sink = &gateway.PersistingSink{Log: log, Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
 				_, err := usage.PersistEvent(ctx, pool, event, payload)
@@ -311,6 +322,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			}
 		}
 		if c.Mode.Inference() {
+			gw.Capture = capturer
 			gw.Media = &gateway.MediaDeps{Jobs: mediaService, Admission: media.NewAdmissionState(c.MediaSpoolCapacityBytes)}
 			if pool != nil {
 				gw.CodeLedger = &resources.CodeStore{Pool: pool}
@@ -341,7 +353,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			// separate worker replica is alive, so the console is told what
 			// this installation is configured for.
 			control.RetentionEnforced = limiter != nil
-			control.NotificationsActive = limiter != nil
+			control.NotificationsActive = true
 			// Installing reads a module's manifest once, which the
 			// interpreter is ready to do several times sooner.
 			pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits, log)
@@ -372,6 +384,12 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		},
 		MediaGaps:    func() int64 { return int64(mediaGapsTotal.Load()) },
 		LossCounters: lossCounters.Totals,
+		Business:     business,
+	}
+	if pool != nil {
+		obsState.Export = func(ctx context.Context, body *strings.Builder) {
+			export.WriteMetrics(ctx, pool, exporter, capturer, body)
+		}
 	}
 	configureObservability(obsState, rt, gw, emitter, mediaSpool, &policy)
 	go obsCache.Run(ctx, obsState, log)
@@ -396,6 +414,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			emitter.RunWriter(delivery, vk, stream, log)
 		})
 		delivered.Go(func() { usage.RunLossReporter(delivery, pool, emitter, instance, lossCounters, log) })
+	}
+	if capturer != nil {
+		delivered.Go(func() { capturer.Run(delivery) })
 	}
 	if outage != nil {
 		go outage.run(ctx)
@@ -430,7 +451,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, prober, keys, installation, &policy, log)
+		workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, prober, keys, installation, &policy, log, exporter, referenceCatalog)
 	}
 	liveMetrics := newLiveMetrics(rt, inferencePool, managementPool)
 	private := observability.NewHandler(obsCache, liveMetrics).ServeMux()

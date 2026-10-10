@@ -52,7 +52,7 @@ func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) 
 			t.Error("inbound parent or tracestate policy changed")
 		}
 		request := RequestFromContext(r.Context())
-		request.RecordInferenceContext("openai", "generation", "safe-route", "safe-key-id", "generation")
+		request.RecordInferenceContext("openai", "generation", "chat", "safe-route", "safe-key-id", "generation")
 		_, attempt := request.Attempt(r.Context(), "openai", "revision", "model")
 		headers := http.Header{}
 		attempt.InjectUpstream(headers, true)

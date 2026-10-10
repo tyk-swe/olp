@@ -11,6 +11,7 @@ import (
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/management"
@@ -88,6 +89,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	// of the management surface; their patterns are more specific than
 	// its catch-all, which answers everything no surface claims.
 	(&usage.Server{Access: m.Access, VendorKind: providers.VendorKind, Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: signing.Trusted()}).Register(mux)
+	(&export.Management{Access: m.Access, Pool: m.Access.Pool, Keys: m.Access.Keys, Installation: m.Access.Installation, Egress: m.Egress}).Register(mux)
 	(&configuration.Server{
 		Limiter:                m.Limiter,
 		Access:                 m.Access,

@@ -4,10 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/notifications"
 )
 
 func TestThresholdMetExactDecimal(t *testing.T) {
@@ -123,7 +129,7 @@ func TestAProviderEventIsReportedByItsRecordedPayload(t *testing.T) {
 		t.Fatalf("decode body: %v", err)
 	}
 	if decoded["event"] != "provider.grant.lapsed" || decoded["rule_id"] != d.ruleID || decoded["rule_name"] != "lapses" ||
-		decoded["provider_id"] != "0195f3c2-0000-7000-8000-0000000000dd" || decoded["credential_version"].(float64) != 3 || len(decoded) != 6 {
+		decoded["provider_id"] != "0195f3c2-0000-7000-8000-0000000000dd" || decoded["credential_version"].(float64) != 3 || decoded["delivery_id"] != d.id || len(decoded) != 7 {
 		t.Fatalf("body = %s", body)
 	}
 }
@@ -185,5 +191,46 @@ func TestAttributionJSONCanonical(t *testing.T) {
 	got := string(AttributionJSON(map[string]string{"b": "2", "a": "1"}))
 	if got != `{"a":"1","b":"2"}` {
 		t.Fatalf("attribution JSON = %s", got)
+	}
+}
+
+func TestWebhookBodyNumericWindowFeedsPagerDutyDedup(t *testing.T) {
+	window := int64(7)
+	accrued, limit := "9", "10"
+	subjectKind, windowKind, threshold := "api_key", "month", 80
+	d := delivery{
+		id: "d-1", ruleID: "r-1", event: "budget.threshold", ruleName: "Spend",
+		subjectKind: &subjectKind, windowKind: &windowKind, windowID: &window, threshold: &threshold,
+		accrued: &accrued, limit: &limit, currency: "usd",
+	}
+	body, err := webhookBody(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["delivery_id"] != "d-1" || decoded["window_id"] != float64(7) {
+		t.Fatalf("numeric window body %v", decoded)
+	}
+	var dedup string
+	pd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf, _ := io.ReadAll(r.Body)
+		var posted map[string]any
+		_ = json.Unmarshal(buf, &posted)
+		dedup, _ = posted["dedup_key"].(string)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"success","dedup_key":"` + dedup + `"}`))
+	}))
+	defer pd.Close()
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	destination := notifications.Destination{Type: "pagerduty", URL: pd.URL}
+	err = notifications.Send(t.Context(), policy, destination, []byte(`{"routing_key":"rk"}`), body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dedup != "r-1:budget.threshold:7" {
+		t.Fatalf("dedup %q, want r-1:budget.threshold:7", dedup)
 	}
 }

@@ -148,6 +148,16 @@ error classification, pricing provenance, and allowed attribution labels. They
 exclude prompts, outputs, reasoning, tool payloads, uploads, raw request
 headers, and credentials. Keep secrets out of operator names and labels too.
 
+Payload capture is a separate, explicit exception for operator-owned external
+sinks, not for OLP's durable records. An installation owner must enable it;
+authorized managers then opt individual projects or routes into bounded,
+sampled input, output or tool-call capture. Captured content exists only in a
+volatile gateway queue and goes directly to an installation sink. It never
+enters PostgreSQL, Valkey, ordinary logs or trace spans. Until M7 redaction is
+available, capture is unredacted and nonempty redaction policies fail closed.
+Request history's capture marker means queued, not confirmed delivered. See the
+[capture runbook](operations.md#export-sinks-payload-capture-and-business-metrics).
+
 Uploaded media may occupy a bounded temporary spool during execution. Files,
 batches, and opt-in stored Responses may retain content at the upstream
 provider; OLP stores their ownership mappings and accounting metadata. This is

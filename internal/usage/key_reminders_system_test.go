@@ -46,7 +46,7 @@ func TestIntegrationKeyRemindersDeduplicateAndCancelSupersededSchedules(t *testi
 		if err = json.Unmarshal(data, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if len(payload) != 8 || payload["event"] != "key.expiring" || payload["api_key_id"] != key || strings.Contains(string(data), "digest") || strings.Contains(string(data), "lookup_id") {
+		if len(payload) != 9 || payload["event"] != "key.expiring" || payload["api_key_id"] != key || strings.Contains(string(data), "digest") || strings.Contains(string(data), "lookup_id") {
 			t.Fatalf("unexpected reminder fields: %v", payload)
 		}
 		if payload["reason"] == "expiry" {

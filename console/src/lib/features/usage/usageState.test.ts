@@ -14,6 +14,28 @@ const defaults = defaultUsageState(new Date('2026-07-12T12:00:35.123Z'));
 const key = '01980000-0000-7000-8000-000000000103';
 
 describe('usage report URL state', () => {
+  it('preserves case-sensitive session identifiers through URLs and draft edits', () => {
+    const state = readUsageState(
+      new URLSearchParams({
+        session_id: 'SessionCase/Alpha',
+        attribution_key: 'session',
+        attribution_value: 'SessionCase/Alpha',
+        project_id: '01980000-0000-7000-8000-00000000ABCD',
+        dimension: 'session'
+      }),
+      defaults
+    );
+    expect(state.filters.session_id).toBe('SessionCase/Alpha');
+    expect(state.filters.project_id).toBe(
+      '01980000-0000-7000-8000-00000000abcd'
+    );
+    expect(usageProblem(state)).toBeNull();
+    expect(
+      readUsageState(new URLSearchParams(usageSearch(state)), defaults)
+    ).toEqual(state);
+    expect(applyUsageDraft(usageDraft(state), state)).toEqual(state);
+  });
+
   it('anchors missing parameters and unknown axes to deterministic defaults', () => {
     const state = readUsageState(
       new URLSearchParams('dimension=unknown&granularity=minute'),

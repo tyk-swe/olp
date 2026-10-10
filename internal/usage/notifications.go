@@ -20,8 +20,10 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -60,18 +62,6 @@ LEFT JOIN olp.budget_group_cost_windows gwm ON gwm.budget_group_id=g.id AND gwm.
 JOIN olp.notification_destinations d ON d.id=r.destination_id
 WHERE r.event=$1 AND r.enabled AND d.enabled`
 
-const pendingDeliverySQL = `SELECT v.id::text,v.rule_id::text,CASE WHEN v.api_key_id IS NOT NULL THEN 'key.expiring' ELSE r.event END,v.attempts,v.last_attempt_at,
- r.name,r.subject_kind,r.subject_id::text,r.window_kind,v.window_id,v.threshold_percent,
- v.accrued::text,v.limit_amount::text,COALESCE(v.currency::text,''),v.payload
-FROM olp.notification_deliveries v
-JOIN olp.notification_rules r ON r.id=v.rule_id
-JOIN olp.notification_destinations d ON d.id=r.destination_id
-WHERE v.status IN ('pending','failed') AND v.attempts<$1 AND r.enabled AND d.enabled
-  AND (v.last_attempt_at IS NULL OR v.attempts<1
-       OR v.last_attempt_at+make_interval(mins => 1<<GREATEST(v.attempts-1,0))<=now())
-ORDER BY v.created_at,v.id
-LIMIT $2`
-
 type dueAlert struct {
 	ruleID        string
 	threshold     int
@@ -105,6 +95,8 @@ type delivery struct {
 	limit         *string
 	currency      string
 	payload       []byte
+	dedupKey      *string
+	resolved      bool
 }
 
 func thresholdEvidence(accrued string, limit *string, threshold int) (decimal.Decimal, decimal.Decimal, bool) {
@@ -139,7 +131,13 @@ func retryDue(lastAttemptAt *time.Time, attempts int, now time.Time) bool {
 	return !now.Before(lastAttemptAt.Add(backoff))
 }
 
+type NotificationDependencies struct {
+	Limiter *limits.Limiter
+	Catalog *catalog.Signed
+}
+
 type notificationWorker struct {
+	dependencies NotificationDependencies
 	pool         *pgxpool.Pool
 	keys         *secrets.KeyRing
 	installation string
@@ -156,8 +154,9 @@ type notificationWorker struct {
 // delivery that fails is retried with backoff, up to maxDeliveryAttempts.
 // Deliveries for a disabled rule or destination wait, unsent, until both are
 // enabled again.
-func RunNotificationDelivery(ctx context.Context, pool *pgxpool.Pool, keys *secrets.KeyRing, installation string, policy *egress.Policy, log *slog.Logger) {
+func RunNotificationDelivery(ctx context.Context, pool *pgxpool.Pool, keys *secrets.KeyRing, installation string, policy *egress.Policy, log *slog.Logger, dependencies NotificationDependencies) {
 	w := &notificationWorker{
+		dependencies: dependencies,
 		pool:         pool,
 		keys:         keys,
 		installation: installation,
@@ -267,7 +266,7 @@ func (w *notificationWorker) claimDue(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	currency := w.currency(ctx)
+	currency := w.currency(ctx, tx)
 	claimed := 0
 	for _, a := range alerts {
 		if a.windowID == nil {
@@ -302,6 +301,14 @@ func (w *notificationWorker) claimDue(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	claimed += reminders
+	if _, err = tx.Exec(ctx, expireRuntimeInstallStatusSQL); err != nil {
+		return 0, err
+	}
+	signals, err := w.claimSignals(ctx, tx, w.dependencies.Limiter, w.dependencies.Catalog)
+	if err != nil {
+		return 0, err
+	}
+	claimed += signals
 	if err = tx.Commit(ctx); err != nil {
 		return 0, err
 	}
@@ -355,7 +362,7 @@ func NotifyGrantLapsed(ctx context.Context, tx pgx.Tx, credentialID string) erro
 }
 
 func (w *notificationWorker) pending(ctx context.Context) ([]delivery, error) {
-	rows, err := w.pool.Query(ctx, pendingDeliverySQL, maxDeliveryAttempts, deliveriesPerPass)
+	rows, err := w.pool.Query(ctx, pendingChannelDeliverySQL, maxDeliveryAttempts, deliveriesPerPass)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +372,7 @@ func (w *notificationWorker) pending(ctx context.Context) ([]delivery, error) {
 		var d delivery
 		if err = rows.Scan(&d.id, &d.ruleID, &d.event, &d.attempts, &d.lastAttemptAt,
 			&d.ruleName, &d.subjectKind, &d.subjectID, &d.windowKind, &d.windowID, &d.threshold,
-			&d.accrued, &d.limit, &d.currency, &d.payload); err != nil {
+			&d.accrued, &d.limit, &d.currency, &d.payload, &d.dedupKey, &d.resolved); err != nil {
 			return nil, err
 		}
 		deliveries = append(deliveries, d)
@@ -373,9 +380,9 @@ func (w *notificationWorker) pending(ctx context.Context) ([]delivery, error) {
 	return deliveries, rows.Err()
 }
 
-func (w *notificationWorker) currency(ctx context.Context) string {
+func (w *notificationWorker) currency(ctx context.Context, q access.Queryer) string {
 	var currency string
-	err := w.pool.QueryRow(ctx, "SELECT currency FROM olp.pricing_currency WHERE singleton").Scan(&currency)
+	err := q.QueryRow(ctx, notificationCurrencySQL).Scan(&currency)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		w.log.Warn("budget alert currency lookup failed", "error", err)
 	}
@@ -398,6 +405,7 @@ func webhookBody(d delivery) ([]byte, error) {
 			"accrued":           d.accrued,
 			"limit":             d.limit,
 			"currency":          d.currency,
+			"delivery_id":       d.id,
 		})
 	}
 	var body map[string]any
@@ -405,7 +413,46 @@ func webhookBody(d delivery) ([]byte, error) {
 		return nil, err
 	}
 	body["event"], body["rule_id"], body["rule_name"] = d.event, d.ruleID, d.ruleName
+	body["delivery_id"] = d.id
+	if d.resolved {
+		body["resolved"] = true
+	}
+	if d.dedupKey != nil {
+		body["dedup_key"] = *d.dedupKey
+	}
 	return json.Marshal(body)
+}
+
+func incidentLockKey(d delivery) string {
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(d.payload, &fields); err == nil {
+		if key, ok := fields["incident_key"]; ok {
+			var value string
+			if err := json.Unmarshal(key, &value); err == nil && value != "" {
+				return value
+			}
+		}
+	}
+	if d.dedupKey != nil {
+		return *d.dedupKey
+	}
+	return ""
+}
+
+func incidentFields(d delivery) (string, int64, bool) {
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(d.payload, &fields); err != nil {
+		return "", 0, false
+	}
+	var subject string
+	if err := json.Unmarshal(fields["subject"], &subject); err != nil || subject == "" {
+		return "", 0, false
+	}
+	var incident int64
+	if err := json.Unmarshal(fields["incident"], &incident); err != nil {
+		return "", 0, false
+	}
+	return subject, incident, true
 }
 
 // notificationDestination reads the URL and signing secret of the rule's
@@ -416,20 +463,17 @@ func webhookBody(d delivery) ([]byte, error) {
 // pgx.ErrNoRows when the rule or its destination is disabled. Both stay locked
 // until the delivery attempt is committed, so a disabled delivery is never
 // claimed and a rule cannot move while its destination is read.
-func (w *notificationWorker) notificationDestination(ctx context.Context, tx pgx.Tx, ruleID string) (string, []byte, error) {
-	var target string
+func (w *notificationWorker) notificationDestination(ctx context.Context, tx pgx.Tx, ruleID string) (notifications.Destination, []byte, error) {
+	var d notifications.Destination
 	var secretID *string
-	if err := tx.QueryRow(ctx,
-		`SELECT d.url,d.secret_id::text FROM olp.notification_rules r
-		 JOIN olp.notification_destinations d ON d.id=r.destination_id
-		 WHERE r.id=$1 AND r.enabled AND d.enabled FOR SHARE OF r,d`, ruleID).Scan(&target, &secretID); err != nil {
-		return "", nil, err
+	if err := tx.QueryRow(ctx, readChannelDestinationSQL, ruleID).Scan(&d.URL, &secretID, &d.Type, &d.Configuration); err != nil {
+		return d, nil, err
 	}
 	if secretID == nil {
-		return target, nil, nil
+		return d, nil, nil
 	}
 	secret, err := w.keys.Read(ctx, tx, w.installation, *secretID, secrets.NotificationSecret)
-	return target, secret, err
+	return d, secret, err
 }
 
 func deliveryErrorCode(err error) string {
@@ -447,7 +491,46 @@ func deliveryErrorCode(err error) string {
 // are released before sending, so a later disable cannot cancel an in-flight
 // attempt.
 func (w *notificationWorker) deliver(ctx context.Context, d delivery) bool {
-	tx, err := w.pool.Begin(ctx)
+	var conn *pgxpool.Conn
+	if key := incidentLockKey(d); key != "" {
+		acquired, err := w.pool.Acquire(ctx)
+		if err != nil {
+			w.log.Warn("notification incident connection failed", "delivery", d.id, "error", err)
+			return false
+		}
+		var locked bool
+		if err := acquired.QueryRow(ctx, lockNotificationIncidentSQL, key).Scan(&locked); err != nil {
+			w.log.Warn("notification incident lock failed", "delivery", d.id, "error", err)
+			closing, done := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer done()
+			_ = acquired.Hijack().Close(closing)
+			acquired.Release()
+			return false
+		}
+		if !locked {
+			acquired.Release()
+			return false
+		}
+		conn = acquired
+		defer func() {
+			release, done := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer done()
+			if _, err := conn.Exec(release, unlockNotificationIncidentSQL, key); err != nil {
+				w.log.Warn("notification incident unlock failed", "delivery", d.id, "error", err)
+				closing, done := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer done()
+				_ = conn.Hijack().Close(closing)
+			}
+			conn.Release()
+		}()
+	}
+	beginner := func(ctx context.Context) (pgx.Tx, error) {
+		if conn != nil {
+			return conn.Begin(ctx)
+		}
+		return w.pool.Begin(ctx)
+	}
+	tx, err := beginner(ctx)
 	if err != nil {
 		w.log.Warn("notification delivery claim failed", "delivery", d.id, "error", err)
 		return false
@@ -466,6 +549,22 @@ func (w *notificationWorker) deliver(ctx context.Context, d delivery) bool {
 				w.log.Warn("notification cancellation failed", "delivery", d.id, "error", e)
 			}
 			return false
+		}
+	} else if !d.resolved {
+		if subject, incident, ok := incidentFields(d); ok {
+			var current bool
+			if e := tx.QueryRow(ctx, signalDeliveryCurrentSQL, d.ruleID, subject, incident).Scan(&current); e != nil {
+				return false
+			}
+			if !current {
+				if _, e := tx.Exec(ctx, "UPDATE olp.notification_deliveries SET status='cancelled',last_error_code='superseded' WHERE id=$1", d.id); e != nil {
+					return false
+				}
+				if e := tx.Commit(ctx); e != nil {
+					w.log.Warn("notification cancellation failed", "delivery", d.id, "error", e)
+				}
+				return false
+			}
 		}
 	}
 	claimed, err := tx.Exec(ctx,
@@ -497,17 +596,43 @@ func (w *notificationWorker) deliver(ctx context.Context, d delivery) bool {
 	if !delivered {
 		lastError = &code
 	}
-	if _, err := w.pool.Exec(ctx,
-		`UPDATE olp.notification_deliveries
-		 SET status=$2,last_error_code=$3,delivered_at=CASE WHEN $2='delivered' THEN now() ELSE delivered_at END
-		 WHERE id=$1`,
-		d.id, map[bool]string{true: "delivered", false: "failed"}[delivered], lastError); err != nil {
+	exec := func() (int64, error) {
+		if conn != nil {
+			tag, err := conn.Exec(ctx,
+				`UPDATE olp.notification_deliveries
+				 SET status=$2,last_error_code=$3,delivered_at=CASE WHEN $2='delivered' THEN now() ELSE delivered_at END
+				 WHERE id=$1`,
+				d.id, map[bool]string{true: "delivered", false: "failed"}[delivered], lastError)
+			return tag.RowsAffected(), err
+		}
+		tag, err := w.pool.Exec(ctx,
+			`UPDATE olp.notification_deliveries
+			 SET status=$2,last_error_code=$3,delivered_at=CASE WHEN $2='delivered' THEN now() ELSE delivered_at END
+			 WHERE id=$1`,
+			d.id, map[bool]string{true: "delivered", false: "failed"}[delivered], lastError)
+		return tag.RowsAffected(), err
+	}
+	if _, err := exec(); err != nil {
 		w.log.Warn("notification delivery update failed", "delivery", d.id, "error", err)
 	}
 	return true
 }
 
-func (w *notificationWorker) send(ctx context.Context, d delivery, destination string, secret []byte) string {
+func (w *notificationWorker) send(ctx context.Context, d delivery, destination notifications.Destination, secret []byte) string {
+	if destination.Type != "" && destination.Type != "webhook" {
+		body, err := webhookBody(d)
+		if err != nil {
+			return "invalid_destination"
+		}
+		if err := notifications.Send(ctx, w.policy, destination, secret, body); err != nil {
+			return notifications.SendErrorCode(err)
+		}
+		return ""
+	}
+	return w.sendWebhook(ctx, d, destination.URL, secret)
+}
+
+func (w *notificationWorker) sendWebhook(ctx context.Context, d delivery, destination string, secret []byte) string {
 	if w.policy == nil {
 		return "invalid_destination"
 	}

@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/access"
 )
 
 func usageRequest(t *testing.T, query string) *http.Request {
@@ -15,7 +17,7 @@ func usageRequest(t *testing.T, query string) *http.Request {
 
 func TestUsageQueryRequiresABoundedRange(t *testing.T) {
 	filters, err := usageFilters(usageRequest(t,
-		"start=2026-01-01T00:00:00Z&end=2026-01-02T00:00:00%2B02:00&route=+primary+&model="))
+		"start=2026-01-01T00:00:00Z&end=2026-01-02T00:00:00%2B02:00&route=+primary+&model="), access.Principal{})
 	if err != nil {
 		t.Fatalf("usage filters: %v", err)
 	}
@@ -37,13 +39,13 @@ func TestUsageQueryRequiresABoundedRange(t *testing.T) {
 		"start=yesterday&end=2026-01-02T00:00:00Z",
 		"start=2026-01-01&end=2026-01-02T00:00:00Z",
 	} {
-		_, err = usageFilters(usageRequest(t, query))
+		_, err = usageFilters(usageRequest(t, query), access.Principal{})
 		if problem := usageProblem(t, err); problem.Status != 400 || problem.Code != "invalid_range" {
 			t.Fatalf("query %q gave %d %s, want 400 invalid_range", query, problem.Status, problem.Code)
 		}
 	}
 	_, err = usageFilters(usageRequest(t,
-		"start=2026-01-01T00:00:00Z&end=2026-01-02T00:00:00Z&provider_id=nope"))
+		"start=2026-01-01T00:00:00Z&end=2026-01-02T00:00:00Z&provider_id=nope"), access.Principal{})
 	if problem := usageProblem(t, err); problem.Status != 400 || problem.Code != "invalid_filter" {
 		t.Fatalf("problem = %d %s, want 400 invalid_filter", problem.Status, problem.Code)
 	}

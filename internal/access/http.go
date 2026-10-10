@@ -390,6 +390,14 @@ func auditSource(r *http.Request) any {
 // Audit records a metadata-only audit event inside the mutation's
 // transaction, attributed to actor.
 func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor Actor, action, resource, id, outcome string) error {
+	return auditForProject(ctx, tx, r, actor, action, resource, id, outcome, nil)
+}
+
+func AuditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor Actor, action, resource, id, outcome string, projectID *string) error {
+	return auditForProject(ctx, tx, r, actor, action, resource, id, outcome, projectID)
+}
+
+func auditForProject(ctx context.Context, tx pgx.Tx, r *http.Request, actor Actor, action, resource, id, outcome string, projectID *string) error {
 	source := auditSource(r)
 	family := "other"
 	agent := r.UserAgent()
@@ -406,7 +414,7 @@ func Audit(ctx context.Context, tx pgx.Tx, r *http.Request, actor Actor, action,
 	if actor.token != "" {
 		tokenID = actor.token
 	}
-	_, err := tx.Exec(ctx, "INSERT INTO olp.Audit(id,actor_user_id,actor_management_token_id,action,resource_type,resource_id,outcome,source_ip,user_agent_family) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)", NewID(), userID, tokenID, action, resource, id, outcome, source, family)
+	_, err := tx.Exec(ctx, auditInsertSQL, NewID(), userID, tokenID, action, resource, id, outcome, source, family, projectID)
 	return err
 }
 func Commit(r *http.Request, tx pgx.Tx, result Reply) (Reply, error) {
