@@ -3,6 +3,7 @@
 package operationplan
 
 import (
+	"bytes"
 	"encoding/json"
 	"maps"
 	"net/http"
@@ -122,6 +123,9 @@ func Parse(dialect string, body []byte, maxBytes int) (oif.Request, error) {
 	d, ok := operationregistry.Lookup(dialect)
 	if !ok {
 		return oif.Request{}, fail("target_capability", "/dialect", "registered_dialect", "The native dialect is not registered.")
+	}
+	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
+		return oif.Request{}, operations.Invalid("request", "The native request must be one JSON object.")
 	}
 	doc, err := oif.ParseJSON(body, oif.Limits{MaxBytes: maxBytes})
 	if err != nil {

@@ -128,9 +128,16 @@ func (s *Server) holdCaps(ctx context.Context, x *execution, attempt runtime.Att
 	if x.callerCostExempt() && provider.CredentialSource == "caller" {
 		return check
 	}
+	checked := false
 	for _, owner := range attemptCaps(x.route, provider, slot) {
 		if owner.limits == nil {
 			continue
+		}
+		if !checked {
+			if e := s.Admission.checkCostAccounting(ctx); e != nil {
+				return capCheck{quota: owner.quota}
+			}
+			checked = true
 		}
 		check.owners = append(check.owners, owner.id)
 		index := slices.IndexFunc(x.caps, func(h capHold) bool { return h.owner == owner.id })

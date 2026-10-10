@@ -59,7 +59,7 @@ func scan(row pgx.Row) (*Definition, error) {
 	return &d, err
 }
 func load(ctx context.Context, q access.Queryer, id string, lock bool) (*Definition, error) {
-	query := "SELECT " + columns + " FROM olp.export_sinks WHERE id=$1"
+	query := "SELECT " + columns + " FROM olp.managed_export_sinks WHERE id=$1"
 	if lock {
 		query += " FOR NO KEY UPDATE"
 	}
@@ -84,7 +84,7 @@ func (s *Server) list(r *http.Request, p access.Principal) (access.Reply, error)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+columns+" FROM olp.export_sinks WHERE retired_at IS NULL AND id<$1 AND ($2 OR project_id=ANY($3::uuid[])) ORDER BY id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
+	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+columns+" FROM olp.managed_export_sinks WHERE retired_at IS NULL AND id<$1 AND ($2 OR project_id=ANY($3::uuid[])) ORDER BY id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -235,25 +235,25 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 	}
 	etag := access.NewID()
 	if retire {
-		_, err = tx.Exec(r.Context(), "UPDATE olp.export_sinks SET enabled=false,retired_at=now(),etag=$2 WHERE id=$1", id, etag)
+		_, err = tx.Exec(r.Context(), "UPDATE olp.managed_export_sinks SET enabled=false,retired_at=now(),etag=$2 WHERE id=$1", id, etag)
 		if err == nil {
-			_, err = tx.Exec(r.Context(), "UPDATE olp.export_deliveries SET status='cancelled',lease=NULL WHERE sink_id=$1 AND status='pending'", id)
+			_, err = tx.Exec(r.Context(), "UPDATE olp.managed_export_deliveries SET status='cancelled',lease=NULL WHERE sink_id=$1 AND status='pending'", id)
 		}
 	} else if current == nil {
 		if in.Type != "https" {
 			return access.Reply{}, access.Invalid("type", "Use the HTTPS JSON sink type.")
 		}
 		var count int
-		if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.export_sinks WHERE retired_at IS NULL").Scan(&count); err != nil {
+		if err = tx.QueryRow(r.Context(), "SELECT count(*) FROM olp.managed_export_sinks WHERE retired_at IS NULL").Scan(&count); err != nil {
 			return access.Reply{}, err
 		}
 		if count >= 64 {
 			return access.Reply{}, access.Invalid("sinks", "At most 64 active sinks are supported.")
 		}
 		id = access.NewID()
-		_, err = tx.Exec(r.Context(), "INSERT INTO olp.export_sinks(id,project_id,name,type,destination,streams,enabled,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)", id, project, in.Name, in.Type, in.Destination, in.Streams, *in.Enabled, etag, p.UserID())
+		_, err = tx.Exec(r.Context(), "INSERT INTO olp.managed_export_sinks(id,project_id,name,type,destination,streams,enabled,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)", id, project, in.Name, in.Type, in.Destination, in.Streams, *in.Enabled, etag, p.UserID())
 	} else {
-		_, err = tx.Exec(r.Context(), "UPDATE olp.export_sinks SET name=$2,destination=$3,streams=$4,enabled=$5,etag=$6 WHERE id=$1", id, in.Name, in.Destination, in.Streams, *in.Enabled, etag)
+		_, err = tx.Exec(r.Context(), "UPDATE olp.managed_export_sinks SET name=$2,destination=$3,streams=$4,enabled=$5,etag=$6 WHERE id=$1", id, in.Name, in.Destination, in.Streams, *in.Enabled, etag)
 	}
 	if err != nil {
 		if problem, ok := err.(*pgconn.PgError); ok && problem.Code == "23505" {
@@ -266,7 +266,7 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 	}
 	if len(in.Credential) > 0 {
 		var previous *string
-		if err = tx.QueryRow(r.Context(), "SELECT credential_id::text FROM olp.export_sinks WHERE id=$1", id).Scan(&previous); err != nil {
+		if err = tx.QueryRow(r.Context(), "SELECT credential_id::text FROM olp.managed_export_sinks WHERE id=$1", id).Scan(&previous); err != nil {
 			return access.Reply{}, err
 		}
 		var next *string
@@ -284,7 +284,7 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 			}
 			next = &secretID
 		}
-		if _, err = tx.Exec(r.Context(), "UPDATE olp.export_sinks SET credential_id=$2 WHERE id=$1", id, next); err != nil {
+		if _, err = tx.Exec(r.Context(), "UPDATE olp.managed_export_sinks SET credential_id=$2 WHERE id=$1", id, next); err != nil {
 			return access.Reply{}, err
 		}
 		if previous != nil {

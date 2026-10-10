@@ -177,24 +177,32 @@ func (r *Refresher) refresh(ctx context.Context, conn *pgx.Conn, credentialID st
 }
 
 // using is the configuration a grant refreshes on behalf of, as a column of a
-// query over the grant's credential version c: one that pins the plugin build
-// that enrolled the grant and selects the version in one of its credential
-// slots, the provider's active revision before its draft. It is NULL when no
-// configuration uses the grant, which is then retired.
+// query over the grant's credential version c. Selection prefers a published
+// code route, then the provider's active revision, its draft, and finally an
+// unexpired retained resource's revision. Each must select the credential and
+// pin its enrolling build and profile. An unused grant is retired.
 const using = `coalesce(
 	(SELECT (v.connections->c.provider_id::text)::json
 	 FROM olp.code_routes r JOIN olp.code_route_revisions v ON v.id=r.latest_revision_id
 	 WHERE EXISTS (SELECT 1 FROM olp.code_accounts a WHERE a.credential_id=c.id
 	   AND a.provider_id=c.provider_id AND a.principal=c.principal AND a.project_id=r.project_id)
 	 AND v.connections->c.provider_id::text->>'profile_revision'=c.plugin_digest
+	 AND v.connections->c.provider_id::text->>'profile_id'=c.profile_id
 	 ORDER BY v.published_at DESC,v.id DESC LIMIT 1),
 	(SELECT r.configuration FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id
-		WHERE p.id=c.provider_id AND r.configuration->>'profile_revision'=c.plugin_digest
+		WHERE p.id=c.provider_id AND r.configuration->>'profile_revision'=c.plugin_digest AND r.configuration->>'profile_id'=c.profile_id
 		AND r.slots @> jsonb_build_array(jsonb_build_object('credential_id',c.id))),
-	(SELECT p.configuration FROM olp.providers p WHERE p.id=c.provider_id AND p.configuration->>'profile_revision'=c.plugin_digest
+	(SELECT p.configuration FROM olp.providers p WHERE p.id=c.provider_id AND p.configuration->>'profile_revision'=c.plugin_digest AND p.configuration->>'profile_id'=c.profile_id
 		AND (EXISTS (SELECT 1 FROM olp.provider_slots s WHERE s.provider_id=p.id AND s.credential_id=c.id)
 		OR EXISTS (SELECT 1 FROM olp.code_accounts a WHERE a.credential_id=c.id
-		  AND a.provider_id=c.provider_id AND a.principal=c.principal AND a.project_id=p.project_id))))`
+		  AND a.provider_id=c.provider_id AND a.principal=c.principal AND a.project_id=p.project_id))),
+	(SELECT r.configuration FROM olp.provider_resources x
+		JOIN olp.provider_revisions r ON r.id=x.provider_revision_id AND r.provider_id=x.provider_id
+		WHERE x.provider_id=c.provider_id AND x.credential_id=c.id AND x.state<>'deleted'
+		AND (x.expires_at IS NULL OR x.expires_at>now())
+		AND r.configuration->>'profile_revision'=c.plugin_digest AND r.configuration->>'profile_id'=c.profile_id
+		AND r.slots @> jsonb_build_array(jsonb_build_object('id',x.slot_id,'credential_id',c.id))
+		ORDER BY x.created_at DESC,x.id DESC LIMIT 1))`
 
 // dueCondition is what makes a grant g, over its credential version c, due: it
 // holds a refresh token, its credential version is not revoked, and it is
@@ -207,12 +215,12 @@ const dueCondition = `g.refresh_token_id IS NOT NULL AND c.revoked_at IS NULL
 // provider, plugin, principal and facts, its refresh token's secret, and the
 // configuration it refreshes on behalf of.
 type dueGrant struct {
-	credentialID, providerID, digest, principal string
-	facts                                       map[string]string
-	refreshTokenID                              string
-	refreshAttemptID                            *string
-	failures                                    int
-	configuration                               refreshConfiguration
+	credentialID, providerID, digest, profileID, principal string
+	facts                                                  map[string]string
+	refreshTokenID                                         string
+	refreshAttemptID                                       *string
+	failures                                               int
+	configuration                                          refreshConfiguration
 }
 
 // refreshConfiguration is what a grant's refresh reads of its provider's
@@ -232,10 +240,10 @@ type refreshConfiguration struct {
 func (r *Refresher) refreshLocked(ctx context.Context, conn *pgx.Conn, credentialID string) (bool, error) {
 	g := dueGrant{credentialID: credentialID}
 	var configuration *refreshConfiguration
-	err := conn.QueryRow(ctx, `SELECT c.provider_id::text,c.plugin_digest,c.principal,c.grant_facts,g.refresh_token_id::text,g.refresh_failures,g.refresh_attempt_id::text,`+using+`
+	err := conn.QueryRow(ctx, `SELECT c.provider_id::text,c.plugin_digest,coalesce(c.profile_id,''),c.principal,c.grant_facts,g.refresh_token_id::text,g.refresh_failures,g.refresh_attempt_id::text,`+using+`
 		FROM olp.provider_grants g JOIN olp.provider_credentials c ON c.id=g.credential_id
 		WHERE g.credential_id=$1 AND `+dueCondition, credentialID).
-		Scan(&g.providerID, &g.digest, &g.principal, &g.facts, &g.refreshTokenID, &g.failures, &g.refreshAttemptID, &configuration)
+		Scan(&g.providerID, &g.digest, &g.profileID, &g.principal, &g.facts, &g.refreshTokenID, &g.failures, &g.refreshAttemptID, &configuration)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -294,7 +302,7 @@ func (r *Refresher) run(ctx context.Context, conn *pgx.Conn, g *dueGrant) (abi.G
 	if tag.RowsAffected() == 0 {
 		return abi.Grant{}, errRefreshNotClaimed
 	}
-	profile := g.configuration.ProfileID
+	profile := g.profileID
 	provider := abi.Provider{Profile: profile, Options: g.configuration.Options.PluginOptions}
 	grant, err := r.Plugins.RefreshGrant(ctx, g.digest, provider, abi.GrantRefresh{Profile: profile, RefreshToken: string(token), Facts: g.facts}, client, []string{string(token)})
 	if err != nil {
@@ -346,7 +354,7 @@ func checkRefreshed(g *dueGrant, grant abi.Grant) error {
 // database or the pass's connection fail.
 func (r *Refresher) store(ctx context.Context, g *dueGrant, grant abi.Grant) error {
 	ctx = context.WithoutCancel(ctx)
-	served, err := json.Marshal(connectors.GrantCredential{AccessToken: grant.AccessToken, Facts: g.facts})
+	served, err := json.Marshal(connectors.GrantCredential{PluginDigest: g.digest, ProfileID: g.profileID, AccessToken: grant.AccessToken, Facts: g.facts})
 	if err != nil {
 		return err
 	}

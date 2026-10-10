@@ -64,7 +64,7 @@ func (r *Resolver) Unwrap(ctx context.Context, key WrappedKey) ([]byte, error) {
 		if err != nil {
 			return nil, ErrUnavailable
 		}
-		ciphertext, err := base64.StdEncoding.Strict().DecodeString(key.Ciphertext)
+		ciphertext, err := base64.RawURLEncoding.Strict().DecodeString(key.Ciphertext)
 		if err != nil {
 			return nil, ErrUnavailable
 		}

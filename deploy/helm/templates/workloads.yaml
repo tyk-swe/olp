@@ -94,6 +94,10 @@ spec:
               value: "0.0.0.0:8080"
             - name: OLP_OBSERVABILITY_LISTEN_ADDR
               value: "0.0.0.0:9090"
+            - name: OLP_METRICS_TENANT_LABELS
+              value: {{ $root.Values.metrics.tenantLabels | quote }}
+            - name: OLP_METRICS_SERIES_CAP
+              value: {{ $root.Values.metrics.seriesCap | quote }}
             {{- if $tracingEndpoint }}
             - name: OLP_OTLP_TRACES_ENDPOINT
               value: {{ $tracingEndpoint | quote }}

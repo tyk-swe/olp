@@ -84,6 +84,9 @@ func (s *Server) bindNetwork(ctx context.Context, tx pgx.Tx, providerID string, 
 	if string(canonical) == string(encoded) {
 		return nil
 	}
+	if err := providers.PreserveCredentialBoundary(ctx, tx, providerID, &stored, &cfg); err != nil {
+		return err
+	}
 	_, err = tx.Exec(ctx, "UPDATE olp.providers SET configuration=$2,etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, encoded, access.NewID())
 	return err
 }

@@ -269,17 +269,9 @@ func (s *Server) attachCreated(ctx context.Context, x *execution, reserved media
 		ErrorClass:       result.Video.ErrorCode,
 		LastPolledAt:     s.now(),
 	}
-	var nativeSource [][]byte
-	if reserved.StrictContract {
-		if !result.Source.Valid() {
-			if _, err := media.MarkCreateAmbiguous(ctx, s.Media.Jobs.Pool, reserved.ID, "upstream_create_response_missing_native_source"); err != nil {
-				s.Media.Jobs.RecordGap()
-			}
-			return protocol("The native video metadata is unavailable.")
-		}
-		nativeSource = append(nativeSource, result.Source.Bytes())
-	}
-	record, err := s.Media.Jobs.AttachWithRetry(ctx, reserved.ID, upstreamID, update, nativeSource...)
+	// Native provider documents may echo prompts or arbitrary output fields.
+	// Keep them transient; lifecycle recovery needs only the typed job metadata.
+	record, err := s.Media.Jobs.AttachWithRetry(ctx, reserved.ID, upstreamID, update)
 	if err != nil {
 		return s.handleFailedAttachment(ctx, x, reserved, upstreamID, result, err, out)
 	}
@@ -469,9 +461,7 @@ func (s *Server) admitVideoRequest(parent context.Context, x *execution, authori
 }
 
 // videoJobCall dispatches one pinned-target upstream call for a media job and
-// returns the attempt fact for the caller to record. A list polls its jobs
-// concurrently, so the call states the attempt in its fact and leaves the
-// execution to the caller.
+// returns the attempt fact for the caller to record.
 // videoJobCall makes one call on an existing job, encoded in the wire of the
 // vendor the job's pinned provider revision names.
 func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.JobRecord, request *media.Request) (*media.Result, *attemptFailure, AttemptFact) {
@@ -508,8 +498,7 @@ func (s *Server) videoJobCall(ctx context.Context, x *execution, record *media.J
 		fact.recordEvidence(false)
 		return nil, &attemptFailure{class: classCredential}, fact
 	}
-	// A list polls its jobs concurrently, so each call redacts with its own
-	// collection rather than the execution's.
+	// Each job call redacts with the secrets of its own pinned provider.
 	var sensitive egress.Sensitive
 	if provider.CredentialSource == "caller" {
 		secret, err := x.bindCallerSecret(provider.ID, record.UpstreamModel)
@@ -723,32 +712,20 @@ func (s *Server) videoList(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, mediaError(media.JobHTTPError(err)))
 		return
 	}
-	refreshed := make([]media.JobRecord, len(page.Items))
-	type refreshResult struct {
-		index      int
-		record     media.JobRecord
-		fact       *AttemptFact
-		dispatched bool
-		err        *Error
-	}
-	results := make(chan refreshResult, len(page.Items))
-	for i, record := range page.Items {
-		i, record := i, record
-		go func() {
-			updated, fact, dispatched, e := s.refreshListRecord(r.Context(), x, record)
-			results <- refreshResult{i, updated, fact, dispatched, e}
-		}()
-	}
+	refreshed := make([]media.JobRecord, 0, len(page.Items))
 	var refreshError *Error
-	for range page.Items {
-		outcome := <-results
-		refreshed[outcome.index] = outcome.record
-		if outcome.err != nil {
-			refreshError = outcome.err
+	// This request holds one process admission permit. Poll serially so a
+	// caller-controlled page cannot multiply that permit into 100 requests.
+	for _, record := range page.Items {
+		updated, fact, dispatched, e := s.refreshListRecord(r.Context(), x, record)
+		refreshed = append(refreshed, updated)
+		x.dispatched = x.dispatched || dispatched
+		if fact != nil {
+			x.facts = append(x.facts, *fact)
 		}
-		x.dispatched = x.dispatched || outcome.dispatched
-		if outcome.fact != nil {
-			x.facts = append(x.facts, *outcome.fact)
+		if e != nil {
+			refreshError = e
+			break
 		}
 	}
 	x.notePolls()

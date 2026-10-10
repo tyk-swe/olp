@@ -75,7 +75,7 @@ func TestExportSinksQueueScopedFactsAndRetrySignedStableEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	var visible int
-	if err = h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.export_deliveries").Scan(&visible); err != nil || visible != 0 {
+	if err = h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.managed_export_deliveries").Scan(&visible); err != nil || visible != 0 {
 		t.Fatalf("uncommitted export escaped: %d %v", visible, err)
 	}
 	if err = tx.Commit(t.Context()); err != nil {
@@ -85,7 +85,7 @@ func TestExportSinksQueueScopedFactsAndRetrySignedStableEvents(t *testing.T) {
 		t.Fatalf("duplicate source: %v %v", result, err)
 	}
 	var count int
-	if err = h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.export_deliveries").Scan(&count); err != nil || count != 3 {
+	if err = h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.managed_export_deliveries").Scan(&count); err != nil || count != 3 {
 		t.Fatalf("fanout/duplicate isolation: %d %v", count, err)
 	}
 	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
@@ -102,7 +102,7 @@ func TestExportSinksQueueScopedFactsAndRetrySignedStableEvents(t *testing.T) {
 		t.Fatalf("first delivery: %v %v", progress, err)
 	}
 	fail.Store(false)
-	if _, err = h.Pool.Exec(t.Context(), "UPDATE olp.export_deliveries SET next_attempt_at=now() WHERE status='pending'"); err != nil {
+	if _, err = h.Pool.Exec(t.Context(), "UPDATE olp.managed_export_deliveries SET next_attempt_at=now() WHERE status='pending'"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = worker.Deliver(t.Context()); err != nil {
@@ -140,7 +140,7 @@ func TestExportSinksQueueScopedFactsAndRetrySignedStableEvents(t *testing.T) {
 		t.Fatalf("stable delivery identities: %d duplicates %d", len(byID), duplicates)
 	}
 	var failed, delivered int
-	if err = h.Pool.QueryRow(t.Context(), "SELECT failed_total,delivered_total FROM olp.export_sinks WHERE id=$1", global["id"]).Scan(&failed, &delivered); err != nil || failed != 2 || delivered != 2 {
+	if err = h.Pool.QueryRow(t.Context(), "SELECT failed_total,delivered_total FROM olp.managed_export_sinks WHERE id=$1", global["id"]).Scan(&failed, &delivered); err != nil || failed != 2 || delivered != 2 {
 		t.Fatalf("delivery counters %d %d %v", failed, delivered, err)
 	}
 	// Attempt inserts and later pricing corrections are separate immutable export events.
@@ -156,18 +156,18 @@ func TestExportSinksQueueScopedFactsAndRetrySignedStableEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	var attempts int
-	if err = h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.export_deliveries WHERE stream='attempts' AND status='delivered'").Scan(&attempts); err != nil || attempts != 2 {
+	if err = h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.managed_export_deliveries WHERE stream='attempts' AND status='delivered'").Scan(&attempts); err != nil || attempts != 2 {
 		t.Fatalf("attempt/correction exports %d %v", attempts, err)
 	}
 	// Expired pending payloads record gaps independently of fact retention.
-	if _, err = h.Pool.Exec(t.Context(), "INSERT INTO olp.export_deliveries(sink_id,event_id,stream,payload,expires_at) VALUES($1,$2,'requests','{}',now()-interval '1 second')", global["id"], uuid.NewString()); err != nil {
+	if _, err = h.Pool.Exec(t.Context(), "INSERT INTO olp.managed_export_deliveries(sink_id,event_id,stream,payload,expires_at) VALUES($1,$2,'requests','{}',now()-interval '1 second')", global["id"], uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = worker.Deliver(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	var expired int
-	if err = h.Pool.QueryRow(t.Context(), "SELECT expired_total FROM olp.export_sinks WHERE id=$1", global["id"]).Scan(&expired); err != nil || expired != 1 {
+	if err = h.Pool.QueryRow(t.Context(), "SELECT expired_total FROM olp.managed_export_sinks WHERE id=$1", global["id"]).Scan(&expired); err != nil || expired != 1 {
 		t.Fatalf("expiry gap %d %v", expired, err)
 	}
 	path := "/api/v1/sinks/" + global["id"].(string)
@@ -194,7 +194,7 @@ func TestExportSinksQueueScopedFactsAndRetrySignedStableEvents(t *testing.T) {
 	}
 	mu.Unlock()
 	var auditCount int
-	if err = h.Pool.QueryRow(t.Context(), "SELECT delivered_total FROM olp.export_sinks WHERE id=$1", auditSink["id"]).Scan(&auditCount); err != nil || auditCount < 2 {
+	if err = h.Pool.QueryRow(t.Context(), "SELECT delivered_total FROM olp.managed_export_sinks WHERE id=$1", auditSink["id"]).Scan(&auditCount); err != nil || auditCount < 2 {
 		t.Fatalf("audit delivery %d %v", auditCount, err)
 	}
 	_ = projectSink
@@ -221,7 +221,7 @@ func TestExportSinkPromotionBindsDestinationSecretsAndReusesUnchangedDefinitions
 	destination.want(b, "POST", "/api/v1/configuration/plan", map[string]any{"document": doc, "secret_bindings": bindings}, nil, 200)
 	destination.want(b, "POST", "/api/v1/configuration/apply", map[string]any{"document": doc, "secret_bindings": bindings}, idem(uuid.NewString()), 200)
 	var id, etag, credential string
-	if err := destination.Pool.QueryRow(t.Context(), "SELECT id::text,etag::text,credential_id::text FROM olp.export_sinks WHERE name='Portable facts'").Scan(&id, &etag, &credential); err != nil {
+	if err := destination.Pool.QueryRow(t.Context(), "SELECT id::text,etag::text,credential_id::text FROM olp.managed_export_sinks WHERE name='Portable facts'").Scan(&id, &etag, &credential); err != nil {
 		t.Fatal(err)
 	}
 	ring, err := secrets.ParseRing([]byte(destination.Ring))
@@ -253,7 +253,7 @@ func TestExportSinkPromotionBindsDestinationSecretsAndReusesUnchangedDefinitions
 	}
 	destination.want(b, "POST", "/api/v1/configuration/apply", map[string]any{"document": doc}, idem(uuid.NewString()), 200)
 	var after string
-	if err = destination.Pool.QueryRow(t.Context(), "SELECT etag::text FROM olp.export_sinks WHERE id=$1", id).Scan(&after); err != nil || after != etag {
+	if err = destination.Pool.QueryRow(t.Context(), "SELECT etag::text FROM olp.managed_export_sinks WHERE id=$1", id).Scan(&after); err != nil || after != etag {
 		t.Fatalf("reused sink mutated: %v", err)
 	}
 	docEntry := doc["sinks"].([]any)[0].(map[string]any)
@@ -267,7 +267,7 @@ func TestExportSinkPromotionBindsDestinationSecretsAndReusesUnchangedDefinitions
 
 func TestExportDeliveryCheckpointIsAcceptedByInstallationAndRegionalHealth(t *testing.T) {
 	h := newAccessHarness(t)
-	if err := usage.CheckpointTask(t.Context(), h.Pool, usage.TaskExportDelivery, usage.OutcomeSuccess, true); err != nil {
+	if err := usage.CheckpointTask(t.Context(), h.Pool, usage.TaskManagedExportDelivery, usage.OutcomeSuccess, true); err != nil {
 		t.Fatal(err)
 	}
 	for _, region := range []string{"", "west"} {
@@ -277,7 +277,7 @@ func TestExportDeliveryCheckpointIsAcceptedByInstallationAndRegionalHealth(t *te
 		}
 		found := false
 		for _, task := range health.Tasks {
-			if task.Task == string(usage.TaskExportDelivery) {
+			if task.Task == string(usage.TaskManagedExportDelivery) {
 				found = true
 				if task.State != observability.TaskStateHealthy || task.SuccessesTotal != 1 {
 					t.Fatalf("export health in %q: %+v", region, task)

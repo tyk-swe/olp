@@ -38,6 +38,12 @@ export function useServiceCapabilities() {
         capabilities.data.notifications_active === true
       );
     },
+    get payloadCaptureActive() {
+      return (
+        capabilities.isSuccess &&
+        capabilities.data.payload_capture_active === true
+      );
+    },
     get retentionEnforced() {
       return (
         capabilities.isSuccess &&

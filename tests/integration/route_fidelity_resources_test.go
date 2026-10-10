@@ -163,6 +163,10 @@ func TestRetainedResponsesFollowTheirRouteFidelity(t *testing.T) {
 	if status != http.StatusOK || !strings.Contains(string(raw), `"status":"cancelled"`) || !strings.Contains(string(raw), strict) {
 		t.Fatalf("cancel of a strict response on a transformed route: %d %s", status, raw)
 	}
+	var receipt map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &receipt); err != nil || len(receipt) != 3 || receipt["output"] != nil {
+		t.Fatalf("cancellation exposed retained content: %s (%v)", raw, err)
+	}
 	status, raw, _ = h.gatewayRaw(http.MethodDelete, "/v1/responses/"+strict, key, nil, nil)
 	if status != http.StatusOK || !strings.Contains(string(raw), `"deleted":true`) {
 		t.Fatalf("delete of a strict response on a transformed route: %d %s", status, raw)

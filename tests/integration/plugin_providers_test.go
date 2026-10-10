@@ -446,9 +446,8 @@ func TestPluginProfileDiscoversModelsAndClassifiesFailuresAsDeclared(t *testing.
 	}
 }
 
-// Moving a provider to another installed build of its plugin is an ordinary
-// new revision, which the revision diff shows; every revision keeps pinning
-// its digest.
+// Moving a provider to another installed build requires replacing its credential
+// and creates a new revision; every revision keeps pinning its digest.
 func TestSwitchingPluginDigestsIsANewProviderRevision(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -461,7 +460,9 @@ func TestSwitchingPluginDigestsIsANewProviderRevision(t *testing.T) {
 	path := "/api/v1/providers/" + created["id"].(string)
 	certifyPluginProvider(t, h, owner, path)
 
+	revokePluginCredentials(t, h, owner, path)
 	detail := moveToBuild(t, h, owner, path, second)
+	replacePluginCredential(t, h, owner, path)
 	if detail["configuration"].(map[string]any)["profile_revision"] != second {
 		t.Fatalf("the draft pins %v", detail["configuration"])
 	}
@@ -512,4 +513,24 @@ func TestPluginProviderAttemptsAreUnpricedUntilTheOperatorPricesThem(t *testing.
 	if fact.Unpriced {
 		t.Fatalf("the provider-scoped price did not apply: %+v", fact)
 	}
+}
+
+// Destination-affecting plugin edits require retiring all selectable versions,
+// then explicitly supplying a credential for the new destination.
+func revokePluginCredentials(t *testing.T, h *accessHarness, owner *browser, path string) {
+	t.Helper()
+	for _, raw := range h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any) {
+		credential := raw.(map[string]any)
+		if credential["revoked_at"] != nil {
+			continue
+		}
+		detail := h.want(owner, "GET", path, nil, nil, 200)
+		h.want(owner, "POST", path+"/credentials/"+credential["id"].(string)+"/revoke", nil, withMatch(detail, idem(uuid.NewString())), 200)
+	}
+}
+
+func replacePluginCredential(t *testing.T, h *accessHarness, owner *browser, path string) {
+	t.Helper()
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "POST", path+"/credentials", map[string]any{"credential": pluginCredential}, withMatch(detail, idem(uuid.NewString())), 201)
 }

@@ -131,6 +131,56 @@
         { "refId": "A", "expr": "max(rate(olp_request_metadata_events_reclaimed_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "metadata reclaimed/s" },
         { "refId": "B", "expr": "max(rate(olp_request_metadata_persistence_duplicates_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "metadata duplicates/s" }
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Business tokens and cost (5m)",
+      "id": 15,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 37 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by(direction) (rate(olp_tokens_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "tokens/s {{direction}}" },
+        { "refId": "B", "expr": "sum by(currency) (rate(olp_cost_total{namespace=~\"$namespace\"}[5m]))", "legendFormat": "cost/s {{currency}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Business latency and throughput (5m)",
+      "id": 16,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 37 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum(rate(olp_time_to_first_token_seconds_bucket{namespace=~\"$namespace\"}[5m])) by (le))", "legendFormat": "TTFT p95" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum(rate(olp_output_tokens_per_second_bucket{namespace=~\"$namespace\"}[5m])) by (le))", "legendFormat": "output tokens/s p95" },
+        { "refId": "C", "expr": "max(olp_metrics_series_active{namespace=~\"$namespace\"})", "legendFormat": "series active" },
+        { "refId": "D", "expr": "increase(olp_metrics_series_overflow_total{namespace=~\"$namespace\"}[10m])", "legendFormat": "series overflow/10m" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Export deliveries and backlog",
+      "id": 17,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 45 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by(outcome) (max by(namespace,sink,outcome) (rate(olp_export_deliveries_total{namespace=~\"$namespace\"}[5m])))", "legendFormat": "deliveries/s {{outcome}}" },
+        { "refId": "B", "expr": "max(olp_export_pending{namespace=~\"$namespace\"})", "legendFormat": "pending records" },
+        { "refId": "C", "expr": "max(olp_export_lag_seconds{namespace=~\"$namespace\"}) by (sink, stream)", "legendFormat": "lag {{sink}}/{{stream}}" },
+        { "refId": "D", "expr": "max by(namespace,sink) (increase(olp_export_gap_total{namespace=~\"$namespace\"}[10m]))", "legendFormat": "retention gaps/10m" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Payload capture",
+      "id": 18,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 45 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "rate(olp_capture_queued_total{namespace=~\"$namespace\"}[5m])", "legendFormat": "queued/s" },
+        { "refId": "B", "expr": "rate(olp_capture_delivered_total{namespace=~\"$namespace\"}[5m])", "legendFormat": "delivered/s" },
+        { "refId": "C", "expr": "rate(olp_capture_dropped_total{namespace=~\"$namespace\"}[5m])", "legendFormat": "dropped/s" },
+        { "refId": "D", "expr": "rate(olp_capture_failed_total{namespace=~\"$namespace\"}[5m])", "legendFormat": "failed/s" }
+      ]
     }
   ],
   "refresh": "15s",

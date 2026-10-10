@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -167,5 +168,28 @@ func TestConsumerReadsTheServersAnswersAboutItsGroup(t *testing.T) {
 				t.Fatalf("groupLost = %v, want %v", run.groupLost, test.lost)
 			}
 		})
+	}
+}
+
+func TestFutureMetadataVersionRemainsPending(t *testing.T) {
+	r := &consumerRun{log: slog.Default()}
+	// No database or stream client is configured: unsupported versions must not
+	// record a permanent gap, acknowledge, or delete the only accounting evidence.
+	completed, duplicate, retry := r.processEntry(t.Context(), StreamEntry{ID: "1-0", Payload: []byte(`{"version":2}`)})
+	if completed || duplicate || !retry {
+		t.Fatalf("future version retired: %v %v %v", completed, duplicate, retry)
+	}
+}
+
+func TestUnsupportedVersionIsDistinctFromMalformedSupportedMetadata(t *testing.T) {
+	for _, payload := range []string{`{"version":2}`, `{"version":99,"future_shape":[]}`} {
+		if _, err := Decode([]byte(payload)); !errors.Is(err, ErrUnsupportedVersion) {
+			t.Fatalf("unsupported envelope classified as permanent damage: %s: %v", payload, err)
+		}
+	}
+	for _, payload := range []string{`{`, `{}`, `{"version":null}`, `{"version":"2"}`, `{"version":1}`} {
+		if _, err := Decode([]byte(payload)); err == nil || errors.Is(err, ErrUnsupportedVersion) {
+			t.Fatalf("malformed envelope retained as a future version: %s: %v", payload, err)
+		}
 	}
 }

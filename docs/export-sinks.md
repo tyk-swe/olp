@@ -6,6 +6,12 @@ Create, read, replace, and retire it through `/api/v1/sinks` or the generated
 management clients. At most 64 active sinks exist per installation; active names
 are unique inside their installation or project scope.
 
+These operator-managed sinks have their own delivery queue and signing
+credentials. The [observability sinks](operations.md#export-sinks-payload-capture-and-business-metrics) at
+`/api/v1/observability/sinks` support additional transports, filters, usage
+rollups, and capture policies; their definitions and delivery records are
+independent.
+
 Project sinks require the `keys` operation and project-change authority.
 Installation sinks require `settings`. Reads require `read` and project
 visibility. Project sinks receive only facts associated with keys belonging to
@@ -64,7 +70,7 @@ Workers remove them in bounded batches and count expired pending deliveries as
 gaps. Disabling a sink pauses its pending work; enabling resumes eligible work
 before expiry. Removing a stream stops its delivery. Reads report delivered,
 failed, and expired counts plus the last delivery time. The shared PostgreSQL
-worker task `export_delivery` appears in health and operational metrics.
+worker task `managed_export_delivery` appears in health and operational metrics.
 
 ## Configuration promotion
 

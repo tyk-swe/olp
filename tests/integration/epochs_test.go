@@ -406,7 +406,8 @@ func TestConsumerHealthKeepsTheFreshestSample(t *testing.T) {
 	pool := acctPool(t)
 	now := time.Now().UTC()
 	oldest := now.Add(-30 * time.Second)
-	if err := usage.ReportConsumerHealth(t.Context(), pool, 3, 5, &oldest, now); err != nil {
+	lagged := now.Add(-20 * time.Second)
+	if err := usage.ReportConsumerHealth(t.Context(), pool, 3, 5, &oldest, &lagged, now); err != nil {
 		t.Fatalf("report health: %v", err)
 	}
 	pending, lag, recorded := acctConsumerHealth(t, pool)
@@ -416,7 +417,7 @@ func TestConsumerHealthKeepsTheFreshestSample(t *testing.T) {
 	acctSameInstant(t, *recorded, oldest, "oldest pending delivery")
 
 	// An older reading from a second consumer must not undo the newer one.
-	if err := usage.ReportConsumerHealth(t.Context(), pool, 0, 0, nil,
+	if err := usage.ReportConsumerHealth(t.Context(), pool, 0, 0, nil, nil,
 		now.Add(-time.Minute)); err != nil {
 		t.Fatalf("report stale health: %v", err)
 	}
@@ -425,7 +426,7 @@ func TestConsumerHealthKeepsTheFreshestSample(t *testing.T) {
 	}
 
 	// A later reading replaces it.
-	if err := usage.ReportConsumerHealth(t.Context(), pool, 0, 0, nil,
+	if err := usage.ReportConsumerHealth(t.Context(), pool, 0, 0, nil, nil,
 		time.Now().UTC().Add(time.Second)); err != nil {
 		t.Fatalf("report drained health: %v", err)
 	}
@@ -450,9 +451,12 @@ func TestConsumerHealthKeepsTheFreshestSample(t *testing.T) {
 		pending int64
 		lag     int64
 		oldest  *time.Time
+		lagged  *time.Time
 	}{
 		{name: "a backlog with nothing pending", pending: 4},
 		{name: "an empty group with something pending", oldest: &oldest},
+		{name: "a lag with nothing undelivered", lag: 2},
+		{name: "an undelivered entry with no lag", lagged: &oldest},
 		{name: "a negative backlog", pending: -1},
 		{name: "a negative lag", lag: -1},
 		{name: "a delivery from the future", pending: 1, oldest: &future},
@@ -460,7 +464,7 @@ func TestConsumerHealthKeepsTheFreshestSample(t *testing.T) {
 	for _, test := range contradictions {
 		t.Run(test.name, func(t *testing.T) {
 			err := usage.ReportConsumerHealth(t.Context(), pool, test.pending, test.lag,
-				test.oldest, time.Now().UTC())
+				test.oldest, test.lagged, time.Now().UTC())
 			if !errors.Is(err, usage.ErrInvalidCheckpoint) {
 				t.Fatalf("error = %v, want ErrInvalidCheckpoint", err)
 			}

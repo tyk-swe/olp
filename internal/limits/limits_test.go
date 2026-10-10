@@ -1044,3 +1044,29 @@ func TestOutcomeAndPolicyNames(t *testing.T) {
 }
 
 func pointer[T any](value T) *T { return &value }
+
+func TestUntrustedUsageCannotRefundTokenReservation(t *testing.T) {
+	for _, observed := range []int64{0, 1, 99, 100, 150} {
+		client := &scripted{answer: func(args []string) (any, error) {
+			want := "0"
+			if observed == 150 {
+				want = "50"
+			}
+			if got := args[len(args)-2]; got != want {
+				t.Fatalf("usage %d adjustment %s, want %s", observed, got, want)
+			}
+			return int64(1), nil
+		}}
+		limiter, err := New(client, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		lease := &Lease{limiter: limiter, hasToken: true, reservedTokens: 100}
+		if err := lease.Reconcile(t.Context(), observed); err != nil {
+			t.Fatal(err)
+		}
+		if calls := len(client.commands()); calls != 1 {
+			t.Fatalf("usage %d sent %d adjustments, want one", observed, calls)
+		}
+	}
+}

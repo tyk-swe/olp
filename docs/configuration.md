@@ -61,6 +61,8 @@ bind.
 | `OLP_SHUTDOWN_TIMEOUT` | `30s` | Shared HTTP, metadata, delivery and worker shutdown budget (1ms–10m). |
 | `OLP_DEPENDENCY_REQUEST_TIMEOUT` | `2s` | Per-request dependency deadline (1ms–1m). |
 | `OLP_STARTUP_TIMEOUT` | `10s` | Startup and ordinary maintenance deadline (1ms–1m). |
+| `OLP_METRICS_TENANT_LABELS`                    | empty                                                           | Optional business-metric tenant labels from `project`, `key`, `end_user`. Empty keeps only the metric's route, provider kind, direction or currency labels.                                              |
+| `OLP_METRICS_SERIES_CAP`                       | `5000`                                                          | Per-process bound on active business-metric series (64–1000000); overflow is counted at `olp_metrics_series_overflow_total`.                                                                             |
 
 At maximum connection age the server stops admitting requests on that connection
 and sends HTTP/2 GOAWAY. Existing streams have the configured drain interval to
@@ -94,6 +96,20 @@ canonical lowercase hyphenated UUID `x-request-id` values enter the trace
 attribute. See [tracing operations](operations.md#distributed-tracing) for
 sampling, monitoring, and local exploration.
 
+Request and attempt spans also carry the GenAI keys of the OpenTelemetry
+semantic conventions pinned at schema `1.41.0`, a convention set still at
+development status upstream: `gen_ai.operation.name`, `gen_ai.provider.name`,
+`gen_ai.request.model`, `gen_ai.response.model`,
+`gen_ai.response.finish_reasons`, `gen_ai.usage.input_tokens`, and
+`gen_ai.usage.output_tokens`. `gen_ai.request.model` is the route slug the
+caller named; `gen_ai.response.model`, finish reasons, and usage are recorded
+only when the provider reports them. Provider and operation names use the
+conventions' well-known values where the provider kind or request surface maps
+to one (`openai`, `anthropic`, `gcp.gemini`, `gcp.vertex_ai`, `aws.bedrock`,
+`azure.ai.openai`, `ibm.watsonx.ai`; `chat`, `generate_content`,
+`text_completion`, `embeddings`), and the gateway's own names otherwise.
+Prompt, output, and tool payload capture stays out of spans.
+
 All HTTP modes (`all`, `gateway`, `control`) require PostgreSQL and the
 authentication HMAC key. Configure Valkey for production: without it, runtime
 hints fall back to polling and hard-limited keys fail closed. `worker` requires
@@ -126,7 +142,9 @@ connectors. Every command refuses to start when `OLP_AUTH_HMAC_KEY`,
 ```json
 {
   "active_version": 1,
-  "keys": [{ "version": 1, "key": "<32 random bytes encoded as hex or base64>" }]
+  "keys": [
+    { "version": 1, "key": "<32 random bytes encoded as hex or base64>" }
+  ]
 }
 ```
 
@@ -179,58 +197,58 @@ documentation is silent. A preset whose vendor speaks Chat Completions exactly
 selects the `compatible-chat` profile, so it can serve strict routes; choose
 **Automatic** to use parameter defaults instead.
 
-| ID | Provider | Endpoint | Profile |
-| --- | --- | --- | --- |
-| `groq` | Groq | `https://api.groq.com/openai/v1` | `compatible-chat` |
-| `mistral` | Mistral | `https://api.mistral.ai/v1` |  |
-| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | `compatible-chat` |
-| `together` | Together AI | `https://api.together.ai/v1` |  |
-| `vllm` | vLLM | `https://vllm.example.internal/v1` (placeholder) |  |
-| `deepseek` | DeepSeek | `https://api.deepseek.com` |  |
-| `fireworks` | Fireworks | `https://api.fireworks.ai/inference/v1` | `compatible-chat` |
-| `deepinfra` | DeepInfra | `https://api.deepinfra.com/v1/openai` |  |
-| `huggingface` | Hugging Face | `https://router.huggingface.co/v1` |  |
-| `cohere` | Cohere | `https://api.cohere.ai/compatibility/v1` |  |
-| `cohere-native-v2` | Cohere native v2 | `https://api.cohere.ai/v2` | `cohere-v2` |
-| `jina` | Jina AI | `https://api.jina.ai/v1` |  |
-| `elevenlabs` | ElevenLabs | `https://api.elevenlabs.io/v1` |  |
-| `deepgram` | Deepgram | `https://api.deepgram.com/v1` |  |
-| `assemblyai` | AssemblyAI | `https://api.assemblyai.com` |  |
-| `runway` | Runway | `https://api.dev.runwayml.com/v1` |  |
-| `stability` | Stability AI | `https://api.stability.ai` |  |
-| `recraft` | Recraft | `https://external.api.recraft.ai/v1` |  |
-| `bfl` | Black Forest Labs | `https://api.bfl.ai/v1` |  |
-| `voyage` | Voyage AI | `https://api.voyageai.com/v1` |  |
-| `xai` | xAI | `https://api.x.ai/v1` | `compatible-chat` |
-| `cerebras` | Cerebras | `https://api.cerebras.ai/v1` | `compatible-chat` |
-| `sambanova` | SambaNova | `https://api.sambanova.ai/v1` | `compatible-chat` |
-| `nebius` | Nebius Token Factory | `https://api.tokenfactory.nebius.com/v1` | `compatible-chat` |
-| `novita` | Novita AI | `https://api.novita.ai/openai/v1` |  |
-| `nvidia-nim` | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` |  |
-| `featherless` | Featherless | `https://api.featherless.ai/v1` |  |
-| `baseten` | Baseten | `https://inference.baseten.co/v1` |  |
-| `moonshot` | Moonshot AI | `https://api.moonshot.ai/v1` | `compatible-chat` |
-| `moonshot-cn` | Moonshot AI (China) | `https://api.moonshot.cn/v1` | `compatible-chat` |
-| `dashscope` | Alibaba Cloud Model Studio | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `compatible-chat` |
-| `dashscope-cn` | Alibaba Cloud Model Studio (China) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `compatible-chat` |
-| `zai` | Z.ai | `https://api.z.ai/api/paas/v4` |  |
-| `zhipu` | Zhipu BigModel | `https://open.bigmodel.cn/api/paas/v4` |  |
-| `minimax` | MiniMax | `https://api.minimax.io/v1` | `compatible-chat` |
-| `minimax-cn` | MiniMax (China) | `https://api.minimax.cn/v1` | `compatible-chat` |
-| `volcengine-ark` | Volcengine Ark | `https://ark.cn-beijing.volces.com/api/v3` | `compatible-chat` |
-| `byteplus-modelark` | BytePlus ModelArk | `https://ark.ap-southeast.bytepluses.com/api/v3` | `compatible-chat` |
-| `scaleway` | Scaleway Generative APIs | `https://api.scaleway.ai/v1` | `compatible-chat` |
-| `ovhcloud` | OVHcloud AI Endpoints | `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1` | `compatible-chat` |
-| `nscale` | Nscale | `https://inference.api.nscale.com/v1` | `compatible-chat` |
-| `databricks` | Databricks | `https://your-workspace.cloud.databricks.com/ai-gateway/mlflow/v1` (placeholder) |  |
-| `snowflake-cortex` | Snowflake Cortex | `https://your-account.snowflakecomputing.com/api/v2/cortex/v1` (placeholder) |  |
-| `cloudflare-workers-ai` | Cloudflare Workers AI | `https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/v1` (placeholder) |  |
-| `vercel-ai-gateway` | Vercel AI Gateway | `https://ai-gateway.vercel.sh/v1` |  |
-| `ollama` | Ollama | `https://ollama.example.internal/v1` (placeholder) |  |
-| `lmstudio` | LM Studio | `https://lmstudio.example.internal/v1` (placeholder) |  |
-| `llamacpp` | llama.cpp server | `https://llamacpp.example.internal/v1` (placeholder) |  |
-| `infinity` | Infinity | `https://infinity.example.internal` (placeholder) |  |
-| `docker-model-runner` | Docker Model Runner | `https://model-runner.example.internal/engines/v1` (placeholder) |  |
+| ID                      | Provider                           | Endpoint                                                                            | Profile           |
+| ----------------------- | ---------------------------------- | ----------------------------------------------------------------------------------- | ----------------- |
+| `groq`                  | Groq                               | `https://api.groq.com/openai/v1`                                                    | `compatible-chat` |
+| `mistral`               | Mistral                            | `https://api.mistral.ai/v1`                                                         |                   |
+| `openrouter`            | OpenRouter                         | `https://openrouter.ai/api/v1`                                                      | `compatible-chat` |
+| `together`              | Together AI                        | `https://api.together.ai/v1`                                                        |                   |
+| `vllm`                  | vLLM                               | `https://vllm.example.internal/v1` (placeholder)                                    |                   |
+| `deepseek`              | DeepSeek                           | `https://api.deepseek.com`                                                          |                   |
+| `fireworks`             | Fireworks                          | `https://api.fireworks.ai/inference/v1`                                             | `compatible-chat` |
+| `deepinfra`             | DeepInfra                          | `https://api.deepinfra.com/v1/openai`                                               |                   |
+| `huggingface`           | Hugging Face                       | `https://router.huggingface.co/v1`                                                  |                   |
+| `cohere`                | Cohere                             | `https://api.cohere.ai/compatibility/v1`                                            |                   |
+| `cohere-native-v2`      | Cohere native v2                   | `https://api.cohere.ai/v2`                                                          | `cohere-v2`       |
+| `jina`                  | Jina AI                            | `https://api.jina.ai/v1`                                                            |                   |
+| `elevenlabs`            | ElevenLabs                         | `https://api.elevenlabs.io/v1`                                                      |                   |
+| `deepgram`              | Deepgram                           | `https://api.deepgram.com/v1`                                                       |                   |
+| `assemblyai`            | AssemblyAI                         | `https://api.assemblyai.com`                                                        |                   |
+| `runway`                | Runway                             | `https://api.dev.runwayml.com/v1`                                                   |                   |
+| `stability`             | Stability AI                       | `https://api.stability.ai`                                                          |                   |
+| `recraft`               | Recraft                            | `https://external.api.recraft.ai/v1`                                                |                   |
+| `bfl`                   | Black Forest Labs                  | `https://api.bfl.ai/v1`                                                             |                   |
+| `voyage`                | Voyage AI                          | `https://api.voyageai.com/v1`                                                       |                   |
+| `xai`                   | xAI                                | `https://api.x.ai/v1`                                                               | `compatible-chat` |
+| `cerebras`              | Cerebras                           | `https://api.cerebras.ai/v1`                                                        | `compatible-chat` |
+| `sambanova`             | SambaNova                          | `https://api.sambanova.ai/v1`                                                       | `compatible-chat` |
+| `nebius`                | Nebius Token Factory               | `https://api.tokenfactory.nebius.com/v1`                                            | `compatible-chat` |
+| `novita`                | Novita AI                          | `https://api.novita.ai/openai/v1`                                                   |                   |
+| `nvidia-nim`            | NVIDIA NIM                         | `https://integrate.api.nvidia.com/v1`                                               |                   |
+| `featherless`           | Featherless                        | `https://api.featherless.ai/v1`                                                     |                   |
+| `baseten`               | Baseten                            | `https://inference.baseten.co/v1`                                                   |                   |
+| `moonshot`              | Moonshot AI                        | `https://api.moonshot.ai/v1`                                                        | `compatible-chat` |
+| `moonshot-cn`           | Moonshot AI (China)                | `https://api.moonshot.cn/v1`                                                        | `compatible-chat` |
+| `dashscope`             | Alibaba Cloud Model Studio         | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`                            | `compatible-chat` |
+| `dashscope-cn`          | Alibaba Cloud Model Studio (China) | `https://dashscope.aliyuncs.com/compatible-mode/v1`                                 | `compatible-chat` |
+| `zai`                   | Z.ai                               | `https://api.z.ai/api/paas/v4`                                                      |                   |
+| `zhipu`                 | Zhipu BigModel                     | `https://open.bigmodel.cn/api/paas/v4`                                              |                   |
+| `minimax`               | MiniMax                            | `https://api.minimax.io/v1`                                                         | `compatible-chat` |
+| `minimax-cn`            | MiniMax (China)                    | `https://api.minimax.cn/v1`                                                         | `compatible-chat` |
+| `volcengine-ark`        | Volcengine Ark                     | `https://ark.cn-beijing.volces.com/api/v3`                                          | `compatible-chat` |
+| `byteplus-modelark`     | BytePlus ModelArk                  | `https://ark.ap-southeast.bytepluses.com/api/v3`                                    | `compatible-chat` |
+| `scaleway`              | Scaleway Generative APIs           | `https://api.scaleway.ai/v1`                                                        | `compatible-chat` |
+| `ovhcloud`              | OVHcloud AI Endpoints              | `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1`                                  | `compatible-chat` |
+| `nscale`                | Nscale                             | `https://inference.api.nscale.com/v1`                                               | `compatible-chat` |
+| `databricks`            | Databricks                         | `https://your-workspace.cloud.databricks.com/ai-gateway/mlflow/v1` (placeholder)    |                   |
+| `snowflake-cortex`      | Snowflake Cortex                   | `https://your-account.snowflakecomputing.com/api/v2/cortex/v1` (placeholder)        |                   |
+| `cloudflare-workers-ai` | Cloudflare Workers AI              | `https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/v1` (placeholder) |                   |
+| `vercel-ai-gateway`     | Vercel AI Gateway                  | `https://ai-gateway.vercel.sh/v1`                                                   |                   |
+| `ollama`                | Ollama                             | `https://ollama.example.internal/v1` (placeholder)                                  |                   |
+| `lmstudio`              | LM Studio                          | `https://lmstudio.example.internal/v1` (placeholder)                                |                   |
+| `llamacpp`              | llama.cpp server                   | `https://llamacpp.example.internal/v1` (placeholder)                                |                   |
+| `infinity`              | Infinity                           | `https://infinity.example.internal` (placeholder)                                   |                   |
+| `docker-model-runner`   | Docker Model Runner                | `https://model-runner.example.internal/engines/v1` (placeholder)                    |                   |
 
 A preset is not provider or model certification. Creation and edits still run
 HTTPS, public-egress, SSRF, and reachability checks unless the host or address

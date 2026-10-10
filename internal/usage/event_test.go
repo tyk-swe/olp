@@ -563,7 +563,7 @@ func TestSerializedEventCarriesNoContentFields(t *testing.T) {
 		"api_key_id", "attempts", "budget_group_id", "cache_write_1h_input_tokens",
 		"cache_write_5m_input_tokens", "cache_write_input_tokens", "cached_input_tokens",
 		"committed", "error_class", "event_id", "first_byte_ms", "input_tokens", "latency_ms",
-		"media_units", "observed_at", "operation", "output_tokens", "provider_id",
+		"media_units", "observed_at", "operation", "output_tokens", "payload_captured", "provider_id",
 		"request_completed_at", "request_id", "request_started_at", "route_slug",
 		"runtime_generation_id", "status_code", "surface", "unpriced", "upstream_model",
 		"usage_complete", "version",

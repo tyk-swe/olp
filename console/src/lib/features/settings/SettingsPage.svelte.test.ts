@@ -87,6 +87,7 @@ const capabilities = {
   gateway_available: false,
   limits_enforced: false,
   notifications_active: false,
+  payload_capture_active: false,
   retention_enforced: false
 };
 

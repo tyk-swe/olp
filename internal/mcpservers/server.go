@@ -264,6 +264,9 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 			return access.Reply{}, err
 		}
 		if len(in.Credential) == 0 && previous != nil && previous.CredentialID != nil {
+			if in.Endpoint != previous.Endpoint {
+				return access.Reply{}, access.Invalid("credential", "Supply a replacement credential or null when changing the MCP endpoint.")
+			}
 			material, err = s.Access.Keys.Read(r.Context(), s.Access.Pool, s.Access.Installation, *previous.CredentialID, secrets.MCPCredential)
 			if err != nil {
 				return access.Reply{}, access.Fail(422, "mcp_credential_unavailable", "The registered credential is unavailable.")

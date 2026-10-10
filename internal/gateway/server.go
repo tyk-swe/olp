@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -74,6 +75,8 @@ type Config struct {
 // Runtime is the pinned authority, release and credential source.
 // *runtime.Manager implements it; fixtures and tests supply static releases.
 type Runtime interface {
+	// CheckRouteFidelity confirms a strict admission against current publication.
+	CheckRouteFidelity(context.Context, runtime.Route) error
 	Release() *runtime.Release
 	Authenticate(secret string) (*access.Authority, error)
 	// RoutingInputs returns current price and performance measurements, or
@@ -102,7 +105,9 @@ type Server struct {
 	Admission *Admission
 	// Media wires the bounded media substrate into the public surface. A nil
 	// Media leaves the media routes unregistered.
-	Media *MediaDeps
+	Media    *MediaDeps
+	Capture  *export.Manager
+	Business *telemetry.BusinessMetrics
 
 	Resources *resources.Store
 
@@ -629,6 +634,9 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			writeError(w, e)
 			return
 		}
+		if s.Capture != nil && x.origin == "" && x.operationName() == "generation" {
+			x.capture = s.Capture.Resolve(x.captureProject(), x.named().Slug, x.keyID, x.endUserDigest, x.request.accountingID())
+		}
 
 		// Admission happens once the request is understood and before any
 		// provider is called, so a rejected request costs an upstream nothing.
@@ -754,6 +762,9 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 // content policy to it. A selector that delegates moves the request on to its
 // route, which is planned in turn.
 func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
+	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
+		return e
+	}
 	snapshot := x.snapshot()
 	route := *x.route
 	if x.strict() {

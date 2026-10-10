@@ -72,7 +72,7 @@ func (s *Server) validateSinks(doc *Document) error {
 	return nil
 }
 func exportSinks(ctx context.Context, q access.Queryer) ([]SinkEntry, error) {
-	rows, err := q.Query(ctx, "SELECT s.name,p.name,s.type,s.destination,s.streams,s.enabled,s.credential_id IS NOT NULL FROM olp.export_sinks s LEFT JOIN olp.projects p ON p.id=s.project_id WHERE s.retired_at IS NULL")
+	rows, err := q.Query(ctx, "SELECT s.name,p.name,s.type,s.destination,s.streams,s.enabled,s.credential_id IS NOT NULL FROM olp.managed_export_sinks s LEFT JOIN olp.projects p ON p.id=s.project_id WHERE s.retired_at IS NULL")
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ type existingSink struct {
 
 func readSink(ctx context.Context, q access.Queryer, entry SinkEntry) (*existingSink, error) {
 	var current existingSink
-	err := q.QueryRow(ctx, "SELECT s.id::text,s.credential_id::text,s.name,p.name,s.type,s.destination,s.streams,s.enabled FROM olp.export_sinks s LEFT JOIN olp.projects p ON p.id=s.project_id WHERE s.retired_at IS NULL AND lower(s.name)=lower($1) AND coalesce(lower(p.name),'')=$2", entry.Name, sinkKey(entry)[0]).Scan(&current.id, &current.credential, &current.entry.Name, &current.entry.Project, &current.entry.Type, &current.entry.Destination, &current.entry.Streams, &current.entry.Enabled)
+	err := q.QueryRow(ctx, "SELECT s.id::text,s.credential_id::text,s.name,p.name,s.type,s.destination,s.streams,s.enabled FROM olp.managed_export_sinks s LEFT JOIN olp.projects p ON p.id=s.project_id WHERE s.retired_at IS NULL AND lower(s.name)=lower($1) AND coalesce(lower(p.name),'')=$2", entry.Name, sinkKey(entry)[0]).Scan(&current.id, &current.credential, &current.entry.Name, &current.entry.Project, &current.entry.Type, &current.entry.Destination, &current.entry.Streams, &current.entry.Enabled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -127,7 +127,7 @@ func (s *Server) sinkBindingMatches(ctx context.Context, q access.Queryer, id st
 func (s *Server) planSinks(ctx context.Context, q access.Queryer, doc *Document, bindings bindingSet, result *planResult) error {
 	active := 0
 	if len(doc.Sinks) > 0 {
-		if err := q.QueryRow(ctx, "SELECT count(*) FROM olp.export_sinks WHERE retired_at IS NULL").Scan(&active); err != nil {
+		if err := q.QueryRow(ctx, "SELECT count(*) FROM olp.managed_export_sinks WHERE retired_at IS NULL").Scan(&active); err != nil {
 			return err
 		}
 	}
@@ -251,9 +251,9 @@ func (s *Server) applySinks(ctx context.Context, tx pgx.Tx, p access.Principal, 
 		}
 		etag := access.NewID()
 		if current == nil {
-			_, err = tx.Exec(ctx, "INSERT INTO olp.export_sinks(id,project_id,name,type,destination,streams,enabled,credential_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", access.NewID(), projectID, e.Name, e.Type, e.Destination, e.Streams, e.Enabled, next, etag, p.UserID())
+			_, err = tx.Exec(ctx, "INSERT INTO olp.managed_export_sinks(id,project_id,name,type,destination,streams,enabled,credential_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", access.NewID(), projectID, e.Name, e.Type, e.Destination, e.Streams, e.Enabled, next, etag, p.UserID())
 		} else {
-			_, err = tx.Exec(ctx, "UPDATE olp.export_sinks SET name=$2,destination=$3,streams=$4,enabled=$5,credential_id=$6,etag=$7 WHERE id=$1", current.id, e.Name, e.Destination, e.Streams, e.Enabled, next, etag)
+			_, err = tx.Exec(ctx, "UPDATE olp.managed_export_sinks SET name=$2,destination=$3,streams=$4,enabled=$5,credential_id=$6,etag=$7 WHERE id=$1", current.id, e.Name, e.Destination, e.Streams, e.Enabled, next, etag)
 		}
 		if err != nil {
 			return err

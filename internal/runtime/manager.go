@@ -129,6 +129,7 @@ type Manager struct {
 	keys             *secrets.KeyRing
 	Mounted          map[string]MountedProvider
 	log              *slog.Logger
+	InstanceID       string
 
 	// GrantRefreshed, when set before Start, is told of each credential
 	// version of the installed release whose grant a poll found refreshed,
@@ -166,6 +167,7 @@ func NewManager(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, 
 		log:          log,
 		release:      emptyRelease(),
 		stop:         make(chan struct{}),
+		InstanceID:   usage.GatewayInstance(),
 
 		refreshRequested: map[string]int64{},
 	}
@@ -215,7 +217,7 @@ func (m *Manager) Stop() {
 func (m *Manager) Refresh(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, PollInterval)
 	defer cancel()
-	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx), m.refreshGrants(ctx), m.refreshInputs(ctx), m.refreshExternalCredentials(ctx))
+	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx), m.refreshGrants(ctx), m.refreshInputs(ctx), m.refreshExternalCredentials(ctx), m.RecordInstallStatus(ctx, m.InstanceID))
 }
 
 func (m *Manager) refreshAuthority(ctx context.Context) error {

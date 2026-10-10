@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -42,6 +44,8 @@ type State struct {
 	// HardLimits reports whether any pinned key carries hard limits; only then
 	// does a limiter outage degrade gateway readiness.
 	HardLimits func() bool
+	Business   *telemetry.BusinessMetrics
+	Export     func(ctx context.Context, body *strings.Builder)
 }
 
 // storeQuerier is the subset of the pool the collectors use.

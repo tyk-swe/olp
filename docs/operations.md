@@ -41,9 +41,12 @@ network access and secret mounts.
 Watch `olp_trace_export_dropped_total`. Export is bounded and asynchronous, so
 an unavailable collector does not extend provider latency; sustained drops mean
 the collector, network, sampling ratio, or queue budget needs attention. Request
-and attempt spans contain only the documented allowlist. Prompt and response
-content, tool payloads, raw headers, credentials, and raw provider errors are
-prohibited even during incident debugging.
+and attempt spans contain only the documented allowlist, which includes the
+`gen_ai.*` metadata keys of OpenTelemetry semantic conventions schema `1.41.0`
+(development status upstream); see
+[configuration](configuration.md#runtime-variables) for the exact keys. Prompt
+and response content, tool payloads, raw headers, credentials, and raw provider
+errors are prohibited even during incident debugging.
 
 For local exploration, start the development-only Jaeger all-in-one overlay:
 
@@ -54,6 +57,61 @@ docker compose -f deploy/compose.yaml -f deploy/compose.tracing.yaml up -d
 Open `http://127.0.0.1:16686`. The overlay samples every local trace, exposes
 only the UI port, and keeps traces in ephemeral memory. Stop it with the same
 two `-f` arguments followed by `down`.
+
+### Export sinks, payload capture, and business metrics
+
+Export sinks deliver durable copies of accounted requests, attempts, hourly
+usage rollups, guardrail decisions, and audit records to HTTPS endpoints, OTLP
+log collectors, and S3, GCS, or Azure Blob object storage in JSONL form.
+Installation sinks see every project; project sinks see their own project.
+Delivery is at-least-once under an immutable event id — receivers should
+deduplicate — and object destinations reuse a stable
+`stream/YYYY-MM-DD/event_id.jsonl` key so retried writes overwrite in place.
+Each pass claims records under a two-minute lease, commits the claim before any
+network call, and retries with exponential backoff from one minute to one hour.
+A failing sink starves no other sink: passes rotate across sink and stream
+pairs and retire at `ExportPassTimeout` (20s), resuming with the next pair.
+Unacknowledged records that outlive the stream's retention are counted in
+`olp.export_gaps` and `olp_export_gap_total` rather than silently dropped — a
+gap means the record expired before its acknowledgement, not that the remote
+necessarily never received it. `olp_export_pending`,
+`olp_export_lag_seconds{sink,stream}`, and
+`olp_export_deliveries_total{sink,outcome}` report queue depth and results. A
+sink outage degrades delivery but never the export task's health; only claim,
+outcome, or checkpoint failures make the worker unhealthy.
+
+Payload capture is owner-enabled, best-effort, and memory-only. An owner first
+enables installation capture; authorized installation and project managers then
+create bounded policies that pick an installation-owned sink, an include set
+(`input`, `output`, `tool_calls`), a deterministic sample ratio, and optional
+project, route, key, and end-user selectors. Sampled requests keep up to 1 MiB per record across at most 256
+active collectors and a 64-record queue, bounded to 4 MiB per project per
+minute; any bound violation drops the whole record and is counted. Captured
+input is taken after the input content policy and output is taken from the
+already-delivered frames, so capture never bypasses configured redaction;
+custom capture redaction is rejected until that feature lands. Delivered and
+failed sends, and stale-policy drops at send time, land in the audit stream as
+metadata only — queue-bound and cache-unavailable drops are counted but not
+audited, and audit writes are best-effort when the database is unavailable.
+Captured content never enters the database, Valkey, logs, or spans; the
+`payload_captured` request flag means a record was accepted into the memory
+queue, not that it was delivered. A record's `mode` marks `unary` (final
+tool-call items) or `streaming` (ordered tool-call argument fragments,
+matching what the caller received). Regular traces are always content-free.
+Counters:
+`olp_capture_queued_total`, `olp_capture_delivered_total`,
+`olp_capture_dropped_total`, `olp_capture_failed_total`, and
+`olp_capture_redaction_failed_total`.
+
+Business metrics record process-local observed usage per terminal request:
+`olp_tokens_total{route,provider_kind,direction}`, `olp_cost_total{route,currency}`
+(approximate — the durable ledger remains authoritative), and the
+`olp_time_to_first_token_seconds` and `olp_output_tokens_per_second`
+histograms for streaming requests. `OLP_METRICS_TENANT_LABELS` can add
+`project`, `key`, or `end_user` labels; `OLP_METRICS_SERIES_CAP` bounds the
+process's active series and `olp_metrics_series_overflow_total` counts
+overflow. Caller-paid budget-exempt usage still contributes cost: exemption
+changes budget charging, not observable upstream spend.
 
 ### Replicated worker health
 
@@ -245,11 +303,38 @@ See the [limits](../tests/integration/limits_test.go),
 ### Notifications
 
 `GET/POST /api/v1/notifications/destinations` and
-`GET/PATCH /api/v1/notifications/destinations/{id}` manage webhook endpoints;
+`GET/PATCH /api/v1/notifications/destinations/{id}` manage endpoints;
 `GET/POST /api/v1/notifications/rules` and
 `GET/PATCH /api/v1/notifications/rules/{id}` manage rules, and
-`GET /api/v1/notifications/deliveries` lists delivery metadata only. A rule
-subscribes a destination to one `event`, which never changes:
+`GET /api/v1/notifications/deliveries` lists delivery metadata only.
+
+Destinations support six transport types: `webhook` (URL + optional HMAC
+signing secret), `slack`, `msteams` and `discord` (channel origin URL plus a
+sealed full tokenized webhook URL — the sealed value is never returned),
+`pagerduty` (full Events API endpoint plus a sealed `routing_key`; a delivery
+requires an HTTP 202 acknowledgement), and `email` (an `smtps://` or
+`smtp+starttls://` URL, `from`/`to`/`subject_prefix`/`ca_certificate`
+configuration, and an optional sealed `{username,password}` object). The legacy
+webhook transport uses a five-second timeout; the typed channel adapters use
+fifteen seconds. Failures persist only a safe category — `timeout`, `network`,
+`http_4xx`, `http_5xx`, or `invalid_destination` — never URLs, credentials, or
+response bodies.
+
+A rule subscribes a destination to one `event`, which never changes. Generic
+signal events — `budget.exhausted`, `provider.circuit.open`,
+`provider.circuit.closed`, `provider.error_rate`, `provider.credential.failing`,
+`route.latency`, `model.retirement`, `runtime.install_failed`, `worker.stale`,
+and `report.spend` — carry canonical configuration (`threshold`,
+`recovery_threshold`, `window_seconds`, `minimum_samples`, `cooldown_seconds`,
+`lead_days`, `metric` (`latency` or `ttft`), `period`, `lead_time_seconds`)
+with backend defaults when omitted. Signals are produced by the real
+measurement queries: `budget.exhausted`, `route.latency`, `model.retirement`,
+`report.spend`, `budget.threshold` and `key.expiring` are project-scoped; the
+rest are installation-wide. When a runtime-install, worker-stale or
+credential-failing incident is active and its measurement source ages out, the
+signal is UNKNOWN — no recovery is emitted; only a fresh healthy measurement
+recovers the incident. Cooldown repeats share the incident key; bodies stay
+metadata-only — no request content or credential material.
 
 - `budget.threshold`: an API key's or budget group's accrued spend reached the
   rule's `threshold_percent` of its limit in the current calendar `day`, `week` or `month`
@@ -272,7 +357,7 @@ A destination may carry a signing secret: it is write-only, stored encrypted in
 the keyring, and never returned by any read. When configured, deliveries sign
 the exact request body with HMAC-SHA256 in `X-OLP-Signature: sha256=<hex>`.
 Destination URLs pass the egress policy at creation and again on every delivery
-dial; a five-second timeout applies and responses are drained bounded. Delivery
+dial; the transport's timeout applies and responses are drained bounded. Delivery
 failures persist only a safe category (`timeout`, `network`, `http_4xx`,
 `http_5xx`, `invalid_destination`), never response bodies or raw error text. Deliveries
 for a disabled rule or destination wait, unsent, until both are enabled again.
@@ -305,28 +390,32 @@ its draft or active revision, usually one; re-enroll their grant. The payload
 never carries secret material: no access or refresh token, grant facts, or the
 refresh failure that lapsed the grant.
 
-The delivery worker runs only where Valkey-backed shared state exists.
-`GET /api/v1/auth/capabilities` reports `notifications_active`; when it is
-false, destinations and rules still save but nothing is delivered — monitor
+The delivery worker runs wherever the management plane is configured; Valkey
+is required only for limiter-dependent signals such as `provider.circuit.*`.
+`GET /api/v1/auth/capabilities` reports `notifications_active` whenever
+delivery is configured, not merely when shared state is live — monitor
 `olp_worker_task_healthy{task="notification_delivery"}` and the
 `notification_deliveries` status counters for live health.
 
 ## Accounting delivery and shutdown
 
-Every request an API key owns produces one content-free metadata event;
-playground traffic has no key and is not accounted for. Inference processes
-buffer up to 8192 events and write them to the installation stream; the buffer
-never blocks a request, and an overflow is counted as loss rather than paid for
-in latency. Events carry identifiers, timing, token counts, and per-attempt
+Every attributable caller request, playground call and health probe produces one
+content-free metadata event. With Valkey configured, gateway, control and worker
+processes each buffer up to 8192 events and write them to the installation stream.
+The buffer handoff is nonblocking; an overflow records local loss and performs a
+bounded loss checkpoint so other replicas can refuse admission against incomplete
+cost accounting. Events carry identifiers, timing, token counts, and per-attempt
 evidence only — never prompts, outputs, tool data, headers, credentials,
 cookies, or uploads. Provider names, route slugs and labels are metadata; keep
 secrets out of them.
 [Provider-retained content](compatibility.md#files-batches-realtime-and-provider-retained-state)
 is governed separately from diagnostics.
 
-The stream carries JSON in one `event` field with `version: 1`. Missing or
-different versions, malformed payloads and permanently invalid records become
-`malformed_stream_event` gaps instead of being interpreted as another format.
+The stream carries JSON in one `event` field with `version: 1`. Unsupported integer
+versions remain in the original stream and pending set for a compatible consumer;
+supported neighboring events continue to persist. Missing versions, malformed
+payloads and permanently invalid records become `malformed_stream_event` gaps
+instead of being interpreted as another format.
 See [metadata tests](../internal/usage/) for the persistence contract.
 
 Transcription durations are recorded at microsecond precision to match the
@@ -400,11 +489,12 @@ No list price applies to a [plugin provider](plugins.md#providers-from-plugin-pr
 its attempts stay unpriced until a revision carries a price scoped to that
 provider, and a `plugin` price must name its `provider_id`.
 
-Shutdown stops the listeners and drains their handlers first, then closes
-metadata intake and gives the writer a bounded opportunity to flush the buffer.
+Shutdown stops the listeners and drains their handlers and health-probe producers
+first, then closes metadata intake and gives the writer a bounded opportunity to
+flush the buffer.
 Only afterwards are delivery and worker contexts cancelled. An expired flush
-budget records undelivered events as loss; a forced HTTP shutdown leaves the
-gateway epoch open for detection because handlers may still emit metadata. A
+budget records undelivered events as loss; a forced HTTP or probe shutdown leaves
+the producer epoch open for detection because requests may still emit metadata. A
 clean drain closes the epoch against what was actually delivered. HTTP,
 metadata, delivery, workers and trace flushing share `OLP_SHUTDOWN_TIMEOUT` (30
 seconds by default). Forced closure records uncertainty instead of extending the
@@ -438,16 +528,16 @@ Every key is prefixed with the installation namespace
 `olp:<installation>:`, so installations sharing one Valkey service never
 read, acknowledge, or reconcile one another's state.
 
-| Key | Contents |
-| --- | --- |
-| `<prefix>limits:{<lookup>}:rate` | Request and token windows for one lookup. |
-| `<prefix>limits:{<lookup>}:concurrency` | Concurrency leases for one lookup. |
-| `<prefix>limits:{<cost owner>}:cost:day`, `:cost:week` and `:cost:month` | Current calendar spend windows for caller and supply owners; supply caps use day/month. Custom calendar hashes also contain start/end instants. |
-| `<prefix>limits:{<cost owner>}:cost:pending` and `:cost:expiry` | Cost reserved by requests in flight against that owner: a hash of each request's amount and their total, and the set of when each lapses. Advisory; absent when nothing is in flight. |
-| `<prefix>limits:provider-cooldown:<scope>` | Credential-version and slot cooldowns. |
-| `<prefix>limits:health:circuits` | Each provider whose circuit the fleet holds open, until when. Gateways publish transitions and read it every two seconds. |
-| `<prefix>limits:health:probes` and `:health:probe:<provider>/<model>` | Each provider's latest active probe result, and the claim that keeps one probe per model and interval. |
-| `<prefix>request-metadata` | The request metadata stream, read by consumer group `olp:persistence`. |
+| Key                                                                      | Contents                                                                                                                                                                              |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<prefix>limits:{<lookup>}:rate`                                         | Request and token windows for one lookup.                                                                                                                                             |
+| `<prefix>limits:{<lookup>}:concurrency`                                  | Concurrency leases for one lookup.                                                                                                                                                    |
+| `<prefix>limits:{<cost owner>}:cost:day`, `:cost:week` and `:cost:month` | Current calendar spend windows for caller and supply owners; supply caps use day/month. Custom calendar hashes also contain start/end instants.                                       |
+| `<prefix>limits:{<cost owner>}:cost:pending` and `:cost:expiry`          | Cost reserved by requests in flight against that owner: a hash of each request's amount and their total, and the set of when each lapses. Advisory; absent when nothing is in flight. |
+| `<prefix>limits:provider-cooldown:<scope>`                               | Credential-version and slot cooldowns.                                                                                                                                                |
+| `<prefix>limits:health:circuits`                                         | Each provider whose circuit the fleet holds open, until when. Gateways publish transitions and read it every two seconds.                                                             |
+| `<prefix>limits:health:probes` and `:health:probe:<provider>/<model>`    | Each provider's latest active probe result, and the claim that keeps one probe per model and interval.                                                                                |
+| `<prefix>request-metadata`                                               | The request metadata stream, read by consumer group `olp:persistence`.                                                                                                                |
 
 A lookup is the key's lookup identifier, `pc_<provider uuid>` for a connection,
 `ps_<slot uuid>` for a credential slot, or `rt_<route uuid>` for a route's
@@ -688,7 +778,6 @@ cancellations must be reported separately, with an explicit inclusion/exclusion
 policy. Refusals and missing usage need distinct product/accounting indicators.
 Cost totals are estimates from recorded priced usage; always read their
 unpriced, incomplete, pending and loss coverage alongside the total.
-
 
 Budget-zone changes are scheduled, not immediate resets. See
 [budget time zones](access.md#budget-time-zone) for the effective-boundary display,

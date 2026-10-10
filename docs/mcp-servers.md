@@ -17,7 +17,9 @@ replace a registration. Exact replay returns the original result without
 repeating discovery.
 
 Optional write-only `credential` supplies static upstream bearer material.
-Omission retains it, null removes it. The installation key ring seals it under
+Omission retains it when the endpoint is unchanged; null removes it. Changing
+the endpoint requires an explicit replacement credential or removal, including
+through configuration promotion. The installation key ring seals it under
 `mcp_credential`; responses expose only `has_credential`. Certification refuses
 metadata reflecting that bearer value, including escaped schema strings. Endpoint
 validation and every connection use provider egress policy, with redirects

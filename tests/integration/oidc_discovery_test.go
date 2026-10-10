@@ -7,6 +7,8 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"sync/atomic"
 	"testing"
 )
 
@@ -115,5 +117,46 @@ func TestOIDCConfigurationRejectsPrivateAdvertisedEndpoints(t *testing.T) {
 				t.Fatal("a rejected endpoint changed the saved configuration")
 			}
 		})
+	}
+}
+
+func TestOIDCRediscoveryCannotRedirectTheSavedClientSecret(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	issuer := newTestIssuer(t)
+	var attackerCalls atomic.Int64
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { attackerCalls.Add(1); w.WriteHeader(400) }))
+	defer attacker.Close()
+	var changed atomic.Bool
+	discovery := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := issuer.Server.URL + "/token"
+		if changed.Load() {
+			token = attacker.URL + "/token"
+		}
+		json.NewEncoder(w).Encode(map[string]any{"issuer": issuer.Server.URL, "authorization_endpoint": issuer.Server.URL + "/authorize", "token_endpoint": token, "jwks_uri": issuer.Server.URL + "/jwks"})
+	}))
+	defer discovery.Close()
+	saved := h.want(owner, "PUT", "/api/v1/oidc/configuration", map[string]any{"issuer": issuer.Server.URL, "discovery_url": discovery.URL, "client_id": "test-client", "client_secret": "write-only-client-secret"}, nil, 200)
+	if saved["discovery_binding"] != nil {
+		t.Fatal("PUT exposed private discovery binding")
+	}
+	current := h.want(owner, "GET", "/api/v1/oidc/configuration", nil, nil, 200)
+	if current["discovery_binding"] != nil {
+		t.Fatal("GET exposed private discovery binding")
+	}
+	auth := h.want(owner, "POST", "/api/v1/oidc/login", map[string]any{}, nil, 200)["authorization_url"].(string)
+	parsed, err := url.Parse(auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed.Store(true)
+	callback := "/api/v1/oidc/callback?" + url.Values{"state": {parsed.Query().Get("state")}, "code": {"attacker-code"}}.Encode()
+	refused := h.want(owner, "GET", callback, nil, nil, 422)
+	if problemCode(t, refused) != "oidc_discovery_changed" {
+		t.Fatal(refused)
+	}
+	h.want(owner, "POST", "/api/v1/oidc/login", map[string]any{}, nil, 422)
+	if attackerCalls.Load() != 0 {
+		t.Fatal("client secret reached changed endpoint")
 	}
 }

@@ -103,6 +103,25 @@ func TestMCPServerCertificationPinsCatalogsAndRechecksAuthorityWithoutLocks(t *t
 	if replay["id"] != id || requests.Load() != before {
 		t.Fatal("idempotent creation repeated network certification")
 	}
+	var redirectedCalls atomic.Int64
+	redirected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectedCalls.Add(1)
+		if r.Header.Get("Authorization") != "" {
+			t.Error("saved credential forwarded to a changed endpoint")
+		}
+		w.WriteHeader(503)
+	}))
+	defer redirected.Close()
+	changedEndpoint := map[string]any{"name": "Search server", "endpoint": redirected.URL, "enabled": true}
+	h.want(owner, "PUT", path, changedEndpoint, map[string]string{"Idempotency-Key": uuid.NewString(), "If-Match": `"` + created["etag"].(string) + `"`}, 422)
+	if redirectedCalls.Load() != 0 {
+		t.Fatal("endpoint change contacted the new server without an explicit credential decision")
+	}
+	changedEndpoint["credential"] = nil
+	h.want(owner, "PUT", path, changedEndpoint, map[string]string{"Idempotency-Key": uuid.NewString(), "If-Match": `"` + created["etag"].(string) + `"`}, 422)
+	if redirectedCalls.Load() == 0 {
+		t.Fatal("explicit credential removal did not allow certification")
+	}
 	description.Store("Changed upstream description")
 	unchanged := h.want(owner, "GET", path, nil, nil, 200)
 	if unchanged["revision_id"] != oldRevision || strings.Contains(string(mustJSON(unchanged)), "Changed upstream") {

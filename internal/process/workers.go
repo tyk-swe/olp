@@ -7,9 +7,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
@@ -30,15 +31,22 @@ import (
 // returned function waits for all of them to have stopped.
 // vk is the consumer's own Valkey client: its blocking stream reads would
 // otherwise stall every command the gateway sends on a shared connection.
-func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, pluginHost *plugins.Host, prober *gateway.Server, keys *secrets.KeyRing, installation, region string, policy *egress.Policy, log *slog.Logger) func() {
+func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, pluginHost *plugins.Host, keys *secrets.KeyRing, installation, region string, policy *egress.Policy, log *slog.Logger, exporter *export.Worker, reference *catalog.Signed) func() {
 	ctx = usage.WithWorkerRegion(ctx, region)
 	var wg sync.WaitGroup
-	exporter := &sinks.Worker{Pool: pool, Keys: keys, Installation: installation, Egress: policy}
-	wg.Go(func() { exporter.Run(ctx, log) })
+	managedExporter := &sinks.Worker{Pool: pool, Keys: keys, Installation: installation, Egress: policy}
+	wg.Go(func() { managedExporter.Run(ctx, log) })
 	wg.Go(func() { mediaService.RunReconciler(ctx) })
 	// Grant refresh needs only PostgreSQL and the providers' network paths.
 	refresher := &grants.Refresher{Pool: pool, Keys: keys, Installation: installation, Plugins: pluginHost, Egress: policy, Log: log}
 	wg.Go(func() { refresher.Run(ctx) })
+	if exporter != nil {
+		wg.Go(func() { exporter.Run(ctx) })
+	}
+	wg.Go(func() {
+		usage.RunNotificationDelivery(ctx, pool, keys, installation, policy, log,
+			usage.NotificationDependencies{Limiter: limiter, Catalog: reference})
+	})
 	if limiter == nil {
 		return wg.Wait
 	}
@@ -55,8 +63,6 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 		connect := func(context.Context) (*limits.Limiter, error) { return limiter, nil }
 		limits.RunRegionalCostReconciliation(ctx, pool, region, connect, costCheckpoint(pool), log)
 	})
-	wg.Go(func() { usage.RunNotificationDelivery(ctx, pool, keys, installation, policy, log) })
-	wg.Go(func() { prober.RunHealthProbes(ctx, probeCheckpoint(pool, log)) })
 	return wg.Wait
 }
 

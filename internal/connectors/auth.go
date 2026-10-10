@@ -217,6 +217,9 @@ func (b *boundedAuthBody) Read(p []byte) (int, error) {
 //
 // It returns the values to redact wherever upstream text is recorded.
 func (a *Auth) Apply(ctx context.Context, req *http.Request, c Config, secret, body []byte) (egress.Sensitive, error) {
+	if c.Kind == "vertex_ai" && !c.vertexDestination(req.URL) {
+		return egress.Sensitive{}, ErrAuthentication
+	}
 	if c.CredentialSource == "caller" {
 		if err := ValidateCredentialSource(c.CredentialSource, c.Kind, c.AuthMode); err != nil {
 			return egress.Sensitive{}, ErrCredentialRejected
@@ -410,6 +413,40 @@ func tokenFailure(err error) error {
 		return ErrCredentialRejected
 	}
 	return ErrAuthentication
+}
+
+func (a *Auth) ApplyAzureStorage(ctx context.Context, req *http.Request, mode string, secret []byte) (egress.Sensitive, error) {
+	c := Config{Kind: "azure_blob", AuthMode: mode}
+	key := cacheKey(c, secret)
+	a.mu.Lock()
+	cached := a.azureTokens[key]
+	a.mu.Unlock()
+	var token azcore.AccessToken
+	if cached.Token != "" && cached.ExpiresOn.After(time.Now().Add(30*time.Second)) {
+		token = cached
+	} else {
+		credential, e := a.azureCredential(c, secret, key)
+		if e != nil {
+			return egress.Sensitive{}, ErrCredentialRejected
+		}
+		tctx, cancel := context.WithTimeout(ctx, authTimeout)
+		var err error
+		token, err = credential.GetToken(tctx, policy.TokenRequestOptions{Scopes: []string{"https://storage.azure.com/.default"}})
+		cancel()
+		if err != nil {
+			return egress.Sensitive{}, tokenFailure(err)
+		}
+		a.mu.Lock()
+		if len(a.azureTokens) >= 256 {
+			clear(a.azureTokens)
+		}
+		a.azureTokens[key] = token
+		a.mu.Unlock()
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	var sensitive egress.Sensitive
+	sensitive.Add(string(secret), token.Token)
+	return sensitive, nil
 }
 
 // sigV4Signature extracts the signature value a SigV4 Authorization header

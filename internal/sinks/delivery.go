@@ -58,7 +58,7 @@ func (w *Worker) Run(ctx context.Context, log *slog.Logger) {
 			outcome = usage.OutcomeFailure
 			log.Warn("export delivery pass failed", "error_type", "export_delivery")
 		}
-		if err = usage.CheckpointTask(ctx, w.Pool, usage.TaskExportDelivery, outcome, progress); err != nil {
+		if err = usage.CheckpointTask(ctx, w.Pool, usage.TaskManagedExportDelivery, outcome, progress); err != nil {
 			log.Warn("export delivery checkpoint failed", "error_type", "checkpoint")
 		}
 		// Drain healthy backlog through additional bounded passes; the ticker
@@ -110,7 +110,7 @@ func (w *Worker) expire(ctx context.Context) error {
 	defer tx.Rollback(ctx)
 	// Mutations and settlement lock the parent before delivery rows. Expiry
 	// follows the same order, so retirement cannot form a lock inversion.
-	rows, err := tx.Query(ctx, "SELECT id FROM olp.export_sinks ORDER BY id FOR NO KEY UPDATE")
+	rows, err := tx.Query(ctx, "SELECT id FROM olp.managed_export_sinks ORDER BY id FOR NO KEY UPDATE")
 	if err != nil {
 		return err
 	}
@@ -122,10 +122,10 @@ func (w *Worker) expire(ctx context.Context) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `WITH expired AS (
-	 DELETE FROM olp.export_deliveries WHERE id IN (
-	 SELECT id FROM olp.export_deliveries WHERE expires_at<=now() ORDER BY expires_at LIMIT 1000 FOR UPDATE SKIP LOCKED)
+	 DELETE FROM olp.managed_export_deliveries WHERE id IN (
+	 SELECT id FROM olp.managed_export_deliveries WHERE expires_at<=now() ORDER BY expires_at LIMIT 1000 FOR UPDATE SKIP LOCKED)
 	 RETURNING sink_id,status)
-	 UPDATE olp.export_sinks s SET expired_total=expired_total+x.n FROM
+	 UPDATE olp.managed_export_sinks s SET expired_total=expired_total+x.n FROM
 	 (SELECT sink_id,count(*) n FROM expired WHERE status='pending' GROUP BY sink_id) x WHERE s.id=x.sink_id`); err != nil {
 		return err
 	}
@@ -138,7 +138,7 @@ func (w *Worker) settle(ctx context.Context, d *delivery, code string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SELECT id FROM olp.export_sinks WHERE id=$1 FOR NO KEY UPDATE", d.sink); err != nil {
+	if _, err = tx.Exec(ctx, "SELECT id FROM olp.managed_export_sinks WHERE id=$1 FOR NO KEY UPDATE", d.sink); err != nil {
 		return err
 	}
 	status := "pending"
@@ -146,12 +146,12 @@ func (w *Worker) settle(ctx context.Context, d *delivery, code string) error {
 		status = "delivered"
 	}
 	delay := time.Second * time.Duration(1<<min(d.attempts, 10))
-	result, err := tx.Exec(ctx, "UPDATE olp.export_deliveries SET status=$3,lease=NULL,last_error_code=NULLIF($4,''),next_attempt_at=now()+$5::interval WHERE id=$1 AND lease=$2 AND status='pending'", d.id, d.lease, status, code, delay.String())
+	result, err := tx.Exec(ctx, "UPDATE olp.managed_export_deliveries SET status=$3,lease=NULL,last_error_code=NULLIF($4,''),next_attempt_at=now()+$5::interval WHERE id=$1 AND lease=$2 AND status='pending'", d.id, d.lease, status, code, delay.String())
 	if err == nil && result.RowsAffected() == 1 {
 		if code == "" {
-			_, err = tx.Exec(ctx, "UPDATE olp.export_sinks SET delivered_total=delivered_total+1,last_delivered_at=now() WHERE id=$1", d.sink)
+			_, err = tx.Exec(ctx, "UPDATE olp.managed_export_sinks SET delivered_total=delivered_total+1,last_delivered_at=now() WHERE id=$1", d.sink)
 		} else {
-			_, err = tx.Exec(ctx, "UPDATE olp.export_sinks SET failed_total=failed_total+1 WHERE id=$1", d.sink)
+			_, err = tx.Exec(ctx, "UPDATE olp.managed_export_sinks SET failed_total=failed_total+1 WHERE id=$1", d.sink)
 		}
 	}
 	if err == nil {
@@ -170,14 +170,14 @@ func (w *Worker) claim(ctx context.Context) (*delivery, error) {
 	defer tx.Rollback(ctx)
 	d := &delivery{lease: access.NewID()}
 	err = tx.QueryRow(ctx, `SELECT d.id::text,d.sink_id::text,d.event_id::text,d.stream,d.payload,d.created_at,d.attempts,
-	 s.destination,s.credential_id::text FROM olp.export_deliveries d JOIN olp.export_sinks s ON s.id=d.sink_id
+	 s.destination,s.credential_id::text FROM olp.managed_export_deliveries d JOIN olp.managed_export_sinks s ON s.id=d.sink_id
 	 WHERE d.status='pending' AND d.next_attempt_at<=now() AND d.expires_at>now() AND s.enabled AND s.retired_at IS NULL
 	 AND d.stream=ANY(s.streams) ORDER BY d.next_attempt_at,d.id LIMIT 1 FOR UPDATE OF d SKIP LOCKED`).Scan(&d.id, &d.sink, &d.event, &d.stream, &d.payload, &d.created, &d.attempts, &d.destination, &d.credential)
 	if err != nil {
 		return nil, err
 	}
 	d.attempts++
-	if _, err = tx.Exec(ctx, "UPDATE olp.export_deliveries SET lease=$2,attempts=attempts+1,next_attempt_at=now()+interval '1 minute' WHERE id=$1", d.id, d.lease); err != nil {
+	if _, err = tx.Exec(ctx, "UPDATE olp.managed_export_deliveries SET lease=$2,attempts=attempts+1,next_attempt_at=now()+interval '1 minute' WHERE id=$1", d.id, d.lease); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {

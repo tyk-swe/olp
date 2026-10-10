@@ -222,7 +222,15 @@ user-agent family, never request bodies, credentials, or content. See
   every project.
 - Notification webhooks follow up to five redirects, validating each hop with
   the provider egress rules, and the OTLP exporter connects to its configured
-  endpoint with its own client.
+  endpoint with its own client. Notification bodies are metadata only: events,
+  rule subjects, windows and amounts — never request content, credentials, or
+  secret material. Channel credentials (chat webhook URLs, PagerDuty routing
+  keys, SMTP credentials, signing secrets) are write-only, sealed under
+  `notification_secret`, and never returned by any read.
+- Payload capture is opt-in, owner-enabled, unredacted, and memory-only — see
+  [operations](operations.md#export-sinks-payload-capture-and-business-metrics);
+  captured content never enters the database, Valkey, logs, or spans and is
+  delivered only to the operator-configured sink.
 - Provider authentication may reach cloud metadata endpoints to obtain workload
   identity for AWS and Azure providers.
 - Bedrock clients authenticate to OLP with an API key, never with AWS

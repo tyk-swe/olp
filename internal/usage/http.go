@@ -45,6 +45,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/usage/completeness", s.usageCompleteness)
 	s.Access.Route(mux, "GET /api/v1/usage/selector-savings", s.selectorSavings)
 	s.Access.Route(mux, "GET /api/v1/usage/shadow-experiments", s.shadowExperiments)
+	s.Access.Stream(mux, "GET /api/v1/requests/export.csv", s.exportRequestsCSV)
+	s.Access.Stream(mux, "GET /api/v1/usage/export.csv", s.exportUsageCSV)
 	s.Access.Route(mux, "GET /api/v1/requests", s.listRequests)
 	s.Access.Route(mux, "GET /api/v1/requests/{request_id}", s.getRequest)
 	s.Access.Route(mux, "GET /api/v1/pricing/revisions", s.listPricingRevisions)
@@ -72,11 +74,10 @@ type list struct {
 }
 
 func (s *Server) usageSummary(r *http.Request, p access.Principal) (access.Reply, error) {
-	filters, err := usageFilters(r)
+	filters, err := usageFilters(r, p)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	filters.AllProjects, filters.AllowedProjects = p.AllProjects, p.ProjectIDs()
 	summary, err := ReadSummary(r.Context(), s.Access.Pool, filters, time.Now())
 	if err != nil {
 		return access.Reply{}, err
@@ -85,11 +86,10 @@ func (s *Server) usageSummary(r *http.Request, p access.Principal) (access.Reply
 }
 
 func (s *Server) usageCompleteness(r *http.Request, p access.Principal) (access.Reply, error) {
-	filters, err := usageFilters(r)
+	filters, err := usageFilters(r, p)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	filters.AllProjects, filters.AllowedProjects = p.AllProjects, p.ProjectIDs()
 	report, err := ReadCompleteness(r.Context(), s.Access.Pool, filters, time.Now())
 	if err != nil {
 		return access.Reply{}, err
@@ -98,11 +98,10 @@ func (s *Server) usageCompleteness(r *http.Request, p access.Principal) (access.
 }
 
 func (s *Server) usageBreakdown(r *http.Request, p access.Principal) (access.Reply, error) {
-	filters, err := usageFilters(r)
+	filters, err := usageFilters(r, p)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	filters.AllProjects, filters.AllowedProjects = p.AllProjects, p.ProjectIDs()
 	limit, err := limitParam(r.URL.Query())
 	if err != nil {
 		return access.Reply{}, err
@@ -116,11 +115,10 @@ func (s *Server) usageBreakdown(r *http.Request, p access.Principal) (access.Rep
 }
 
 func (s *Server) usageTimeSeries(r *http.Request, p access.Principal) (access.Reply, error) {
-	filters, err := usageFilters(r)
+	filters, err := usageFilters(r, p)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	filters.AllProjects, filters.AllowedProjects = p.AllProjects, p.ProjectIDs()
 	granularity := GranularityHour
 	if raw := strings.TrimSpace(r.URL.Query().Get("granularity")); raw != "" {
 		granularity = raw
@@ -132,7 +130,7 @@ func (s *Server) usageTimeSeries(r *http.Request, p access.Principal) (access.Re
 	return access.OK(series), nil
 }
 
-func (s *Server) listRequests(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Server) requestFilters(r *http.Request, p access.Principal) (RequestFilters, error) {
 	var err error
 	query := r.URL.Query()
 	filters := RequestFilters{
@@ -146,23 +144,48 @@ func (s *Server) listRequests(r *http.Request, p access.Principal) (access.Reply
 		AllowedProjects:  p.ProjectIDs(),
 	}
 	if filters.ProviderID, err = uuidParam(query, "provider_id"); err != nil {
-		return access.Reply{}, err
+		return filters, err
 	}
 	if filters.APIKey, err = uuidParam(query, "api_key_id"); err != nil {
-		return access.Reply{}, err
+		return filters, err
 	}
 	if filters.StatusCode, err = statusParam(query); err != nil {
-		return access.Reply{}, err
+		return filters, err
 	}
 	if filters.StartedAfter, err = timeParam(query, "started_after"); err != nil {
-		return access.Reply{}, err
+		return filters, err
 	}
 	if filters.StartedBefore, err = timeParam(query, "started_before"); err != nil {
-		return access.Reply{}, err
+		return filters, err
+	}
+	if filters.ProjectID, err = uuidParam(query, "project_id"); err != nil {
+		return filters, err
+	}
+	if filters.ProjectID != nil {
+		if err = p.Project(filters.ProjectID, access.View); err != nil {
+			return filters, err
+		}
+	}
+	if session := textParam(query, "session_id"); session != nil {
+		if filters.AttributionKey != nil && *filters.AttributionKey != "session" ||
+			filters.AttributionValue != nil && *filters.AttributionValue != *session {
+			return filters, access.Fail(422, "invalid_filter", "session_id conflicts with the attribution filters.")
+		}
+		sessionKey := "session"
+		filters.AttributionKey, filters.AttributionValue = &sessionKey, session
 	}
 	if err = filters.Validate(); err != nil {
+		return filters, err
+	}
+	return filters, nil
+}
+
+func (s *Server) listRequests(r *http.Request, p access.Principal) (access.Reply, error) {
+	filters, err := s.requestFilters(r, p)
+	if err != nil {
 		return access.Reply{}, err
 	}
+	query := r.URL.Query()
 	cursor, err := cursorParam(query)
 	if err != nil {
 		return access.Reply{}, err
@@ -324,7 +347,7 @@ func (s *Server) acknowledgeGatewayEpoch(r *http.Request, _ access.Principal) (a
 
 // usageFilters reads the shared usage query. Times are required and the range
 // is validated here so every report refuses the same impossible windows.
-func usageFilters(r *http.Request) (Filters, error) {
+func usageFilters(r *http.Request, p access.Principal) (Filters, error) {
 	query := r.URL.Query()
 	start, err := requiredTimeParam(query, "start")
 	if err != nil {
@@ -348,6 +371,24 @@ func usageFilters(r *http.Request) (Filters, error) {
 	}
 	if filters.APIKey, err = uuidParam(query, "api_key_id"); err != nil {
 		return Filters{}, err
+	}
+	filters.AllProjects, filters.AllowedProjects = p.AllProjects, p.ProjectIDs()
+	if project, err := uuidParam(query, "project_id"); err != nil {
+		return Filters{}, err
+	} else if project != nil {
+		if err := p.Project(project, access.View); err != nil {
+			return Filters{}, err
+		}
+		filters.AllProjects = false
+		filters.AllowedProjects = []string{*project}
+	}
+	if session := textParam(query, "session_id"); session != nil {
+		if filters.AttributionKey != nil && *filters.AttributionKey != "session" ||
+			filters.AttributionValue != nil && *filters.AttributionValue != *session {
+			return Filters{}, access.Fail(422, "invalid_filter", "session_id conflicts with the attribution filters.")
+		}
+		sessionKey := "session"
+		filters.AttributionKey, filters.AttributionValue = &sessionKey, session
 	}
 	if err = filters.Validate(); err != nil {
 		return Filters{}, err

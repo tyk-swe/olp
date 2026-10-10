@@ -236,7 +236,7 @@ func (s *Server) stageGrant(r *http.Request, current *record, enrollment grants.
 	if cfg := locked.Configuration; !cfg.Grant() || cfg.ProfileRevision != enrollment.PluginDigest || cfg.ProfileID != enrollment.ProfileID {
 		return access.Reply{}, stale
 	}
-	credentialID, version, err := grants.Store(r.Context(), tx, a, current.ID, enrollment.PluginDigest, grant)
+	credentialID, version, err := grants.Store(r.Context(), tx, a, current.ID, enrollment.PluginDigest, enrollment.ProfileID, grant)
 	if err != nil {
 		return access.Reply{}, err
 	}

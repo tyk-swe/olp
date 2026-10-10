@@ -100,6 +100,20 @@
           <p>{detail.data.estimated_cost} {detail.data.currency ?? ''}</p>
         </details>{/if}
     </article>
+    {#if detail.data.attribution?.session}
+      <article class="card metric-card">
+        <p>Session</p>
+        <strong
+          ><a
+            href={resolve(
+              `/requests?session_id=${encodeURIComponent(detail.data.attribution.session)}`
+            )}
+            class="mono">{detail.data.attribution.session}</a
+          ></strong
+        >
+        <span>Requests in this session</span>
+      </article>
+    {/if}
   </section>
 
   <section class="card request-facts" aria-labelledby="decision-title">
@@ -150,6 +164,17 @@
         <dd>{formatInteger(detail.data.output_tokens)}</dd>
       </div>
       <div>
+        <dt>Capture</dt>
+        <dd>
+          {#if detail.data.payload_captured}<span
+              class="badge"
+              title="Queued in the volatile capture queue — does not guarantee delivery"
+              >Capture queued</span
+            ><small>Queued ≠ delivered — see audit records.</small>{:else}Not
+            captured{/if}
+        </dd>
+      </div>
+      <div>
         <dt>Usage completeness</dt>
         <dd>
           <span
@@ -164,6 +189,19 @@
           >
         </dd>
       </div>
+      {#if detail.data.attribution?.session}
+        <div>
+          <dt>Session</dt>
+          <dd>
+            <a
+              href={resolve(
+                `/requests?session_id=${encodeURIComponent(detail.data.attribution.session)}`
+              )}
+              class="mono">{detail.data.attribution.session}</a
+            >
+          </dd>
+        </div>
+      {/if}
       <div>
         <dt>Started</dt>
         <dd>{formatDate(detail.data.started_at)}</dd>

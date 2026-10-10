@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
@@ -27,6 +28,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -139,6 +141,7 @@ type execution struct {
 
 	policyDecisions []contentpolicy.Decision
 	emit            openai.Emit
+	capture         *export.Collector
 	estimate        int64
 	// sizedInput is the input estimate of a request the gateway reads only the
 	// size of: four bytes to a token over its body, as media, Bedrock invoke and
@@ -634,6 +637,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		if u := fact.Usage; u != nil {
 			atr.RecordUsage(&u.InputTokens, &u.OutputTokens, u.CachedInputTokens, u.MediaUnits)
 		}
+		atr.RecordResponse(fact.ResponseModel, fact.FinishReasons)
 		atr.Finish(fact.Class, fact.Status)
 	}
 	fail := func(class string, f *attemptFailure) (AttemptFact, *openai.Completion, *attemptFailure) {
@@ -824,6 +828,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				return openai.ErrEventTooLarge
 			}
 			err := x.emit(frame)
+			if err == nil && x.capture != nil {
+				x.captureDeliveredFrame(frame)
+			}
 			if fact.Interaction != nil {
 				if fact.Interaction.ClientState == usage.ClientUnobserved {
 					fact.Interaction.ClientState = usage.ClientPartial
@@ -963,6 +970,10 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	}
 	if completion != nil {
 		fact.Usage = completion.Usage
+		fact.ResponseModel = completion.ProviderModel
+		if completion.FinishReason != "" {
+			fact.FinishReasons = []string{completion.FinishReason}
+		}
 		if !x.parsed.Stream && (wire != x.family || x.family == openai.FamilyEmbeddings || x.family == openai.FamilyRerank) && int64(len(completion.Body)) > s.cfg.MaxResponseBytes {
 			err = errResponseTooLarge
 		}
@@ -1126,11 +1137,140 @@ func (s *Server) finish(x *execution, out *outcome, status int) {
 				firstByte = *x.firstByte
 			}
 			total = env.Duration
-			x.request.trace.RecordInferenceContext(env.Surface, env.Operation, env.Route, env.KeyID, env.RuntimeGenerationID)
+			x.request.trace.RecordInferenceContext(env.Surface, env.Operation, env.Family, env.Route, env.KeyID, env.RuntimeGenerationID)
+			if len(x.facts) != 0 {
+				serving := &x.facts[len(x.facts)-1]
+				var providerKind string
+				var snapshot *runtime.Snapshot
+				if x.historicalSnapshot != nil {
+					snapshot = x.historicalSnapshot
+				} else if x.request.release != nil {
+					snapshot = x.request.release.Snapshot
+				}
+				if snapshot != nil {
+					if provider, ok := snapshot.Providers[serving.ProviderID]; ok {
+						providerKind = provider.Kind
+					}
+				}
+				var inputTokens, outputTokens *int64
+				if u := serving.Usage; u != nil {
+					inputTokens, outputTokens = &u.InputTokens, &u.OutputTokens
+				}
+				x.request.trace.RecordResponse(providerKind, serving.ResponseModel, inputTokens, outputTokens, serving.FinishReasons)
+			}
 			x.request.trace.RecordTerminal(env.Status, env.ErrorClass, len(x.facts), firstByte, total)
 		}
+		if x.capture != nil {
+			x.capture.CaptureDocument(x.captureInputDocument())
+			mode := "unary"
+			if x.parsed != nil && x.parsed.Stream {
+				mode = "streaming"
+			} else if out != nil && out.completion != nil && len(out.completion.Body) != 0 {
+				protocols.InspectOutputText(x.family, out.completion.Body, func(text string) (string, bool) {
+					x.capture.CaptureText("output", text)
+					return text, false
+				})
+				for _, raw := range protocols.CaptureDocumentToolCalls(x.family, out.completion.Body) {
+					x.capture.CaptureToolCall(raw)
+				}
+			}
+			var traceID, spanID string
+			if context := x.request.trace.SpanContext(); context.IsValid() {
+				traceID, spanID = context.TraceID().String(), context.SpanID().String()
+			}
+			env.PayloadCaptured = x.capture.Finish(export.CaptureIdentity{
+				Route: env.Route, ProjectID: x.captureProject(), KeyID: env.KeyID, EndUserDigest: env.EndUserDigest,
+				TraceID: traceID, SpanID: spanID, Outcome: env.Outcome, Mode: mode,
+			}, completedAt)
+		}
+		s.recordBusiness(env, x)
 		s.Sink.Terminal(env)
 	})
+}
+
+func (x *execution) captureInputDocument() map[string]json.RawMessage {
+	var body []byte
+	if len(x.facts) != 0 {
+		fact := &x.facts[len(x.facts)-1]
+		if prepared, ok := x.preparedProviders[fact.ProviderID+"/"+fact.ProviderRevisionID+"/"+fact.UpstreamModel]; ok {
+			if document := prepared.invocation.Prepared.Document(); document.Valid() {
+				body = document.Bytes()
+			}
+		}
+	}
+	if len(body) == 0 && x.parsed != nil && (x.route == nil || x.route.ContentPolicy == nil) {
+		if document := x.parsed.OIF().Document(); document.Valid() {
+			body = document.Bytes()
+		}
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	var document map[string]json.RawMessage
+	if json.Unmarshal(body, &document) != nil {
+		return nil
+	}
+	return document
+}
+
+func (x *execution) captureProject() string {
+	if x.authority.ProjectID != nil {
+		return *x.authority.ProjectID
+	}
+	if x.route != nil && x.route.ProjectID != nil {
+		return *x.route.ProjectID
+	}
+	return ""
+}
+
+func (s *Server) recordBusiness(env Envelope, x *execution) {
+	if s.Business == nil {
+		return
+	}
+	project := ""
+	if x.authority.ProjectID != nil {
+		project = *x.authority.ProjectID
+	} else if x.route != nil && x.route.ProjectID != nil {
+		project = *x.route.ProjectID
+	}
+	var snapshot *runtime.Snapshot
+	if x.historicalSnapshot != nil {
+		snapshot = x.historicalSnapshot
+	} else if x.request.release != nil {
+		snapshot = x.request.release.Snapshot
+	}
+	for index := range env.Attempts {
+		fact := &env.Attempts[index]
+		route := env.Route
+		if fact.Leg != nil && fact.Leg.Route != "" {
+			route = fact.Leg.Route
+		}
+		labels := telemetry.BusinessLabels{Route: route, Project: project, Key: env.KeyID, EndUser: env.EndUserDigest}
+		if snapshot != nil {
+			if provider, ok := snapshot.Providers[fact.ProviderID]; ok {
+				labels.ProviderKind = provider.Kind
+			}
+		}
+		if u := fact.Usage; u != nil && fact.UsageObserved {
+			s.Business.Tokens(labels, &u.InputTokens, &u.OutputTokens)
+			if fact.Price != nil {
+				if cost, ok := fact.Price.Cost(attemptUsage(fact, env.Operation)); ok {
+					if amount, err := strconv.ParseFloat(cost.String(), 64); err == nil {
+						s.Business.Cost(labels, fact.Price.Currency, amount)
+					}
+				}
+			}
+		}
+		if fact.FirstOutput != nil {
+			elapsed := fact.StartedAt.Add(*fact.FirstOutput).Sub(env.StartedAt).Seconds()
+			s.Business.FirstToken(labels, elapsed)
+			if u := fact.Usage; u != nil && fact.UsageObserved && u.OutputTokens > 0 {
+				if seconds := fact.Duration.Seconds() - fact.FirstOutput.Seconds(); seconds > 0 {
+					s.Business.OutputRate(labels, u.OutputTokens, seconds)
+				}
+			}
+		}
+	}
 }
 
 func credentialHealthKey(slot *runtime.Slot, generation int64) string {
@@ -1142,4 +1282,10 @@ func credentialHealthKey(slot *runtime.Slot, generation int64) string {
 		return key
 	}
 	return "credential:ambient"
+}
+
+func (x *execution) captureDeliveredFrame(frame []byte) {
+	protocols.CaptureStreamFrame(x.family, frame,
+		func(text string) { x.capture.CaptureText("output", text) },
+		func(raw json.RawMessage) { x.capture.CaptureToolCall(raw) })
 }

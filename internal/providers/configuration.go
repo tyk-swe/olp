@@ -301,17 +301,17 @@ func (c *Configuration) CredentialRequired() bool { return connectors.SecretRequ
 func (c *Configuration) Grant() bool { return c.AuthMode == connectors.AuthGrant }
 
 // Authenticates reports whether a provider that takes a credential can
-// authenticate with a credential version recording pluginDigest: the plugin
-// build whose grant enrollment created it, or "" for a pasted credential. A
-// grant serves only a provider that pins the build that enrolled it, since a
+// authenticate with a credential version recording pluginDigest and profileID:
+// the build and profile whose enrollment created it, or empty for a pasted
+// credential. A grant serves only its enrolling build and profile, since a
 // plugin gets only its own grant and a build's name is only what its manifest
 // claims; moving a provider to another build therefore takes a new grant
 // enrollment for each of its slots.
-func (c *Configuration) Authenticates(pluginDigest string) bool {
+func (c *Configuration) Authenticates(pluginDigest, profileID string) bool {
 	if c.Grant() {
-		return pluginDigest == c.ProfileRevision
+		return profileID != "" && pluginDigest != "" && pluginDigest == c.ProfileRevision && profileID == c.ProfileID
 	}
-	return pluginDigest == ""
+	return pluginDigest == "" && profileID == ""
 }
 
 // transportFingerprint identifies everything that affects how the gateway

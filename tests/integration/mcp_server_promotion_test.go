@@ -109,6 +109,23 @@ func TestMCPServerPromotionRecertifiesReviewedCatalogAndReusesPinnedDestination(
 	if unchanged["etag"] != changed["etag"] || requests.Load() != before {
 		t.Fatal("completed promotion replay recertified or overwrote a later registration")
 	}
+	var redirectedCalls atomic.Int64
+	redirected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectedCalls.Add(1)
+		if r.Header.Get("Authorization") != "" {
+			t.Error("promotion forwarded a saved credential to a changed endpoint")
+		}
+		w.WriteHeader(503)
+	}))
+	defer redirected.Close()
+	entry["endpoint"] = redirected.URL
+	delete(input, "secret_bindings")
+	destination.want(destOwner, "POST", "/api/v1/configuration/apply", input, idem(uuid.NewString()), 422)
+	if redirectedCalls.Load() != 0 {
+		t.Fatal("promotion contacted a changed endpoint without a new credential binding")
+	}
+	entry["endpoint"] = upstream.URL
+	input["secret_bindings"] = map[string]any{ref: destinationSecret}
 	upstream.Close()
 	destination.want(destOwner, "POST", "/api/v1/configuration/apply", input, applyHeaders, 200)
 }

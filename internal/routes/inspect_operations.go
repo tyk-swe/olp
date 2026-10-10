@@ -63,7 +63,7 @@ func inspectorAnyRequest(raw json.RawMessage, operation, surface, mode, dialect,
 	}
 	return nil, &request, nil, nil
 }
-func inspectionUnaryAccept(route runtime.Route, source oif.Request, context interaction.Context, client string, demand *runtime.TokenDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
+func inspectionUnaryAccept(route runtime.Route, source oif.Request, context interaction.Context, client string, demand *runtime.TokenDemand, budget *inspectionBudget) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
 	details := map[string]*interactionInspection{}
 	plans := map[string]*operationplan.Plan{}
 	accept := func(provider runtime.Provider, target runtime.Target) error {
@@ -95,7 +95,7 @@ func inspectionUnaryAccept(route runtime.Route, source oif.Request, context inte
 		}
 		summary := inspectRequest(plan.Prepared().Document(), plan.Prepared().Provenance())
 		result.EffectiveRequest = &summary
-		if _, err := plan.CheckInput(); err != nil {
+		if _, err := plan.CheckInputWithBudget(budget.reserve); err != nil {
 			safe := safeInspectionError(err)
 			if diagnostic, ok := safe.(*inspectionDiagnostic); ok && diagnostic.code == "content_policy_blocked" {
 				result.Status = "blocked"
@@ -116,7 +116,7 @@ func inspectionUnaryAccept(route runtime.Route, source oif.Request, context inte
 	return accept, effective, details
 }
 
-func inspectionMediaAccept(route runtime.Route, source *media.Request, dialect string, context interaction.Context, client string, demand *runtime.TokenDemand) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
+func inspectionMediaAccept(route runtime.Route, source *media.Request, dialect string, context interaction.Context, client string, demand *runtime.TokenDemand, budget *inspectionBudget) (func(runtime.Provider, runtime.Target) error, func(runtime.Provider, runtime.Target) (runtime.Names, *runtime.TokenDemand), map[string]*interactionInspection) {
 	details := map[string]*interactionInspection{}
 	parameters := map[string][]string{}
 	accept := func(provider runtime.Provider, target runtime.Target) error {
@@ -133,7 +133,7 @@ func inspectionMediaAccept(route runtime.Route, source *media.Request, dialect s
 		if failure != nil {
 			return safeInspectionError(failure)
 		}
-		bound, err := template.Bind(mediacontract.Input{Route: route.Slug, Mode: effective.Mode(), Source: source.SourceDocument(), JSON: call.JSON})
+		bound, err := template.Bind(mediacontract.Input{Route: route.Slug, Mode: effective.Mode(), Source: source.SourceDocument(), JSON: call.JSON, PolicyBudget: budget.reserve})
 		if err != nil {
 			safe := safeInspectionError(err)
 			if diagnostic, ok := safe.(*inspectionDiagnostic); ok && diagnostic.code == "content_policy_blocked" {

@@ -21,6 +21,8 @@
   import { presentEstimate } from '$lib/features/usage/estimatePresentation';
   import UsageCompletenessStatus from '$lib/features/usage/UsageCompletenessStatus.svelte';
   import { errorMessage } from '$lib/api/http';
+  import { downloadBlob } from '$lib/download';
+  import { exportUsageCsv } from '$lib/features/usage/api/usage';
   import {
     formatBudget,
     formatCompact,
@@ -110,6 +112,23 @@
   function titleCase(value: string) {
     return value.charAt(0).toUpperCase() + value.slice(1);
   }
+
+  let exporting = $state(false);
+  let exportError = $state('');
+
+  async function exportCsv() {
+    if (exporting) return;
+    exporting = true;
+    exportError = '';
+    try {
+      const csv = await exportUsageCsv(applied.filters, applied.dimension);
+      downloadBlob(new Blob([csv], { type: 'text/csv' }), 'olp-usage.csv');
+    } catch (cause) {
+      exportError = errorMessage(cause, 'The export could not be created.');
+    } finally {
+      exporting = false;
+    }
+  }
 </script>
 
 <svelte:head><title>Usage · OpenLLMProxy</title></svelte:head>
@@ -128,6 +147,12 @@
     type="button"
     onclick={() => usage.refetch()}
     disabled={usage.isFetching || Boolean(urlProblem)}>Refresh</button
+  ><button
+    class="button button-secondary"
+    type="button"
+    onclick={exportCsv}
+    disabled={exporting || Boolean(urlProblem)}
+    >{exporting ? 'Exporting…' : 'Export CSV'}</button
   >
 </div>
 
@@ -140,6 +165,10 @@
     );
   }}
 />
+
+{#if exportError}<div class="inline-problem" role="alert">
+    {exportError}
+  </div>{/if}
 
 <form class="card filters" aria-label="Usage filters" onsubmit={apply}>
   <div class="filter-grid">
@@ -180,6 +209,20 @@
       /></label
     >
     <label
+      >Project ID <input
+        bind:value={draft.project_id}
+        class="mono"
+        placeholder="All projects"
+      /></label
+    >
+    <label
+      >Session ID <input
+        bind:value={draft.session_id}
+        class="mono"
+        placeholder="All sessions"
+      /></label
+    >
+    <label
       >Attribution key <input
         bind:value={draft.attribution_key}
         placeholder="e.g. team"
@@ -201,7 +244,9 @@
           value="estimate_provenance">Estimate provenance</option
         ><option value="api_key">API key</option><option value="operation"
           >Operation</option
-        ><option value="attribution">Attribution</option></select
+        ><option value="attribution">Attribution</option><option value="project"
+          >Project</option
+        ><option value="session">Session</option></select
       ></label
     >
     <label

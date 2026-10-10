@@ -211,6 +211,9 @@ func (s *Server) prepareMCPServers(ctx context.Context, p access.Principal, doc 
 			if b, ok := bindings[*e.CredentialRef]; ok {
 				material = []byte(b.secret)
 			} else if d != nil && d.CredentialID != nil {
+				if e.Endpoint != d.Endpoint {
+					return nil, access.Invalid("secret_bindings", "Supply a new MCP bearer binding or remove credential_ref when changing the endpoint.")
+				}
 				material, err = s.Access.Keys.Read(ctx, s.Access.Pool, s.Access.Installation, *d.CredentialID, secrets.MCPCredential)
 				if err != nil {
 					return nil, err

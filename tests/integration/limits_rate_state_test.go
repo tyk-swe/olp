@@ -229,21 +229,21 @@ func TestLimitsRateStateFollowsRefundsAndReconciliation(t *testing.T) {
 	first, state, _ := limReserveStated(t, c, limiter, request)
 	limWantAllowance(t, state, 10, 9, 1000, 900)
 
-	// The estimate is replaced with the tokens the request used, and the next
-	// request is measured against that.
+	// Lower provider usage cannot refund the locally reserved estimate, and
+	// the next request is measured against that floor.
 	if err := first.Reconcile(t.Context(), 10); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	request.RequestedTokens = 30
 	second, state, _ := limReserveStated(t, c, limiter, request)
-	limWantAllowance(t, state, 10, 8, 1000, 960)
+	limWantAllowance(t, state, 10, 8, 1000, 870)
 
 	// A request that never dispatched gives both back.
 	if err := second.Refund(t.Context()); err != nil {
 		t.Fatalf("Refund: %v", err)
 	}
 	_, state, _ = limReserveStated(t, c, limiter, request)
-	limWantAllowance(t, state, 10, 8, 1000, 960)
+	limWantAllowance(t, state, 10, 8, 1000, 870)
 
 	// A lease keeps the allowance it was granted: the counts are what the script
 	// answered, not a live reading.

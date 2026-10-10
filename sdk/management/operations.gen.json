@@ -4020,6 +4020,118 @@
     }
   },
   {
+    "name": "create_capture_policy",
+    "group": "observability",
+    "method": "POST",
+    "path": "/api/v1/observability/capture-policies",
+    "description": "create capture policy",
+    "scopes": [
+      [
+        "keys"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique mutation key"
+        },
+        "body": {
+          "$ref": "#/$defs/CreateCapturePolicyRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "CreateCapturePolicyRequest": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "format": "uuid",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "route_slug": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sink": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "sample_ratio": {
+              "type": "string"
+            },
+            "include": {
+              "items": {
+                "enum": [
+                  "input",
+                  "output",
+                  "tool_calls"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "redact": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "key_ids": {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "end_user_digests": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "max_bytes": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "sink",
+            "sample_ratio",
+            "include",
+            "max_bytes"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "create_code_account",
     "group": "code-mode",
     "method": "POST",
@@ -4381,6 +4493,149 @@
     }
   },
   {
+    "name": "create_export_sink",
+    "group": "observability",
+    "method": "POST",
+    "path": "/api/v1/observability/sinks",
+    "description": "create export sink",
+    "scopes": [
+      [
+        "keys"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique mutation key"
+        },
+        "body": {
+          "$ref": "#/$defs/CreateExportSinkRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "CreateExportSinkRequest": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "format": "uuid",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "https",
+                "otlp_logs",
+                "s3",
+                "gcs",
+                "azure_blob"
+              ],
+              "type": "string"
+            },
+            "destination": {
+              "type": "string"
+            },
+            "streams": {
+              "items": {
+                "enum": [
+                  "requests",
+                  "attempts",
+                  "usage_rollups",
+                  "guardrail_decisions",
+                  "audit"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "format": {
+              "enum": [
+                "json",
+                "otlp",
+                "jsonl"
+              ],
+              "type": "string"
+            },
+            "filter": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "project": {
+                  "format": "uuid",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "route": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "outcome": {
+                  "enum": [
+                    "success",
+                    "failure",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "credential": {
+              "description": "Write-only sink credential document.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": true
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "destination",
+            "streams",
+            "format",
+            "name"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "create_guardrail",
     "group": "guardrails",
     "method": "POST",
@@ -4696,6 +4951,11 @@
       "$defs": {
         "CreateNotificationDestinationRequest": {
           "properties": {
+            "configuration": {
+              "description": "Per-channel configuration object; required for email destinations.",
+              "type": "object",
+              "additionalProperties": true
+            },
             "enabled": {
               "description": "Defaults to true.",
               "type": "boolean"
@@ -4712,14 +4972,34 @@
               ]
             },
             "secret": {
-              "description": "Optional HMAC-SHA256 signing secret. Write-only; never returned.",
-              "type": [
-                "string",
-                "null"
+              "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
+            "type": {
+              "enum": [
+                "webhook",
+                "slack",
+                "msteams",
+                "discord",
+                "pagerduty",
+                "email"
+              ],
+              "type": "string",
+              "description": "Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook."
+            },
             "url": {
-              "description": "Webhook URL validated by the installation egress policy.",
+              "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.",
               "type": "string"
             }
           },
@@ -4774,8 +5054,13 @@
       ],
       "$defs": {
         "CreateNotificationRuleRequest": {
-          "description": "A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent, and its subject and destination belong to its project. A provider event rule takes none of them and is installation-wide: project_id is null or omitted, and its destination is installation-wide. A key.expiring rule requires subject_kind=api_key and subject_id, no window or threshold, and a subject/destination in the rule project.",
+          "description": "A budget.threshold rule requires subject_kind, subject_id, window_kind and threshold_percent; key.expiring requires subject_kind=api_key and subject_id. Generic events take no subject/window/threshold fields and accept an event-specific configuration object; only budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped.",
           "properties": {
+            "configuration": {
+              "description": "Event-specific rule configuration; unsupported fields are rejected, missing fields take their defaults.",
+              "type": "object",
+              "additionalProperties": true
+            },
             "destination_id": {
               "format": "uuid",
               "type": "string"
@@ -4827,11 +5112,21 @@
           "type": "object"
         },
         "NotificationEvent": {
-          "description": "What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. provider.grant.lapsed: a grant can no longer be refreshed, so its credential version's slots are ineligible until a new grant enrollment; a provider event concerns the whole installation. key.expiring: an API key expires or reaches its declared rotation date within 24 hours, or is overdue. One metadata-only delivery per rule, key, reason and date; never creates or transmits a secret.",
+          "description": "What a notification rule subscribes its destination to. budget.threshold: an API key's or budget group's spend crossed a threshold in a window. key.expiring: an API key expires or reaches its rotation date within its configured lead_time_seconds. provider.grant.lapsed: a grant can no longer be refreshed. Generic events (budget.exhausted, provider.circuit.*, provider.error_rate, route.latency, provider.credential.failing, model.retirement, runtime.install_failed, worker.stale, report.spend) evaluate configured signals; budget.exhausted, route.latency, model.retirement and report.spend may be project-scoped, the rest are installation-wide. Metadata-only deduplicated trigger/recovery deliveries; cooldown repeats share incident keys; no request content or credential material is included.",
           "enum": [
+            "budget.exhausted",
             "budget.threshold",
+            "key.expiring",
+            "model.retirement",
+            "provider.circuit.closed",
+            "provider.circuit.open",
+            "provider.credential.failing",
+            "provider.error_rate",
             "provider.grant.lapsed",
-            "key.expiring"
+            "report.spend",
+            "route.latency",
+            "runtime.install_failed",
+            "worker.stale"
           ],
           "type": "string"
         },
@@ -7866,6 +8161,63 @@
     }
   },
   {
+    "name": "delete_capture_policy",
+    "group": "observability",
+    "method": "DELETE",
+    "path": "/api/v1/observability/capture-policies/{capture_policy_id}",
+    "description": "delete capture policy",
+    "scopes": [
+      [
+        "keys"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "capture_policy_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "capture_policy_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "capture_policy_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Concurrency token returned with the resource"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match"
+      ]
+    }
+  },
+  {
     "name": "delete_credential_slot",
     "group": "providers",
     "method": "DELETE",
@@ -7936,6 +8288,63 @@
         "path",
         "if_match",
         "idempotency_key"
+      ]
+    }
+  },
+  {
+    "name": "delete_export_sink",
+    "group": "observability",
+    "method": "DELETE",
+    "path": "/api/v1/observability/sinks/{export_sink_id}",
+    "description": "delete export sink",
+    "scopes": [
+      [
+        "keys"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "export_sink_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "export_sink_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "export_sink_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Concurrency token returned with the resource"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match"
       ]
     }
   },
@@ -9621,6 +10030,67 @@
     }
   },
   {
+    "name": "get_capture_configuration",
+    "group": "observability",
+    "method": "GET",
+    "path": "/api/v1/observability/capture",
+    "description": "get capture configuration",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_capture_policy",
+    "group": "observability",
+    "method": "GET",
+    "path": "/api/v1/observability/capture-policies/{capture_policy_id}",
+    "description": "get capture policy",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "capture_policy_id",
+        "in": "path",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "capture_policy_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "capture_policy_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_catalog_publication",
     "group": "model-catalog",
     "method": "GET",
@@ -9823,6 +10293,48 @@
           "required": [
             "provider_id",
             "slot_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_export_sink",
+    "group": "observability",
+    "method": "GET",
+    "path": "/api/v1/observability/sinks/{export_sink_id}",
+    "description": "get export sink",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "export_sink_id",
+        "in": "path",
+        "required": true
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "export_sink_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "export_sink_id"
           ]
         }
       },
@@ -11629,6 +12141,52 @@
     }
   },
   {
+    "name": "list_capture_policies",
+    "group": "observability",
+    "method": "GET",
+    "path": "/api/v1/observability/capture-policies",
+    "description": "list capture policies",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "list_code_accounts",
     "group": "code-mode",
     "method": "GET",
@@ -12226,6 +12784,119 @@
             "project_id": {
               "format": "uuid",
               "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_export_sink_gaps",
+    "group": "observability",
+    "method": "GET",
+    "path": "/api/v1/observability/sinks/{export_sink_id}/gaps",
+    "description": "list export sink gaps",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "export_sink_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "export_sink_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "export_sink_id"
+          ]
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "list_export_sinks",
+    "group": "observability",
+    "method": "GET",
+    "path": "/api/v1/observability/sinks",
+    "description": "list export sinks",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false
+      }
+    ],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           "additionalProperties": false
@@ -13926,6 +14597,16 @@
         "name": "attribution_value",
         "in": "query",
         "required": false
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "session_id",
+        "in": "query",
+        "required": false
       }
     ],
     "body_required": false,
@@ -13981,6 +14662,13 @@
               "type": "string"
             },
             "attribution_value": {
+              "type": "string"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "session_id": {
               "type": "string"
             }
           },
@@ -14399,6 +15087,25 @@
           "additionalProperties": false
         }
       },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "listCaptureSinks",
+    "group": "Observability",
+    "method": "GET",
+    "path": "/api/v1/observability/capture-sinks",
+    "description": "List capture sink options",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [],
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {},
       "additionalProperties": false
     }
   },
@@ -26680,6 +27387,286 @@
     }
   },
   {
+    "name": "update_capture_configuration",
+    "group": "observability",
+    "method": "PATCH",
+    "path": "/api/v1/observability/capture",
+    "description": "update capture configuration",
+    "scopes": [
+      [
+        "access",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Concurrency token returned with the resource"
+        },
+        "body": {
+          "$ref": "#/$defs/UpdateCaptureConfigurationRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "UpdateCaptureConfigurationRequest": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "update_capture_policy",
+    "group": "observability",
+    "method": "PATCH",
+    "path": "/api/v1/observability/capture-policies/{capture_policy_id}",
+    "description": "update capture policy",
+    "scopes": [
+      [
+        "keys"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "capture_policy_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "capture_policy_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "capture_policy_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Concurrency token returned with the resource"
+        },
+        "body": {
+          "$ref": "#/$defs/UpdateCapturePolicyRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "UpdateCapturePolicyRequest": {
+          "type": "object",
+          "properties": {
+            "sink": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "sample_ratio": {
+              "type": "string"
+            },
+            "include": {
+              "items": {
+                "enum": [
+                  "input",
+                  "output",
+                  "tool_calls"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "redact": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "key_ids": {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "end_user_digests": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "max_bytes": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "update_export_sink",
+    "group": "observability",
+    "method": "PATCH",
+    "path": "/api/v1/observability/sinks/{export_sink_id}",
+    "description": "update export sink",
+    "scopes": [
+      [
+        "keys"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "export_sink_id",
+        "in": "path",
+        "required": true
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true
+      }
+    ],
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "export_sink_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "export_sink_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Concurrency token returned with the resource"
+        },
+        "body": {
+          "$ref": "#/$defs/UpdateExportSinkRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "UpdateExportSinkRequest": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "destination": {
+              "type": "string"
+            },
+            "filter": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "project": {
+                  "format": "uuid",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "route": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "outcome": {
+                  "enum": [
+                    "success",
+                    "failure",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "credential": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": true
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "update_guardrail",
     "group": "guardrails",
     "method": "PUT",
@@ -27045,6 +28032,14 @@
       "$defs": {
         "UpdateNotificationDestinationRequest": {
           "properties": {
+            "configuration": {
+              "description": "Replaces the channel configuration; null clears it to {}.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": true
+            },
             "enabled": {
               "type": "boolean"
             },
@@ -27052,17 +28047,39 @@
               "type": "string"
             },
             "secret": {
-              "description": "A string replaces the signing secret, null removes it, absent keeps it.",
-              "type": [
-                "string",
-                "null"
+              "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
+            "type": {
+              "enum": [
+                "webhook",
+                "slack",
+                "msteams",
+                "discord",
+                "pagerduty",
+                "email"
+              ],
+              "type": "string",
+              "description": "Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook."
+            },
             "url": {
-              "type": "string"
+              "type": "string",
+              "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
             }
           },
-          "type": "object"
+          "type": "object",
+          "description": "Replace parts of a destination; send the latest record's ETag with If-Match. type is immutable; url is an origin for chat/PagerDuty channels so changing it requires a matching sealed secret."
         }
       }
     }
@@ -27128,8 +28145,16 @@
       ],
       "$defs": {
         "UpdateNotificationRuleRequest": {
-          "description": "A rule's event and project never change. Only budget.threshold rules take subject, window and threshold fields.",
+          "description": "Replace parts of a notification rule; send the latest record's ETag with If-Match. budget.threshold rules keep their subject_kind/subject_id, window_kind and threshold_percent; key.expiring rules keep their api_key subject and take lead_time_seconds in configuration; generic events carry configuration only.",
           "properties": {
+            "configuration": {
+              "description": "Replaces the rule configuration; null resets to the event defaults.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": true
+            },
             "destination_id": {
               "format": "uuid",
               "type": "string"
@@ -29116,7 +30141,7 @@
       {
         "name": "dimension",
         "in": "query",
-        "required": true
+        "required": false
       },
       {
         "name": "limit",
@@ -29130,6 +30155,16 @@
       },
       {
         "name": "attribution_value",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "session_id",
         "in": "query",
         "required": false
       }
@@ -29167,7 +30202,21 @@
               "type": "string"
             },
             "dimension": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "route",
+                "provider",
+                "model",
+                "model_family",
+                "estimate_provenance",
+                "api_key",
+                "end_user",
+                "operation",
+                "attribution",
+                "project",
+                "session"
+              ],
+              "default": "route"
             },
             "limit": {
               "format": "int32",
@@ -29180,13 +30229,19 @@
             },
             "attribution_value": {
               "type": "string"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "session_id": {
+              "type": "string"
             }
           },
           "additionalProperties": false,
           "required": [
             "start",
-            "end",
-            "dimension"
+            "end"
           ]
         }
       },
@@ -29242,6 +30297,26 @@
         "name": "operation",
         "in": "query",
         "required": false
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "session_id",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "attribution_key",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "attribution_value",
+        "in": "query",
+        "required": false
       }
     ],
     "body_required": false,
@@ -29274,6 +30349,19 @@
               "type": "string"
             },
             "operation": {
+              "type": "string"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "attribution_key": {
+              "type": "string"
+            },
+            "attribution_value": {
               "type": "string"
             }
           },
@@ -29316,6 +30404,26 @@
         "name": "route",
         "in": "query",
         "required": false
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "session_id",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "attribution_key",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "attribution_value",
+        "in": "query",
+        "required": false
       }
     ],
     "body_required": false,
@@ -29334,6 +30442,19 @@
               "type": "string"
             },
             "route": {
+              "type": "string"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "attribution_key": {
+              "type": "string"
+            },
+            "attribution_value": {
               "type": "string"
             }
           },
@@ -29376,6 +30497,26 @@
         "name": "route",
         "in": "query",
         "required": false
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "session_id",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "attribution_key",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "attribution_value",
+        "in": "query",
+        "required": false
       }
     ],
     "body_required": false,
@@ -29394,6 +30535,19 @@
               "type": "string"
             },
             "route": {
+              "type": "string"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "attribution_key": {
+              "type": "string"
+            },
+            "attribution_value": {
               "type": "string"
             }
           },
@@ -29466,6 +30620,16 @@
         "name": "attribution_value",
         "in": "query",
         "required": false
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "session_id",
+        "in": "query",
+        "required": false
       }
     ],
     "body_required": false,
@@ -29504,6 +30668,13 @@
               "type": "string"
             },
             "attribution_value": {
+              "type": "string"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "session_id": {
               "type": "string"
             }
           },
@@ -29581,6 +30752,16 @@
         "name": "attribution_value",
         "in": "query",
         "required": false
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false
+      },
+      {
+        "name": "session_id",
+        "in": "query",
+        "required": false
       }
     ],
     "body_required": false,
@@ -29622,6 +30803,13 @@
               "type": "string"
             },
             "attribution_value": {
+              "type": "string"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "session_id": {
               "type": "string"
             }
           },

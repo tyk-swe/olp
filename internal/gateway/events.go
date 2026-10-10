@@ -64,6 +64,7 @@ type Envelope struct {
 	RuntimeGenerationID string
 	Usage               *openai.Usage // nil when the upstream reported no usage
 	Attempts            []AttemptFact
+	PayloadCaptured     bool
 }
 
 // AttemptFact records one credential attempt against one target.
@@ -106,8 +107,10 @@ type AttemptFact struct {
 	// response status was received. It is nil when no response arrived.
 	FirstByte *time.Duration
 	// RetryAfter is the delay the upstream asked for; nil unless it sent one.
-	RetryAfter *time.Duration
-	Usage      *openai.Usage
+	RetryAfter    *time.Duration
+	Usage         *openai.Usage
+	ResponseModel string
+	FinishReasons []string
 	// ResponseUsageDeferred delegates accounting to the durable background
 	// resource, which retains this generation request until final usage arrives.
 	ResponseUsageDeferred bool

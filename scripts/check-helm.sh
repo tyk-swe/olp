@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 version=1.27.0
+bash scripts/check-helm-egress.sh
 helm lint deploy/helm
 helm lint deploy/helm -f deploy/helm/values.production.yaml
 helm template olp deploy/helm --kube-version "$version" >/dev/null

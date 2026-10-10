@@ -6,10 +6,10 @@ and then past it. It is milestone-driven: each milestone has a fixed scope,
 design constraints, decisions to settle and exit criteria, but no date. A
 milestone closes when its exit criteria pass.
 
-| Document | Purpose |
-| --- | --- |
-| [Parity matrix](parity.md) | Every LiteLLM gateway capability, OLP's state today, and the milestone that closes each gap |
-| [M1](m01-measured-advantage.md) through [M11](m11-operator-ecosystem.md) | One specification per milestone, listed [below](#milestones) |
+| Document                                                                 | Purpose                                                                                     |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| [Parity matrix](parity.md)                                               | Every LiteLLM gateway capability, OLP's state today, and the milestone that closes each gap |
+| [M1](m01-measured-advantage.md) through [M11](m11-operator-ecosystem.md) | One specification per milestone, listed [below](#milestones)                                |
 
 ## Reference baseline
 
@@ -65,15 +65,15 @@ published yet.
 Parity alone is not the goal. Every milestone delivers its features under these
 commitments, and its exit criteria include the evidence named here.
 
-| Commitment | Meaning | Evidence every milestone produces |
-| --- | --- | --- |
-| Correct by construction | New operations are certified per exact tuple before they serve traffic. Translation refuses what it cannot represent. | Conformance fixtures and certification probes for each new operation and provider. |
-| Fast by default | The Go data plane adds less latency and uses less CPU per request than LiteLLM in every comparative benchmark scenario. A feature that is not configured costs nothing on the hot path. | [M1 benchmark](m01-measured-advantage.md#m11-gateway-benchmark) results with no regression beyond budget. |
-| Private by default | Durable records and telemetry stay content-free. Content-bearing features (caching, payload capture, external guardrails) are opt-in, scoped, bounded and visible in `GET /api/v1/auth/capabilities`. | An inventory of what the milestone persists, where, for how long, and under which seal purpose. |
-| Secure by default | Every new outbound destination passes the provider egress policy. Every new management operation is declared in the contract and covered by the authorization and isolation sweeps. Every new secret has a declared seal purpose. | The authorization golden diff, sweep results and the generated purpose table in [security](../security.md). |
-| Accountable | Every billable or quota-relevant event (provider attempt, cache hit, tool call, guardrail call, shadow attempt) produces attempt-level facts with pricing provenance. | Accounting and completeness tests for each new event type. |
-| Complete without a paywall | Every capability here ships in the single AGPL-3.0-only product. LiteLLM reserves SSO beyond five users, SCIM, JWT authentication, organizations, key rotation, secret managers, key- and team-scoped guardrails and logging, audit logs and multi-region deployment for its [Enterprise license](https://docs.litellm.ai/docs/enterprise). | Not applicable. |
-| Operable | One binary with explicit process modes, forward-only migrations and digest-addressed configuration promotion. | New desired state round-trips through configuration export, plan and apply. |
+| Commitment                 | Meaning                                                                                                                                                                                                                                                                                                                                     | Evidence every milestone produces                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Correct by construction    | New operations are certified per exact tuple before they serve traffic. Translation refuses what it cannot represent.                                                                                                                                                                                                                       | Conformance fixtures and certification probes for each new operation and provider.                          |
+| Fast by default            | The Go data plane adds less latency and uses less CPU per request than LiteLLM in every comparative benchmark scenario. A feature that is not configured costs nothing on the hot path.                                                                                                                                                     | [M1 benchmark](m01-measured-advantage.md#m11-gateway-benchmark) results with no regression beyond budget.   |
+| Private by default         | Durable records and telemetry stay content-free. Content-bearing features (caching, payload capture, external guardrails) are opt-in, scoped, bounded and visible in `GET /api/v1/auth/capabilities`.                                                                                                                                       | An inventory of what the milestone persists, where, for how long, and under which seal purpose.             |
+| Secure by default          | Every new outbound destination passes the provider egress policy. Every new management operation is declared in the contract and covered by the authorization and isolation sweeps. Every new secret has a declared seal purpose.                                                                                                           | The authorization golden diff, sweep results and the generated purpose table in [security](../security.md). |
+| Accountable                | Every billable or quota-relevant event (provider attempt, cache hit, tool call, guardrail call, shadow attempt) produces attempt-level facts with pricing provenance.                                                                                                                                                                       | Accounting and completeness tests for each new event type.                                                  |
+| Complete without a paywall | Every capability here ships in the single AGPL-3.0-only product. LiteLLM reserves SSO beyond five users, SCIM, JWT authentication, organizations, key rotation, secret managers, key- and team-scoped guardrails and logging, audit logs and multi-region deployment for its [Enterprise license](https://docs.litellm.ai/docs/enterprise). | Not applicable.                                                                                             |
+| Operable                   | One binary with explicit process modes, forward-only migrations and digest-addressed configuration promotion.                                                                                                                                                                                                                               | New desired state round-trips through configuration export, plan and apply.                                 |
 
 ## Milestones
 
@@ -95,7 +95,7 @@ parallel.
 | M2 | [Provider and catalog breadth](m02-provider-catalog.md) | LiteLLM's production provider families reachable through certified tiers; media providers; a signed reference catalog of model facts and prices. | None | Implemented |
 | M3 | [Adaptive routing and resilience](m03-routing-resilience.md) | Cross-route fallbacks, capacity-aware selection, priority admission, supply-side budgets, active and fleet-shared health, shadow traffic, explainable request selectors. | M1 | Implemented |
 | M4 | [Tenancy, identity and budgets](m04-tenancy-identity.md) | End users, a budget hierarchy with flexible windows, limit templates, route groups, workload JWTs, SAML, SCIM, MFA, organizations and caller-supplied credentials. | None | Implemented |
-| M5 | [Observability, export and alerting](m05-observability.md) | Durable export sinks, opt-in payload capture, OpenTelemetry GenAI conventions, business metrics, alert channels and events. | M4 | Planned |
+| M5 | [Observability, export and alerting](m05-observability.md) | Durable export sinks, opt-in payload capture, OpenTelemetry GenAI conventions, business metrics, alert channels and events. | M4 | Implemented |
 | M6 | [Cost management and chargeback](m06-cost-management.md) | Complete pricing dimensions, rate cards, cost estimation, FOCUS and billing exports, invoice reconciliation. | M2, M4, M5 | Planned |
 | M7 | [Guardrails platform](m07-guardrails.md) | One guardrail engine with built-in detectors, vendor adapters, webhook and WebAssembly guardrails, streaming inspection and tool governance. | M1 | Planned |
 | M8 | [Response caching](m08-caching.md) | Sealed exact and semantic response caches, cache controls and provider prompt-cache automation. | M7 | Planned |
@@ -124,14 +124,14 @@ Parity is reached when every row of the [parity matrix](parity.md) is
 `Parity`, `Ahead` or `Excluded`. Progress is reported with these measures,
 recomputed whenever a milestone closes:
 
-| Measure | Definition |
-| --- | --- |
-| Parity coverage | Rows marked `Parity` or `Ahead`, divided by all rows not marked `Excluded`. |
-| Added latency | Gateway minus direct-to-mock latency at p50, p95 and p99 for each [M1 scenario](m01-measured-advantage.md#scenarios), for OLP and the pinned LiteLLM release. |
-| Efficiency | Sustained requests per second per vCPU, and resident memory per 1,000 open streams. |
-| Compatibility | Pass rate of the SDK and client qualification suites across their pinned versions. |
-| Accounting completeness | Share of admitted requests with complete usage, and share of attempts that are unpriced. |
-| Authorization coverage | Management operations exercised by the authorization and isolation sweeps (must stay 100%). |
+| Measure                 | Definition                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Parity coverage         | Rows marked `Parity` or `Ahead`, divided by all rows not marked `Excluded`.                                                                                   |
+| Added latency           | Gateway minus direct-to-mock latency at p50, p95 and p99 for each [M1 scenario](m01-measured-advantage.md#scenarios), for OLP and the pinned LiteLLM release. |
+| Efficiency              | Sustained requests per second per vCPU, and resident memory per 1,000 open streams.                                                                           |
+| Compatibility           | Pass rate of the SDK and client qualification suites across their pinned versions.                                                                            |
+| Accounting completeness | Share of admitted requests with complete usage, and share of attempts that are unpriced.                                                                      |
+| Authorization coverage  | Management operations exercised by the authorization and isolation sweeps (must stay 100%).                                                                   |
 
 At the 0.1.0 baseline the matrix has 150 rows: 15 `Ahead`, 33 `Parity`, 30
 `Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 48 of 148 (32%).
@@ -182,15 +182,15 @@ Every milestone, and every workstream inside it, ships with:
 These LiteLLM capabilities conflict with OLP's guarantees or have been retired
 upstream. The parity matrix marks them `Excluded`.
 
-| Capability | Reason |
-| --- | --- |
-| An embeddable Python SDK | OLP is a gateway. Official vendor SDKs are its clients, which keeps client compatibility the product rather than a translation layer. |
-| OpenAI Assistants API | OpenAI scheduled its shutdown for 2026-08-26, as the [LiteLLM page](https://docs.litellm.ai/docs/assistants) notes. Responses and Conversations replace it ([M9](m09-api-surface.md)). |
-| Caller-chosen upstream base URLs | Destinations stay operator-declared and egress-validated. Caller-supplied credentials for an operator-declared connection are in scope ([M4](m04-tenancy-identity.md#m46-caller-supplied-provider-credentials)). |
-| Uncertified wildcard model passthrough | Routes publish only certified capabilities. Route templates create ordinary routes for newly certified models ([M3](m03-routing-resilience.md#m38-route-templates)). |
-| In-process custom code hooks | Custom authentication, callbacks and guardrails run as confined WebAssembly plugins or behind signed webhook contracts, never inside the gateway process. |
-| `/memory` key-value storage | Application state that no provider API defines. Applications should keep it in their own stores. |
-| Prompt and response storage in request history | Durable request records stay content-free. Opt-in payload capture streams to an operator-owned sink instead ([M5](m05-observability.md#m52-payload-capture)). |
+| Capability                                     | Reason                                                                                                                                                                                                           |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An embeddable Python SDK                       | OLP is a gateway. Official vendor SDKs are its clients, which keeps client compatibility the product rather than a translation layer.                                                                            |
+| OpenAI Assistants API                          | OpenAI scheduled its shutdown for 2026-08-26, as the [LiteLLM page](https://docs.litellm.ai/docs/assistants) notes. Responses and Conversations replace it ([M9](m09-api-surface.md)).                           |
+| Caller-chosen upstream base URLs               | Destinations stay operator-declared and egress-validated. Caller-supplied credentials for an operator-declared connection are in scope ([M4](m04-tenancy-identity.md#m46-caller-supplied-provider-credentials)). |
+| Uncertified wildcard model passthrough         | Routes publish only certified capabilities. Route templates create ordinary routes for newly certified models ([M3](m03-routing-resilience.md#m38-route-templates)).                                             |
+| In-process custom code hooks                   | Custom authentication, callbacks and guardrails run as confined WebAssembly plugins or behind signed webhook contracts, never inside the gateway process.                                                        |
+| `/memory` key-value storage                    | Application state that no provider API defines. Applications should keep it in their own stores.                                                                                                                 |
+| Prompt and response storage in request history | Durable request records stay content-free. Opt-in payload capture streams to an operator-owned sink instead ([M5](m05-observability.md#m52-payload-capture)).                                                    |
 
 ## Maintaining this roadmap
 

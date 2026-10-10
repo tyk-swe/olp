@@ -119,6 +119,9 @@ func (s *Server) selectPin(ctx context.Context, x *execution, route *runtime.Rou
 }
 
 func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runtime.Route, operation, surface, mode string, qualified func(*runtime.Provider, string) bool) (*pin, *Error) {
+	if e := s.checkRouteFidelity(ctx, route); e != nil {
+		return nil, e
+	}
 	if e := x.checkBody(route); e != nil {
 		return nil, e
 	}
@@ -485,7 +488,10 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 	// Stored provider fields are upstream identifiers, whatever their
 	// spelling. Output and error files are first seen here, so they get a
 	// mapping on demand.
-	for _, name := range []string{"output_file_id", "error_file_id"} {
+	for _, name := range []string{"input_file_id", "output_file_id", "error_file_id"} {
+		if name == "input_file_id" && batchLocalInput(res) != "" {
+			continue
+		}
 		raw, ok := obj[name]
 		if !ok {
 			continue
@@ -1318,7 +1324,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
+	source, err := parseObjectRequest(body, oif.Limits{MaxBytes: int(s.cfg.MaxBodyBytes)})
 	if err != nil || source.Root().Kind() != oif.Object {
 		s.stateFail(x, w, invalidRequest("invalid_json", "The request body must be one JSON object.", nil), x.family)
 		return
@@ -1368,6 +1374,10 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 			s.stateFail(x, w, invalidRequest("resource_affinity", "The batch endpoint must match every qualified item in its uploaded file.", strPtr("endpoint")), x.family)
 			return
 		}
+	}
+	if e := s.unboundedPinLimits(x.admissionAuthority(authority), p, route); e != nil {
+		s.stateFail(x, w, e, x.family)
+		return
 	}
 	if e := policySurfaceGate(route); e != nil {
 		s.stateFail(x, w, e, x.family)

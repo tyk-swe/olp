@@ -7,6 +7,33 @@ semantic versioning and take their source from root `package.json`;
 
 ## [Unreleased]
 
+### Security
+
+- Preserve native credential destinations and trust settings across provider
+  edits, imports and restores; validate Vertex hosting before acquiring or
+  sending Google credentials. Bind enrolled grants to their plugin digest and
+  profile while keeping grants used by live retained resources refreshable.
+- Reject unenforceable consumption budgets for asynchronous batches and Gemini
+  Live sessions, and keep consumption admission closed when accounting is
+  incomplete. Preserve local token reservations during settlement and retain
+  unknown usage-event versions for compatible consumers.
+- Apply current slot restrictions and published route fidelity to retained and
+  strict operations. Enforce Responses storage opt-in after request preparation,
+  project owned file identifiers in historical batches and return content-free
+  cancellation receipts when a retained response can no longer be returned.
+- Persist only video-job lifecycle metadata, bound video-list provider polling,
+  and reject ambiguous realtime accounting aliases. Bound source-index nodes,
+  forced-stream output-item retention and actual cumulative simulation policy
+  work, including nested tool arguments and empty strings.
+- Bind OIDC discovery destinations and client authentication to reviewed saved
+  configuration, require fresh pricing edits after ETag conflicts, redact plugin
+  directory errors, scope restricted DNS egress to configured resolvers and
+  remove mutable caches from release candidate builds.
+- Migrations 0045 and 0046 remove saved native video documents and add immutable
+  grant profile bindings. Existing grants without a provable profile require
+  re-enrollment; existing OIDC configurations require an owner to review and save
+  discovery again. Restricted Helm deployments must configure DNS resolver CIDRs.
+
 ### Added
 
 - Project-scoped code-mode accounts, explicit pools, published native-model

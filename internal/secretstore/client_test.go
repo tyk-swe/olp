@@ -72,7 +72,7 @@ func TestEveryWrappedKeyServiceUsesWorkloadAuthorityAndChecksTheResult(t *testin
 	keys := []WrappedKey{
 		{Store: "aws", Region: "us-east-1", KeyID: "arn:aws:kms:us-east-1:123456789012:key/test", Ciphertext: base64.StdEncoding.EncodeToString([]byte("wrapped")), Context: map[string]string{"installation": "fixture"}},
 		{Store: "gcp", KeyID: "projects/project/locations/global/keyRings/ring/cryptoKeys/key", Ciphertext: base64.StdEncoding.EncodeToString([]byte("wrapped"))},
-		{Store: "azure", KeyID: "https://fixture.vault.azure.net/keys/key/0123456789abcdef0123456789abcdef", Ciphertext: base64.StdEncoding.EncodeToString([]byte("wrapped"))},
+		{Store: "azure", KeyID: "https://fixture.vault.azure.net/keys/key/0123456789abcdef0123456789abcdef", Ciphertext: base64.RawURLEncoding.EncodeToString([]byte{0xfb, 0xff})},
 		{Store: "vault", KeyID: "https://vault.example/v1/transit/keys/key", Ciphertext: "vault:v1:wrapped"},
 	}
 	for _, key := range keys {
@@ -102,7 +102,7 @@ func TestEveryWrappedKeyServiceUsesWorkloadAuthorityAndChecksTheResult(t *testin
 					}
 					return response(map[string]any{"plaintext": encoded, "plaintextCrc32c": checksum(plaintext), "verifiedCiphertextCrc32c": true}), nil
 				case "azure":
-					if request.Header.Get("Authorization") != "Bearer azure-workload-token" || input["alg"] != "RSA-OAEP-256" {
+					if request.Header.Get("Authorization") != "Bearer azure-workload-token" || input["alg"] != "RSA-OAEP-256" || input["value"] != key.Ciphertext {
 						t.Error("Azure authority/algorithm absent")
 					}
 					return response(map[string]string{"value": base64.RawURLEncoding.EncodeToString(plaintext), "kid": key.KeyID}), nil
