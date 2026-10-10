@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-type oidcDiscoveryTransport struct{ metadata map[string]string }
+type oidcDiscoveryTransport struct{ metadata any }
 
 func (transport oidcDiscoveryTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	body, err := json.Marshal(transport.metadata)
@@ -61,7 +61,7 @@ func TestOIDCDiscoveryValidatesAdvertisedAddresses(t *testing.T) {
 				}
 				metadata[field] = tc.endpoint
 				s := &Server{Origin: "https://console.test", OIDCClient: &http.Client{Transport: oidcDiscoveryTransport{metadata}}}
-				provider, oauth, err := s.discover(t.Context(), oidcConfiguration{
+				provider, oauth, err := s.discover(t.Context(), &oidcConfiguration{
 					DiscoveryURL: "https://8.8.8.8/.well-known/openid-configuration",
 					Issuer:       metadata["issuer"], ClientID: "test-client", Scopes: []string{"openid"},
 				})
@@ -121,5 +121,67 @@ func TestOIDCSignInRoleRequiresVerifiedScopes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOIDCDiscoveryRejectsChangedOrUnboundDestinations(t *testing.T) {
+	original := map[string]string{"issuer": "https://8.8.8.8", "authorization_endpoint": "https://8.8.8.8/auth", "token_endpoint": "https://8.8.8.8/token", "jwks_uri": "https://8.8.8.8/jwks"}
+	for _, field := range []string{"authorization_endpoint", "token_endpoint", "jwks_uri", "missing_binding", "unchanged"} {
+		t.Run(field, func(t *testing.T) {
+			metadata := make(map[string]string)
+			for k, v := range original {
+				metadata[k] = v
+			}
+			s := &Server{Origin: "https://console.test", OIDCClient: &http.Client{Transport: oidcDiscoveryTransport{metadata}}}
+			c := oidcConfiguration{DiscoveryURL: "https://8.8.8.8/discovery", Issuer: original["issuer"], ClientID: "client"}
+			if _, _, err := s.discover(t.Context(), &c); err != nil {
+				t.Fatal(err)
+			}
+			c.ID = "saved-configuration"
+			// Exercise the same persistence round-trip as the configuration document.
+			data, _ := json.Marshal(c)
+			if err := json.Unmarshal(data, &c); err != nil {
+				t.Fatal(err)
+			}
+			if field == "missing_binding" {
+				c.DiscoveryBinding = ""
+			} else if field != "unchanged" {
+				metadata[field] = "https://1.1.1.1/attacker"
+			}
+			provider, oauth, err := s.discover(t.Context(), &c)
+			if field == "unchanged" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			var problem *Problem
+			if !errors.As(err, &problem) || problem.Code != "oidc_discovery_changed" || provider != nil || oauth != nil {
+				t.Fatalf("changed metadata produced credential-capable config: %v %v %v", provider, oauth, err)
+			}
+		})
+	}
+}
+
+func TestOIDCDiscoveryBindsTheSelectedTokenAuthenticationMethod(t *testing.T) {
+	metadata := map[string]any{
+		"issuer": "https://8.8.8.8", "authorization_endpoint": "https://8.8.8.8/auth",
+		"token_endpoint": "https://8.8.8.8/token", "jwks_uri": "https://8.8.8.8/jwks",
+	}
+	s := &Server{Origin: "https://console.test", OIDCClient: &http.Client{Transport: oidcDiscoveryTransport{metadata}}}
+	c := oidcConfiguration{DiscoveryURL: "https://8.8.8.8/discovery", Issuer: "https://8.8.8.8", ClientID: "client"}
+	if _, _, err := s.discover(t.Context(), &c); err != nil {
+		t.Fatal(err)
+	}
+	c.ID = "saved-configuration"
+	metadata["token_endpoint_auth_methods_supported"] = []string{"client_secret_post", "client_secret_basic"}
+	if _, _, err := s.discover(t.Context(), &c); err != nil {
+		t.Fatalf("unchanged selected method: %v", err)
+	}
+	metadata["token_endpoint_auth_methods_supported"] = []string{"client_secret_post"}
+	provider, oauth, err := s.discover(t.Context(), &c)
+	var problem *Problem
+	if !errors.As(err, &problem) || problem.Code != "oidc_discovery_changed" || provider != nil || oauth != nil {
+		t.Fatalf("changed method produced credential-capable config: %v %v %v", provider, oauth, err)
 	}
 }

@@ -203,8 +203,8 @@ type Request struct {
 	DailyCostLimit   *string
 	MonthlyCostLimit *string
 	WeeklyCostLimit  *string
-	// RequestedTokens is the estimate reserved up front and later reconciled
-	// against the tokens the attempt actually used.
+	// RequestedTokens is the local allowance reserved before dispatch. Later
+	// reconciliation can increase it, but cannot refund it on reported usage.
 	RequestedTokens int64
 	// LeaseTTL bounds how long a concurrency slot survives without a release.
 	LeaseTTL time.Duration
@@ -788,7 +788,7 @@ func limitValue(limit *int64) int64 {
 // The counts are the ones the rate script held when it answered, not a live
 // reading. A granted request's own reservation is already counted in them, and
 // its token reservation is the admission estimate, which Reconcile later
-// replaces with the tokens actually used. A rejected request reserved nothing,
+// increases if reported usage is higher. A rejected request reserved nothing,
 // so its counts are what the window still holds. The zero value states no
 // allowance, and is what a reservation reports that was not asked to state one.
 type RateState struct {
@@ -1066,9 +1066,9 @@ func (le *Lease) Refund(ctx context.Context) error {
 	}))
 }
 
-// Reconcile settles the token reservation against the tokens actually used. It
-// is a no-op without a token budget, and the script ignores a window that has
-// already rolled over.
+// Reconcile increases the token reservation when reported usage exceeds it.
+// Provider usage cannot refund the local admission allowance. Refund remains
+// available for work never dispatched, and a rolled-over window is untouched.
 func (le *Lease) Reconcile(ctx context.Context, actualTokens int64) error {
 	if le == nil {
 		return nil
@@ -1080,10 +1080,7 @@ func (le *Lease) Reconcile(ctx context.Context, actualTokens int64) error {
 	if actualTokens < 0 || actualTokens > maxLuaInteger {
 		return errors.Join(err, &InvalidRequestError{Reason: "actual tokens must be a non-negative Lua-safe integer"})
 	}
-	adjustment := actualTokens - le.reservedTokens
-	if adjustment == 0 {
-		return err
-	}
+	adjustment := max(int64(0), actualTokens-le.reservedTokens)
 	return errors.Join(err, cleanup(ctx, func(ctx context.Context) error {
 		_, err := le.limiter.eval(ctx, reconcileLimitsScript, []string{le.rateKey},
 			le.classed(strconv.FormatInt(le.windowID, 10), strconv.FormatInt(adjustment, 10), le.id)...)

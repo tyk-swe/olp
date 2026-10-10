@@ -313,7 +313,9 @@ func TestProviderInventoryAvailabilityTracksPublishedModels(t *testing.T) {
 	h.refresh()
 	sequence := h.Runtime.Release().Sequence
 	detail = h.want(owner, "GET", providerPath, nil, nil, 200)
-	detail = h.want(owner, "PATCH", providerPath, map[string]any{"name": "Inventory publication", "configuration": configuration(up.URL + "/draft/v1")}, etagHeader(detail), 200)
+	draftConfiguration := detail["configuration"].(map[string]any)
+	draftConfiguration["options"].(map[string]any)["parameter_defaults"] = map[string]any{"temperature": 0.2}
+	detail = h.want(owner, "PATCH", providerPath, map[string]any{"name": "Inventory publication", "configuration": draftConfiguration}, etagHeader(detail), 200)
 	if detail["certified_capability_count"] != float64(0) {
 		t.Fatal("transport change did not invalidate draft certification")
 	}

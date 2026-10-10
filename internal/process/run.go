@@ -43,7 +43,7 @@ import (
 // mediaUpstreamHeaderTimeout mirrors the gateway's upstream header wait bound.
 const mediaUpstreamHeaderTimeout = 5 * time.Minute
 
-// metadataBuffer is how many request metadata events one inference replica may
+// metadataBuffer is how many request metadata events one producer replica may
 // hold while the stream writer catches up. Beyond it events are dropped and
 // counted as loss, so a slow or unreachable stream costs completeness rather
 // than memory or inference latency.
@@ -176,6 +176,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 	}
 	var emitter *usage.Emitter
+	var gatewayInstance string
 	var rt *runtime.Manager
 	var gw *gateway.Server
 	var mediaService *media.Service
@@ -270,8 +271,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 		if limiter != nil && (c.Mode == config.Worker || c.Mode == config.All) {
 			// The worker plane's health probes run through a gateway of their
-			// own: planned, gated and priced like any request, and persisted
-			// directly, since a worker carries no metadata stream.
+			// own: planned, gated, priced and emitted like any request.
 			prober = gateway.New(rt, &policy, gateway.Config{
 				MaxInFlight:       1,
 				MaxResponseBytes:  c.ProviderMaxResponseBytes,
@@ -282,10 +282,6 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			}, log)
 			prober.Business = business
 			prober.Admission = gateway.NewAdmission(limiter, nil, log)
-			prober.Sink = &gateway.PersistingSink{Log: log, Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
-				_, err := usage.PersistEvent(ctx, pool, event, payload)
-				return err
-			}}
 		}
 		// Plugins that providers pin are compiled now rather than by the
 		// first call that needs them.
@@ -330,14 +326,27 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				gw.Resources = resources.NewEncrypted(pool, installation, keys)
 				gw.Resolver = resources.NewResolver(pool)
 			}
-			// Without shared state there is no admission backend at all: the
-			// gateway then refuses traffic that carries hard limits rather
-			// than serving it unmetered, and keeps logging its metadata.
-			if limiter != nil {
-				emitter = usage.NewEmitter(metadataBuffer)
-				gw.Sink = &gateway.AccountingSink{Emitter: emitter, Log: log, Next: gw.Sink}
-			}
 			gw.Register(public)
+		}
+		// Every process that can spend against shared budgets owns a durable
+		// producer epoch, including control-only playground calls and worker-only
+		// health probes. No producer may log and forget a failed ledger write.
+		// Without shared state, hard limits are refused and metadata stays logged.
+		if limiter != nil {
+			emitter = usage.NewEmitter(metadataBuffer)
+			gatewayInstance = usage.GatewayInstance()
+			for _, server := range []*gateway.Server{gw, prober} {
+				if server == nil {
+					continue
+				}
+				server.Admission.CostAccountingReady = func(ctx context.Context) error {
+					return usage.CheckBudgetAccounting(ctx, pool, emitter)
+				}
+				server.Sink = &gateway.AccountingSink{Emitter: emitter, Log: log, Next: server.Sink,
+					RecordLoss: func(ctx context.Context, requestID string) error {
+						return usage.RecordBudgetLoss(ctx, pool, emitter, gatewayInstance, lossCounters)
+					}}
+			}
 		}
 		if c.Mode.Management() {
 			control, err := access.New(startup, pool, installation, c.PublicOrigin, auth, keys, bootstrap)
@@ -394,16 +403,16 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	configureObservability(obsState, rt, gw, emitter, mediaSpool, &policy)
 	go obsCache.Run(ctx, obsState, log)
 	// The delivery plane outlives the listeners: it is cancelled only once the
-	// gateway has drained, so every event a served request emitted is written
-	// and this gateway's epoch is closed against what it actually delivered.
+	// producers have drained, so every emitted event is written and this
+	// process's epoch is closed against what it actually delivered.
 	delivery, stopDelivery := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopDelivery()
 	var delivered sync.WaitGroup
 	var writerDone chan struct{}
 	if emitter != nil {
-		stream, instance := usage.StreamName(prefix), usage.GatewayInstance()
-		// Register before listeners bind: even a crash before the first tick
-		// must leave an epoch that recovery can detect.
+		stream, instance := usage.StreamName(prefix), gatewayInstance
+		// Register before listeners bind or probes start: even a crash before
+		// the first tick must leave an epoch that recovery can detect.
 		if _, err := usage.CheckpointEpoch(startup, pool, instance, emitter.Snapshot(), false); err != nil {
 			return err
 		}
@@ -451,7 +460,19 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, prober, keys, installation, &policy, log, exporter, referenceCatalog)
+		workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, keys, installation, &policy, log, exporter, referenceCatalog)
+	}
+	// Probes produce accounting events, so they stop before delivery closes;
+	// the consumer and recovery workers remain alive until delivery drains.
+	probes, stopProbes := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopProbes()
+	var probesStopped chan struct{}
+	if prober != nil {
+		probesStopped = make(chan struct{})
+		go func() {
+			defer close(probesStopped)
+			prober.RunHealthProbes(probes, probeCheckpoint(pool, log))
+		}()
 	}
 	liveMetrics := newLiveMetrics(rt, inferencePool, managementPool)
 	private := observability.NewHandler(obsCache, liveMetrics).ServeMux()
@@ -494,6 +515,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			}
 		}
 	}
+	drainProbes(shutdown, stopProbes, probesStopped, emitter, log)
 	if rt != nil {
 		rt.Stop()
 	}
@@ -517,11 +539,21 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	return serveErr
 }
 
+// drainProbes stops synthetic request production before metadata intake closes.
+// A producer that exceeds the drain budget leaves its epoch open because a
+// terminal event may still arrive after delivery stops.
+func drainProbes(ctx context.Context, stop context.CancelFunc, stopped <-chan struct{}, emitter *usage.Emitter, log *slog.Logger) {
+	stop()
+	if stopped != nil && !awaitPlane(ctx, func() { <-stopped }, log, "health probes") && emitter != nil {
+		emitter.MarkUnclean()
+	}
+}
+
 // awaitPlane waits for a plane to finish after intake is closed or its context
 // is cancelled. All planes share one deadline, including HTTP draining.
 // A plane that outlives it records a completeness gap rather than extending
 // the deployment grace period.
-func awaitPlane(ctx context.Context, wait func(), log *slog.Logger, plane string) {
+func awaitPlane(ctx context.Context, wait func(), log *slog.Logger, plane string) bool {
 	done := make(chan struct{})
 	go func() {
 		wait()
@@ -529,8 +561,10 @@ func awaitPlane(ctx context.Context, wait func(), log *slog.Logger, plane string
 	}()
 	select {
 	case <-done:
+		return true
 	case <-ctx.Done():
 		log.Warn("shutdown budget reached before the plane closed", "plane", plane)
+		return false
 	}
 }
 

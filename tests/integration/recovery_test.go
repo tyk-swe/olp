@@ -39,7 +39,8 @@ func TestReplacementRestoreIsAtomicAndAuthenticatesKeys(t *testing.T) {
 	}
 	// This in-process fixture does not emit asynchronous metadata. Real worker
 	// drain and history preservation are exercised by browser-integration.sh.
-	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health VALUES(true,0,0,NULL,now())`); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.request_metadata_consumer_health
+        (singleton, pending_events, lag_events, oldest_pending_at, checked_at) VALUES(true,0,0,NULL,now())`); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()

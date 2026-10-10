@@ -83,26 +83,15 @@ func (s *Service) checkpoint(ctx context.Context, outcome usage.Outcome, progres
 	}
 }
 
-// MaxNativeVideoSourceBytes bounds exact video metadata retained for recovery.
-// Asset bytes never enter this secret: they remain in the request-owned spool.
+// MaxNativeVideoSourceBytes bounds transient native video metadata.
+// Asset bytes remain in the request-owned spool.
 const MaxNativeVideoSourceBytes = 1 << 20
 
-// AttachWithRetry persists the upstream identity with bounded retry. Strict
-// native metadata is sealed under the job UUID and committed in the same
-// transaction as activation, so no active strict job lacks recoverable source.
-func (s *Service) AttachWithRetry(ctx context.Context, id, upstreamJobID string, update JobUpdate, nativeSource ...[]byte) (JobRecord, error) {
-	if len(nativeSource) > 1 || len(nativeSource) == 1 && (len(nativeSource[0]) == 0 || len(nativeSource[0]) > MaxNativeVideoSourceBytes) {
-		return JobRecord{}, &JobError{Kind: JobErrorInvalid, Message: "native video source exceeds its durable bound"}
-	}
+// AttachWithRetry persists only the upstream identity and typed lifecycle metadata.
+func (s *Service) AttachWithRetry(ctx context.Context, id, upstreamJobID string, update JobUpdate) (JobRecord, error) {
 	const attempts = 3
 	for attempt := 0; ; attempt++ {
-		var record JobRecord
-		var err error
-		if len(nativeSource) == 0 {
-			record, err = AttachUpstream(ctx, s.Pool, id, upstreamJobID, update)
-		} else {
-			record, err = s.attachWithSource(ctx, id, upstreamJobID, update, nativeSource[0])
-		}
+		record, err := AttachUpstream(ctx, s.Pool, id, upstreamJobID, update)
 		if err == nil {
 			return record, nil
 		}
@@ -116,64 +105,6 @@ func (s *Service) AttachWithRetry(ctx context.Context, id, upstreamJobID string,
 		case <-time.After(time.Duration(25*(attempt+1)) * time.Millisecond):
 		}
 	}
-}
-
-func (s *Service) attachWithSource(ctx context.Context, id, upstreamJobID string, update JobUpdate, source []byte) (JobRecord, error) {
-	if s.Keys == nil || s.Installation == "" {
-		return JobRecord{}, &JobError{Kind: JobErrorDatabase, Message: "media secret authority unavailable"}
-	}
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return JobRecord{}, dbError(err)
-	}
-	defer tx.Rollback(ctx)
-	expires := s.now().Add(30 * 24 * time.Hour)
-	if update.ExpiresAt != nil && update.ExpiresAt.Before(expires) {
-		expires = *update.ExpiresAt
-	}
-	if err := s.Keys.Store(ctx, tx, s.Installation, id, secrets.MediaJobSource, source, &expires); err != nil {
-		return JobRecord{}, dbError(err)
-	}
-	record, err := AttachUpstream(ctx, tx, id, upstreamJobID, update, id)
-	if err != nil {
-		return JobRecord{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return JobRecord{}, dbError(err)
-	}
-	return record, nil
-}
-
-// ReadNativeVideoSource is only for the job owner while the current pinned
-// provider authority remains usable. A missing/expired/tampered secret fails
-// closed; possession of a job UUID alone never authorizes this read.
-func (s *Service) ReadNativeVideoSource(ctx context.Context, record JobRecord, apiKeyID string) ([]byte, error) {
-	fresh, err := Job(ctx, s.Pool, record.ID)
-	if err != nil {
-		return nil, err
-	}
-	record = fresh
-	if !record.StrictContract || record.APIKeyID != apiKeyID || record.NativeSourceID == nil ||
-		*record.NativeSourceID != record.ID || record.Lifecycle == LifecycleDeleted ||
-		record.ExpiresAt != nil && !record.ExpiresAt.After(s.now()) {
-		return nil, &JobError{Kind: JobErrorNotFound, Message: "native video source unavailable"}
-	}
-	if target, _, _ := s.JobTarget(ctx, &record); target == nil {
-		return nil, &JobError{Kind: JobErrorPrecondition, Message: "pinned video authority is unavailable"}
-	}
-	if s.Keys == nil {
-		return nil, &JobError{Kind: JobErrorDatabase, Message: "media secret authority unavailable"}
-	}
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return nil, dbError(err)
-	}
-	defer tx.Rollback(ctx)
-	source, err := s.Keys.Read(ctx, tx, s.Installation, record.ID, secrets.MediaJobSource)
-	if err != nil {
-		return nil, &JobError{Kind: JobErrorNotFound, Message: "native video source unavailable"}
-	}
-	return source, nil
 }
 
 // FinalizeDeletion applies the tombstone and confirms the row landed in the

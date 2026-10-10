@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.27.1-trixie@sha256:3b77fc618ec235a1ab412de7737f120dd507c57e8d87de4cbb7994fb94275ed5 AS go-build
+FROM golang:1.27.2-trixie@sha256:e58d6f83b3416618d8bcac2b3dde1b7f7e3c4a77d25e88637f8bbae81536c48d AS go-build
 ARG TARGETARCH
 ARG OLP_VERSION
 # The release workflow builds with the release tag, so the binary trusts only
@@ -35,7 +35,7 @@ RUN npm install --global pnpm@11.24.0
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY console/package.json ./console/package.json
 COPY tests/sdk-smoke/package.json ./tests/sdk-smoke/package.json
-RUN --mount=type=cache,target=/pnpm/store pnpm install --frozen-lockfile --store-dir /pnpm/store
+RUN pnpm install --frozen-lockfile --store-dir /pnpm/store
 COPY console ./console
 COPY openapi/management.json ./openapi/management.json
 RUN pnpm --dir console api:generate && pnpm --dir console build

@@ -391,20 +391,23 @@ delivery is configured, not merely when shared state is live — monitor
 
 ## Accounting delivery and shutdown
 
-Every request an API key owns produces one content-free metadata event;
-playground traffic has no key and is not accounted for. Inference processes
-buffer up to 8192 events and write them to the installation stream; the buffer
-never blocks a request, and an overflow is counted as loss rather than paid for
-in latency. Events carry identifiers, timing, token counts, and per-attempt
+Every attributable caller request, playground call and health probe produces one
+content-free metadata event. With Valkey configured, gateway, control and worker
+processes each buffer up to 8192 events and write them to the installation stream.
+The buffer handoff is nonblocking; an overflow records local loss and performs a
+bounded loss checkpoint so other replicas can refuse admission against incomplete
+cost accounting. Events carry identifiers, timing, token counts, and per-attempt
 evidence only — never prompts, outputs, tool data, headers, credentials,
 cookies, or uploads. Provider names, route slugs and labels are metadata; keep
 secrets out of them.
 [Provider-retained content](compatibility.md#files-batches-realtime-and-provider-retained-state)
 is governed separately from diagnostics.
 
-The stream carries JSON in one `event` field with `version: 1`. Missing or
-different versions, malformed payloads and permanently invalid records become
-`malformed_stream_event` gaps instead of being interpreted as another format.
+The stream carries JSON in one `event` field with `version: 1`. Unsupported integer
+versions remain in the original stream and pending set for a compatible consumer;
+supported neighboring events continue to persist. Missing versions, malformed
+payloads and permanently invalid records become `malformed_stream_event` gaps
+instead of being interpreted as another format.
 See [metadata tests](../internal/usage/) for the persistence contract.
 
 Transcription durations are recorded at microsecond precision to match the
@@ -478,11 +481,12 @@ No list price applies to a [plugin provider](plugins.md#providers-from-plugin-pr
 its attempts stay unpriced until a revision carries a price scoped to that
 provider, and a `plugin` price must name its `provider_id`.
 
-Shutdown stops the listeners and drains their handlers first, then closes
-metadata intake and gives the writer a bounded opportunity to flush the buffer.
+Shutdown stops the listeners and drains their handlers and health-probe producers
+first, then closes metadata intake and gives the writer a bounded opportunity to
+flush the buffer.
 Only afterwards are delivery and worker contexts cancelled. An expired flush
-budget records undelivered events as loss; a forced HTTP shutdown leaves the
-gateway epoch open for detection because handlers may still emit metadata. A
+budget records undelivered events as loss; a forced HTTP or probe shutdown leaves
+the producer epoch open for detection because requests may still emit metadata. A
 clean drain closes the epoch against what was actually delivered. HTTP,
 metadata, delivery, workers and trace flushing share `OLP_SHUTDOWN_TIMEOUT` (30
 seconds by default). Forced closure records uncertainty instead of extending the

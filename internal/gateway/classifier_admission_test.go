@@ -47,7 +47,9 @@ func TestClassifierSettlesItsOwnCallerReservation(t *testing.T) {
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	counter := server.of("olp:test:{classifier}:rate")
-	if counter.requests != 2 || counter.tokens != 10 || server.reconciled != 2 {
+	// Both one-token prompts retain their 4096-token output allowance; the
+	// provider's five-token replies cannot refund either local reservation.
+	if counter.requests != 2 || counter.tokens != 8194 || server.reconciled != 2 {
 		t.Fatalf("caller and classifier reservations: counter=%+v reconciliations=%d", counter, server.reconciled)
 	}
 }

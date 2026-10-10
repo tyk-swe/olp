@@ -135,6 +135,8 @@ type Input struct {
 	JSON        []byte       // exact candidate-specific outbound JSON
 	Parts       []Part       // exact outbound multipart order
 	CallerParts []Part       // accepted caller order before admitted overlays
+	// PolicyBudget optionally reserves work before each input regexp match.
+	PolicyBudget func(int) error
 }
 
 type Bound struct {
@@ -270,7 +272,7 @@ func (t *Template) bindJSON(d oif.Descriptor, in Input) (Bound, error) {
 	if err != nil || effectiveRequest.Document().Raw() != effective.Raw() {
 		return Bound{}, reject("target_capability", "/request", "exact_media_overlay", "The native media request differs from its admitted source overlays.")
 	}
-	if err := t.inspectJSONInput(effective); err != nil {
+	if err := t.inspectJSONInput(effective, in.PolicyBudget); err != nil {
 		return Bound{}, err
 	}
 	return Bound{Descriptor: d, Source: source, Effective: effectiveRequest, Receipt: t.receipt(d, dispositions)}, nil
@@ -422,7 +424,7 @@ func multipartDefaultParts(name string, raw json.RawMessage) []Part {
 	return []Part{{Name: name, Text: &text, Raw: true}}
 }
 
-func (t *Template) inspectJSONInput(doc oif.Document) error {
+func (t *Template) inspectJSONInput(doc oif.Document, reserve func(int) error) error {
 	if t.policy == nil || !t.policy.HasInput() {
 		return nil
 	}
@@ -439,6 +441,11 @@ func (t *Template) inspectJSONInput(doc oif.Document) error {
 			continue
 		}
 		for _, rule := range t.policy.Input {
+			if reserve != nil {
+				if err := reserve(len(value)); err != nil {
+					return err
+				}
+			}
 			if rule.Re.MatchString(value) {
 				return reject("content_policy_blocked", "/request", "content_policy", "The effective native media request was blocked.")
 			}

@@ -7,6 +7,12 @@ import (
 )
 
 func (p *Plan) CheckInput() ([]contentpolicy.Decision, error) {
+	return p.CheckInputWithBudget(nil)
+}
+
+// CheckInputWithBudget lets inspection callers bound cumulative regexp work
+// across plans. A nil callback leaves ordinary serving unchanged.
+func (p *Plan) CheckInputWithBudget(reserve func(int) error) ([]contentpolicy.Decision, error) {
 	policy := p.template.policy
 	if policy != nil && len(policy.Output) > 0 && p.template.codec.OutputText == nil {
 		return nil, fail("policy_conflict", "/content_policy", "inspectable_output", "This operation has no qualified output policy coverage.")
@@ -24,6 +30,11 @@ func (p *Plan) CheckInput() ([]contentpolicy.Decision, error) {
 	decisions := []contentpolicy.Decision{}
 	for _, rule := range policy.Input {
 		for _, text := range texts {
+			if reserve != nil {
+				if err := reserve(len(text.Value)); err != nil {
+					return decisions, err
+				}
+			}
 			if rule.Re.MatchString(text.Value) {
 				decisions = append(decisions, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionBlock, Outcome: contentpolicy.OutcomeBlocked})
 				return decisions, fail("content_policy_blocked", "/request", "content_policy", "The effective request was blocked by its content policy.")

@@ -295,8 +295,11 @@
             "restricted": { "type": "boolean" },
             "dns": {
               "type": "object",
-              "required": ["enabled"],
-              "properties": { "enabled": { "type": "boolean" } }
+              "required": ["enabled", "cidrs"],
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "cidrs": { "$ref": "#/definitions/cidrList" }
+              }
             },
             "postgresql": { "$ref": "#/definitions/networkPolicyPeer" },
             "valkey": { "$ref": "#/definitions/networkPolicyPeer" },

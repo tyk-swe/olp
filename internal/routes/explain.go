@@ -24,11 +24,12 @@ const fallbackStandby = "standby"
 // shared circuit state the gateways read, but never reserves state or contacts
 // a provider: classifier predicates use the labels the caller supplies.
 type simulation struct {
-	ctx      context.Context
-	snapshot *runtime.Snapshot
-	input    simulationInput
-	inputs   *usage.RoutingInputs
-	demand   *runtime.TokenDemand
+	ctx              context.Context
+	snapshot         *runtime.Snapshot
+	input            simulationInput
+	inputs           *usage.RoutingInputs
+	demand           *runtime.TokenDemand
+	inspectionBudget inspectionBudget
 	// named is the route the request names; every leg parses the request as
 	// addressed to it, as the gateway parses it once.
 	named     string
@@ -124,12 +125,12 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, runtime.Pla
 		}
 	}
 	counted := newSimulatedDemand(parsed, input, m.demand)
-	accept, effective, inspections := inspectionAccept(route, parsed, semantic, counted)
+	accept, effective, inspections := inspectionAccept(route, parsed, semantic, counted, &m.inspectionBudget)
 	if unary != nil {
-		accept, effective, inspections = inspectionUnaryAccept(route, *unary, semantic, input.ClientContract, m.demand)
+		accept, effective, inspections = inspectionUnaryAccept(route, *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
 	}
 	if mediaRequest != nil {
-		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, semantic, input.ClientContract, m.demand)
+		accept, effective, inspections = inspectionMediaAccept(route, mediaRequest, input.Dialect, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
 	}
 	preferences := input.Preferences
 	if via != "" && preferences != nil {

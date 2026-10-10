@@ -74,6 +74,8 @@ type Config struct {
 // Runtime is the pinned authority, release and credential source.
 // *runtime.Manager implements it; fixtures and tests supply static releases.
 type Runtime interface {
+	// CheckRouteFidelity confirms a strict admission against current publication.
+	CheckRouteFidelity(context.Context, runtime.Route) error
 	Release() *runtime.Release
 	Authenticate(secret string) (*access.Authority, error)
 	// RoutingInputs returns current price and performance measurements, or
@@ -759,6 +761,9 @@ func (s *Server) prepare(ctx context.Context, x *execution, authorize func(*runt
 // content policy to it. A selector that delegates moves the request on to its
 // route, which is planned in turn.
 func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
+	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
+		return e
+	}
 	snapshot := x.snapshot()
 	route := *x.route
 	if x.strict() {

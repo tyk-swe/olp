@@ -36,7 +36,9 @@ func (l Limits) effective() Limits {
 		l.MaxDepth = 128
 	}
 	if l.MaxNodes <= 0 {
-		l.MaxNodes = 1 << 20
+		// The index includes per-value metadata and container indexes. Bound
+		// its default memory independently of compact scalar input sizes.
+		l.MaxNodes = 1 << 16
 	}
 	return l
 }

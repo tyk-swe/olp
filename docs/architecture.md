@@ -106,7 +106,8 @@ confined plugin's module on wazero, or an unconfined plugin's executable as a
 subprocess speaking the ABI over stdio, where the deployment enables the
 unconfined tier. Their callers still own SQL, transactions, authorization,
 credential checks, and operation eligibility. Publication alone drops empty
-provider limits; retained resources preserve the stored limits.
+provider limits; retained resources preserve their connection identity, while new
+work also enforces current slot authorization and the tighter published quotas.
 
 The console usage feature owns `PricingRevisionsPanel`, including its queries,
 form, decimal validation, submission, and pagination. Settings keeps the panel

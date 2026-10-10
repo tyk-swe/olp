@@ -113,6 +113,9 @@ func (c Config) Validate(policy *egress.Policy) error {
 	if e != nil {
 		return e
 	}
+	if c.Kind == "vertex_ai" && !c.vertexDestination(u) {
+		return errors.New("Vertex credentials require the Google endpoint for the configured location and system trust roots")
+	}
 	if err := c.validateProfileEndpoint(u); err != nil {
 		return err
 	}

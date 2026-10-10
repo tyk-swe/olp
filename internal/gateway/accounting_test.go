@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -11,6 +13,86 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestAccountingLossIsCheckpointedBeforeTerminalReturns(t *testing.T) {
+	for _, invalid := range []bool{false, true} {
+		emitter := usage.NewEmitter(1)
+		calls := 0
+		sink := &AccountingSink{Emitter: emitter, Log: quiet, RecordLoss: func(ctx context.Context, requestID string) error {
+			calls++
+			if _, bounded := ctx.Deadline(); !bounded || requestID != "client-named-request" || emitter.Snapshot().Lost() == 0 {
+				t.Fatalf("loss checkpoint lacks local evidence or deadline: %s %+v", requestID, emitter.Snapshot())
+			}
+			return nil
+		}}
+		event := accountingEnvelope(t)
+		if invalid {
+			event.CompletedAt = event.StartedAt.Add(-time.Second)
+		} else {
+			sink.Terminal(event)
+		}
+		sink.Terminal(event)
+		if calls != 1 {
+			t.Fatalf("terminal returned before loss checkpoint: calls=%d invalid=%v", calls, invalid)
+		}
+	}
+}
+
+func TestHealthProbeAccountingUsesTheVersionedLossTrackedPipeline(t *testing.T) {
+	emitter := usage.NewEmitter(1)
+	probe := accountingEnvelope(t)
+	probe.Actor, probe.KeyID, probe.Origin = "system", "", usage.OriginProbe
+	probe.Mode = "unary"
+	for i := range probe.Attempts {
+		probe.Attempts[i].Mode = "unary"
+	}
+	checkpoints := 0
+	sink := &AccountingSink{Emitter: emitter, Log: quiet, RecordLoss: func(ctx context.Context, requestID string) error {
+		checkpoints++
+		if _, bounded := ctx.Deadline(); !bounded || requestID != probe.RequestID || emitter.Snapshot().Lost() != 1 {
+			t.Fatal("probe loss checkpoint lacks its local evidence or deadline")
+		}
+		// Even a failed durable checkpoint leaves local loss visible for
+		// budget admission and for the producer's next epoch checkpoint.
+		return errors.New("database unavailable")
+	}}
+	sink.Terminal(probe)
+	if snapshot := emitter.Snapshot(); snapshot.Accepted != 1 || snapshot.Lost() != 0 || checkpoints != 0 {
+		t.Fatalf("keyless probe was not queued: %+v, checkpoints=%d", snapshot, checkpoints)
+	}
+	sink.Terminal(probe)
+	if snapshot := emitter.Snapshot(); snapshot.Accepted != 1 || snapshot.Lost() != 1 || snapshot.LastLossAt == nil || checkpoints != 1 {
+		t.Fatalf("probe loss disappeared after failed checkpoint: %+v, checkpoints=%d", snapshot, checkpoints)
+	}
+	emitter.Close()
+	writes := 0
+	emitter.RunWriter(t.Context(), accountingStreamFunc(func(_ context.Context, args ...string) (any, error) {
+		writes++
+		if len(args) != 5 || args[0] != "XADD" || args[1] != "metadata" || args[3] != "event" {
+			t.Fatalf("unexpected metadata write: %v", args)
+		}
+		event, err := usage.Decode([]byte(args[4]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.Version != usage.WireVersion || event.Origin != usage.OriginProbe || event.APIKeyID != "" || event.RequestID != probe.AccountingID || len(event.Attempts) != len(probe.Attempts) {
+			t.Fatalf("probe identity or usage lost in stream: %+v", event)
+		}
+		if _, err := usage.Validate(event); err != nil {
+			t.Fatal(err)
+		}
+		return "1-0", nil
+	}), "metadata", quiet)
+	if snapshot := emitter.Snapshot(); writes != 1 || snapshot.Persisted != 1 || snapshot.Lost() != 1 || !snapshot.GracefullyDrained() {
+		t.Fatalf("probe pipeline did not drain with loss evidence intact: %+v, writes=%d", snapshot, writes)
+	}
+}
+
+type accountingStreamFunc func(context.Context, ...string) (any, error)
+
+func (f accountingStreamFunc) Do(ctx context.Context, args ...string) (any, error) {
+	return f(ctx, args...)
+}
 
 // accountingID is a fresh identifier for a fixture field that must be one.
 func accountingID(t *testing.T) string {

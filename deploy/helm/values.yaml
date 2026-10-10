@@ -271,6 +271,9 @@ networkPolicy:
     restricted: false
     dns:
       enabled: true
+      # Resolver addresses reachable from pods, including node-local DNS if used.
+      # Required for restricted egress with DNS enabled.
+      cidrs: []
     postgresql:
       cidrs: []
       port: 5432

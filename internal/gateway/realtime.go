@@ -92,7 +92,7 @@ func (s *realtimeResponseState) add(id string, strict bool) {
 // controls, without materializing a second JSON tree for the few observed
 // response fields. OIF rejects duplicate keys and invalid Unicode throughout.
 func realtimeObject(data []byte) (oif.Value, bool) {
-	doc, err := oif.ParseJSON(data, oif.Limits{MaxBytes: maxRealtimeTrackedFrameBytes})
+	doc, err := parseObjectRequest(data, oif.Limits{MaxBytes: maxRealtimeTrackedFrameBytes})
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return oif.Value{}, false
 	}
@@ -145,9 +145,9 @@ func realtimeFlatFrame(data []byte) (realtimeFrame, bool) {
 			return realtimeFrame{}, false
 		}
 		key := data[start:at]
-		// encoding/json's struct fields accept case-insensitive spellings and
-		// assign the last matching member. Let the fallback preserve that rule;
-		// response is structured even if a caller sends a scalar value.
+		// Case-insensitive observed fields need the full decoder, including
+		// its strict ambiguity checks. Response is structured even if a caller
+		// sends a scalar value.
 		if bytes.EqualFold(key, []byte("response")) ||
 			bytes.EqualFold(key, []byte("type")) && !bytes.Equal(key, []byte("type")) ||
 			bytes.EqualFold(key, []byte("response_id")) && !bytes.Equal(key, []byte("response_id")) {
@@ -229,6 +229,10 @@ func realtimeMember(object oif.Value, name string) (oif.Value, bool) {
 	found := false
 	for _, member := range object.Members() {
 		if strings.EqualFold(member.Name, name) {
+			if found {
+				// An alias must not hide an earlier malformed accounting field.
+				return oif.Value{}, true
+			}
 			value, found = member.Value, true
 		}
 	}

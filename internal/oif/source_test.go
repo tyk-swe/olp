@@ -274,3 +274,32 @@ func TestFieldsWithoutLeavesOutOnlyTheNamedMembers(t *testing.T) {
 		t.Fatalf("a document that is not an object has fields %v", got)
 	}
 }
+
+func TestDefaultNodeLimitRejectsCompactScalarFlood(t *testing.T) {
+	for _, raw := range []string{
+		`[` + strings.Repeat(`0,`, 1<<16) + `0]`,
+		`{"input":[` + strings.Repeat(`0,`, 1<<16) + `0]}`,
+	} {
+		_, err := oif.ParseJSON([]byte(raw), oif.Limits{})
+		if err == nil || !strings.Contains(err.Error(), "node_limit") {
+			t.Fatalf("compact flood should fail node budget, got %v", err)
+		}
+	}
+}
+
+func TestDefaultNodeLimitCountsContainersAtTheBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		prefix, suffix string
+		containers     int
+	}{{"[", "]", 1}, {`{"input":[`, "]}", 2}} {
+		values := (1 << 16) - tc.containers
+		body := tc.prefix + strings.Repeat("0,", values-1) + "0" + tc.suffix
+		if _, err := oif.ParseJSON([]byte(body), oif.Limits{}); err != nil {
+			t.Fatalf("document at the node limit: %v", err)
+		}
+		body = tc.prefix + strings.Repeat("0,", values) + "0" + tc.suffix
+		if _, err := oif.ParseJSON([]byte(body), oif.Limits{}); err == nil || !strings.Contains(err.Error(), "node_limit") {
+			t.Fatalf("document one value beyond the limit: %v", err)
+		}
+	}
+}

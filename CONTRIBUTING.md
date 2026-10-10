@@ -1,6 +1,6 @@
 # Contributing
 
-Install Go 1.27.1, a C compiler/linker and glibc development headers, Node.js
+Install Go 1.27.2, a C compiler/linker and glibc development headers, Node.js
 26, pnpm 11.24.0, Docker Compose, PostgreSQL 18 client tools, OpenSSL, curl, jq,
 Python 3, bubblewrap and ripgrep. Run commands from the repository root. GLIDE links a
 pinned prebuilt native core, so development needs CGO but no Rust toolchain.

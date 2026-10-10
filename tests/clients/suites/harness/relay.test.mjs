@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { beforeEach, describe, test } from 'node:test';
 import { gzipSync } from 'node:zlib';
-import { apiKey, baseURLs, localFetch, models, recorded, resetRecorded, script, upstreamModels } from '../../lib/harness.mjs';
+import { apiKey, stateApiKey, baseURLs, localFetch, models, recorded, resetRecorded, script, upstreamModels } from '../../lib/harness.mjs';
 import {
   assertJSONSchemaTypes,
   assertRelayed,
@@ -214,6 +214,19 @@ describe('sseData', () => {
 });
 
 describe('assertRelayed with a real tap and the real gateway', () => {
+  test('holds default-deny and opted-in Responses to their distinct retention contracts', async (t) => {
+    const tap = await tapFor(t);
+    const body = { model: models.openai, input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Private prompt' }] }] };
+    await post(`${tap.baseURLs.openai}/responses`, body);
+    await post(`${tap.baseURLs.openai}/responses`, body, { authorization: `Bearer ${stateApiKey}` });
+    const { upstream } = await assertRelayed(tap, [
+      { api: 'openai.responses', model: models.openai },
+      { api: 'openai.responses', model: models.openai, allowProviderState: true }
+    ]);
+    assert.equal(upstream[0].body.store, false);
+    assert.equal(Object.hasOwn(upstream[1].body, 'store'), false);
+  });
+
   test('accepts a request that keeps its dialect, unary and streamed, and one that is translated', async (t) => {
     const tap = await tapFor(t);
     const chat = (extra) => ({ model: models.openai, messages: [{ role: 'user', content: 'Say hello.' }], max_tokens: 16, temperature: 0.5, ...extra });
@@ -294,6 +307,41 @@ describe('assertRelayed with records built by hand', () => {
     await assert.rejects(relayed([sent], [upstreamRequest({ body: other, stream: true })], [{ ...chat, stream: true }]), /the gateway changed the request/);
     // The same option on a request that does not stream is a change.
     await assert.rejects(relayed([clientRequest()], [upstreamRequest({ body: { ...upstreamRequest().body, stream_options: { include_usage: true } } })], [chat]), /the gateway changed the request/);
+  });
+
+  test('requires transformed Responses to disable default storage without masking other changes', async () => {
+    const want = { api: 'openai.responses', model: models.openai };
+    for (const store of [undefined, null, false]) {
+      const body = { model: models.openai, input: 'Private prompt', ...(store === undefined ? {} : { store }) };
+      const sent = clientRequest({ path: '/v1/responses', body });
+      const expected = { ...body, model: upstreamModels.openai, store: false };
+      const upstream = (body) => upstreamRequest({ dialect: 'openai.responses', path: '/openai/v1/responses', body });
+      await relayed([sent], [upstream(expected)], [want]);
+      for (const wrong of [
+        (({ store, ...rest }) => rest)(expected),
+        { ...expected, store: true },
+        { ...expected, input: 'Altered prompt' },
+        { ...expected, extra: 'unexpected' }
+      ]) await assert.rejects(relayed([sent], [upstream(wrong)], [want]), /the gateway changed the request/);
+    }
+  });
+
+  test('requires transparency when the fixture key explicitly permits provider state', async () => {
+    const body = { model: models.openai, input: 'Private prompt' };
+    const sent = clientRequest({ path: '/v1/responses', headers: { authorization: `Bearer ${stateApiKey}` }, body });
+    const upstream = upstreamRequest({ dialect: 'openai.responses', path: '/openai/v1/responses', body: { ...body, model: upstreamModels.openai } });
+    const expected = [{ api: 'openai.responses', model: models.openai, allowProviderState: true }];
+    await relayed([sent], [upstream], expected);
+    await assert.rejects(relayed([sent], [{ ...upstream, body: { ...upstream.body, store: false } }], expected), /the gateway changed the request/);
+  });
+
+  test('does not normalize strict Responses or mask an explicit storage request', async () => {
+    for (const [model, store] of [[models.openaiStrict, undefined], [models.openai, true]]) {
+      const body = { model, input: 'Private prompt', ...(store === undefined ? {} : { store }) };
+      const sent = clientRequest({ path: '/v1/responses', body });
+      const upstream = upstreamRequest({ dialect: 'openai.responses', path: '/openai/v1/responses', body: { ...body, model: upstreamModels.openai, store: false } });
+      await assert.rejects(relayed([sent], [upstream], [{ api: 'openai.responses', model }]), /the gateway changed the request/);
+    }
   });
 
   test('rejects a body the gateway altered, extended, shortened or left with the route slug', async () => {

@@ -1,6 +1,8 @@
 package protocols
 
 import (
+	"bytes"
+
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
@@ -8,6 +10,9 @@ import (
 // ParseBedrockRequest retains the native Converse document. Its model and
 // delivery mode belong to the URL, so neither is introduced into the payload.
 func ParseBedrockRequest(body []byte, model string, stream bool) (*openai.Request, error) {
+	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, &openai.RequestError{Code: "invalid_json", Message: "The request body must be unambiguous valid JSON."}
+	}
 	doc, err := oif.ParseJSON(body, oif.Limits{})
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return nil, &openai.RequestError{Code: "invalid_json", Message: "The request body must be unambiguous valid JSON."}

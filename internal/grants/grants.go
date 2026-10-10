@@ -38,21 +38,21 @@ const (
 )
 
 // Store creates the next credential version of a provider, recording the
-// plugin that enrolled a grant, its observed principal and its grant facts,
+// plugin build and profile that enrolled a grant, its principal and facts,
 // and holds the grant beneath it. It returns the version's ID and number.
-func Store(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, digest string, grant abi.Grant) (string, int, error) {
+func Store(ctx context.Context, tx pgx.Tx, a *access.Server, providerID, digest, profileID string, grant abi.Grant) (string, int, error) {
 	id := access.NewID()
 	facts, err := json.Marshal(grant.Facts)
 	if err != nil {
 		return "", 0, err
 	}
 	var version int
-	if err = tx.QueryRow(ctx, `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts)
-		VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2),$3,$4,$5) RETURNING version`,
-		id, providerID, digest, grant.Principal, facts).Scan(&version); err != nil {
+	if err = tx.QueryRow(ctx, `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts,profile_id)
+		VALUES($1,$2,(SELECT coalesce(max(version),0)+1 FROM olp.provider_credentials WHERE provider_id=$2),$3,$4,$5,$6) RETURNING version`,
+		id, providerID, digest, grant.Principal, facts, profileID).Scan(&version); err != nil {
 		return "", 0, err
 	}
-	served, err := json.Marshal(connectors.GrantCredential{AccessToken: grant.AccessToken, Facts: grant.Facts})
+	served, err := json.Marshal(connectors.GrantCredential{PluginDigest: digest, ProfileID: profileID, AccessToken: grant.AccessToken, Facts: grant.Facts})
 	if err != nil {
 		return "", 0, err
 	}
