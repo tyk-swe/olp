@@ -35,6 +35,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/surface"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -150,9 +151,30 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		return err
 	}
 	defer pool.Close()
+	var readPool *pgxpool.Pool
+	if c.DatabaseReadURL != "" && (c.Mode.Inference() || c.Mode == config.Worker) {
+		readConfig, err := database.Configuration(c.DatabaseReadURL, c.DatabaseMaxConnections, c.RequestTimeout)
+		if err != nil {
+			return errors.New("invalid OLP_DATABASE_READ_URL")
+		}
+		readPool, err = database.Open(startup, readConfig)
+		if err != nil {
+			return errors.New("runtime read database connection failed")
+		}
+		defer readPool.Close()
+	}
 	installation, err := database.Installation(startup, pool)
 	if err != nil {
 		return err
+	}
+	if readPool != nil {
+		readInstallation, err := database.Installation(startup, readPool)
+		if err != nil {
+			return errors.New("runtime read database is not initialized at the current schema")
+		}
+		if readInstallation != installation {
+			return errors.New("runtime read database belongs to another installation")
+		}
 	}
 	// Shared state comes up before anything that admits or accounts for
 	// traffic, because both the gateway and the console are told at
@@ -215,6 +237,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		exporter = &export.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		capturer = &export.Manager{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		rt = runtime.NewManager(pool, installation, auth, keys, log)
+		rt.ReadPool = readPool
+		rt.Region = c.Region
+		rt.ExternalSecrets = secretstore.New(policy)
 		if c.ConnectorConfigFile != "" {
 			rt.Mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
 			if err != nil {
@@ -243,6 +268,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		defer pluginHost.Close(context.Background())
 		if c.Mode.Management() || c.Mode.Inference() {
 			gw = gateway.New(rt, &policy, gateway.Config{
+				Region:             c.Region,
 				MaxInFlight:        c.MaxInFlightInference,
 				MaxShadowInFlight:  c.MaxInFlightShadow,
 				CORSAllowedOrigins: c.GatewayCORSAllowedOrigins,
@@ -273,6 +299,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			// The worker plane's health probes run through a gateway of their
 			// own: planned, gated, priced and emitted like any request.
 			prober = gateway.New(rt, &policy, gateway.Config{
+				Region:            c.Region,
 				MaxInFlight:       1,
 				MaxResponseBytes:  c.ProviderMaxResponseBytes,
 				MaxEventBytes:     c.ProviderMaxEventBytes,
@@ -385,6 +412,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	// The observability collectors probe only what this process composes: an
 	// unconfigured dependency is reported as absent, never as failed.
 	obsState := &observability.State{
+		Region:        c.Region,
 		Pool:          pool,
 		PingDB:        pool.Ping,
 		ServesGateway: c.Mode.Inference(),
@@ -460,7 +488,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, keys, installation, &policy, log, exporter, referenceCatalog)
+		workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, keys, installation, c.Region, &policy, log, exporter, referenceCatalog)
 	}
 	// Probes produce accounting events, so they stop before delivery closes;
 	// the consumer and recovery workers remain alive until delivery drains.
@@ -471,7 +499,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		probesStopped = make(chan struct{})
 		go func() {
 			defer close(probesStopped)
-			prober.RunHealthProbes(probes, probeCheckpoint(pool, log))
+			prober.RunHealthProbes(usage.WithWorkerRegion(probes, c.Region), probeCheckpoint(pool, log))
 		}()
 	}
 	liveMetrics := newLiveMetrics(rt, inferencePool, managementPool)
@@ -582,7 +610,7 @@ func loadSecrets(ctx context.Context, pool *pgxpool.Pool, c config.Config, insta
 	}
 	var keys *secrets.KeyRing
 	if c.MasterKeyFile != "" {
-		keys, err = secrets.LoadRing(c.MasterKeyFile)
+		keys, err = secrets.LoadRingWithUnwrapper(ctx, c.MasterKeyFile, secretstore.New(egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}))
 		if err != nil {
 			return nil, nil, "", err
 		}

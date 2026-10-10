@@ -11,6 +11,7 @@ releases and the configuration each suite tested.
 pnpm install --frozen-lockfile        # the npm clients, once
 tests/clients/run.sh                  # every suite
 CLIENTS=harness,ai-sdk tests/clients/run.sh
+CLIENTS=operator-env,go-sdks tests/clients/run.sh
 tests/clients/run.sh --list
 ```
 
@@ -24,6 +25,14 @@ defines none, or skips or leaves a test or a group of tests to do. The only
 skips are rows of the table in `run.sh` with a stated reason, which are visible
 open items. A signal to `run.sh` stops the running suite, its clients and the
 gateway at once. `scripts/integration.sh` runs it as part of `make integration`.
+
+The `operator-env` suite executes actual `olp client-env` JavaScript output with
+the pinned frameworks and official SDKs, then checks authenticated gateway
+requests and upstream model rewriting. The Go suite also compiles and executes
+generated constructors. These suites build the operator binary and read a
+private mounted key at program startup; generated source is checked for copied
+credential values. Generated Python constructors run through the SDK smoke
+fixture as part of the integration suite.
 
 ## Layout
 

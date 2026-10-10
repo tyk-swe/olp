@@ -18,10 +18,12 @@ import (
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/budgetcalendar"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -309,6 +311,15 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		return nil, access.Fail(422, "unsupported_api_version", "The artifact declares an unsupported api_version.")
 	}
 	normalizeDocument(doc)
+	if err := s.validateMCPServers(doc); err != nil {
+		return nil, err
+	}
+	if err := s.validateSinks(doc); err != nil {
+		return nil, err
+	}
+	if err := validateGuardrails(doc); err != nil {
+		return nil, err
+	}
 	if err := validateSCIMMappings(doc); err != nil {
 		return nil, err
 	}
@@ -652,8 +663,22 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	return unavailable, nil
 }
 
-func validateBindings(doc *Document, bindings map[string]string) error {
+func validateBindings(doc *Document, bindings bindingSet) error {
 	refs, grants := map[string]bool{}, map[string]bool{}
+	mcpRefs := map[string]bool{}
+	for _, e := range doc.MCPServers {
+		if e.CredentialRef != nil {
+			refs[*e.CredentialRef] = true
+			mcpRefs[*e.CredentialRef] = true
+		}
+	}
+	sinkRefs := map[string]bool{}
+	for _, entry := range doc.Sinks {
+		if entry.CredentialRef != nil {
+			refs[*entry.CredentialRef] = true
+			sinkRefs[*entry.CredentialRef] = true
+		}
+	}
 	for _, p := range doc.Providers {
 		if p.NetworkCredentialRef != nil {
 			refs[*p.NetworkCredentialRef] = true
@@ -666,12 +691,39 @@ func validateBindings(doc *Document, bindings map[string]string) error {
 		}
 	}
 	for name, secret := range bindings {
+		if mcpRefs[name] {
+			if secret.reference != nil {
+				return access.Invalid("external_credential_bindings", "MCP static bearer material uses sealed bindings.")
+			}
+			encoded, _ := json.Marshal(secret.secret)
+			if _, err := mcpservers.Credential(encoded); err != nil {
+				return err
+			}
+			continue
+		}
+		if sinkRefs[name] {
+			if secret.reference != nil || len(secret.secret) < 1 || len(secret.secret) > 4096 {
+				return access.Invalid("secret_bindings", "Sink signing credentials require 1–4096 sealed bytes.")
+			}
+			continue
+		}
 		if grants[name] {
 			return access.Invalid("secret_bindings."+name, grantBindingRefused)
 		}
+		if secret.reference != nil {
+			if !refs[name] || secret.reference.Validate() != nil {
+				return access.Invalid("external_credential_bindings", "Use a document reference and an immutable store version.")
+			}
+			for _, provider := range doc.Providers {
+				if provider.NetworkCredentialRef != nil && *provider.NetworkCredentialRef == name {
+					return access.Invalid("external_credential_bindings", "Network identities require sealed secret bindings.")
+				}
+			}
+			continue
+		}
 		for _, provider := range doc.Providers {
 			if provider.NetworkCredentialRef != nil && *provider.NetworkCredentialRef == name {
-				if err := egress.ValidateConnectionSecret([]byte(secret)); err != nil {
+				if err := egress.ValidateConnectionSecret([]byte(secret.secret)); err != nil {
 					return access.Invalid("secret_bindings."+name, err.Error())
 				}
 			}
@@ -679,17 +731,17 @@ func validateBindings(doc *Document, bindings map[string]string) error {
 		if !refs[name] {
 			return access.Invalid("secret_bindings", "Secret binding "+name+" is not referenced by the document.")
 		}
-		if err := providers.ValidCredential(secret); err != nil {
+		if err := providers.ValidCredential(secret.secret); err != nil {
 			return access.Invalid("secret_bindings."+name, "Use a credential of 1–65536 bytes.")
 		}
-		if len(secret) > maxSecretBytes {
+		if len(secret.secret) > maxSecretBytes {
 			return access.Invalid("secret_bindings."+name, "Secrets must fit within 64 KiB.")
 		}
 	}
 	return nil
 }
 
-func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bindings map[string]string, expected *string) (*planResult, error) {
+func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bindings bindingSet, expected *string) (*planResult, error) {
 	unavailable, err := s.validateDocument(ctx, q, doc)
 	if err != nil {
 		return nil, err
@@ -703,11 +755,23 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		return nil, err
 	}
 	result := &planResult{Digest: digest, Actions: []planItem{}, Conflicts: []planItem{}, Blockers: []planItem{}}
+	if err = planCatalogPolicies(ctx, q, doc, result); err != nil {
+		return nil, err
+	}
 	for plugin, refusal := range unavailable {
 		result.blocker("plugin", plugin, refusal)
 	}
 	state, err := loadState(ctx, q)
 	if err != nil {
+		return nil, err
+	}
+	if err = s.planMCPServers(ctx, q, doc, bindings, state, result); err != nil {
+		return nil, err
+	}
+	if err = s.planSinks(ctx, q, doc, bindings, result); err != nil {
+		return nil, err
+	}
+	if err = planGuardrails(ctx, q, doc, state, result); err != nil {
 		return nil, err
 	}
 	if doc.SAML != nil {
@@ -1072,7 +1136,7 @@ func (s *Server) currentProviderEntry(ctx context.Context, q access.Queryer, p *
 func (s *Server) currentRouteEntry(ctx context.Context, q access.Queryer, draftID string, desired *RouteEntry, state *stateView) (*RouteEntry, error) {
 	entry := &RouteEntry{Slug: desired.Slug, Project: desired.Project}
 	var operations, targets, behavior []byte
-	if err := q.QueryRow(ctx, "SELECT operations,overall_timeout_ms,max_attempts,targets,content_policy,fidelity,behavior FROM olp.route_drafts WHERE id=$1", draftID).Scan(&operations, &entry.OverallTimeoutMS, &entry.MaxAttempts, &targets, &entry.ContentPolicy, &entry.Fidelity, &behavior); err != nil {
+	if err := q.QueryRow(ctx, "SELECT operations,overall_timeout_ms,max_attempts,targets,content_policy,fidelity,behavior,COALESCE(catalog_expose_upstream_models,(SELECT c.expose_upstream_models FROM olp.model_catalog_route_settings c JOIN olp.routes r ON r.id=c.route_id WHERE r.slug=route_drafts.slug),false) FROM olp.route_drafts WHERE id=$1", draftID).Scan(&operations, &entry.OverallTimeoutMS, &entry.MaxAttempts, &targets, &entry.ContentPolicy, &entry.Fidelity, &behavior, &entry.ExposeUpstreamModels); err != nil {
 		return nil, err
 	}
 	if err := entry.setBehavior(behavior); err != nil {
@@ -1104,9 +1168,20 @@ func (s *Server) currentRouteEntry(ctx context.Context, q access.Queryer, draftI
 	return entry, nil
 }
 
-func (s *Server) bindingMatches(ctx context.Context, q access.Queryer, credentialID *string, secret string) (bool, error) {
+func (s *Server) bindingMatches(ctx context.Context, q access.Queryer, credentialID *string, binding credentialBinding) (bool, error) {
 	if credentialID == nil {
 		return false, nil
+	}
+	if binding.reference != nil {
+		var data []byte
+		if err := q.QueryRow(ctx, "SELECT external_reference FROM olp.provider_credentials WHERE id=$1 AND revoked_at IS NULL", *credentialID).Scan(&data); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, nil
+			}
+			return false, err
+		}
+		var current secretstore.Reference
+		return len(data) > 0 && json.Unmarshal(data, &current) == nil && current == *binding.reference, nil
 	}
 	if s.Access == nil || s.Access.Keys == nil {
 		return false, errors.New("credential comparison unavailable")
@@ -1118,10 +1193,11 @@ func (s *Server) bindingMatches(ctx context.Context, q access.Queryer, credentia
 	if err != nil {
 		return false, err
 	}
-	return sha256.Sum256(current) == sha256.Sum256([]byte(secret)), nil
+	defer clear(current)
+	return sha256.Sum256(current) == sha256.Sum256([]byte(binding.secret)), nil
 }
 
-func bindingFingerprint(doc *Document, digest string, bindings map[string]string, expected *string) map[string]any {
+func bindingFingerprint(doc *Document, digest string, bindings bindingSet, expected *string) map[string]any {
 	names := make([]string, 0, len(bindings))
 	for name := range bindings {
 		names = append(names, name)
@@ -1129,7 +1205,13 @@ func bindingFingerprint(doc *Document, digest string, bindings map[string]string
 	slices.Sort(names)
 	sealed := make([]map[string]string, 0, len(names))
 	for _, name := range names {
-		sum := sha256.Sum256([]byte(bindings[name]))
+		value := []byte("sealed:" + bindings[name].secret)
+		if bindings[name].reference != nil {
+			value, _ = json.Marshal(bindings[name].reference)
+			value = append([]byte("external:"), value...)
+		}
+		sum := sha256.Sum256(value)
+		clear(value)
 		sealed = append(sealed, map[string]string{"ref": name, "sha256": hex.EncodeToString(sum[:])})
 	}
 	return map[string]any{"document_digest": digest, "expected_digest": expected, "secret_bindings": sealed}

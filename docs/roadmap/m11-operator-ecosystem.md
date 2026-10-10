@@ -2,14 +2,13 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M4](m04-tenancy-identity.md) | Automation-first and multi-region operation |
+| Implemented | [M4](m04-tenancy-identity.md) | Automation-first and multi-region operation |
 
-OLP is operated through its console, its management API and configuration
-promotion, with one PostgreSQL primary and file-mounted secrets. LiteLLM adds a
-management CLI, secret managers, a model hub, multi-region topologies and
-administration through agents. This milestone delivers those capabilities on
-OLP's existing contracts: every tool is a client of the declared management
-API, so authorization, ETags, idempotency and audit apply unchanged.
+OLP operators use the console, a generated CLI, Terraform/OpenTofu and scoped
+management MCP tools against the same declared management API. Authorization,
+ETags, idempotency and audit protect each client. Regional fleets, cloud-backed
+secrets and a caller-visible catalog extend that boundary without changing
+installation ownership or request-pinned serving configuration.
 
 ## Outcome
 
@@ -24,11 +23,11 @@ API, so authorization, ETags, idempotency and audit apply unchanged.
 
 | | OLP today | LiteLLM reference |
 | --- | --- | --- |
-| CLI | `olp` process, migration, doctor, master-key, account recovery and health-probe commands | [lite CLI](https://docs.litellm.ai/docs/proxy/management_cli) for models, credentials, keys, teams and users |
-| Desired state | [Export, plan and apply](../configuration.md#configuration-promotion-artifacts) with canonical digests | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models |
-| Secrets | Mounted master-key ring and HMAC key files; provider secrets sealed in PostgreSQL ([secrets](../security.md#secrets)) | [Secret managers](https://docs.litellm.ai/docs/secret_managers/overview) (Enterprise) |
-| Topology | One region; `gateway`, `control` and `worker` modes ([deployment](../deployment.md)) | [Read replicas](https://docs.litellm.ai/docs/proxy/db_read_replica), [multi-region](https://docs.litellm.ai/docs/proxy/multi_region) and a [global control plane](https://docs.litellm.ai/docs/proxy/global_control_plane) (Enterprise) |
-| Discovery | `GET /v1/models` lists key-visible routes | [AI Hub](https://docs.litellm.ai/docs/proxy/ai_hub) |
+| CLI | [Contract-generated management commands](../operator-cli.md), saved configuration plans and qualified-client environment setup, alongside process and recovery commands | [lite CLI](https://docs.litellm.ai/docs/proxy/management_cli) for models, credentials, keys, teams and users |
+| Desired state | [Export, plan and apply](../configuration.md#configuration-promotion-artifacts) with canonical digests and [twelve conditional Terraform/OpenTofu resources](../terraform.md) | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models |
+| Secrets | Workload-identity wrapped rings and immutable AWS/GCP/Azure/Vault credential references with validated rotation ([external secrets](../external-secrets.md)) | [Secret managers](https://docs.litellm.ai/docs/secret_managers/overview) (Enterprise) |
+| Topology | [Regional fleets](../deployment.md#regional-fleets), explicit key overrides, global cost reconciliation and [replica-aware runtime authority](../deployment.md#regional-read-replicas) and the [independent-installation console switcher](../operator-console.md#independent-installations) | [Read replicas](https://docs.litellm.ai/docs/proxy/db_read_replica), [multi-region](https://docs.litellm.ai/docs/proxy/multi_region) and a [global control plane](https://docs.litellm.ai/docs/proxy/global_control_plane) (Enterprise) |
+| Discovery | [Member/key-visible model catalog](../model-catalog.md), SDK examples, explicit upstream disclosure and independently priced owner-enabled public catalogs | [AI Hub](https://docs.litellm.ai/docs/proxy/ai_hub) |
 
 ## Scope
 
@@ -120,36 +119,209 @@ editing, and session-scoped saved filters for usage and request history.
 
 | Change | Start here |
 | --- | --- |
-| CLI | `cmd/olp/`, generated client from `openapi/` |
-| KMS and secret references | `internal/secrets/`, `internal/runtime/credentials.go` |
-| Catalog | `internal/routes/`, new `console/src/lib/features/catalog/` |
+| CLI | `cmd/olp/`, `internal/operatorcli/`, generated `sdk/management/` from `openapi/` |
+| KMS and secret references | `internal/secretstore/`, `internal/secrets/`, `internal/runtime/credentials.go` |
+| Catalog | `internal/modelcatalog/`, `console/src/lib/features/model-catalog/` |
 | Read replicas and regions | `internal/database/`, `internal/runtime/`, `internal/limits/` |
 | Management MCP server | `internal/management/` |
 
-## Decisions to settle
+## Decisions
 
-1. Whether regional rate limits divide a key's global limit automatically
-   (recommended: no; regional values are explicit, and the default applies the
-   full limit per region, which is documented).
-2. The Terraform provider's model: per-resource management or a single
-   configuration-artifact resource (recommended: per-resource, which matches
-   Terraform practice, with configuration promotion kept for whole-installation
-   moves).
-3. Whether the public catalog may show prices (recommended: only when the
-   owner opts in separately).
+1. Regional limits are explicit. A region without an override applies the full
+   key limit; limits are never divided automatically as regions join or leave.
+2. Terraform manages individual resources, with ETags protecting updates.
+   Configuration promotion remains the workflow for whole-installation moves.
+3. Public catalogs hide prices by default. A project owner must enable public
+   prices separately from enabling the public catalog.
 
 ## Exit criteria
 
-- [ ] The CLI covers every operation it lists, passes the authorization sweep as
+- [x] The CLI covers every operation it lists, passes the authorization sweep as
       a management-token client, and is generated from the contract in CI.
-- [ ] The Terraform provider creates, updates, imports and destroys each
+- [x] The Terraform provider creates, updates, imports and destroys each
       resource against a disposable installation.
-- [ ] A KMS-wrapped master-key ring starts OLP with workload identity, and a
+- [x] A KMS-wrapped master-key ring starts OLP with workload identity, and a
       referenced credential rotates through validation and activation.
-- [ ] Gateways reading from a lagging replica refuse traffic once authority age
+- [x] Gateways reading from a lagging replica refuse traffic once authority age
       exceeds 60 seconds.
-- [ ] A two-region integration test enforces regional limits and reconciles
+- [x] A two-region integration test enforces regional limits and reconciles
       global cost budgets within the documented overshoot bound.
-- [ ] The management MCP server refuses every operation the token's scopes do
+- [x] The management MCP server refuses every operation the token's scopes do
       not admit.
-- [ ] The [parity matrix](parity.md) administration rows are `Parity` or better.
+- [x] The [parity matrix](parity.md) administration rows are `Parity` or better.
+
+Replica qualification: `TestManagementReadReplicaLagConsumesTheRevocationDeadline`
+uses a physical PostgreSQL standby, pauses replay after revocation, checks
+gateway HTTP 503 at the authority deadline, resumes replay, and checks HTTP 401
+for the revoked key. WAL checkpoint unit tests cover idle replicas, replay
+regression and bounded monitoring state. Deployment settings are validated by
+the Helm checks and the full local check.
+
+Regional qualification:
+`TestRegionalRateAndConcurrencyLimitsWithGlobalBudgetReconciliation` uses two
+independent Valkey services, checks inherited and explicit limits, elects one
+leader per region, observes $1.20 global spend against a $1 budget, and verifies
+that both stores refuse further cost after reconciliation. It also verifies
+that local readiness cannot borrow another region's worker success. Selection
+tests preserve priority and hard region constraints while preferring local
+connections. The regional changes pass the full local check, focused race
+tests and Helm validation.
+
+Console qualification: `control.spec.ts` covers ETag-protected name/logo edits,
+bulk role changes, session-scoped saved usage views, and accessibility.
+`fleet/installations.spec.ts` runs two live installations with separate
+databases and independently generated keys, verifies project and saved-view
+isolation, switches between retained sessions, and checks the menu at mobile
+width. Packaged Chromium journeys, the full local check, backend race tests
+and the management authorization sweep pass.
+
+Generated-client qualification:
+`TestGeneratedManagementClientsAndMCPFollowEveryMachineAuthorization` exercises
+every generated operation through both the SDK and CLI against each live
+management-token archetype in the authorization golden. It checks the MCP tool
+list against the same matrix, calls every disallowed tool, and rejects
+session-only, unknown and recursive MCP operations. The uncached race test
+passes against a disposable installation. Contract generation and drift checks
+include the shared CLI/MCP registry.
+
+Catalog qualification: `TestModelCatalogVisibilityPublishingAndUpstreamDisclosure`
+verifies project/key/token visibility, precise current pricing, default identity
+privacy, independent public-price opt-in, ETags, withdrawal and key revocation.
+`TestModelCatalogPromotionPreservesOwnerConsentAndStagesRouteDisclosure` checks
+conditional owner authority and disclosure publication only after imported draft
+activation. The packaged catalog browser journey covers discovery, disclosure,
+public publication and accessibility. Projection tests cover conservative facts,
+unknown/partial coverage, exact decimal ranges and native SDK examples. The full
+local gate and ordinary/generated-client authorization sweeps pass.
+
+Secret-store qualification: four-platform protocol tests verify identity,
+version and integrity bindings; egress tests refuse private destinations and
+redirects. `TestExternalCredentialAndWrappedMasterKeyRotationKeepPublishedVersionsPinned`
+uses live PostgreSQL/Valkey and Vault JWT/Transit/KV protocols to validate,
+activate and promote a new reference without copying values, retain old pinned
+versions, rotate/verify sealed records and start the built gateway with a
+wrapped ring. Cache races cover single-flight, bounded capacity and unavailable
+plan decisions. The packaged external-credential console journey creates and
+rotates versions and passes accessibility checks; local and Helm gates pass.
+
+Terraform qualification covers all twelve resource types in the separate
+[provider repository](https://github.com/tyk-swe/terraform-provider-openllmproxy):
+projects, providers, credential slots, routes, routing policies, guardrails,
+export sinks, keys, budget groups, notification destinations, notification rules and upstream MCP servers. Terraform 1.16.5 and OpenTofu 1.13.1 run plan/create/update/import/no-change/
+destroy against fresh live installations built from the SDK's immutable module
+version. The full twelve-type suite passed under race in 140.698 seconds.
+See [provider operations](../terraform.md).
+
+Budget/notification tests cover concurrent-edit refusal, explicit nullable-ceiling
+removal and ephemeral signing values excluded from saved plans/state. API-key
+qualification covers exact budget-window projection, owner-only one-time output,
+retained revocation, and recovery from forced output failure: state retains the
+created UUID so destroy cannot leave an orphaned active credential.
+
+Provider/slot backend qualification includes
+`TestProviderDeletionRequiresUnusedDraftAndCleansOwnedSeals` and
+`TestCredentialSlotConditionsAreIndependentAndPreservePublishedVersions`.
+Unused draft deletion is conditional, replayable and audited, cleans owned seals,
+and preserves scoped prices and published dependencies. Individual slot
+preconditions survive sibling edits; deletion retains published credentials and
+refuses the default slot. Both infrastructure engines exercise simultaneous pool
+creation, validated write-only rotation, normalized configuration and composite
+imports. Failed validation retains committed configuration and the prior secret
+counter. Saved destruction plans refuse external parent edits. Atomic parent
+transition metadata survives idempotent replay and advances only contiguous own
+writes.
+
+`TestPublishedRouteWritesAreConditionalAtomicAndPreserveIndependentDrafts` and
+`TestPublishedRouteReplacementPreservesItsPolicy` prove atomic shared validation
+and promotion, conditional refusal, failure rollback, replayed identity/audit,
+independent draft preservation and pinned serving policy. The infrastructure
+route test covers revision updates, canonical target import, empty plans,
+retirement/history, stale saved-plan refusal and project-boundary replacement
+rejection before retirement.
+
+`TestRoutingPolicyRemovalPreservesFreshPreconditionsAndParentProof` covers all
+three scopes, removal/recreation, missing/stale conditions, original replay
+proofs and exact audit counts. Removal retains a fresh default-policy ETag.
+`TestRoutingPolicyLifecyclesWithTerraformAndOpenTofu` covers composite imports,
+key/policy graph mutations, omitted-constraint clearing and foreign saved-plan
+refusal without overwriting the external policy.
+
+`TestNamedGuardrailRevisionsRemainScopedAndPublishedCopiesStayPinned` and
+`TestNamedGuardrailConfigurationPromotionIsPortableAndIdempotent` cover project
+boundaries, immutable revisions, conditional replay/audit, actual input refusal,
+pinned published copies and portable reuse. The infrastructure guardrail/route
+graph qualifies reviewed policy composition, old-revision reads, foreign
+saved-plan refusal and retained retirement.
+
+Content-free sink qualification covers atomic scoped source queuing, replay
+suppression, stable signed retries, usage/pricing corrections, expired-gap counts,
+audit-field privacy, retirement cleanup and destination-bound promotion with
+unchanged ETag reuse. The three-test service suite passed under race in 13.759
+seconds. Ordinary management, isolation and every generated SDK/CLI/MCP machine
+operation passed in 188.450 seconds; focused races and the full local gate pass.
+`TestSignedExportSinkLifecyclesWithTerraformAndOpenTofu` additionally verifies
+actual signed delivery by the built installation worker, both scoped lifecycles,
+write-only values absent from saved-plan JSON and state, UUID imports, empty
+plans, foreign saved-plan refusal and signing-material cleanup. Both engines are
+included in the complete twelve-type suite.
+
+Upstream MCP registration now certifies bounded Streamable HTTP handshakes and
+schemas into project-owned immutable catalogs. The two-test live service suite
+passed under race in 21.659 seconds: project/revision isolation, replay without
+network rediscovery, concurrent retirement refusal, certification without held
+mutation locks, sealed-material cleanup, and destination promotion matching a
+reviewed digest with pinned reuse. JSON/SSE session handling, schema bounds,
+remote-loader refusal, reflected-credential rejection and exact numeric bounds
+have focused race coverage. Ordinary authorization, isolation and every generated
+SDK/CLI/MCP machine operation passed in 245.075 seconds; the full local gate and
+focused races pass.
+`TestCertifiedMCPServerLifecyclesWithTerraformAndOpenTofu` qualifies create, update, static bearer rotation, UUID import, no-change plans and retirement with
+both engines. It checks immutable old catalogs, no-network pinned reads after
+upstream drift, secret exclusion from saved-plan JSON/state and foreign
+saved-plan refusal. The complete twelve-type suite uses the same immutable SDK
+and built installation version. Export checkpoint health is separately tested
+for installation and regional summaries.
+
+Client setup qualification executes generated configuration with every named
+M1.3 family. The `operator-env` client suite completes 13 authenticated
+JavaScript/framework cases, checking the client's result and upstream request
+rewrite. `TestOperatorGeneratedGoClients` compiles and executes generated
+constructors for all three official Go SDKs. Generated Python constructors
+complete all three native requests through the smoke fixture, and
+`TestOperatorGeneratedPythonClients` runs that proof in the integration gate.
+Mounted credentials remain outside generated source. Path quoting, unsupported
+format/surface refusal, Go syntax, focused races and operator tests pass.
+
+The default merge-base benchmark gate passes ten paired samples across all seven
+shared packages and 93 benchmarks, with no additions or removals and no
+statistically significant regression above the 10% budget. The first full
+comparison exposed unnecessary synchronization in empty external-credential
+caches; the eligibility fast path was corrected and the entire gate rerun.
+External-reference freshness, failure and concurrent-fetch behavior retain
+focused race coverage.
+
+## Final qualification
+
+The complete default `make integration` gate passes against the final
+implementation. Its Code and remaining root race suites pass in 1,131 and
+2,355 seconds, followed by the internal and extension suites, official SDKs,
+all pinned coding clients and frameworks, and all 36 packaged/Vite browser
+journeys. The packaged recovery drill passes all six fresh journeys and the
+restored journey, preserving six historical requests and recording nine after
+restored inference. Keyboard, accessibility, responsive sizing and cross-tab
+logout checks remain enabled.
+
+The local check includes uncached Go and benchmark-harness races, 134 console
+test files with 1,045 tests, 87 script tests, formatting, vet, types and lint.
+Contract drift, release-version consistency, the distribution build and Helm
+profile/Kubernetes validation also pass. The companion
+[Terraform/OpenTofu provider PR](https://github.com/tyk-swe/terraform-provider-openllmproxy/pull/1)
+has independent passing check and two-engine acceptance jobs. Reviewed
+[console](../operator-console.md), [catalog](../model-catalog.md) and
+[external-secret](../external-secrets.md) screenshots accompany the runbooks.
+
+All 14 administration/deployment comparison rows are `Parity` or `Ahead`.
+The [LiteLLM management CLI documentation](https://docs.litellm.ai/docs/proxy/management_cli)
+and [release notes](https://docs.litellm.ai/release_notes) were reviewed at
+closure on 2026-10-10. Broader observability, guardrail execution and agent
+gateway work remains in M5, M7 and M10.

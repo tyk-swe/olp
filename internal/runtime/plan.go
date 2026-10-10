@@ -35,6 +35,7 @@ func (n Names) list() []string {
 }
 
 type SelectionOptions struct {
+	Region      string
 	KeyID       string
 	Preferences *Preferences
 	Parameters  Names
@@ -178,6 +179,7 @@ type rankedCandidate struct {
 	decision   Decision
 	order      int
 	preference int
+	locality   int
 	shadow     bool
 	// allowed marks a target that only the matching selector excluded.
 	allowed bool
@@ -283,6 +285,13 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 		// discarded, for every target of every request.
 		if raw := provider.Models[target.ProviderModel]; len(raw) > 0 {
 			_ = json.Unmarshal(raw, &metadata)
+		}
+		connectionRegion := provider.CloudRegion
+		if connectionRegion == "" && metadata.Region != nil {
+			connectionRegion = *metadata.Region
+		}
+		if options.Region != "" && connectionRegion != options.Region {
+			row.locality = 1
 		}
 		row.decision.MetadataObservedAt = metadata.ObservedAt
 		row.decision.ContextLength = metadata.ContextLength
@@ -405,6 +414,9 @@ func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 			return 1
 		}
 		if order := cmp.Compare(a.attempt.Priority, b.attempt.Priority); order != 0 {
+			return order
+		}
+		if order := cmp.Compare(a.locality, b.locality); order != 0 {
 			return order
 		}
 		if order := cmp.Compare(a.order, b.order); order != 0 {

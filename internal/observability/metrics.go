@@ -42,7 +42,7 @@ func CollectMetrics(ctx context.Context, s *State) (string, error) {
 	epochs, _ := ReadEpochHealth(ctx, s.Pool)
 	operations, operationsErr := ReadOperationsSummary(ctx, s.Pool, 5)
 	providers, providersComplete, providersErr := ReadProviderHealthMetrics(ctx, s.Pool)
-	tasks, tasksErr := ReadWorkerTaskHealth(ctx, s.Pool)
+	tasks, tasksErr := ReadRegionalWorkerTaskHealth(ctx, s.Pool, s.Region)
 	counters, countersErr := ReadWorkerRecoveryCounters(ctx, s.Pool)
 
 	body.WriteString("# HELP olp_provider_metrics_complete Whether provider collection completed without truncation or query failure.\n" +

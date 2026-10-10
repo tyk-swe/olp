@@ -2,6 +2,8 @@ package limits
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"log/slog"
 	"time"
 
@@ -36,6 +38,12 @@ type Leader struct{ conn *pgx.Conn }
 // TryAcquireLeader elects this replica, returning a nil Leader and a nil error
 // when another replica already holds the lock.
 func TryAcquireLeader(ctx context.Context, pool *pgxpool.Pool) (*Leader, error) {
+	return TryAcquireRegionalLeader(ctx, pool, "")
+}
+
+// TryAcquireRegionalLeader elects one worker per regional Valkey. All regions
+// reconcile the same authoritative PostgreSQL accounts into their own store.
+func TryAcquireRegionalLeader(ctx context.Context, pool *pgxpool.Pool, region string) (*Leader, error) {
 	acquired, err := pool.Acquire(ctx)
 	if err != nil {
 		return nil, err
@@ -46,7 +54,12 @@ func TryAcquireLeader(ctx context.Context, pool *pgxpool.Pool) (*Leader, error) 
 	// lock exactly when this leader is closed.
 	conn := acquired.Hijack()
 	var held bool
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", costReconciliationLockID).Scan(&held); err != nil {
+	lockID := costReconciliationLockID
+	if region != "" {
+		digest := sha256.Sum256([]byte("openllmproxy:cost-reconciliation:" + region))
+		lockID = int64(binary.BigEndian.Uint64(digest[:8]))
+	}
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", lockID).Scan(&held); err != nil {
 		closeLeaderConn(ctx, conn)
 		return nil, err
 	}
@@ -142,7 +155,13 @@ func (o Outcome) String() string {
 // skip cheaply. checkpoint records each pass; its second argument reports
 // whether the pass changed anything.
 func RunCostReconciliation(ctx context.Context, pool *pgxpool.Pool, connect func(context.Context) (*Limiter, error), checkpoint func(context.Context, Outcome, bool) error, log *slog.Logger) {
-	runner := &reconciliationRunner{pool: pool, connect: connect, log: log}
+	RunRegionalCostReconciliation(ctx, pool, "", connect, checkpoint, log)
+}
+
+// RunRegionalCostReconciliation installs global durable spend into this
+// region's Valkey without another region holding its worker out of leadership.
+func RunRegionalCostReconciliation(ctx context.Context, pool *pgxpool.Pool, region string, connect func(context.Context) (*Limiter, error), checkpoint func(context.Context, Outcome, bool) error, log *slog.Logger) {
+	runner := &reconciliationRunner{pool: pool, region: region, connect: connect, log: log}
 	defer runner.release(ctx)
 	ticker := time.NewTicker(reconciliationInterval)
 	defer ticker.Stop()
@@ -165,6 +184,7 @@ func RunCostReconciliation(ctx context.Context, pool *pgxpool.Pool, connect func
 }
 
 type reconciliationRunner struct {
+	region  string
 	pool    *pgxpool.Pool
 	connect func(context.Context) (*Limiter, error)
 	log     *slog.Logger
@@ -176,7 +196,7 @@ func (r *reconciliationRunner) pass(ctx context.Context) (Outcome, bool) {
 	passCtx, cancel := context.WithTimeout(ctx, reconciliationPassTimeout)
 	defer cancel()
 	if r.leader == nil {
-		leader, err := TryAcquireLeader(passCtx, r.pool)
+		leader, err := TryAcquireRegionalLeader(passCtx, r.pool, r.region)
 		if err != nil {
 			r.log.Warn("cost reconciliation could not elect a leader", "error", err)
 			return OutcomeFailure, false

@@ -394,6 +394,14 @@
           "effective_limits": {
             "$ref": "#/components/schemas/EndUserLimits",
             "description": "Rate and cost limits the gateway enforces, after the key's limit template fills dimensions the key leaves unset. Edit the key's own fields; present these."
+          },
+          "regional_limits": {
+            "type": "object",
+            "maxProperties": 64,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegionalRateLimits"
+            },
+            "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
           }
         },
         "required": [
@@ -412,7 +420,8 @@
           "etag",
           "created_at",
           "allowed_attribution_keys",
-          "response_metadata"
+          "response_metadata",
+          "regional_limits"
         ],
         "type": "object"
       },
@@ -1531,6 +1540,27 @@
               }
             ],
             "description": "Omission/null preserves SAML. Export, plan, apply and replay containing SAML additionally require installation access authority. Set enabled=false explicitly to disable; the usable-owner safeguard still applies."
+          },
+          "guardrails": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationGuardrail"
+            }
+          },
+          "sinks": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationSink"
+            }
+          },
+          "mcp_servers": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationMCPServer"
+            }
           }
         },
         "required": [
@@ -1619,7 +1649,11 @@
               "credential",
               "route",
               "route_template",
-              "pricing"
+              "pricing",
+              "catalog_publication",
+              "guardrail",
+              "sink",
+              "mcp_server"
             ],
             "type": "string"
           }
@@ -1850,6 +1884,14 @@
               "null"
             ],
             "description": "Organization name. Omitted/null preserves destination membership. First assignment requires installation access authority; existing membership cannot change."
+          },
+          "public_catalog": {
+            "type": "boolean",
+            "description": "Owner-enabled anonymous catalog. Changing this value through promotion requires installation access scope."
+          },
+          "public_catalog_prices": {
+            "type": "boolean",
+            "description": "Independent opt-in for published catalog prices."
           }
         },
         "required": [
@@ -1876,6 +1918,13 @@
             },
             "description": "Write-only map from credential_ref to secret; never echoed, audited, or replayed. A slot a grant backs takes no binding.",
             "type": "object"
+          },
+          "external_credential_bindings": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ExternalCredentialReference"
+            },
+            "description": "Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings. Introducing an external reference requires installation-wide settings authority in addition to configure authority."
           }
         },
         "required": [
@@ -2042,6 +2091,10 @@
           "caller_cost_exempt": {
             "type": "boolean",
             "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          },
+          "expose_upstream_models": {
+            "type": "boolean",
+            "description": "Explicitly disclose upstream model names in route catalogs."
           }
         },
         "required": [
@@ -2715,6 +2768,17 @@
               "null"
             ],
             "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "regional_limits": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "maxProperties": 64,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegionalRateLimits"
+            },
+            "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
           }
         },
         "required": [
@@ -3187,6 +3251,10 @@
               "string",
               "null"
             ]
+          },
+          "credential_reference": {
+            "$ref": "#/components/schemas/ExternalCredentialReference",
+            "description": "Introducing an external reference requires installation-wide settings authority in addition to configure authority."
           }
         },
         "required": [
@@ -3427,6 +3495,16 @@
           "version": {
             "format": "int32",
             "type": "integer"
+          },
+          "external_reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalCredentialReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -4188,6 +4266,7 @@
           "settings",
           "access_read",
           "access",
+          "manage_projects",
           "manage_organization"
         ],
         "type": "string"
@@ -5982,6 +6061,10 @@
           },
           "policy": {
             "$ref": "#/components/schemas/RoutingPolicy"
+          },
+          "configured": {
+            "type": "boolean",
+            "description": "Whether an explicit policy exists. False represents inherited defaults with a fresh observed ETag after removal."
           }
         },
         "required": [
@@ -9590,12 +9673,26 @@
           "credential": {
             "type": "string",
             "writeOnly": true
+          },
+          "credential_reference": {
+            "$ref": "#/components/schemas/ExternalCredentialReference",
+            "description": "Introducing an external reference requires installation-wide settings authority in addition to configure authority."
           }
         },
-        "required": [
-          "credential"
-        ],
-        "type": "object"
+        "required": [],
+        "type": "object",
+        "anyOf": [
+          {
+            "required": [
+              "credential"
+            ]
+          },
+          {
+            "required": [
+              "credential_reference"
+            ]
+          }
+        ]
       },
       "RouteActivationResponse": {
         "properties": {
@@ -11156,6 +11253,15 @@
           },
           "user": {
             "$ref": "#/components/schemas/UserResponse"
+          },
+          "installation_logo": {
+            "type": "string",
+            "description": "Embedded PNG/JPEG installation logo; empty uses the default brand mark."
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Public session identifier for session-scoped console preferences; conveys no authentication proof."
           }
         },
         "required": [
@@ -11601,6 +11707,10 @@
           },
           "slot": {
             "$ref": "#/components/schemas/CredentialSlot"
+          },
+          "credential_reference": {
+            "$ref": "#/components/schemas/ExternalCredentialReference",
+            "description": "Introducing an external reference requires installation-wide settings authority in addition to configure authority."
           }
         },
         "required": [
@@ -11968,6 +12078,17 @@
               "null"
             ],
             "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "regional_limits": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "maxProperties": 64,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegionalRateLimits"
+            },
+            "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
           }
         },
         "type": "object"
@@ -17099,7 +17220,10 @@
               "key_end_user",
               "project_end_user",
               "attribution",
-              "organization"
+              "organization",
+              "guardrail",
+              "sink",
+              "mcp_server"
             ]
           },
           "id": {
@@ -19072,6 +19196,1663 @@
         ],
         "description": "Portable public SAML trust and role mappings. Promotion creates or preserves a destination-local SP signing key and certificate; link state, subjects, flows, sessions and private material never travel."
       },
+      "RegionalRateLimits": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Explicit per-region key rate and concurrency values. Omitted or null fields inherit the full default; cost budgets are global.",
+        "properties": {
+          "requests_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "tokens_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "max_concurrency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        }
+      },
+      "InstallationBrandingResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "logo",
+          "etag"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "logo": {
+            "type": "string",
+            "maxLength": 100000,
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+          },
+          "etag": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateInstallationBrandingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "logo"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "logo": {
+            "type": "string",
+            "maxLength": 100000,
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+          }
+        }
+      },
+      "CatalogRange": {
+        "type": "object",
+        "properties": {
+          "minimum": {
+            "type": "string"
+          },
+          "maximum": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "minimum",
+          "maximum"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogPrice": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "input_per_million": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cached_input_per_million": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "output_per_million": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "cache_write_input_per_million": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cache_write_5m_input_per_million": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cache_write_1h_input_per_million": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "operation",
+          "currency",
+          "input_per_million",
+          "cached_input_per_million",
+          "output_per_million",
+          "unit_price",
+          "complete",
+          "cache_write_input_per_million",
+          "cache_write_5m_input_per_million",
+          "cache_write_1h_input_per_million"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogCapabilities": {
+        "type": "object",
+        "properties": {
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "operation_support": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "guaranteed",
+                "target_dependent",
+                "unknown"
+              ]
+            }
+          },
+          "input_modalities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "output_modalities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "context_length": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "max_output_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "supported_parameters": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "unknown": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "operations",
+          "operation_support",
+          "input_modalities",
+          "output_modalities",
+          "context_length",
+          "max_output_tokens",
+          "supported_parameters",
+          "unknown"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogPrivacy": {
+        "type": "object",
+        "properties": {
+          "data_collection": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "zero_data_retention": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "regions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "unknown": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "data_collection",
+          "zero_data_retention",
+          "regions",
+          "unknown"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogSample": {
+        "type": "object",
+        "properties": {
+          "sdk": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "anthropic",
+              "gemini"
+            ]
+          },
+          "operation": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "python"
+            ]
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sdk",
+          "operation",
+          "language",
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogModel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/CatalogCapabilities"
+          },
+          "privacy": {
+            "$ref": "#/components/schemas/CatalogPrivacy"
+          },
+          "prices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogPrice"
+            }
+          },
+          "upstream_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogSample"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "capabilities",
+          "privacy",
+          "samples"
+        ],
+        "additionalProperties": false
+      },
+      "ModelCatalogResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogModel"
+            }
+          },
+          "prices_visible": {
+            "type": "boolean",
+            "description": "Whether this catalog discloses configured prices. Missing current price records remain unknown."
+          }
+        },
+        "required": [
+          "items",
+          "prices_visible"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogPublicationResponse": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "prices_public": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string",
+            "description": "Observed resource version; supply it in If-Match for updates."
+          }
+        },
+        "required": [
+          "enabled",
+          "prices_public",
+          "etag"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateCatalogPublicationRequest": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "prices_public": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "prices_public"
+        ],
+        "additionalProperties": false
+      },
+      "RouteCatalogExposureResponse": {
+        "type": "object",
+        "properties": {
+          "expose_upstream_models": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string",
+            "description": "Observed resource version; supply it in If-Match for updates."
+          }
+        },
+        "required": [
+          "expose_upstream_models",
+          "etag"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateRouteCatalogExposureRequest": {
+        "type": "object",
+        "properties": {
+          "expose_upstream_models": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "expose_upstream_models"
+        ],
+        "additionalProperties": false
+      },
+      "ExternalCredentialReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "store",
+          "secret_id",
+          "version"
+        ],
+        "properties": {
+          "store": {
+            "type": "string",
+            "enum": [
+              "aws",
+              "gcp",
+              "azure",
+              "vault"
+            ]
+          },
+          "secret_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "region": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "field": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
+      },
+      "CredentialSlotDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_api_keys": {
+            "default": [],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "allowed_models": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "allowed_routes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "credential_version_id": {
+            "default": null,
+            "description": "The credential version the slot serves with. A slot write binds the version it names, which must be neither revoked nor lapsed; one that sends null or omits it keeps the slot's current version unless it stages a pasted credential.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "id": {
+            "default": "00000000-0000-0000-0000-000000000000",
+            "format": "uuid",
+            "type": "string"
+          },
+          "max_concurrency": {
+            "default": null,
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "default": "",
+            "type": "string"
+          },
+          "priority": {
+            "default": 0,
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requests_per_minute": {
+            "default": null,
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tokens_per_minute": {
+            "default": null,
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "weight": {
+            "default": 1,
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "daily_cost_limit": {
+            "description": "Exact decimal amount in the installation currency.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "monthly_cost_limit": {
+            "description": "Exact decimal amount in the installation currency.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "priority_shares": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriorityShares"
+              }
+            ]
+          },
+          "saturation_percent": {
+            "description": "Usage percentage of the quota above which each class is held to its share.",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_id",
+          "is_default",
+          "etag"
+        ]
+      },
+      "UpdatePublishedRouteRequest": {
+        "properties": {
+          "content_policy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ContentPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_attempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "operations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "overall_timeout_ms": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string",
+            "description": "The published slug is immutable."
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ReplaceRouteTargetRequest"
+            },
+            "type": "array"
+          },
+          "fidelity": {
+            "description": "Omit, or send null, to declare a strict route.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RouteFidelity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fallbacks": {
+            "description": "Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.",
+            "items": {
+              "$ref": "#/components/schemas/RouteFallback"
+            },
+            "maxItems": 4,
+            "type": "array"
+          },
+          "selectors": {
+            "description": "Ordered request selectors; the first match wins.",
+            "items": {
+              "$ref": "#/components/schemas/RouteSelector"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "retry": {
+            "$ref": "#/components/schemas/RouteRetry"
+          },
+          "affinity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RouteAffinity"
+              }
+            ]
+          },
+          "budget": {
+            "description": "Spend cap of the route itself.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SpendCap"
+              }
+            ]
+          },
+          "max_body_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1073741824,
+            "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+          },
+          "caller_cost_exempt": {
+            "type": "boolean",
+            "description": "Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets."
+          }
+        },
+        "required": [
+          "slug",
+          "operations",
+          "overall_timeout_ms",
+          "max_attempts",
+          "targets"
+        ],
+        "type": "object"
+      },
+      "CreateGuardrailRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "builtin.regex"
+            ]
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/ContentPolicy"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "project_id",
+          "policy"
+        ]
+      },
+      "UpdateGuardrailRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "policy": {
+            "$ref": "#/components/schemas/ContentPolicy"
+          }
+        },
+        "required": [
+          "name",
+          "policy"
+        ]
+      },
+      "GuardrailResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "builtin.regex"
+            ]
+          },
+          "etag": {
+            "type": "string"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "policy": {
+            "$ref": "#/components/schemas/ContentPolicy"
+          },
+          "retired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "type",
+          "etag",
+          "revision_id",
+          "revision",
+          "policy",
+          "retired_at"
+        ]
+      },
+      "GuardrailRevisionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "guardrail_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "policy": {
+            "$ref": "#/components/schemas/ContentPolicy"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "guardrail_id",
+          "revision",
+          "policy",
+          "created_at"
+        ]
+      },
+      "GuardrailListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailResponse"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ConfigurationGuardrail": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "builtin.regex"
+            ]
+          },
+          "policy": {
+            "$ref": "#/components/schemas/ContentPolicy"
+          }
+        },
+        "required": [
+          "name",
+          "project",
+          "type",
+          "policy"
+        ]
+      },
+      "CreateSinkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type",
+          "destination",
+          "streams",
+          "enabled"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "streams": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "requests",
+                "attempts",
+                "guardrail_decisions",
+                "audit"
+              ]
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "credential": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "writeOnly": true,
+            "description": "HMAC signing credential; omitted updates retain it and null removes it."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "https"
+            ]
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "UpdateSinkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "destination",
+          "streams",
+          "enabled"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "streams": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "requests",
+                "attempts",
+                "guardrail_decisions",
+                "audit"
+              ]
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "credential": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "writeOnly": true,
+            "description": "HMAC signing credential; omitted updates retain it and null removes it."
+          }
+        }
+      },
+      "SinkResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "type",
+          "destination",
+          "streams",
+          "enabled",
+          "has_credential",
+          "etag",
+          "retired_at",
+          "delivery"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "streams": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "requests",
+                "attempts",
+                "guardrail_decisions",
+                "audit"
+              ]
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "https"
+            ]
+          },
+          "has_credential": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string"
+          },
+          "retired_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delivery": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "delivered",
+              "failed",
+              "expired",
+              "last_delivered_at"
+            ],
+            "properties": {
+              "delivered": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "failed": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "expired": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "last_delivered_at": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "SinkListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SinkResponse"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ConfigurationSink": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type",
+          "destination",
+          "streams",
+          "enabled"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "streams": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "requests",
+                "attempts",
+                "guardrail_decisions",
+                "audit"
+              ]
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "https"
+            ]
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credential_ref": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Deterministic exported logical signing reference; destination bytes are supplied separately."
+          }
+        }
+      },
+      "MCPRegisteredTool": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "input_schema": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "input_schema"
+        ]
+      },
+      "MCPRegisteredCatalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "protocol_version": {
+            "type": "string",
+            "enum": [
+              "2025-11-25",
+              "2025-06-18",
+              "2025-03-26"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/MCPRegisteredTool"
+            }
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "tools",
+          "digest"
+        ]
+      },
+      "CreateMCPServerRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "writeOnly": true,
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata."
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "streamable_http"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "endpoint",
+          "enabled",
+          "project_id",
+          "transport"
+        ]
+      },
+      "UpdateMCPServerRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "writeOnly": true,
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata."
+          }
+        },
+        "required": [
+          "name",
+          "endpoint",
+          "enabled"
+        ]
+      },
+      "MCPServerResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "streamable_http"
+            ]
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "has_credential": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/MCPRegisteredCatalog"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "retired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "transport",
+          "endpoint",
+          "enabled",
+          "has_credential",
+          "etag",
+          "revision_id",
+          "revision",
+          "catalog",
+          "certified_at",
+          "retired_at"
+        ]
+      },
+      "MCPServerSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "streamable_http"
+            ]
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "has_credential": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "retired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "transport",
+          "endpoint",
+          "enabled",
+          "has_credential",
+          "etag",
+          "revision_id",
+          "revision",
+          "certified_at",
+          "retired_at"
+        ]
+      },
+      "MCPServerListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MCPServerSummary"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "MCPServerRevisionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "catalog": {
+            "$ref": "#/components/schemas/MCPRegisteredCatalog"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "server_id",
+          "revision",
+          "endpoint",
+          "catalog",
+          "certified_at"
+        ]
+      },
+      "ConfigurationMCPServer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "project",
+          "transport",
+          "endpoint",
+          "enabled",
+          "catalog_digest"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "streamable_http"
+            ]
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "catalog_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Reviewed tool catalog. Destination certification must match before configuration changes commit."
+          },
+          "credential_ref": {
+            "type": "string",
+            "description": "Logical destination sealed bearer binding; never source credential bytes."
+          }
+        }
+      },
       "CaptureConfiguration": {
         "type": "object",
         "properties": {
@@ -19733,6 +21514,11 @@
         "in": "cookie",
         "name": "__Host-olp_session",
         "type": "apiKey"
+      },
+      "apiKeyBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Gateway API key with models_read scope. Admitted only for consumer catalog reads, with the gateway authority-age, revocation, route and client-address restrictions."
       }
     }
   },
@@ -20798,6 +22584,79 @@
               }
             },
             "description": "Validation failed"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "budget-groups"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_budget_group",
+        "description": "Conditionally delete an unused resource; dependencies and retained history produce a conflict. Completed deletion is replayable with the original idempotency key.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "budget_group_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current budget group ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "Resource has dependencies or retained history",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not name the stored ETag"
           }
         },
         "security": [
@@ -22711,6 +24570,93 @@
         "tags": [
           "notifications"
         ]
+      },
+      "delete": {
+        "operationId": "delete_notification_destination",
+        "description": "Conditionally delete an unused resource; dependencies and retained history produce a conflict. Completed deletion is replayable with the original idempotency key.",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "notification_destination_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "Resource has dependencies or retained history",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
       }
     },
     "/api/v1/notifications/rules": {
@@ -23059,6 +25005,93 @@
               }
             },
             "description": "Invalid rule fields for its event, a subject or destination outside the rule's project, or a provider event rule in a project"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_notification_rule",
+        "description": "Conditionally delete an unused resource; dependencies and retained history produce a conflict. Completed deletion is replayable with the original idempotency key.",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "notification_rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Concurrency token returned with the resource",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "Resource has dependencies or retained history",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match does not match the current etag"
           }
         },
         "security": [
@@ -25819,6 +27852,12 @@
               "manage_projects",
               "installation"
             ]
+          },
+          {
+            "managementToken": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -25915,6 +27954,12 @@
               "manage_projects",
               "installation"
             ]
+          },
+          {
+            "managementToken": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -25971,6 +28016,12 @@
         "security": [
           {
             "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
               "manage_projects",
               "installation"
             ]
@@ -26091,11 +28142,101 @@
               "manage_projects",
               "installation"
             ]
+          },
+          {
+            "managementToken": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
           "projects"
         ]
+      },
+      "delete": {
+        "operationId": "delete_project",
+        "description": "Delete an empty project with observed ETag and idempotency. Dependencies and retained history refuse deletion.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "manage_projects",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "projects"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Project deleted"
+          },
+          "409": {
+            "description": "Project retains resources or history",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "ETag mismatch"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        }
       }
     },
     "/api/v1/projects/{project_id}/members": {
@@ -26176,6 +28317,12 @@
         "security": [
           {
             "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
               "manage_projects",
               "installation"
             ]
@@ -26277,6 +28424,12 @@
           {
             "csrfToken": [],
             "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
               "manage_projects",
               "installation"
             ]
@@ -26403,6 +28556,12 @@
           {
             "csrfToken": [],
             "sessionCookie": [
+              "manage_projects",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
               "manage_projects",
               "installation"
             ]
@@ -27302,6 +29461,88 @@
         "tags": [
           "providers"
         ]
+      },
+      "delete": {
+        "operationId": "delete_provider",
+        "description": "Conditionally delete an unused draft provider and owned sealed credentials. Published revisions, draft references, prices and retained evidence produce a conflict; disable published providers instead.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "Provider has published revisions, dependencies or retained history",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match is required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
       }
     },
     "/api/v1/providers/{provider_id}/activate": {
@@ -27473,7 +29714,7 @@
             }
           },
           {
-            "description": "Current credential-slot ETag",
+            "description": "Observed individual credential-slot or collection ETag",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -27510,7 +29751,21 @@
                 }
               }
             },
-            "description": ""
+            "description": "",
+            "headers": {
+              "OLP-Previous-Parent-ETag": {
+                "description": "Provider ETag immediately before this slot mutation.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "OLP-Parent-ETag": {
+                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request’s atomic parent transition, including idempotent replay.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -27551,6 +29806,164 @@
               }
             },
             "description": "If-Match is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      },
+      "get": {
+        "operationId": "get_credential_slot",
+        "description": "Read one draft credential slot and its individual ETag. Resolved secret values are never returned.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credential slot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialSlotDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_credential_slot",
+        "description": "Delete a nondefault draft slot using its individual or pool ETag. Published slots and immutable credential versions remain pinned.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Observed individual credential-slot or collection ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique write key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Draft slot removed",
+            "headers": {
+              "OLP-Previous-Parent-ETag": {
+                "description": "Provider ETag immediately before this slot mutation.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "OLP-Parent-ETag": {
+                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request’s atomic parent transition, including idempotent replay.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default slot is required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "ETag mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "If-Match required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -30935,6 +33348,72 @@
         "tags": [
           "routes"
         ]
+      },
+      "post": {
+        "operationId": "create_route",
+        "tags": [
+          "routes"
+        ],
+        "summary": "Create and publish a route atomically",
+        "description": "Validates targets and publishes an immutable revision in one transaction. Existing slugs conflict; independent console drafts are preserved.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRouteDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Published route with observed ETag",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDetailResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Existing route or publication conflict"
+          },
+          "422": {
+            "description": "Target or policy validation failed"
+          }
+        }
       }
     },
     "/api/v1/routes/{route_id}": {
@@ -30960,7 +33439,14 @@
                 }
               }
             },
-            "description": ""
+            "description": "",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "404": {
             "content": {
@@ -30988,6 +33474,95 @@
         "tags": [
           "routes"
         ]
+      },
+      "put": {
+        "operationId": "update_route",
+        "tags": [
+          "routes"
+        ],
+        "summary": "Replace published route configuration atomically",
+        "description": "Checks the published route ETag, retains its project, slug and routing policy, validates a fresh draft, and publishes an immutable revision without changing independent console drafts.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "route_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePublishedRouteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Published replacement and observed ETag",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteDetailResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Retired route or publication conflict"
+          },
+          "412": {
+            "description": "Stale route ETag"
+          },
+          "422": {
+            "description": "Target or policy validation failed"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
       }
     },
     "/api/v1/routes/{route_id}/retire": {
@@ -31504,7 +34079,21 @@
                 }
               }
             },
-            "description": ""
+            "description": "",
+            "headers": {
+              "OLP-Previous-Parent-ETag": {
+                "description": "Locked parent ETag before a scoped mutation; omitted for installation scope.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "OLP-Parent-ETag": {
+                "description": "Parent ETag committed by this mutation; omitted for installation scope.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -31587,6 +34176,116 @@
         "tags": [
           "routes"
         ]
+      },
+      "delete": {
+        "operationId": "delete_routing_policy",
+        "tags": [
+          "routes"
+        ],
+        "summary": "Remove an explicit scoped routing policy",
+        "description": "Returns inherited defaults with a fresh ETag, preserving conditional-write protection across removal/recreation. Applies the same scope-specific permissions as PUT, publishes non-draft changes, and audits the removal.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current policy ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique write key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Explicit policy removed; parent authority updated",
+            "headers": {
+              "OLP-Previous-Parent-ETag": {
+                "description": "Locked parent ETag before a scoped mutation; omitted for installation scope.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "OLP-Parent-ETag": {
+                "description": "Parent ETag committed by this mutation; omitted for installation scope.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope requires its specific operation"
+          },
+          "412": {
+            "description": "Stale observed policy ETag"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
       }
     },
     "/api/v1/routing/simulate": {
@@ -39788,6 +42487,12 @@
               "manage_projects",
               "installation"
             ]
+          },
+          {
+            "managementToken": [
+              "manage_projects",
+              "installation"
+            ]
           }
         ],
         "tags": [
@@ -46797,6 +49502,1991 @@
         "tags": [
           "saml"
         ]
+      }
+    },
+    "/api/v1/mcp": {
+      "post": {
+        "operationId": "management_mcp",
+        "summary": "Stateless management MCP over Streamable HTTP",
+        "description": "Management-token only. Tools are generated from the management contract, filtered by current authority, and dispatched through the ordinary API handlers. Results omit secrets. Each call requires the same conditional headers, idempotency and project access as the API.",
+        "tags": [
+          "management-mcp"
+        ],
+        "security": [
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "access_read",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "manage_organization"
+            ]
+          },
+          {
+            "managementToken": [
+              "playground"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "manage_projects",
+              "installation"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "method"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "const": "2.0"
+                  },
+                  "id": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC result or error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Notification accepted"
+          },
+          "401": {
+            "description": "Management token required"
+          },
+          "403": {
+            "description": "Token lacks authority"
+          }
+        }
+      }
+    },
+    "/api/v1/branding": {
+      "get": {
+        "operationId": "get_installation_branding",
+        "summary": "Read the installation name and logo",
+        "tags": [
+          "branding"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current installation branding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallationBrandingResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_installation_branding",
+        "summary": "Update the installation name and embedded logo",
+        "tags": [
+          "branding"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateInstallationBrandingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated branding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallationBrandingResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/catalog": {
+      "get": {
+        "operationId": "list_model_catalog",
+        "tags": [
+          "model-catalog"
+        ],
+        "summary": "List visible published routes with capabilities, privacy, prices and qualified SDK examples",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "models_read"
+            ]
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalogResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Resource not found"
+          }
+        }
+      }
+    },
+    "/api/v1/catalog/public/{project_id}": {
+      "get": {
+        "operationId": "get_public_model_catalog",
+        "tags": [
+          "model-catalog"
+        ],
+        "summary": "Read an owner-published project catalog; prices require a separate opt-in",
+        "security": [],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalogResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Resource not found"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/catalog": {
+      "get": {
+        "operationId": "get_catalog_publication",
+        "tags": [
+          "model-catalog"
+        ],
+        "summary": "Read a project catalog publication policy",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogPublicationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Resource not found"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_catalog_publication",
+        "tags": [
+          "model-catalog"
+        ],
+        "summary": "Publish or withdraw a project catalog and independently choose public prices",
+        "security": [
+          {
+            "sessionCookie": [
+              "access",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "access",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCatalogPublicationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogPublicationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "412": {
+            "description": "Observed version is stale"
+          },
+          "428": {
+            "description": "If-Match required"
+          }
+        }
+      }
+    },
+    "/api/v1/routes/{route_id}/catalog": {
+      "get": {
+        "operationId": "get_route_catalog_exposure",
+        "tags": [
+          "model-catalog"
+        ],
+        "summary": "Read a route upstream-model disclosure policy",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "route_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteCatalogExposureResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Resource not found"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_route_catalog_exposure",
+        "tags": [
+          "model-catalog"
+        ],
+        "summary": "Choose whether a route catalog may disclose upstream model names",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "route_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRouteCatalogExposureRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteCatalogExposureResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "412": {
+            "description": "Observed version is stale"
+          },
+          "428": {
+            "description": "If-Match required"
+          }
+        }
+      }
+    },
+    "/api/v1/guardrails": {
+      "get": {
+        "operationId": "list_guardrails",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailListResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed definition ETag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller authority refused"
+          },
+          "404": {
+            "description": "Not visible"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_guardrail",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGuardrailRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed definition ETag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller authority refused"
+          },
+          "409": {
+            "description": "Definition conflict"
+          },
+          "412": {
+            "description": "Stale observation"
+          },
+          "422": {
+            "description": "Invalid definition"
+          },
+          "428": {
+            "description": "Missing observation"
+          }
+        }
+      }
+    },
+    "/api/v1/guardrails/{guardrail_id}": {
+      "get": {
+        "operationId": "get_guardrail",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guardrail_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed definition ETag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller authority refused"
+          },
+          "404": {
+            "description": "Not visible"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_guardrail",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guardrail_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGuardrailRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed definition ETag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller authority refused"
+          },
+          "409": {
+            "description": "Definition conflict"
+          },
+          "412": {
+            "description": "Stale observation"
+          },
+          "422": {
+            "description": "Invalid definition"
+          },
+          "428": {
+            "description": "Missing observation"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_guardrail",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guardrail_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Retired; immutable policies remain available."
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller authority refused"
+          },
+          "409": {
+            "description": "Definition conflict"
+          },
+          "412": {
+            "description": "Stale observation"
+          },
+          "422": {
+            "description": "Invalid definition"
+          },
+          "428": {
+            "description": "Missing observation"
+          }
+        }
+      }
+    },
+    "/api/v1/guardrails/{guardrail_id}/revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_guardrail_revision",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guardrail_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailRevisionResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed definition ETag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller authority refused"
+          },
+          "404": {
+            "description": "Not visible"
+          }
+        }
+      }
+    },
+    "/api/v1/sinks": {
+      "get": {
+        "operationId": "list_sinks",
+        "tags": [
+          "export-sinks"
+        ],
+        "summary": "list sinks",
+        "description": "Read visible export sink metadata; credentials are never returned.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SinkListResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller lacks authority"
+          },
+          "404": {
+            "description": "Resource not visible"
+          },
+          "409": {
+            "description": "Conflicting retained state"
+          },
+          "412": {
+            "description": "Stale resource ETag"
+          },
+          "422": {
+            "description": "Invalid sink definition"
+          },
+          "428": {
+            "description": "Observed If-Match required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_sink",
+        "tags": [
+          "export-sinks"
+        ],
+        "summary": "create sink",
+        "description": "Manage a content-free export sink through ordinary scope authority, ETags, idempotency and audit.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SinkResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller lacks authority"
+          },
+          "404": {
+            "description": "Resource not visible"
+          },
+          "409": {
+            "description": "Conflicting retained state"
+          },
+          "412": {
+            "description": "Stale resource ETag"
+          },
+          "422": {
+            "description": "Invalid sink definition"
+          },
+          "428": {
+            "description": "Observed If-Match required"
+          }
+        }
+      }
+    },
+    "/api/v1/sinks/{sink_id}": {
+      "get": {
+        "operationId": "get_sink",
+        "tags": [
+          "export-sinks"
+        ],
+        "summary": "get sink",
+        "description": "Read visible export sink metadata; credentials are never returned.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sink_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SinkResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller lacks authority"
+          },
+          "404": {
+            "description": "Resource not visible"
+          },
+          "409": {
+            "description": "Conflicting retained state"
+          },
+          "412": {
+            "description": "Stale resource ETag"
+          },
+          "422": {
+            "description": "Invalid sink definition"
+          },
+          "428": {
+            "description": "Observed If-Match required"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_sink",
+        "tags": [
+          "export-sinks"
+        ],
+        "summary": "update sink",
+        "description": "Manage a content-free export sink through ordinary scope authority, ETags, idempotency and audit.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sink_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SinkResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller lacks authority"
+          },
+          "404": {
+            "description": "Resource not visible"
+          },
+          "409": {
+            "description": "Conflicting retained state"
+          },
+          "412": {
+            "description": "Stale resource ETag"
+          },
+          "422": {
+            "description": "Invalid sink definition"
+          },
+          "428": {
+            "description": "Observed If-Match required"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_sink",
+        "tags": [
+          "export-sinks"
+        ],
+        "summary": "delete sink",
+        "description": "Manage a content-free export sink through ordinary scope authority, ETags, idempotency and audit.",
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          },
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sink_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful operation"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller lacks authority"
+          },
+          "404": {
+            "description": "Resource not visible"
+          },
+          "409": {
+            "description": "Conflicting retained state"
+          },
+          "412": {
+            "description": "Stale resource ETag"
+          },
+          "422": {
+            "description": "Invalid sink definition"
+          },
+          "428": {
+            "description": "Observed If-Match required"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers": {
+      "get": {
+        "operationId": "list_mcp_servers",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "list mcp servers",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerListResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_mcp_server",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "create mcp server",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Certified server created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMCPServerRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}": {
+      "get": {
+        "operationId": "get_mcp_server",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "get mcp server",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      },
+      "put": {
+        "operationId": "update_mcp_server",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "update mcp server",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMCPServerRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_mcp_server",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "delete mcp server",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Server retired and credential removed"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{server_id}/revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_mcp_server_revision",
+        "tags": [
+          "mcp-servers"
+        ],
+        "summary": "get mcp server revision",
+        "description": "Project-scoped upstream MCP registration. Writes certify bounded initialize/tools-list protocols without invoking tools or holding database locks. Catalogs and credentials never change during reads; update explicitly approves a new immutable revision.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Certified server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPServerRevisionResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Observed registration or revision identity",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Retired or conflicting name"
+          },
+          "412": {
+            "description": "Stale observed registration"
+          },
+          "422": {
+            "description": "Invalid definition or upstream certification"
+          },
+          "428": {
+            "description": "Observed ETag required"
+          }
+        }
       }
     },
     "/api/v1/observability/capture": {

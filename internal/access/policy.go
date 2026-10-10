@@ -1,5 +1,7 @@
 package access
 
+import "slices"
+
 // Operation is a management action that authorization decides. Delegable
 // operations are also the scopes a management token may carry; the others are
 // performed only by a signed-in member.
@@ -95,7 +97,7 @@ var policy = [operationCount]rule{
 	Self:               {name: "self", roles: everyone},
 	ManageSessions:     {name: "manage_sessions", roles: owner, installation: true},
 	ManageTokens:       {name: "manage_tokens", roles: owner, installation: true},
-	ManageProjects:     {name: "manage_projects", roles: owner, installation: true},
+	ManageProjects:     {name: "manage_projects", roles: owner, installation: true, delegable: true},
 	LocalLogin:         {name: "local_login", roles: owner, installation: true},
 	ManagePlugins:      {name: "manage_plugins", roles: owner, installation: true},
 }
@@ -154,6 +156,12 @@ func (s operationSet) has(op Operation) bool { return s&(1<<op) != 0 }
 // through their role; a management token holds it only when the operation is
 // delegable, in the token's scopes, and held by the token's creator now.
 func (p Principal) Authorize(op Operation) error {
+	if p.Kind == "key" {
+		if op == Read && p.KeyAuthority != nil && slices.Contains(p.KeyAuthority.Policy.Scopes, "models_read") {
+			return nil
+		}
+		return Forbidden()
+	}
 	r, ok := op.rule()
 	if !ok {
 		return Forbidden()

@@ -275,10 +275,10 @@ func TestRouteFidelityOmissionIsStrictInDocuments(t *testing.T) {
 
 func TestValidateBindingsRejectsForeignRef(t *testing.T) {
 	doc := testDocument()
-	if err := validateBindings(doc, map[string]string{"acme/other": "secret"}); err == nil {
+	if err := validateBindings(doc, plainBindings(map[string]string{"acme/other": "secret"})); err == nil {
 		t.Fatal("binding outside document refs accepted")
 	}
-	if err := validateBindings(doc, map[string]string{"acme/primary": "secret"}); err != nil {
+	if err := validateBindings(doc, plainBindings(map[string]string{"acme/primary": "secret"})); err != nil {
 		t.Fatalf("binding rejected: %v", err)
 	}
 }
@@ -302,7 +302,7 @@ func TestPlanCreatesAndRequiresBindings(t *testing.T) {
 	if blocker == nil || blocker.Key != "acme/primary" {
 		t.Fatalf("expected secret_binding_required for acme/primary: %+v", result.Blockers)
 	}
-	result, err = s.plan(context.Background(), mapQueryer{t: t}, doc, map[string]string{"acme/primary": "vendor-secret"}, nil)
+	result, err = s.plan(context.Background(), mapQueryer{t: t}, doc, plainBindings(map[string]string{"acme/primary": "vendor-secret"}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestPlanProviderKindConflict(t *testing.T) {
 	stubs := []queryStub{
 		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "openai", "active", nil, nil}}},
 	}
-	result, err := s.plan(context.Background(), mapQueryer{t: t, stub: stubs}, doc, map[string]string{"acme/primary": "s"}, nil)
+	result, err := s.plan(context.Background(), mapQueryer{t: t, stub: stubs}, doc, plainBindings(map[string]string{"acme/primary": "s"}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestPlanProviderProjectMismatch(t *testing.T) {
 		{match: "FROM olp.providers", rows: [][]any{{"provider-id", "acme", "openai_compatible", "active", "other-id", nil}}},
 		{match: "FROM olp.projects", rows: [][]any{{"other-id", "Core", nil, nil, nil, nil, nil, nil, nil}, {"edge-id", "Edge", nil, nil, nil, nil, nil, nil, nil}}},
 	}
-	result, err := s.plan(context.Background(), mapQueryer{t: t, stub: stubs}, doc, map[string]string{"acme/primary": "s"}, nil)
+	result, err := s.plan(context.Background(), mapQueryer{t: t, stub: stubs}, doc, plainBindings(map[string]string{"acme/primary": "s"}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +409,7 @@ func TestPlanPricingRebasedDetail(t *testing.T) {
 	s := testServer()
 	doc := testDocument()
 	doc.Pricing.EffectiveAt = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-	result, err := s.plan(context.Background(), mapQueryer{t: t}, doc, map[string]string{"acme/primary": "s"}, nil)
+	result, err := s.plan(context.Background(), mapQueryer{t: t}, doc, plainBindings(map[string]string{"acme/primary": "s"}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +444,7 @@ func TestPlanNoopProviderAndRoute(t *testing.T) {
 		{match: "provider_slots s LEFT JOIN", rows: [][]any{{"provider-id", "primary", "slot-id", "cred-id", "", ""}}},
 		{match: "provider_slots WHERE", rows: [][]any{{"primary", true, 0, true, 0, 1, "cred-id", []byte(`{"allowed_api_keys":[],"allowed_models":[],"allowed_routes":[]}`), []byte(`{}`)}}},
 		{match: "FROM olp.provider_models", rows: [][]any{{"gpt-x", "gpt-x", true, capabilities}}},
-		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil, []byte(`{"mode":"strict"}`), []byte(`{}`)}},
+		{match: "route_drafts WHERE id", row: []any{[]byte(`["generation"]`), 30000, 2, targets, nil, []byte(`{"mode":"strict"}`), []byte(`{}`), false}},
 		{match: "routing_policies WHERE", row: []any{[]byte(`{"allowed_strategies":["weighted"]}`)}},
 		{match: "FROM olp.route_drafts", rows: [][]any{{"draft-id", "main", "edge-id"}}},
 		{match: "FROM olp.projects", rows: [][]any{{"edge-id", "Edge", nil, nil, nil, nil, nil, nil, nil}}},
@@ -576,7 +576,7 @@ func TestPlanMarksGrantSlotsForGrantEnrollment(t *testing.T) {
 
 	// Grant enrollment is the only source of a grant slot's credential.
 	var problem *access.Problem
-	if _, err = testServer().plan(t.Context(), mapQueryer{t: t}, doc, map[string]string{"acme/backup": "pasted"}, nil); !errors.As(err, &problem) || problem.Field != "secret_bindings.acme/backup" {
+	if _, err = testServer().plan(t.Context(), mapQueryer{t: t}, doc, plainBindings(map[string]string{"acme/backup": "pasted"}), nil); !errors.As(err, &problem) || problem.Field != "secret_bindings.acme/backup" {
 		t.Fatalf("a grant slot took a secret binding: %v", err)
 	}
 	doc.Providers[0].Slots[1].CredentialRef = nil

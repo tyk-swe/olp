@@ -162,10 +162,21 @@ tracing:
   # Accept a valid inbound W3C trace context as the request parent.
   acceptInbound: true
 
+# Additional workload-identity environment and projected files, shared by
+# gateway, control and worker pods. Keep identity tokens in mounted files.
+extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []
+
 config:
   logLevel: info
   databaseSecretName: olp-postgresql
   databaseSecretKey: url
+  # Optional regional read replica; runtime release and authority reads only.
+  databaseReadSecretName: ""
+  databaseReadSecretKey: url
+  # Same name across the gateways and workers sharing a regional Valkey.
+  region: ""
   valkeySecretName: olp-valkey
   valkeySecretKey: url
   masterKeySecretName: olp-master-key

@@ -34,6 +34,8 @@ export type ProviderEditValues = {
 export type ProviderDraft = ProviderEditValues & {
   kind: ProviderKind;
   credential: string;
+  useExternalCredential?: boolean;
+  externalCredentialReference?: string;
   model: string;
   projectId: string;
   /** Console-only selection; creation persists the resolved ordinary fields. */
@@ -198,6 +200,8 @@ export function setProviderDraftKind(
   draft.options = undefined;
   draft.credentialHeaders = '';
   draft.credential = '';
+  draft.useExternalCredential = false;
+  draft.externalCredentialReference = '';
   draft.endpoint = '';
   draft.apiVersion = '';
   draft.cloudRegion = '';
@@ -217,6 +221,8 @@ export function selectProviderPreset(
   if (draft.presetId !== presetId) {
     draft.options = undefined;
     draft.credential = '';
+    draft.useExternalCredential = false;
+    draft.externalCredentialReference = '';
     draft.credentialHeaders = '';
   }
   const preset = presetId
@@ -447,7 +453,9 @@ export function validateProviderDraft(
   if (
     !options.credentialAlreadyStored &&
     requiresCredential(spec, draft.authMode) &&
-    !draft.credential.trim()
+    !(draft.useExternalCredential
+      ? draft.externalCredentialReference?.trim()
+      : draft.credential.trim())
   ) {
     // Re-editing a saved draft keeps the stored write-only credential; only a
     // provider that has never been created must supply one here.
@@ -504,9 +512,17 @@ export function buildCreateProviderInput(
           },
           ...buildConnectionFields(draft, spec)
         },
-    credential: requiresCredential(spec, draft.authMode)
-      ? draft.credential
-      : undefined,
+    ...(draft.useExternalCredential && requiresCredential(spec, draft.authMode)
+      ? {
+          credential_reference: parseExternalReference(
+            draft.externalCredentialReference ?? ''
+          )
+        }
+      : {}),
+    credential:
+      requiresCredential(spec, draft.authMode) && !draft.useExternalCredential
+        ? draft.credential
+        : undefined,
     model: draft.model.trim() || undefined,
     display_name: draft.model.trim() ? draft.name.trim() : undefined
   };
@@ -679,3 +695,4 @@ export type RunProviderAction = (
   label: string,
   action: () => Promise<void>
 ) => Promise<boolean>;
+import { parseExternalReference } from './externalReference';

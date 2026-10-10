@@ -8,6 +8,8 @@ import type { Provider } from '$lib/features/providers/api/providers';
 type Schemas = components['schemas'];
 
 export type ProviderCredential = Schemas['CredentialResponse'];
+export type ExternalCredentialReference =
+  Schemas['ExternalCredentialReference'];
 export type CredentialSlot = Schemas['CredentialSlot'];
 export type CredentialSlotPool = Schemas['SlotList'];
 
@@ -87,7 +89,7 @@ async function listProviderCredentialPage(
 
 export async function rotateProviderCredential(
   provider: Provider,
-  secret: string
+  secret: string | ExternalCredentialReference
 ): Promise<void> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/credentials',
@@ -99,7 +101,10 @@ export async function rotateProviderCredential(
           'Idempotency-Key': crypto.randomUUID()
         }
       },
-      body: { credential: secret }
+      body:
+        typeof secret === 'string'
+          ? { credential: secret }
+          : { credential_reference: secret }
     }
   );
   unwrap(response);

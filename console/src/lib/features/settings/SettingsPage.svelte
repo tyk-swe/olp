@@ -1,4 +1,5 @@
 <script lang="ts">
+  import BrandingPanel from './BrandingPanel.svelte';
   import AggregateBudgetPanel from '$lib/features/access/budgets/AggregateBudgetPanel.svelte';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   const services = useServiceCapabilities();
@@ -177,6 +178,8 @@
     onclick={reloadConflict}
     >Discard this edit and reload the current setting</button
   >{/if}
+
+<BrandingPanel />
 
 <section class="settings-section" aria-labelledby="installation-title">
   <div class="section-heading">

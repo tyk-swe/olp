@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/workload"
 )
@@ -48,6 +49,7 @@ type Release struct {
 	Snapshot    *Snapshot
 	InstalledAt time.Time
 	credentials map[string][]byte
+	references  map[string]secretstore.Reference
 }
 
 // NewRelease builds an installed release directly from a snapshot and its
@@ -112,12 +114,22 @@ type Manager struct {
 	workloadKeys         *workload.Cache
 	workloadRegistration sync.Mutex
 	pool                 *pgxpool.Pool
-	installation         string
-	auth                 *secrets.AuthKey
-	keys                 *secrets.KeyRing
-	Mounted              map[string]MountedProvider
-	log                  *slog.Logger
-	InstanceID           string
+	// ReadPool, when set before Start, supplies runtime release and authority
+	// reads. Writes and historical secret resolution always use the primary.
+	ReadPool *pgxpool.Pool
+	// Region is the deployment's explicit region name, fixed before Start.
+	Region string
+	// ExternalSecrets is fixed before Start and follows the provider egress policy.
+	ExternalSecrets  ExternalSecrets
+	external         externalCredentials
+	authorityRefresh sync.Mutex
+	replica          replicaProgress
+	installation     string
+	auth             *secrets.AuthKey
+	keys             *secrets.KeyRing
+	Mounted          map[string]MountedProvider
+	log              *slog.Logger
+	InstanceID       string
 
 	// GrantRefreshed, when set before Start, is told of each credential
 	// version of the installed release whose grant a poll found refreshed,
@@ -205,22 +217,34 @@ func (m *Manager) Stop() {
 func (m *Manager) Refresh(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, PollInterval)
 	defer cancel()
-	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx), m.refreshGrants(ctx), m.refreshInputs(ctx), m.RecordInstallStatus(ctx, m.InstanceID))
+	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx), m.refreshGrants(ctx), m.refreshInputs(ctx), m.refreshExternalCredentials(ctx), m.RecordInstallStatus(ctx, m.InstanceID))
 }
 
 func (m *Manager) refreshAuthority(ctx context.Context) error {
-	start := time.Now()
-	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	m.authorityRefresh.Lock()
+	defer m.authorityRefresh.Unlock()
+	start, err := m.authorityReadTime(ctx)
+	if err != nil {
+		return fmt.Errorf("authority replica freshness: %w", err)
+	}
+	tx, err := m.runtimeReadPool().BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	var id string
+	var id, installation string
 	var sequence int64
-	if err = tx.QueryRow(ctx, "SELECT COALESCE(authority_id::text,''),authority_sequence FROM olp.installation WHERE singleton").Scan(&id, &sequence); err != nil {
+	if err = tx.QueryRow(ctx, "SELECT id::text,COALESCE(authority_id::text,''),authority_sequence FROM olp.installation WHERE singleton").Scan(&installation, &id, &sequence); err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
+	if installation != m.installation {
+		return errors.New("runtime read database belongs to another installation")
+	}
 	m.mu.Lock()
+	if m.authority.loaded && m.authority.id == id && sequence < m.authority.sequence {
+		m.mu.Unlock()
+		return ErrStaleAuthority
+	}
 	unchanged := m.authority.loaded && m.authority.id == id && m.authority.sequence == sequence
 	if unchanged {
 		m.authority.readAt = start
@@ -281,6 +305,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 			rows.Close()
 			return fmt.Errorf("authority: key %s policy: %w", record.authority.ID, err)
 		}
+		record.authority.Policy = record.authority.Policy.InRegion(m.Region)
 		record.authority.BudgetIncreases = state.budgetIncreases
 		record.authority.InstallationID = m.installation
 		record.authority.InstallationBudget = state.installationBudget
@@ -380,15 +405,18 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 }
 
 func (m *Manager) refreshRelease(ctx context.Context) error {
-	var id, digest string
+	var id, digest, installation string
 	var sequence int64
 	var raw []byte
-	err := m.pool.QueryRow(ctx, "SELECT id::text,sequence,sha256,snapshot FROM olp.runtime_releases ORDER BY sequence DESC LIMIT 1").Scan(&id, &sequence, &digest, &raw)
+	err := m.runtimeReadPool().QueryRow(ctx, "SELECT r.id::text,r.sequence,r.sha256,r.snapshot,i.id::text FROM olp.runtime_releases r CROSS JOIN olp.installation i WHERE i.singleton ORDER BY r.sequence DESC LIMIT 1").Scan(&id, &sequence, &digest, &raw, &installation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
+	}
+	if installation != m.installation {
+		return errors.New("runtime release database belongs to another installation")
 	}
 	for {
 		current := m.desired.Load()
@@ -455,6 +483,18 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	var credentialIDs []string
+	for _, provider := range snapshot.Providers {
+		for _, slot := range provider.Slots {
+			if slot.CredentialID != nil {
+				credentialIDs = append(credentialIDs, *slot.CredentialID)
+			}
+		}
+	}
+	release.references, err = readExternalReferences(ctx, tx, credentialIDs)
+	if err != nil {
+		return nil, err
+	}
 	for _, provider := range snapshot.Providers {
 		if provider.Network != nil && provider.Network.CredentialID != "" {
 			id := provider.Network.CredentialID
@@ -478,6 +518,9 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 			if slot.CredentialID == nil {
 				continue
 			}
+			if _, external := release.references[*slot.CredentialID]; external {
+				continue
+			}
 			if _, done := release.credentials[*slot.CredentialID]; done {
 				continue
 			}
@@ -487,6 +530,15 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 			}
 			release.credentials[*slot.CredentialID] = secret
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	// Record store availability before publication so failed references produce
+	// explicit route-plan decisions. Fetches hold neither transaction nor mutex.
+	for id, reference := range release.references {
+		value, _ := m.external.read(ctx, m.ExternalSecrets, id, reference)
+		clear(value)
 	}
 	return release, nil
 }

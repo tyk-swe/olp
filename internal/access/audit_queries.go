@@ -17,5 +17,7 @@ const auditInsertSQL = `WITH subject AS (
  WHEN 'notification_destination' THEN (SELECT d.project_id FROM olp.notification_destinations d WHERE d.id=subject.id)
  WHEN 'notification_rule' THEN (SELECT r.project_id FROM olp.notification_rules r WHERE r.id=subject.id)
  WHEN 'export_sink' THEN (SELECT s.project_id FROM olp.export_sinks s WHERE s.id=subject.id)
+ WHEN 'sink' THEN (SELECT s.project_id FROM olp.managed_export_sinks s WHERE s.id=subject.id)
+ WHEN 'mcp_server' THEN (SELECT s.project_id FROM olp.mcp_servers s WHERE s.id=subject.id)
  WHEN 'capture_policy' THEN (SELECT p.project_id FROM olp.capture_policies p WHERE p.id=subject.id)
  END) FROM subject`

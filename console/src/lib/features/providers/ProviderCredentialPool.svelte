@@ -1,4 +1,6 @@
 <script lang="ts">
+  import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
+  import { parseExternalReference } from './externalReference';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage, unanswered } from '$lib/api/http';
   import type { Provider } from './api/providers';
@@ -45,6 +47,8 @@
   let editing = $state<Slot | null>(null);
   let editingEtag = $state('');
   let secret = $state('');
+  let useExternal = $state(false);
+  let externalValue = $state('');
   let models = $state('');
   let routes = $state('');
   let keys = $state('');
@@ -71,6 +75,8 @@
           max_concurrency: null
         };
     secret = '';
+    useExternal = false;
+    externalValue = '';
     models = slot?.allowed_models?.join(', ') ?? '';
     routes = slot?.allowed_routes?.join(', ') ?? '';
     keys = slot?.allowed_api_keys?.join(', ') ?? '';
@@ -93,7 +99,10 @@
           allowed_routes: parseManualModelNames(routes),
           allowed_api_keys: parseManualModelNames(keys)
         },
-        credential: secret || null
+        credential: useExternal ? null : secret || null,
+        ...(useExternal
+          ? { credential_reference: parseExternalReference(externalValue) }
+          : {})
       });
       secret = '';
       editing = null;
@@ -363,14 +372,21 @@
               bind:value={editing.weight}
             /></label
           >
-          {#if !grant}<label
-              >Credential<input
-                type="password"
-                autocomplete="new-password"
-                bind:value={secret}
-                placeholder="Leave blank to retain the stored secret"
-              /></label
-            >{/if}
+          {#if !grant}
+            <label
+              ><input type="checkbox" bind:checked={useExternal} />Use an
+              external credential version</label
+            >
+            {#if useExternal}<ExternalReferenceEditor
+                bind:value={externalValue}
+              />{:else}<label
+                >Credential<input
+                  type="password"
+                  autocomplete="new-password"
+                  bind:value={secret}
+                  placeholder="Leave blank to retain the stored secret"
+                /></label
+              >{/if}{/if}
           <label
             >Allowed models<input
               bind:value={models}

@@ -42,6 +42,15 @@ vi.mock('$lib/features/settings/api', async (original) => ({
   listSettings: vi.fn(),
   updateSetting: vi.fn()
 }));
+vi.mock('$lib/features/settings/api/branding', async (original) => ({
+  ...(await original<typeof import('$lib/features/settings/api/branding')>()),
+  getBranding: vi.fn().mockResolvedValue({
+    name: 'Test installation',
+    logo: '',
+    etag: 'branding-etag'
+  }),
+  updateBranding: vi.fn()
+}));
 vi.mock('$lib/features/providers/api/models', () => ({
   listProviderKinds: vi.fn()
 }));

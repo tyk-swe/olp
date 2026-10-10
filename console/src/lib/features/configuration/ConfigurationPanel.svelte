@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { parseExternalReference } from '$lib/features/providers/externalReference';
   import { resolve } from '$app/paths';
   import { parseNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
   import { ApiProblem, errorMessage } from '$lib/api/http';
@@ -24,6 +25,7 @@
   let artifactDocument = $state.raw<ConfigurationDocument | null>(null);
   let plan = $state<ConfigurationPlan | null>(null);
   let secrets = $state<Record<string, string>>({});
+  let externalBindingsJSON = $state('');
   let applyResult = $state<'staged' | ''>('');
   let busy = $state(false);
   let error = $state('');
@@ -61,6 +63,7 @@
     // Secret bindings answer the artifact they were entered for. OLP refuses
     // one this artifact doesn't take, such as for a slot a grant now backs.
     secrets = {};
+    externalBindingsJSON = '';
     try {
       artifactDocument = parseNativeJSON(artifact) as ConfigurationDocument;
     } catch {
@@ -83,6 +86,25 @@
     );
   }
 
+  function withBindings(
+    operation: typeof planConfiguration,
+    document: ConfigurationDocument
+  ) {
+    if (!externalBindingsJSON.trim()) return operation(document, bindings());
+    const parsed: unknown = JSON.parse(externalBindingsJSON);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      throw new Error(
+        'External bindings must be an object keyed by artifact credential reference.'
+      );
+    const references = Object.fromEntries(
+      Object.entries(parsed).map(([name, value]) => [
+        name,
+        parseExternalReference(JSON.stringify(value))
+      ])
+    );
+    return operation(document, bindings(), undefined, references);
+  }
+
   async function runPlan() {
     if (busy || !artifactDocument) return;
     // A plan answers the document it reviewed; one that arrives after the
@@ -92,7 +114,7 @@
     error = '';
     applyResult = '';
     try {
-      const result = await planConfiguration(planned, bindings());
+      const result = await withBindings(planConfiguration, planned);
       if (artifactDocument === planned) plan = result;
     } catch (problem) {
       if (artifactDocument !== planned) return;
@@ -110,14 +132,14 @@
     error = '';
     applyResult = '';
     try {
-      const result = await applyConfiguration(applied, bindings());
+      const result = await withBindings(applyConfiguration, applied);
       if (artifactDocument !== applied) return;
       plan = result;
       applyResult = 'staged';
     } catch (problem) {
       if (artifactDocument !== applied) return;
       if (problem instanceof ApiProblem && problem.problem.status === 409) {
-        const replanned = await planConfiguration(applied, bindings()).catch(
+        const replanned = await withBindings(planConfiguration, applied).catch(
           () => plan
         );
         if (artifactDocument === applied) plan = replanned;
@@ -215,6 +237,21 @@
       onchange={upload}
     />
     {#if artifactDocument}
+      <label
+        >External credential bindings<textarea
+          class="filter-control"
+          bind:value={externalBindingsJSON}
+          readonly={busy}
+          rows="4"
+          maxlength="65536"
+          spellcheck="false"
+          placeholder={'{"provider/primary":{"store":"gcp","secret_id":"projects/project/secrets/provider","version":"1"}}'}
+        ></textarea></label
+      >
+      <p>
+        Optionally bind artifact references to immutable secret-store versions.
+        A reference must use either an external binding or a plaintext binding.
+      </p>
       <div class="promotion-actions">
         <button
           class="button button-secondary"

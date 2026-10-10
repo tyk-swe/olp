@@ -19,6 +19,9 @@ import (
 const APIVersion = "openllmproxy.dev/config/v1"
 
 type Document struct {
+	MCPServers        []MCPServerEntry       `json:"mcp_servers,omitempty"`
+	Sinks             []SinkEntry            `json:"sinks,omitempty"`
+	Guardrails        []GuardrailEntry       `json:"guardrails,omitempty"`
 	SAML              *access.SAMLDefinition `json:"saml,omitempty"`
 	RequireLocalMFA   *bool                  `json:"require_local_mfa,omitempty"`
 	SCIMGroupMappings []SCIMGroupMapping     `json:"scim_group_mappings,omitempty"`
@@ -38,6 +41,8 @@ type Document struct {
 }
 
 type ProjectEntry struct {
+	PublicCatalog        bool                      `json:"public_catalog,omitempty"`
+	PublicCatalogPrices  bool                      `json:"public_catalog_prices,omitempty"`
 	Organization         *string                   `json:"organization,omitempty"`
 	AttributionBudgets   access.AttributionBudgets `json:"attribution_budgets,omitempty"`
 	LimitTemplates       *access.LimitTemplates    `json:"limit_templates,omitempty"`
@@ -104,23 +109,24 @@ func targetEntry(t runtime.PublishedTarget) TargetEntry {
 }
 
 type RouteEntry struct {
-	CallerCostExempt bool                `json:"caller_cost_exempt,omitempty"`
-	MaxBodyBytes     *int64              `json:"max_body_bytes,omitempty"`
-	Slug             string              `json:"slug"`
-	Project          *string             `json:"project"`
-	Operations       []string            `json:"operations"`
-	OverallTimeoutMS int                 `json:"overall_timeout_ms"`
-	MaxAttempts      int                 `json:"max_attempts"`
-	Targets          []TargetEntry       `json:"targets"`
-	RoutingPolicy    *runtime.Policy     `json:"routing_policy"`
-	ContentPolicy    json.RawMessage     `json:"content_policy"`
-	Fidelity         json.RawMessage     `json:"fidelity"`
-	Fallbacks        []runtime.Fallback  `json:"fallbacks,omitempty"`
-	Selectors        []runtime.Selector  `json:"selectors,omitempty"`
-	Retry            runtime.Retry       `json:"retry,omitempty"`
-	Affinity         *runtime.Affinity   `json:"affinity,omitempty"`
-	Budget           *runtime.CostLimits `json:"budget,omitempty"`
-	Retired          bool                `json:"retired"`
+	ExposeUpstreamModels bool                `json:"expose_upstream_models,omitempty"`
+	CallerCostExempt     bool                `json:"caller_cost_exempt,omitempty"`
+	MaxBodyBytes         *int64              `json:"max_body_bytes,omitempty"`
+	Slug                 string              `json:"slug"`
+	Project              *string             `json:"project"`
+	Operations           []string            `json:"operations"`
+	OverallTimeoutMS     int                 `json:"overall_timeout_ms"`
+	MaxAttempts          int                 `json:"max_attempts"`
+	Targets              []TargetEntry       `json:"targets"`
+	RoutingPolicy        *runtime.Policy     `json:"routing_policy"`
+	ContentPolicy        json.RawMessage     `json:"content_policy"`
+	Fidelity             json.RawMessage     `json:"fidelity"`
+	Fallbacks            []runtime.Fallback  `json:"fallbacks,omitempty"`
+	Selectors            []runtime.Selector  `json:"selectors,omitempty"`
+	Retry                runtime.Retry       `json:"retry,omitempty"`
+	Affinity             *runtime.Affinity   `json:"affinity,omitempty"`
+	Budget               *runtime.CostLimits `json:"budget,omitempty"`
+	Retired              bool                `json:"retired"`
 }
 
 // TemplateEntry is a route template. Apply stores it; provider activation and
@@ -282,6 +288,26 @@ func sortCapabilities(c []CapabilityEntry) {
 }
 
 func (d *Document) canonicalize() {
+	slices.SortFunc(d.MCPServers, func(a, b MCPServerEntry) int {
+		ka, kb := mcpKey(a), mcpKey(b)
+		if c := strings.Compare(ka[0], kb[0]); c != 0 {
+			return c
+		}
+		return strings.Compare(ka[1], kb[1])
+	})
+	slices.SortFunc(d.Sinks, func(a, b SinkEntry) int {
+		ka, kb := sinkKey(a), sinkKey(b)
+		if c := strings.Compare(ka[0], kb[0]); c != 0 {
+			return c
+		}
+		return strings.Compare(ka[1], kb[1])
+	})
+	slices.SortFunc(d.Guardrails, func(a, b GuardrailEntry) int {
+		if order := strings.Compare(strings.ToLower(a.Project), strings.ToLower(b.Project)); order != 0 {
+			return order
+		}
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	})
 	normalizeDocument(d)
 	d.ExportedAt = ""
 	slices.SortFunc(d.SCIMGroupMappings, func(a, b SCIMGroupMapping) int {

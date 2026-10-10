@@ -8,14 +8,18 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/branding"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/management"
+	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/modelcatalog"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -24,6 +28,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/signing"
+	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -54,8 +59,14 @@ type Management struct {
 // feature's routes, and the catch-all that answers 404 for the rest.
 func (m Management) Register(mux *http.ServeMux) {
 	management.Register(mux)
+	(&management.MCP{Access: m.Access, API: mux}).Register(mux)
 	m.Access.Egress = m.Egress
 	m.Access.Register(mux)
+	(&branding.Server{Access: m.Access}).Register(mux)
+	(&guardrails.Server{Access: m.Access}).Register(mux)
+	(&mcpservers.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
+	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
+	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)
 	catalogue := providers.New(m.Access, m.Egress, m.PluginHost)
 	catalogue.Unconfined = m.Unconfined
 	catalogue.Log = m.Log
@@ -67,6 +78,9 @@ func (m Management) Register(mux *http.ServeMux) {
 	catalogue.Register(mux)
 	routeServer := routes.New(m.Access)
 	routeServer.Inputs = m.Runtime.RoutingInputs
+	if m.Runtime != nil {
+		routeServer.Region = m.Runtime.Region
+	}
 	routeServer.UnconfinedPlugins = m.Unconfined != nil
 	routeServer.Catalog = m.Catalog
 	if m.Limiter != nil {

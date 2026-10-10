@@ -6,6 +6,12 @@ bash scripts/check-helm-egress.sh
 helm lint deploy/helm
 helm lint deploy/helm -f deploy/helm/values.production.yaml
 helm template olp deploy/helm --kube-version "$version" >/dev/null
+helm template olp deploy/helm --kube-version "$version" \
+  --set-json 'extraEnv=[{"name":"OLP_VAULT_ROLE","value":"olp"},{"name":"OLP_VAULT_JWT_FILE","value":"/run/identity/token"}]' \
+  --set-json 'extraVolumes=[{"name":"workload-identity","projected":{"sources":[{"serviceAccountToken":{"path":"token","audience":"vault","expirationSeconds":3600}}]}}]' \
+  --set-json 'extraVolumeMounts=[{"name":"workload-identity","mountPath":"/run/identity","readOnly":true}]' |
+  docker run --rm -i ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e \
+    -strict -summary -kubernetes-version "$version" -skip ServiceMonitor,PrometheusRule
 helm template olp deploy/helm --kube-version "$version" -f deploy/helm/values.production.yaml |
   docker run --rm -i ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e \
     -strict -summary -kubernetes-version "$version" -skip ServiceMonitor,PrometheusRule
@@ -50,7 +56,21 @@ for metric in $metrics; do
     exit 1
   fi
 done
-for invalid in 'config.databaseMaxConnections=0' 'config.httpMaxJsonBodyBytes=0' \
+if helm template olp deploy/helm | grep -q 'name: OLP_DATABASE_READ_URL'; then
+  echo 'Expected the default chart to omit the optional read-replica URL' >&2
+  exit 1
+fi
+if ! helm template olp deploy/helm --set config.databaseReadSecretName=olp-replica,config.databaseReadSecretKey=readonly |
+  grep -q 'name: OLP_DATABASE_READ_URL'; then
+  echo 'Expected the configured read-replica URL in workload environments' >&2
+  exit 1
+fi
+if ! helm template olp deploy/helm --set config.region=us-west-2 | grep -q 'name: OLP_REGION'; then
+  echo 'Expected the regional environment in workloads' >&2
+  exit 1
+fi
+for invalid in 'config.region=Invalid' 'config.databaseMaxConnections=0' 'config.httpMaxJsonBodyBytes=0' \
+  'config.databaseReadSecretName=olp-replica,config.databaseReadSecretKey=' \
   'gateway.replicas=-1' 'ingress.enabled=true,config.trustedProxyCidrs=' \
   'networkPolicy.enabled=true' 'config.unconfinedPluginDir=plugins' \
   'migration.databaseSecretName=olp-postgresql-migration'; do

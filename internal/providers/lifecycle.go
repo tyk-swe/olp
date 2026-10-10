@@ -18,17 +18,19 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 const maxCredentialBytes = 65536
 
 type createRequest struct {
-	Name          string        `json:"name"`
-	Configuration Configuration `json:"configuration"`
-	Credential    *string       `json:"credential"`
-	DisplayName   *string       `json:"display_name"`
-	Model         *string       `json:"model"`
-	ProjectID     *string       `json:"project_id"`
+	Name                string                 `json:"name"`
+	Configuration       Configuration          `json:"configuration"`
+	Credential          *string                `json:"credential"`
+	CredentialReference *secretstore.Reference `json:"credential_reference,omitempty"`
+	DisplayName         *string                `json:"display_name"`
+	Model               *string                `json:"model"`
+	ProjectID           *string                `json:"project_id"`
 }
 
 type updateRequest struct {
@@ -106,6 +108,9 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err != nil {
 		return access.Reply{}, err
 	}
+	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
+		return access.Reply{}, err
+	}
 	claim, replayed, err := a.Replay(r, tx, p, input)
 	if err != nil {
 		return access.Reply{}, err
@@ -129,17 +134,15 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	switch cfg := &input.Configuration; {
-	case cfg.Grant() && input.Credential != nil:
+	case cfg.Grant() && (input.Credential != nil || input.CredentialReference != nil):
 		return access.Reply{}, access.Invalid("credential", grantEnrollmentOnly)
-	case cfg.CredentialRequired() && !cfg.Grant() && input.Credential == nil:
+	case cfg.CredentialRequired() && !cfg.Grant() && input.Credential == nil && input.CredentialReference == nil:
 		return access.Reply{}, access.Invalid("credential", "This authentication mode requires a credential.")
-	case !cfg.CredentialRequired() && input.Credential != nil:
+	case !cfg.CredentialRequired() && (input.Credential != nil || input.CredentialReference != nil):
 		return access.Reply{}, access.Invalid("credential", "This authentication mode takes no stored credential.")
 	}
-	if input.Credential != nil {
-		if err = ValidCredential(*input.Credential); err != nil {
-			return access.Reply{}, err
-		}
+	if err = validateCredentialInput(input.Credential, input.CredentialReference); err != nil {
+		return access.Reply{}, err
 	}
 	if input.Model != nil {
 		if err = ValidModelName("model", *input.Model); err != nil {
@@ -167,8 +170,8 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	var credentialID *string
-	if input.Credential != nil {
-		stored, _, err := s.StoreCredential(r.Context(), tx, id, *input.Credential)
+	if input.Credential != nil || input.CredentialReference != nil {
+		stored, _, err := s.storeCredentialInput(r.Context(), tx, id, input.Credential, input.CredentialReference)
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -414,6 +417,7 @@ func loadModels(ctx context.Context, q access.Queryer, providerID string, enable
 
 type slotRow struct {
 	ID                string
+	ETag              string
 	Default           bool
 	Position          int
 	Name              string
@@ -446,7 +450,7 @@ type slotRestrictions struct {
 }
 
 func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slotRow, error) {
-	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,coalesce(c.plugin_digest,''),coalesce(c.profile_id,''),g.lapsed_at IS NOT NULL,coalesce(g.generation,0),coalesce(c.principal,''),coalesce(c.grant_facts,'{}'),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id LEFT JOIN olp.provider_grants g ON g.credential_id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
+	rows, err := q.Query(ctx, "SELECT s.id::text,s.is_default,s.position,s.name,s.enabled,s.priority,s.weight,s.credential_id::text,c.version,c.revoked_at IS NOT NULL,coalesce(c.plugin_digest,''),coalesce(c.profile_id,''),g.lapsed_at IS NOT NULL,coalesce(g.generation,0),coalesce(c.principal,''),coalesce(c.grant_facts,'{}'),s.restrictions,s.limits,s.validated_at,s.validated_fingerprint,s.etag::text FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id LEFT JOIN olp.provider_grants g ON g.credential_id=s.credential_id WHERE s.provider_id=$1 ORDER BY s.position", providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +460,7 @@ func loadSlots(ctx context.Context, q access.Queryer, providerID string) ([]slot
 		var row slotRow
 		var facts, restrictions, limits []byte
 		var revoked *bool
-		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &row.CredentialPlugin, &row.CredentialProfile, &row.CredentialLapsed, &row.GrantGeneration, &row.CredentialPrincipal, &facts, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint); err != nil {
+		if err = rows.Scan(&row.ID, &row.Default, &row.Position, &row.Name, &row.Enabled, &row.Priority, &row.Weight, &row.CredentialID, &row.CredentialVersion, &revoked, &row.CredentialPlugin, &row.CredentialProfile, &row.CredentialLapsed, &row.GrantGeneration, &row.CredentialPrincipal, &facts, &restrictions, &limits, &row.ValidatedAt, &row.ValidatedFingerprint, &row.ETag); err != nil {
 			return nil, err
 		}
 		row.CredentialRevoked = revoked != nil && *revoked

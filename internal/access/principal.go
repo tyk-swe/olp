@@ -38,7 +38,10 @@ type User struct {
 // current authority.
 type Principal struct {
 	User
-	Kind             string
+	Kind string
+	// KeyAuthority is set only by an inference-key authentication alternative.
+	// It grants consumer catalog reads, never management mutation authority.
+	KeyAuthority     *Authority
 	Creator          string
 	AllProjects      bool
 	Projects         map[string]string

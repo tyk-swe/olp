@@ -14,6 +14,7 @@ export type AuthenticatedUser = {
 export type AuthenticatedSession = {
   user: AuthenticatedUser;
   csrf_token: string;
+  session_id?: string;
 };
 
 export type AuthenticationPhase =
@@ -30,6 +31,7 @@ export type PrincipalAbsentSnapshot = {
 type AuthenticatedSnapshot = {
   phase: 'authenticated';
   user: AuthenticatedUser;
+  sessionId?: string;
   error: string;
   principalExitError: string;
   lastValidatedAt: number;
@@ -79,6 +81,9 @@ export function reduceAuthentication(
       return {
         phase: 'authenticated',
         user: action.session.user,
+        ...(action.session.session_id
+          ? { sessionId: action.session.session_id }
+          : {}),
         error: '',
         principalExitError: snapshot.principalExitError,
         lastValidatedAt: action.validatedAt

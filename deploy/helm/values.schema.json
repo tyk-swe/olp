@@ -4,6 +4,91 @@
   "required": ["image", "gateway", "control", "ingress", "worker", "migration", "tracing", "config", "mediaSpool", "monitoring", "networkPolicy", "preStopDelaySeconds", "terminationGracePeriodSeconds", "podSecurityContext", "containerSecurityContext", "metrics"],
   "additionalProperties": false,
   "properties": {
+    "extraEnv": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "value"
+            ],
+            "not": {
+              "required": [
+                "valueFrom"
+              ]
+            }
+          },
+          {
+            "required": [
+              "valueFrom"
+            ],
+            "not": {
+              "required": [
+                "value"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "extraVolumes": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "extraVolumeMounts": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "mountPath"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mountPath": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "readOnly": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
     "image": {
       "type": "object",
       "required": ["repository", "pullPolicy"],
@@ -127,6 +212,9 @@
       "properties": {
         "databaseSecretName": { "type": "string", "minLength": 1 },
         "databaseSecretKey": { "type": "string", "minLength": 1 },
+        "databaseReadSecretName": { "type": "string" },
+        "databaseReadSecretKey": { "type": "string", "minLength": 1 },
+        "region": { "type": "string", "pattern": "^$|^[a-z0-9][a-z0-9._-]{0,99}$" },
         "valkeySecretName": { "type": "string", "minLength": 1 },
         "valkeySecretKey": { "type": "string", "minLength": 1 },
         "masterKeySecretName": { "type": "string", "minLength": 1 },

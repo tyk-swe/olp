@@ -64,6 +64,13 @@ account, model, region, and credential.
 
 ## Provider lifecycle
 
+An unused draft can be deleted with `DELETE /api/v1/providers/{provider_id}`,
+using its observed ETag and an idempotency key. Published revisions, route
+draft references, scoped price history, notification evidence and retained
+resource dependencies return `409 provider_in_use`. Deletion cleans the draft's
+owned sealed material and advances authority. Use disable for published
+providers, preserving their immutable revisions and accounting history.
+
 A provider is created as a draft with its configuration and a credential unless
 the authentication mode is `none`, `adc`, `default_chain`, `azure_default`, or a
 plugin's `grant`, whose credential versions come from
@@ -171,6 +178,13 @@ edit, rotate, and validate additional slots under
 page. Writes use ETags and idempotency keys; secrets remain encrypted and
 write-only. A connection supports up to 64 slots including the default.
 
+Individual `GET /credential-slots/{slot_id}` reads return a slot ETag.
+Individual PUT and DELETE accept it, so sibling edits preserve each other's
+preconditions. Pool edits retain the collection ETag. DELETE removes a
+nondefault draft slot and its pending enrollment state, retaining immutable
+credential versions and published revision slots. The default slot is required;
+activate the changed provider draft to publish the resulting pool.
+
 Default-slot restrictions and quotas also apply to connections using no stored
 secret (`none`, ADC, or the AWS default chain).
 
@@ -266,7 +280,32 @@ when another replica has reclaimed the job.
 
 ![Credential slots with validation, priority, and shared quota usage](assets/screenshots/provider-credential-pool.png)
 
+## Scoped routing policies
+
+`GET /api/v1/routing-policies/{scope}/{id}` reports `configured` alongside
+its policy and observed ETag. Installation policy uses the nil UUID and requires
+installation settings authority; API-key policies require key authority, and
+route-draft policies require configuration authority and project access.
+
+`DELETE` removes an explicit override under the same permissions, observed
+`If-Match`, and `Idempotency-Key` requirements as `PUT`. The next read reports
+inherited defaults with a fresh ETag. An observation from before a create/delete
+cycle remains stale. Non-draft removal publishes the runtime change; draft removal
+becomes effective when that draft is activated. Scoped writes return their exact
+parent ETag transition, and replay returns the original transition and outcome.
+Successful removals are audited.
+
 ## Routes
+
+Automation can create a published route with `POST /api/v1/routes` and replace
+its configuration with `PUT /api/v1/routes/{route_id}`. Both validate and publish
+an immutable revision in one transaction using the same checks as console draft
+activation. Creation refuses an existing slug; replacement requires the observed
+published ETag and retains its slug, project, and routing policy. Each successful
+write retains a revision source draft and leaves independent console drafts
+untouched. Failed validation rolls back the draft, revision and runtime release;
+replaying the same Idempotency-Key returns the original result. Published route
+reads return their own ETag. Retirement preserves revision and accounting history.
 
 Route drafts carry a slug, allowed operations (default `generation`), an overall
 deadline, an attempt budget, and 1–64 targets with priority, weight, and

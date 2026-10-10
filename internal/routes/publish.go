@@ -263,6 +263,18 @@ func (s *Server) promote(ctx context.Context, tx pgx.Tx, current *draft, actor s
 	if _, err = tx.Exec(ctx, "UPDATE olp.routes SET latest_revision=$2,latest_revision_id=$3,state='active',retired_at=NULL,retired_by=NULL,etag=$4 WHERE id=$1", routeID, revision, revisionID, access.NewID()); err != nil {
 		return promotion{}, err
 	}
+	var exposure *bool
+	if err = tx.QueryRow(ctx, "SELECT catalog_expose_upstream_models FROM olp.route_drafts WHERE id=$1", current.ID).Scan(&exposure); err != nil {
+		return promotion{}, err
+	}
+	if exposure != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO olp.model_catalog_route_settings(route_id,expose_upstream_models,etag) VALUES($1,$2,$3) ON CONFLICT(route_id) DO UPDATE SET expose_upstream_models=excluded.expose_upstream_models,etag=excluded.etag`, routeID, *exposure, access.NewID()); err != nil {
+			return promotion{}, err
+		}
+		if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET catalog_expose_upstream_models=NULL WHERE id=$1", current.ID); err != nil {
+			return promotion{}, err
+		}
+	}
 	etag := access.NewID()
 	if _, err = tx.Exec(ctx, "UPDATE olp.route_drafts SET state='validated',targets=$2,etag=$3,based_on_revision_id=$4,updated_at=now() WHERE id=$1", current.ID, targets, etag, revisionID); err != nil {
 		return promotion{}, err
@@ -434,7 +446,7 @@ func (s *Server) route(r *http.Request, p access.Principal) (access.Reply, error
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.OK(item), nil
+	return access.Detail(item, row.ETag), nil
 }
 
 func (s *Server) revisions(r *http.Request, p access.Principal) (access.Reply, error) {

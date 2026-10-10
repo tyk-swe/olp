@@ -20,6 +20,7 @@ import (
 type KeyPolicy struct {
 	LimitTemplate           *string           `json:"limit_template"`
 	RouteLimits             RouteLimits       `json:"route_limits"`
+	RegionalLimits          RegionalLimits    `json:"regional_limits"`
 	RotationIntervalDays    *int              `json:"rotation_interval_days"`
 	AllowedRouteGroups      []string          `json:"allowed_route_groups"`
 	RequiredAttributionKeys []string          `json:"required_attribution_keys"`
@@ -105,6 +106,9 @@ func validateKey(input keyInput, expirationChanged bool) error {
 		return err
 	}
 	if err := input.RouteLimits.Validate(); err != nil {
+		return err
+	}
+	if err := input.RegionalLimits.Validate(); err != nil {
 		return err
 	}
 	if err := validateKeyCIDRs(input.AllowedCIDRs); err != nil {
@@ -223,7 +227,7 @@ const keyFields = `'workload_issuer_id',k.workload_issuer_id,'workload_digest',k
  'rotation_due_at',CASE WHEN k.policy->>'rotation_interval_days' IS NOT NULL THEN COALESCE(k.rotated_at,k.created_at)+make_interval(secs=>86400.0*(k.policy->>'rotation_interval_days')::int) END,
  'active_overlaps',COALESCE((SELECT jsonb_agg(jsonb_build_object('lookup_id',o.lookup_id,'expires_at',LEAST(o.expires_at,k.expires_at)) ORDER BY o.expires_at) FROM olp.api_key_overlaps o WHERE o.api_key_id=k.id AND LEAST(o.expires_at,k.expires_at)>now() AND k.revoked_at IS NULL),'[]'::jsonb),
  'id',k.id,'lookup_id',k.lookup_id,'name',k.name,'project_id',k.project_id,'project_name',pr.name,'budget_group_id',k.budget_group_id,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes',
- 'limit_template',k.policy->'limit_template','route_limits',COALESCE(NULLIF(k.policy->'route_limits','null'::jsonb),'{}'::jsonb),'allowed_route_groups',COALESCE(NULLIF(k.policy->'allowed_route_groups','null'::jsonb),'[]'::jsonb),'allowed_cidrs',COALESCE(NULLIF(k.policy->'allowed_cidrs','null'::jsonb),'[]'::jsonb),'requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','allowed_attribution_keys',COALESCE(k.policy->'allowed_attribution_keys','[]'::jsonb),'allow_provider_state',COALESCE(k.policy->'allow_provider_state','false'::jsonb),'response_metadata',COALESCE(k.policy->'response_metadata','false'::jsonb),'required_attribution_keys',COALESCE(NULLIF(k.policy->'required_attribution_keys','null'::jsonb),'[]'::jsonb),'attribution_defaults',COALESCE(NULLIF(k.policy->'attribution_defaults','null'::jsonb),'{}'::jsonb),'end_user_policy',k.policy->'end_user_policy','end_user_source',k.policy->'end_user_source','priority',k.policy->'priority','max_priority',k.policy->'max_priority','effective_limits',k.effective_limits`
+ 'regional_limits',COALESCE(NULLIF(k.policy->'regional_limits','null'::jsonb),'{}'::jsonb),'limit_template',k.policy->'limit_template','route_limits',COALESCE(NULLIF(k.policy->'route_limits','null'::jsonb),'{}'::jsonb),'allowed_route_groups',COALESCE(NULLIF(k.policy->'allowed_route_groups','null'::jsonb),'[]'::jsonb),'allowed_cidrs',COALESCE(NULLIF(k.policy->'allowed_cidrs','null'::jsonb),'[]'::jsonb),'requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','allowed_attribution_keys',COALESCE(k.policy->'allowed_attribution_keys','[]'::jsonb),'allow_provider_state',COALESCE(k.policy->'allow_provider_state','false'::jsonb),'response_metadata',COALESCE(k.policy->'response_metadata','false'::jsonb),'required_attribution_keys',COALESCE(NULLIF(k.policy->'required_attribution_keys','null'::jsonb),'[]'::jsonb),'attribution_defaults',COALESCE(NULLIF(k.policy->'attribution_defaults','null'::jsonb),'{}'::jsonb),'end_user_policy',k.policy->'end_user_policy','end_user_source',k.policy->'end_user_source','priority',k.policy->'priority','max_priority',k.policy->'max_priority','effective_limits',k.effective_limits`
 const keyFrom = " FROM olp.api_keys_with_limits k JOIN olp.users u ON u.id=k.created_by LEFT JOIN olp.projects pr ON pr.id=k.project_id"
 
 // keyJSON renders one API key row, whose alias must be k, as the management
@@ -367,7 +371,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if patch == nil {
 		return Reply{}, Invalid("policy", "Send a policy object.")
 	}
-	allowed := []string{"route_limits", "limit_template", "name", "scopes", "rotation_interval_days", "allowed_routes", "allowed_route_groups", "allowed_cidrs", "allowed_attribution_keys", "required_attribution_keys", "attribution_defaults", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "expires_at", "budget_group_id", "allow_provider_state", "response_metadata", "end_user_source", "end_user_policy", "priority", "max_priority"}
+	allowed := []string{"regional_limits", "route_limits", "limit_template", "name", "scopes", "rotation_interval_days", "allowed_routes", "allowed_route_groups", "allowed_cidrs", "allowed_attribution_keys", "required_attribution_keys", "attribution_defaults", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "expires_at", "budget_group_id", "allow_provider_state", "response_metadata", "end_user_source", "end_user_policy", "priority", "max_priority"}
 	for field, value := range patch {
 		if !slices.Contains(allowed, field) {
 			return Reply{}, Invalid(field, "Unknown policy field.")

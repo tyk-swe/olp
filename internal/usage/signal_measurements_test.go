@@ -46,9 +46,9 @@ func TestSignalMeasurementsKeepUnknownSeparateFromRecovery(t *testing.T) {
 		{"provider no attempts", "provider.error_rate", "provider", signalTestRow{"provider", "Provider", int64(0), nil}, false, false, nil},
 		{"credential enough samples", "provider.credential.failing", "credential", signalTestRow{"credential", "provider", int64(3), int64(3)}, true, false, nil},
 		{"credential insufficient samples", "provider.credential.failing", "credential", signalTestRow{"credential", "provider", int64(2), int64(2)}, false, false, nil},
-		{"worker at bound", "worker.stale", "export_delivery", signalTestRow{"export_delivery", "30"}, true, false, nil},
-		{"worker stale", "worker.stale", "export_delivery", signalTestRow{"export_delivery", "30.000001"}, true, true, nil},
-		{"unknown worker", "worker.stale", "future_task", signalTestRow{"future_task", "1000"}, false, true, nil},
+		{"worker at bound", "worker.stale", "export_delivery", signalTestRow{"export_delivery", "", "30"}, true, false, nil},
+		{"worker stale", "worker.stale", "export_delivery", signalTestRow{"export_delivery", "", "30.000001"}, true, true, nil},
+		{"unknown worker", "worker.stale", "future_task", signalTestRow{"future_task", "", "1000"}, false, true, nil},
 		{"runtime failed", "runtime.install_failed", "gateway", signalTestRow{"gateway", int64(4), int64(3), true}, true, true, nil},
 		{"runtime installed", "runtime.install_failed", "gateway", signalTestRow{"gateway", int64(4), int64(4), true}, true, false, nil},
 		{"budget exact limit", "budget.exhausted", "project:id:day:7", signalTestRow{"project", "id", &project, "Project", "day", int64(7), "20", "20", true}, true, true, nil},
@@ -82,8 +82,8 @@ func TestSignalMeasurementsRejectInvalidStoredBudgetAndWorkerEvidence(t *testing
 		event string
 		row   signalTestRow
 	}{
-		{"worker.stale", signalTestRow{"export_delivery", "-1"}},
-		{"worker.stale", signalTestRow{"export_delivery", "not-a-number"}},
+		{"worker.stale", signalTestRow{"export_delivery", "", "-1"}},
+		{"worker.stale", signalTestRow{"export_delivery", "", "not-a-number"}},
 		{"budget.exhausted", signalTestRow{"project", "id", nil, "Project", "day", int64(7), "-1", "20", true}},
 		{"budget.exhausted", signalTestRow{"project", "id", nil, "Project", "day", int64(7), "1", "0", true}},
 	} {

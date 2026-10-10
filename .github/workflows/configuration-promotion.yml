@@ -1,0 +1,151 @@
+name: Promote OLP configuration
+on:
+  workflow_call:
+    inputs:
+      installation_url:
+        type: string
+        required: true
+      artifact_path:
+        type: string
+        required: true
+      olp_ref:
+        description: Reviewed immutable OLP source commit containing the CLI
+        type: string
+        required: true
+      external_bindings_path:
+        description: Optional destination reference JSON; contains no secret values
+        type: string
+        default: ''
+      reviewed_plan_path:
+        description: Committed olp-plan-review.json from the reviewed pull-request plan; required for apply
+        type: string
+        default: ''
+      apply:
+        description: Apply on a push to the caller's default branch
+        type: boolean
+        default: false
+    secrets:
+      management_token:
+        required: true
+permissions:
+  contents: read
+  pull-requests: write
+concurrency:
+  group: olp-promotion-${{ inputs.installation_url }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Validate execution boundary
+        env:
+          OLP_REF: ${{ inputs.olp_ref }}
+          APPLY: ${{ inputs.apply }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REVIEWED_PLAN: ${{ inputs.reviewed_plan_path }}
+        run: |
+          [[ $OLP_REF =~ ^[a-f0-9]{40}$ ]] || { echo 'olp_ref must be a reviewed commit SHA'; exit 1; }
+          if [[ $APPLY == true ]]; then
+            [[ $EVENT == push && $REF == "refs/heads/$DEFAULT_BRANCH" ]] || { echo 'Apply requires a push to the default branch'; exit 1; }
+            [[ -n $REVIEWED_PLAN ]] || { echo 'Apply requires a committed reviewed plan'; exit 1; }
+          fi
+      - name: Check out configuration data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: configuration
+          persist-credentials: false
+      - name: Check out reviewed CLI source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tyk-swe/olp
+          ref: ${{ inputs.olp_ref }}
+          path: olp-source
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: olp-source/go.mod
+          cache-dependency-path: olp-source/go.sum
+      - name: Build reviewed CLI
+        working-directory: olp-source
+        run: go build -mod=readonly -o "$RUNNER_TEMP/olp" ./cmd/olp
+      - name: Plan configuration
+        id: plan
+        continue-on-error: true
+        env:
+          OLP_MANAGEMENT_URL: ${{ inputs.installation_url }}
+          PROMOTION_TOKEN: ${{ secrets.management_token }}
+          ARTIFACT: ${{ inputs.artifact_path }}
+          EXTERNAL_BINDINGS: ${{ inputs.external_bindings_path }}
+        run: |
+          umask 077
+          token_file="$RUNNER_TEMP/olp-promotion.token"
+          trap 'rm -f -- "$token_file"' EXIT
+          printf '%s' "$PROMOTION_TOKEN" > "$token_file"
+          export OLP_MANAGEMENT_TOKEN_FILE="$token_file"
+          configuration_root="$(realpath configuration)"
+          artifact_file="$(realpath -e "configuration/$ARTIFACT")"
+          [[ $artifact_file == "$configuration_root/"* ]] || { echo 'Artifact must stay within configuration checkout'; exit 1; }
+          arguments=(config plan --file "$artifact_file" --output "$RUNNER_TEMP/olp-plan.json")
+          if [[ -n $EXTERNAL_BINDINGS ]]; then
+            bindings_file="$(realpath -e "configuration/$EXTERNAL_BINDINGS")"
+            [[ $bindings_file == "$configuration_root/"* ]] || { echo 'Bindings must stay within configuration checkout'; exit 1; }
+            arguments+=(--external-bindings-file "$bindings_file")
+          fi
+          "$RUNNER_TEMP/olp" "${arguments[@]}"
+      - name: Prepare review
+        if: always() && (steps.plan.outcome == 'success' || steps.plan.outcome == 'failure')
+        run: node olp-source/scripts/promotion-comment.mjs "$RUNNER_TEMP/olp-plan.json" "$RUNNER_TEMP/olp-comment.json" "$RUNNER_TEMP/olp-plan-review.json"
+      - name: Upload complete review
+        if: always() && (steps.plan.outcome == 'success' || steps.plan.outcome == 'failure')
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: olp-plan-review
+          path: ${{ runner.temp }}/olp-plan-review.json
+          retention-days: 7
+      - name: Comment actions, conflicts and blockers
+        if: always() && github.event_name == 'pull_request' && (steps.plan.outcome == 'success' || steps.plan.outcome == 'failure')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --method POST "repos/$REPOSITORY/issues/$PULL_REQUEST/comments" --input "$RUNNER_TEMP/olp-comment.json" > /dev/null
+      - name: Require an applicable plan
+        if: always()
+        env:
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+        run: '[[ $PLAN_OUTCOME == success ]]'
+      - name: Verify reviewed plan
+        id: review
+        if: inputs.apply && steps.plan.outcome == 'success'
+        env:
+          REVIEWED_PLAN: ${{ inputs.reviewed_plan_path }}
+        run: |
+          configuration_root="$(realpath configuration)"
+          review_file="$(realpath -e "configuration/$REVIEWED_PLAN")"
+          [[ $review_file == "$configuration_root/"* ]] || { echo 'Reviewed plan must stay within configuration checkout'; exit 1; }
+          node olp-source/scripts/verify-promotion-review.mjs "$RUNNER_TEMP/olp-plan.json" "$review_file"
+      - name: Apply merged configuration
+        if: inputs.apply && steps.plan.outcome == 'success' && steps.review.outcome == 'success'
+        env:
+          OLP_MANAGEMENT_URL: ${{ inputs.installation_url }}
+          PROMOTION_TOKEN: ${{ secrets.management_token }}
+          EXTERNAL_BINDINGS: ${{ inputs.external_bindings_path }}
+        run: |
+          umask 077
+          token_file="$RUNNER_TEMP/olp-promotion.token"
+          trap 'rm -f -- "$token_file"' EXIT
+          printf '%s' "$PROMOTION_TOKEN" > "$token_file"
+          export OLP_MANAGEMENT_TOKEN_FILE="$token_file"
+          arguments=(config apply --plan-file "$RUNNER_TEMP/olp-plan.json" --output "$RUNNER_TEMP/olp-applied.json" --idempotency-key "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT")
+          if [[ -n $EXTERNAL_BINDINGS ]]; then
+            arguments+=(--external-bindings-file "$(realpath -e "configuration/$EXTERNAL_BINDINGS")")
+          fi
+          "$RUNNER_TEMP/olp" "${arguments[@]}"

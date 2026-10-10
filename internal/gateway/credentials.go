@@ -76,6 +76,16 @@ func (s *Server) authenticate(r *http.Request, scope string) (access.Authority, 
 	return s.authenticateRequest(r, token, scope)
 }
 
+// CatalogAuthority shares the gateway's pinned authority, revocation, scope
+// and client-address checks with the management catalog's consumer-key reads.
+func (s *Server) CatalogAuthority(r *http.Request) (access.Authority, error) {
+	authority, failure := s.authenticate(r, "models_read")
+	if failure != nil {
+		return access.Authority{}, access.Fail(failure.Status, failure.Code, failure.Message)
+	}
+	return authority, nil
+}
+
 // bedrockAuthenticate is authenticate for Bedrock's credential locations.
 func (s *Server) bedrockAuthenticate(r *http.Request) (access.Authority, *Error) {
 	token, e := bedrockPresentedKey(r)

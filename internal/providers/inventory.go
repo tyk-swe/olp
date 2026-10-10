@@ -133,6 +133,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/providers", s.createProvider, access.MaxBody(1<<20))
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}", s.provider)
 	s.Access.Route(mux, "PATCH /api/v1/providers/{provider_id}", s.updateProvider, access.MaxBody(1<<20))
+	s.Access.Route(mux, "DELETE /api/v1/providers/{provider_id}", s.deleteProvider)
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/activate", s.activateProvider)
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/disable", s.disableProvider)
 	// Each advertised capability, or each declared model of a provider without
@@ -158,6 +159,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/poll", s.pollGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
 	s.Access.Route(mux, "DELETE /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}", s.cancelGrantEnrollment)
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/credential-slots", s.slots)
+	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/credential-slots/{slot_id}", s.getSlot)
+	s.Access.Route(mux, "DELETE /api/v1/providers/{provider_id}/credential-slots/{slot_id}", s.deleteSlot)
 	s.Access.Route(mux, "PUT /api/v1/providers/{provider_id}/credential-slots/{slot_id}", s.writeSlot)
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credential-slots/{slot_id}/validate", s.validateSlot, access.MaxBody(65536), access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/revisions", s.revisions)

@@ -1,4 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const vaultDirectory =
+  process.env.OLP_CONSOLE_E2E_VAULT_DIR ??
+  join(tmpdir(), 'olp-vault-browser-fixture');
 
 if (!process.env.OLP_DATABASE_URL || !process.env.OLP_VALKEY_URL) {
   throw new Error('Run make integration to provision isolated services');
@@ -13,7 +18,7 @@ function database(name: string) {
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: '**/{access,basics,gateway,plugins,code-mode}/**/*.spec.ts',
+  testMatch: '**/{access,basics,gateway,plugins,code-mode,fleet}/**/*.spec.ts',
   timeout: 90_000,
   outputDir: 'test-results/access',
   workers: 1,
@@ -61,6 +66,9 @@ export default defineConfig({
       reuseExistingServer: false,
       env: {
         OLP_DATABASE_URL: database('olp_packaged'),
+        OLP_VAULT_ADDR: 'http://127.0.0.1:4199',
+        OLP_VAULT_ROLE: 'olp',
+        OLP_VAULT_JWT_FILE: join(vaultDirectory, 'identity.jwt'),
         OLP_PUBLIC_ORIGIN: 'http://127.0.0.1:4182',
         OLP_LISTEN_ADDR: '127.0.0.1:4182',
         OLP_OBSERVABILITY_LISTEN_ADDR: '127.0.0.1:9182',
@@ -75,6 +83,9 @@ export default defineConfig({
       reuseExistingServer: false,
       env: {
         OLP_DATABASE_URL: database('olp_vite'),
+        OLP_VAULT_ADDR: 'http://127.0.0.1:4199',
+        OLP_VAULT_ROLE: 'olp',
+        OLP_VAULT_JWT_FILE: join(vaultDirectory, 'identity.jwt'),
         OLP_PUBLIC_ORIGIN: 'http://localhost:4183',
         OLP_LISTEN_ADDR: '127.0.0.1:4184',
         OLP_OBSERVABILITY_LISTEN_ADDR: '127.0.0.1:9184',
@@ -88,6 +99,26 @@ export default defineConfig({
       url: 'http://127.0.0.1:4186/.well-known/openid-configuration',
       reuseExistingServer: false
     },
+    ...(process.env.OLP_CONSOLE_E2E_FLEET_SECRET_DIR
+      ? [
+          { name: 'first', host: 'localhost', port: 4197 },
+          { name: 'second', host: '127.0.0.1', port: 4198 }
+        ].map(({ name, host, port }) => ({
+          command: 'bash tests/fleet/run-olp.sh',
+          url: `http://127.0.0.1:${port + 5000}/health/live`,
+          reuseExistingServer: false,
+          gracefulShutdown: { signal: 'SIGTERM' as const, timeout: 30_000 },
+          env: {
+            OLP_DATABASE_URL: database(`olp_fleet_${name}`),
+            OLP_PUBLIC_ORIGIN: `http://${host}:${port}`,
+            OLP_LISTEN_ADDR: `127.0.0.1:${port}`,
+            OLP_OBSERVABILITY_LISTEN_ADDR: `127.0.0.1:${port + 5000}`,
+            OLP_CONSOLE_DIR: 'console/build',
+            OLP_DATABASE_MAX_CONNECTIONS: '5',
+            OLP_CONSOLE_E2E_FLEET_INSTANCE_SECRET_DIR: `${process.env.OLP_CONSOLE_E2E_FLEET_SECRET_DIR}/${name}`
+          }
+        }))
+      : []),
     {
       command: 'node tests/journeys/mock-azure-openai.mjs',
       url: 'http://127.0.0.1:4178/health',
@@ -96,6 +127,11 @@ export default defineConfig({
     {
       command: 'node tests/gateway/mock-openai.mjs',
       url: 'http://127.0.0.1:4187/health',
+      reuseExistingServer: false
+    },
+    {
+      command: 'node tests/gateway/mock-vault.mjs',
+      url: 'http://127.0.0.1:4199/health',
       reuseExistingServer: false
     },
     {

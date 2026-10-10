@@ -25,7 +25,6 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/providerinvoke"
-	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
@@ -736,7 +735,7 @@ func (s *Server) credentialFor(ctx context.Context, tx pgx.Tx, p *record) ([]byt
 	if err := slot.credentialFits(&p.Configuration); err != nil {
 		return nil, state, err
 	}
-	secret, err := s.Access.Keys.Read(ctx, tx, s.Access.Installation, *state.ID, secrets.ProviderCredential)
+	secret, err := s.readCredential(ctx, tx, *state.ID)
 	if err != nil {
 		return nil, state, err
 	}

@@ -54,6 +54,39 @@ runtime grants. See
 [database deadlines](operations.md#database-deadlines-and-privileges) for query
 limits and backup roles.
 
+### Regional read replicas
+
+Set `OLP_DATABASE_READ_URL` (or its mounted-file form) on regional gateways and
+workers to offload runtime release and key/credential authority reads to a
+physical PostgreSQL replica. The Helm chart accepts an optional
+`config.databaseReadSecretName` and `config.databaseReadSecretKey`; all workload
+components in that chart use the named connection. Set `OLP_DATABASE_URL` to
+the single writable primary. Management mutations, accounting, workload-key
+registration, grant refresh requests and historical secret reads use the
+primary. Both connections must name the same installation and schema version.
+
+Each authority poll samples the primary WAL position and the replica replay
+position before opening its read snapshot. A read inherits the local timestamp
+of the newest primary position that the replica has reached. Replica delay and
+time since the last successful poll together consume the existing 60-second
+authority deadline. A reachable replica cannot keep an unreplayed revocation
+fresh; API-key and provider-credential admissions refuse once the deadline is
+exceeded. A healthy idle replica stays fresh without clock synchronization or
+database heartbeat writes. The primary and replica must both remain reachable
+for new freshness proofs. No replica query runs on the inference admission
+path.
+
+Every gateway or worker with a read URL has a separate read pool, bounded by
+the same `OLP_DATABASE_MAX_CONNECTIONS` setting. Budget those connections
+against replica capacity in addition to the primary connection budget. Control
+processes use only the primary and do not open the optional read pool.
+
+Read replicas do not create independent installations. Monitor replication,
+authority age and readiness, apply migrations to the primary, and wait for
+replay before rolling out the new binary. The integration harness runs a
+physical standby, pauses replay after key revocation, verifies deadline
+refusal, then resumes replay and verifies the revoked key remains refused.
+
 ### Shared Valkey and workers
 
 The PostgreSQL installation UUID supplies the Valkey namespace, so independent
@@ -369,3 +402,64 @@ Candidate qualification and the weekly release scan evaluate both the image and
 those inventories; missing inventory is a failure. Downloaded chart archives can
 be checked with `gh attestation verify CHART.tgz --repo tyk-swe/olp` before
 installation.
+
+## Regional fleets
+
+Run one control plane and PostgreSQL primary per installation. Each region runs
+its own gateways, workers and Valkey, optionally with a local PostgreSQL read
+replica. Set `OLP_REGION` to the same name on every gateway and worker that
+shares that Valkey; use a distinct name for each regional store. Helm exposes
+this as `config.region`. All regions use the same installation UUID,
+authentication key and encryption key ring. An independent installation needs
+its own database and keys.
+
+Key RPM, TPM and concurrency counters are regional. The complete default key
+limit applies in every region. Optional `regional_limits` on a key override
+individual count limits by region; omitted fields inherit defaults. For example,
+`{"west":{"requests_per_minute":100},"east":{"max_concurrency":8}}` sets a
+western RPM override and an eastern concurrency override. Project limit
+templates continue to impose ceilings on the effective regional policy.
+Regional overrides cannot define cost limits. Route, end-user and provider
+count limits likewise use the region's Valkey. There is no automatic division
+when a region joins, leaves or fails.
+
+Durable cost accounts and usage facts remain global in PostgreSQL. One elected
+worker in **each region** reconciles those global balances into that region's
+Valkey every minute. Workers in different regions can hold leadership
+simultaneously; workers in the same region cannot. Existing reservation and
+settlement rules protect each local budget snapshot, including costs in flight.
+These snapshots provide eventual global enforcement, rather than a global
+synchronous reservation on every request.
+
+The conservative overshoot envelope is the number of regions multiplied by the
+maximum cost admitted between global reconciliations in one region. Count all
+cost admitted against an older snapshot during that interval, including requests
+that finish before the next reconciliation. For two regions admitting at most
+$0.60 each before reconciliation, the envelope is $1.20. If both start from zero
+and each admits $0.60 against a $1 budget, global spend can reach $1.20 before
+both reject additional cost after reconciliation. Bound this exposure with
+conservative request estimates, per-key count/concurrency limits and regional
+rate overrides. The envelope assumes bounded estimates and timely accounting;
+a worker outage lengthens the reconciliation interval. Apply the configured
+coordination outage policy and monitor worker recovery. Do not interpret the
+bound as only the cost of requests still running at the instant of reconciliation.
+
+Readiness and worker metrics on a process with `OLP_REGION` use that region's
+metadata-consumer, cost-reconciliation and health-probe checkpoints. Success in
+another region cannot hide a silent local worker. PostgreSQL-only tasks and the
+control plane's installation-wide summary remain shared.
+
+Within a priority tier, gateways prefer providers whose configured cloud region
+(or recorded model region when no cloud region is configured) matches
+`OLP_REGION`. Hard region and privacy constraints are evaluated first, and a
+higher-priority eligible provider stays ahead of locality. Unknown regions have
+no local preference. Simulation uses the control process's configured region.
+
+Qualification uses two independent authenticated Valkey services and one
+PostgreSQL installation:
+`TestRegionalRateAndConcurrencyLimitsWithGlobalBudgetReconciliation` checks count
+overrides, regional concurrency, simultaneous regional leaders, the admitted-cost
+envelope and refusal in both regions after global reconciliation.
+`make integration` provisions both regional stores and a physical PostgreSQL
+standby; explicitly running these tests requires the corresponding
+`OLP_TEST_VALKEY_REGIONAL_URL` and `OLP_TEST_DATABASE_READ_URL` fixtures.

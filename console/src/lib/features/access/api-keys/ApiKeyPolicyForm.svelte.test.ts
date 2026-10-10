@@ -24,6 +24,7 @@ const key = {
   budget_group_id: null,
   scopes: ['inference'],
   allowed_routes: [],
+  regional_limits: {},
   allow_provider_state: false,
   response_metadata: false,
   allowed_attribution_keys: [],

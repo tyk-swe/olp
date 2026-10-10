@@ -118,19 +118,33 @@ func (s *Server) policy(r *http.Request, p access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.Detail(map[string]any{"policy": policyOrDefault(policy), "etag": etag}, etag), nil
+	var configured bool
+	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.routing_policies WHERE scope=$1 AND scope_id=$2 AND configured)", scope, id).Scan(&configured); err != nil {
+		return access.Reply{}, err
+	}
+	return access.Detail(map[string]any{"policy": policyOrDefault(policy), "etag": etag, "configured": configured}, etag), nil
 }
 func (s *Server) putPolicy(r *http.Request, _ access.Principal) (access.Reply, error) {
+	return s.writePolicy(r, false)
+}
+
+func (s *Server) deletePolicy(r *http.Request, _ access.Principal) (access.Reply, error) {
+	return s.writePolicy(r, true)
+}
+
+func (s *Server) writePolicy(r *http.Request, remove bool) (access.Reply, error) {
 	scope, id, operation, err := policyScope(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	var policy runtime.Policy
-	if err = access.Decode(r, &policy); err != nil {
-		return access.Reply{}, err
-	}
-	if err = policy.Validate(); err != nil {
-		return access.Reply{}, err
+	if !remove {
+		if err = access.Decode(r, &policy); err != nil {
+			return access.Reply{}, err
+		}
+		if err = policy.Validate(); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	a := s.Access
 	tx, err := a.Begin(r)
@@ -168,9 +182,13 @@ func (s *Server) putPolicy(r *http.Request, _ access.Principal) (access.Reply, e
 	if err = access.Match(r, etag); err != nil {
 		return access.Reply{}, err
 	}
+	previous := etag
 	etag = access.NewID()
 	data, _ := json.Marshal(policy)
-	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.routing_policies(scope,scope_id,policy,etag,updated_by) VALUES($1,$2,$3,$4,$5) ON CONFLICT(scope,scope_id) DO UPDATE SET policy=excluded.policy,etag=excluded.etag,updated_by=excluded.updated_by,updated_at=now()`, scope, id, data, etag, principal.UserID()); err != nil {
+	if remove {
+		data = []byte(`{}`)
+	}
+	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.routing_policies(scope,scope_id,policy,etag,updated_by,configured) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(scope,scope_id) DO UPDATE SET policy=excluded.policy,etag=excluded.etag,updated_by=excluded.updated_by,configured=excluded.configured,updated_at=now()`, scope, id, data, etag, principal.UserID(), !remove); err != nil {
 		return access.Reply{}, err
 	}
 	switch scope {
@@ -187,10 +205,20 @@ func (s *Server) putPolicy(r *http.Request, _ access.Principal) (access.Reply, e
 			return access.Reply{}, err
 		}
 	}
-	if err = access.Audit(r.Context(), tx, r, principal.Actor(), "routing_policy.update", scope, id, "success"); err != nil {
+	action := "routing_policy.update"
+	if remove {
+		action = "routing_policy.delete"
+	}
+	if err = access.Audit(r.Context(), tx, r, principal.Actor(), action, scope, id, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	reply := access.Detail(map[string]any{"policy": &policy, "etag": etag}, etag)
+	reply := access.Detail(map[string]any{"policy": &policy, "etag": etag, "configured": true}, etag)
+	if remove {
+		reply = access.Reply{Status: http.StatusNoContent}
+	}
+	if scope != "installation" {
+		reply.ParentMutation = &access.ParentMutation{Previous: previous, Current: etag}
+	}
 	if err = a.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}

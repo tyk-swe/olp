@@ -373,6 +373,14 @@ builds a separate test binary, and release images never enable that tag.
 
 ## Projects and budget groups
 
+Automation can delete unused budget groups and notification destinations/rules
+with their observed `If-Match` and an `Idempotency-Key`. A dependency or retained
+accounting/delivery history returns HTTP 409; detach or disable the resource
+when retained history prevents deletion. A completed deletion replays with its
+original key. Removing a destination also removes its sealed signing secret;
+budget-group deletion advances key authority. Every successful deletion is
+audited through the ordinary management mutation path.
+
 Users have a global or assigned-project access scope in addition to their
 installation role. Global users can access all projects and unassigned resources
 within that role's permissions. Assigned users see only their member projects;
@@ -437,6 +445,17 @@ inactive or OIDC-deauthorized, loses operations the creator's current role does
 not hold, and reaches only the creator's projects when the creator has an
 assigned access scope. Nothing is revoked, so a creator who regains authority
 also restores their tokens.
+An installation-wide `manage_projects` token can create, read and update
+projects and their membership while its creator remains an installation-wide
+owner. The scope is separate from provider configuration and does not imply
+`read`, `configure` or `keys`; assigned-project tokens cannot administer the
+installation's project boundary. This supports infrastructure automation
+without granting token administration.
+Deleting an empty project requires its observed ETag and an Idempotency-Key.
+Existing providers, routes, drafts, keys and retained foreign-key dependencies
+return `409 project_in_use`, preserving the project boundary and its history.
+Successful deletion advances runtime authority and records an audit event;
+repeating the same idempotency key returns the completed result.
 Token administration itself — create, list, read, revoke — is always
 session-owner-only; no management token can manage tokens. Installing,
 approving, permitting and uninstalling [provider plugins](plugins.md) is

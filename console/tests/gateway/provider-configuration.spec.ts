@@ -74,9 +74,12 @@ test('default SageMaker onboarding requires an endpoint before creation', async 
     page.getByText('Amazon SageMaker AI requires probe model.', { exact: true })
   ).toBeVisible();
   await expect(page).toHaveURL(/\/providers\/new$/);
-  await page.locator('form').screenshot({
-    path: info.outputPath('console-sagemaker-required-endpoint.png')
-  });
+  await page
+    .getByRole('main')
+    .locator('form')
+    .screenshot({
+      path: info.outputPath('console-sagemaker-required-endpoint.png')
+    });
 });
 
 test('configuration forms retain native source through real saves, conflicts and strict activation', async ({

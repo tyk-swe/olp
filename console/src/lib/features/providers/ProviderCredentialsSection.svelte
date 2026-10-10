@@ -1,4 +1,6 @@
 <script lang="ts">
+  import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
+  import { parseExternalReference } from './externalReference';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { onDestroy } from 'svelte';
@@ -47,6 +49,8 @@
     queryFn: ({ signal }) => listProviderCredentials(current.id, signal)
   }));
   let credentialValue = $state('');
+  let useExternal = $state(false);
+  let externalValue = $state('');
   // The store refuses a rotation on a disabled provider with the same 409 that
   // Save draft returns, so the form is locked until it is restored as a draft.
   const editingLocked = $derived(providerDisabled(current));
@@ -57,10 +61,21 @@
 
   async function rotate(event: SubmitEvent) {
     event.preventDefault();
-    if (!credentialValue || !canManage || editingLocked) return;
+    if (
+      !(useExternal ? externalValue : credentialValue) ||
+      !canManage ||
+      editingLocked
+    )
+      return;
     const submittedCredential = credentialValue;
     await run('rotate-credential', async () => {
-      await rotateProviderCredential(current, submittedCredential);
+      await rotateProviderCredential(
+        current,
+        useExternal
+          ? parseExternalReference(externalValue)
+          : submittedCredential
+      );
+      externalValue = '';
       if (credentialValue === submittedCredential) credentialValue = '';
       await credentials.refetch();
       onResetModelPage();
@@ -116,18 +131,30 @@
         credential version.</span
       >
     </div>{:else}<form class="credential-form" onsubmit={rotate}>
-      <label class="sr-only" for="rotation-secret">New credential</label><input
-        id="rotation-secret"
-        type="password"
-        autocomplete="new-password"
-        bind:value={credentialValue}
-        placeholder="New credential"
-        disabled={!canManage || editingLocked}
-      /><button
+      <label
+        ><input
+          type="checkbox"
+          bind:checked={useExternal}
+          disabled={!canManage || editingLocked || Boolean(busy)}
+        />Use an external credential version</label
+      >
+      {#if useExternal}<ExternalReferenceEditor
+          bind:value={externalValue}
+          disabled={!canManage || editingLocked || Boolean(busy)}
+        />{:else}
+        <label class="sr-only" for="rotation-secret">New credential</label
+        ><input
+          id="rotation-secret"
+          type="password"
+          autocomplete="new-password"
+          bind:value={credentialValue}
+          placeholder="New credential"
+          disabled={!canManage || editingLocked}
+        />{/if}<button
         class="button button-secondary"
         type="submit"
         disabled={!canManage ||
-          !credentialValue ||
+          !(useExternal ? externalValue : credentialValue) ||
           Boolean(busy) ||
           !providerSpec ||
           editingLocked}
@@ -152,8 +179,11 @@
           credential.grant?.lapsed_at}
         <li>
           <span
-            ><strong>Version {credential.version}</strong><small
-              >{formatDate(credential.created_at)}</small
+            ><strong>Version {credential.version}</strong
+            >{#if credential.external_reference}<small
+                >{credential.external_reference.store} · pinned store version {credential
+                  .external_reference.version}</small
+              >{/if}<small>{formatDate(credential.created_at)}</small
             >{#if credential.grant}<small
                 >Observed principal {credential.grant.principal}</small
               >{/if}{#if lapsed}<small
@@ -213,11 +243,11 @@
     font-size: var(--text-body-sm);
   }
   .credential-form {
-    display: flex;
-    align-items: end;
+    display: grid;
+    align-items: start;
     gap: 0.6rem;
   }
-  .credential-form input {
+  .credential-form input[type='password'] {
     min-width: 0;
     min-height: 2.5rem;
     flex: 1;
@@ -228,10 +258,10 @@
     color: var(--foreground);
     transition: border-color var(--motion);
   }
-  .credential-form input:hover {
+  .credential-form input[type='password']:hover {
     border-color: var(--border-strong);
   }
-  .credential-form input::placeholder {
+  .credential-form input[type='password']::placeholder {
     color: var(--foreground-muted);
   }
   .credential-list {

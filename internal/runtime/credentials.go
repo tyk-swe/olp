@@ -29,6 +29,9 @@ const (
 	// StaleAuthority withholds every credential version: the last authority
 	// read is too old to vouch for any of them.
 	StaleAuthority Eligibility = "stale_authority"
+	// ExternalUnavailable makes a failed or expired store resolution visible in
+	// route plans; a static credential is never substituted for a reference.
+	ExternalUnavailable Eligibility = "external_secret_unavailable"
 )
 
 // ErrCredentialUnavailable reports a credential version the credential source
@@ -56,11 +59,19 @@ type Credentials interface {
 // authority read.
 func (m *Manager) Eligibility(credentialID string) Eligibility {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	if !m.authority.loaded || time.Since(m.authority.readAt) > AuthorityStaleAfter {
+		m.mu.RUnlock()
 		return StaleAuthority
 	}
-	return m.authority.ineligible[credentialID]
+	eligibility := m.authority.ineligible[credentialID]
+	m.mu.RUnlock()
+	if eligibility != Eligible {
+		return eligibility
+	}
+	if known, available := m.external.available(credentialID); known && !available {
+		return ExternalUnavailable
+	}
+	return Eligible
 }
 
 // ReadIneligible reads which credential versions and network credentials may
@@ -99,6 +110,12 @@ func (m *Manager) Secret(ctx context.Context, release *Release, credentialID str
 	if err := m.eligible(credentialID); err != nil {
 		return nil, 0, err
 	}
+	if release != nil {
+		if reference, ok := release.references[credentialID]; ok {
+			value, err := m.external.read(ctx, m.ExternalSecrets, credentialID, reference)
+			return value, 0, err
+		}
+	}
 	if grant, ok := m.grantSecret(credentialID); ok {
 		return grant.secret, grant.generation, nil
 	}
@@ -123,6 +140,14 @@ func (m *Manager) Secret(ctx context.Context, release *Release, credentialID str
 	}
 	if eligibility := ineligible[credentialID]; eligibility != Eligible {
 		return nil, 0, fmt.Errorf("credential %s: %s: %w", credentialID, eligibility, ErrCredentialUnavailable)
+	}
+	references, err := readExternalReferences(ctx, tx, []string{credentialID})
+	if err != nil {
+		return nil, 0, err
+	}
+	if reference, ok := references[credentialID]; ok {
+		value, err := m.external.read(ctx, m.ExternalSecrets, credentialID, reference)
+		return value, 0, err
 	}
 	generations, err := ReadGrantGenerations(ctx, tx, []string{credentialID})
 	if err != nil {

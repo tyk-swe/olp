@@ -25,6 +25,7 @@ import (
 
 // Server serves the route management surface.
 type Server struct {
+	Region string
 	Access *access.Server
 	Inputs func() *usage.RoutingInputs
 	// Catalog is the reference catalog this release ships, whose documented

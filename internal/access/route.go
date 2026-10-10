@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,6 +23,7 @@ type PublicHandler func(*http.Request) (Reply, error)
 type routeOptions struct {
 	maxBody int64
 	timeout time.Duration
+	keyAuth func(*http.Request) (Authority, error)
 }
 
 // RouteOption adjusts a route's request bounds.
@@ -34,6 +36,12 @@ func MaxBody(n int64) RouteOption { return func(o *routeOptions) { o.maxBody = n
 // Deadline extends the request deadline for operations that legitimately
 // outlive the default 15 seconds.
 func Deadline(d time.Duration) RouteOption { return func(o *routeOptions) { o.timeout = d } }
+
+// InferenceKeyAuth supplies the pinned gateway authority for a contract's
+// read-only apiKeyBearer alternative. Other routes cannot enable it.
+func InferenceKeyAuth(authenticate func(*http.Request) (Authority, error)) RouteOption {
+	return func(o *routeOptions) { o.keyAuth = authenticate }
+}
 
 func options(opts []RouteOption) routeOptions {
 	o := routeOptions{maxBody: 65536, timeout: 15 * time.Second}
@@ -66,13 +74,40 @@ func declared(pattern string, public bool) Requirement {
 func (s *Server) Route(mux *http.ServeMux, pattern string, h Handler, opts ...RouteOption) {
 	req := declared(pattern, false)
 	o := options(opts)
+	keyAlternative := false
+	for _, alternative := range req.Alternatives {
+		keyAlternative = keyAlternative || alternative.Kind == "key"
+	}
+	if keyAlternative != (o.keyAuth != nil) || keyAlternative && !strings.HasPrefix(pattern, "GET ") {
+		panic(fmt.Sprintf("management route %s has an invalid inference-key authenticator", pattern))
+	}
 	mux.HandleFunc(pattern, s.serve(o.maxBody, o.timeout, func(r *http.Request) (Reply, error) {
+		if o.keyAuth != nil && presentedInferenceKey(r) {
+			authority, err := o.keyAuth(r)
+			if err != nil {
+				return Reply{}, err
+			}
+			p := Principal{Kind: "key", KeyAuthority: &authority}
+			if req.Admits(p) != nil {
+				return Reply{}, Forbidden()
+			}
+			return h(r, p)
+		}
 		r, p, err := s.admitRoute(r, req)
 		if err != nil {
 			return Reply{}, err
 		}
 		return h(r, p)
 	}))
+}
+
+func presentedInferenceKey(r *http.Request) bool {
+	header := r.Header.Get("Authorization")
+	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
+		return false
+	}
+	token := strings.TrimSpace(header[7:])
+	return strings.HasPrefix(token, "olp_") || strings.Count(token, ".") == 2
 }
 
 // Stream mounts a secured streaming handler, admitted like Route.

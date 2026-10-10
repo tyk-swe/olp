@@ -23,7 +23,7 @@ func portableNetwork(entry *ProviderEntry) {
 
 // networkConfiguration binds portable network references without mutating the
 // canonical import document or exposing a destination environment's secret IDs.
-func (s *Server) networkConfiguration(ctx context.Context, tx pgx.Tx, providerID string, entry *ProviderEntry, existing *existingProvider, bindings map[string]string) (providers.Configuration, error) {
+func (s *Server) networkConfiguration(ctx context.Context, tx pgx.Tx, providerID string, entry *ProviderEntry, existing *existingProvider, bindings bindingSet) (providers.Configuration, error) {
 	cfg := entry.Configuration
 	if cfg.Options.Network == nil {
 		return cfg, nil
@@ -46,7 +46,7 @@ func (s *Server) networkConfiguration(ctx context.Context, tx pgx.Tx, providerID
 			if s.StoreNetworkCredential == nil {
 				return cfg, access.Invalid("secret_bindings", "Network credential storage is unavailable.")
 			}
-			id, err := s.StoreNetworkCredential(ctx, tx, providerID, secret)
+			id, err := s.StoreNetworkCredential(ctx, tx, providerID, secret.secret)
 			if err != nil {
 				return cfg, err
 			}
@@ -60,7 +60,7 @@ func (s *Server) networkConfiguration(ctx context.Context, tx pgx.Tx, providerID
 	return cfg, nil
 }
 
-func (s *Server) bindNetwork(ctx context.Context, tx pgx.Tx, providerID string, entry *ProviderEntry, existing *existingProvider, bindings map[string]string) error {
+func (s *Server) bindNetwork(ctx context.Context, tx pgx.Tx, providerID string, entry *ProviderEntry, existing *existingProvider, bindings bindingSet) error {
 	cfg, err := s.networkConfiguration(ctx, tx, providerID, entry, existing, bindings)
 	if err != nil {
 		return err

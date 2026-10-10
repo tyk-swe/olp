@@ -39,7 +39,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	if err = organizations.Err(); err != nil {
 		return nil, err
 	}
-	projects, err := q.Query(ctx, "SELECT (SELECT name FROM olp.organizations WHERE id=organization_id) AS organization_name,name,end_user_policy,attribution_policy,route_groups,budget_policy,limit_templates,attribution_budgets FROM olp.projects ORDER BY lower(name),name")
+	projects, err := q.Query(ctx, "SELECT (SELECT name FROM olp.organizations WHERE id=organization_id) AS organization_name,name,end_user_policy,attribution_policy,route_groups,budget_policy,limit_templates,attribution_budgets,COALESCE((SELECT enabled FROM olp.model_catalog_project_settings WHERE project_id=projects.id),false),COALESCE((SELECT prices_public FROM olp.model_catalog_project_settings WHERE project_id=projects.id),false) FROM olp.projects ORDER BY lower(name),name")
 	if err != nil {
 		return nil, err
 	}
@@ -53,10 +53,12 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		var budget *access.BudgetPolicy
 		var templates access.LimitTemplates
 		var caps access.AttributionBudgets
-		if err = projects.Scan(&organization, &name, &policy, &labels, &groups, &budget, &templates, &caps); err != nil {
+		var publicCatalog, publicPrices bool
+		if err = projects.Scan(&organization, &name, &policy, &labels, &groups, &budget, &templates, &caps, &publicCatalog, &publicPrices); err != nil {
 			return nil, err
 		}
 		entry := ProjectEntry{Organization: organization, AttributionBudgets: caps, LimitTemplates: &templates, Name: name, Budget: budget, AttributionPolicy: labels, RouteGroups: groups}
+		entry.PublicCatalog, entry.PublicCatalogPrices = publicCatalog, publicPrices
 		if policy != nil {
 			entry.EndUserDefaults = &policy.Defaults
 			entry.EndUserLimitTemplate = policy.LimitTemplate
@@ -159,7 +161,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		referenceGrants(pp.entry)
 		doc.Providers = append(doc.Providers, *pp.entry)
 	}
-	routes, err := q.Query(ctx, `SELECT r.slug,pr.name,r.state='retired',v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.routing_policy,v.content_policy,v.fidelity,v.behavior
+	routes, err := q.Query(ctx, `SELECT r.slug,pr.name,r.state='retired',v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.routing_policy,v.content_policy,v.fidelity,v.behavior,COALESCE((SELECT expose_upstream_models FROM olp.model_catalog_route_settings WHERE route_id=r.id),false)
         FROM olp.routes r JOIN olp.route_revisions v ON v.id=r.latest_revision_id
         LEFT JOIN olp.projects pr ON pr.id=r.project_id ORDER BY r.slug`)
 	if err != nil {
@@ -169,7 +171,7 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	for routes.Next() {
 		var route RouteEntry
 		var operations, targets, policy, behavior []byte
-		if err = routes.Scan(&route.Slug, &route.Project, &route.Retired, &operations, &route.OverallTimeoutMS, &route.MaxAttempts, &targets, &policy, &route.ContentPolicy, &route.Fidelity, &behavior); err != nil {
+		if err = routes.Scan(&route.Slug, &route.Project, &route.Retired, &operations, &route.OverallTimeoutMS, &route.MaxAttempts, &targets, &policy, &route.ContentPolicy, &route.Fidelity, &behavior, &route.ExposeUpstreamModels); err != nil {
 			return nil, err
 		}
 		if err = route.setBehavior(behavior); err != nil {
@@ -224,6 +226,18 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 			}
 			doc.Pricing.Prices = append(doc.Pricing.Prices, entry)
 		}
+	}
+	doc.MCPServers, err = exportMCPServers(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	doc.Sinks, err = exportSinks(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	doc.Guardrails, err = exportGuardrails(ctx, q)
+	if err != nil {
+		return nil, err
 	}
 	doc.canonicalize()
 	doc.SCIMGroupMappings, err = exportSCIMMappings(ctx, q)

@@ -18,6 +18,39 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func TestIntegrationUpgradeFromSecurityAndObservabilityMigrations(t *testing.T) {
+	for _, prefix := range []string{"0047", "0050"} {
+		t.Run(prefix, func(t *testing.T) {
+			pool := scratchPool(t)
+			entries, err := fs.ReadDir(migrations, "migrations")
+			if err != nil {
+				t.Fatal(err)
+			}
+			previous := fstest.MapFS{}
+			for _, entry := range entries {
+				if entry.Name()[:4] > prefix {
+					break
+				}
+				path := "migrations/" + entry.Name()
+				data, err := fs.ReadFile(migrations, path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				previous[path] = &fstest.MapFile{Data: data}
+			}
+			if err := migrate(t.Context(), pool, previous); err != nil {
+				t.Fatal(err)
+			}
+			if err := Migrate(t.Context(), pool); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Installation(t.Context(), pool); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 // scratchPool returns a pool on a new, empty database that is dropped after
 // the test. The integration suite provisions the admin connection.
 func scratchPool(t *testing.T) *pgxpool.Pool {

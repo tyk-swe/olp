@@ -10,7 +10,8 @@ import (
 // Each operation adds its own source demand and semantic preparation.
 func (s *Server) selectionOptions(ctx context.Context, x *execution) runtime.SelectionOptions {
 	options := runtime.SelectionOptions{
-		KeyID: x.keyID, Preferences: x.legPreferences(),
+		Region: s.cfg.Region,
+		KeyID:  x.keyID, Preferences: x.legPreferences(),
 		Inputs: s.Runtime.RoutingInputs(), Now: s.now(),
 		CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility,
 		UnconfinedPlugins: s.cfg.UnconfinedPlugins, Context: ctx,

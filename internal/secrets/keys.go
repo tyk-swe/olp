@@ -3,6 +3,8 @@
 package secrets
 
 import (
+	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -13,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tyk-swe/olp/internal/secretstore"
 	"io"
 	"os"
 	"strings"
@@ -55,27 +58,65 @@ type KeyRing struct {
 
 func (k *KeyRing) String() string { return "KeyRing([REDACTED])" }
 func LoadRing(path string) (*KeyRing, error) {
+	return LoadRingWithUnwrapper(context.Background(), path, nil)
+}
+
+type KeyUnwrapper interface {
+	Unwrap(context.Context, secretstore.WrappedKey) ([]byte, error)
+}
+
+func LoadRingWithUnwrapper(ctx context.Context, path string, unwrapper KeyUnwrapper) (*KeyRing, error) {
 	data, err := ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return ParseRing(data)
+	defer clear(data)
+	return ParseRingWithUnwrapper(ctx, data, unwrapper)
 }
 func ParseRing(data []byte) (*KeyRing, error) {
+	return ParseRingWithUnwrapper(context.Background(), data, nil)
+}
+
+func ParseRingWithUnwrapper(ctx context.Context, data []byte, unwrapper KeyUnwrapper) (_ *KeyRing, resultErr error) {
 	var doc struct {
 		Active int `json:"active_version"`
 		Keys   []struct {
-			Version int    `json:"version"`
-			Key     string `json:"key"`
+			Version int                     `json:"version"`
+			Key     *string                 `json:"key,omitempty"`
+			Wrapped *secretstore.WrappedKey `json:"wrapped,omitempty"`
 		} `json:"keys"`
 	}
-	if json.Unmarshal(data, &doc) != nil || doc.Active < 1 || len(doc.Keys) < 1 || len(doc.Keys) > 32 {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&doc) != nil || decoder.Decode(new(any)) != io.EOF || doc.Active < 1 || len(doc.Keys) < 1 || len(doc.Keys) > 32 {
 		return nil, errors.New("invalid master key ring")
 	}
 	ring := &KeyRing{Active: doc.Active, keys: map[int][]byte{}}
+	defer func() {
+		if resultErr != nil {
+			for _, key := range ring.keys {
+				clear(key)
+			}
+		}
+	}()
 	for _, entry := range doc.Keys {
-		key, err := DecodeKey(entry.Key)
-		if err != nil || entry.Version < 1 || ring.keys[entry.Version] != nil {
+		if ctx.Err() != nil || entry.Version < 1 || ring.keys[entry.Version] != nil || (entry.Key == nil) == (entry.Wrapped == nil) {
+			return nil, errors.New("invalid master key entry")
+		}
+		var key []byte
+		var err error
+		if entry.Wrapped != nil && entry.Wrapped.Validate() != nil {
+			return nil, errors.New("invalid master key entry")
+		}
+		if entry.Key != nil {
+			key, err = DecodeKey(*entry.Key)
+		} else if unwrapper != nil {
+			key, err = unwrapper.Unwrap(ctx, *entry.Wrapped)
+		} else {
+			err = errors.New("wrapped master key requires a workload identity unwrapper")
+		}
+		if err != nil || len(key) != 32 {
+			clear(key)
 			return nil, errors.New("invalid master key entry")
 		}
 		ring.keys[entry.Version] = key

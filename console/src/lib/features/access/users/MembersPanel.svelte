@@ -19,6 +19,7 @@
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import { formatDate } from '$lib/format';
+  import { updateMembers } from './bulk';
 
   const queryClient = useQueryClient();
   const access = useRole();
@@ -28,6 +29,12 @@
   let busy = $state('');
   let error = $state('');
   let notice = $state('');
+  let selected = $state<string[]>([]);
+  let bulkAction = $state('deactivate');
+  $effect(() => {
+    void pagination.cursor;
+    selected = [];
+  });
 
   const users = createQuery(() => ({
     queryKey: userKeys.page(pagination.cursor),
@@ -80,6 +87,33 @@
       notice = `${updated.display_name} is now ${updated.role}. Existing sessions were revoked.`;
     });
     if (!saved) select.value = user.role;
+  }
+
+  async function applyBulk() {
+    const members = (users.data?.items ?? []).filter(
+      (user) => selected.includes(user.id) && user.id !== viewer?.id
+    );
+    if (!members.length || !canManage || busy) return;
+    if (
+      bulkAction === 'deactivate' &&
+      !window.confirm(
+        `Deactivate ${members.length} members and revoke their sessions? Review their API keys separately.`
+      )
+    )
+      return;
+    await run('bulk', async () => {
+      const patch = bulkAction.startsWith('role:')
+        ? { role: bulkAction.slice(5) as User['role'] }
+        : { active: bulkAction === 'reactivate' };
+      const result = await updateMembers(members, patch);
+      result.updated.forEach(updateCachedUser);
+      selected = result.failed.map(({ user }) => user.id);
+      await refreshUserViews();
+      notice = `${result.updated.length} of ${members.length} members updated. Existing sessions were revoked; attributed API keys remain active.`;
+      error = result.failed
+        .map(({ user, message }) => `${user.display_name}: ${message}`)
+        .join(' ');
+    });
   }
 
   async function changeScope(user: User, select: HTMLSelectElement) {
@@ -143,17 +177,82 @@
     >
   </div>
 {:else}
+  {#if canManage}<div class="bulk-actions">
+      <span>{selected.length} selected on this page</span>
+      <button
+        class="button button-secondary"
+        type="button"
+        disabled={Boolean(busy) || users.isFetching}
+        onclick={() => users.refetch()}>Refresh members</button
+      >
+      <label
+        ><span class="sr-only">Bulk member action</span><select
+          bind:value={bulkAction}
+          class="filter-control"
+          disabled={Boolean(busy)}
+          ><option value="deactivate">Deactivate</option><option
+            value="reactivate">Reactivate</option
+          >{#each FIXED_ROLES as role (role)}<option value={`role:${role}`}
+              >Set role: {role}</option
+            >{/each}</select
+        ></label
+      >
+      <button
+        class="button button-secondary"
+        type="button"
+        disabled={!selected.length || Boolean(busy)}
+        onclick={applyBulk}
+        >{busy === 'bulk'
+          ? 'Updating members…'
+          : 'Apply to selected members'}</button
+      >
+      <button
+        class="button button-quiet"
+        type="button"
+        disabled={!selected.length || Boolean(busy)}
+        onclick={() => (selected = [])}>Clear selection</button
+      >
+    </div>{/if}
   <div class="table-shell">
     <table class="data-table">
       <thead
         ><tr
-          ><th>Member</th><th>Status</th><th>Fixed role</th><th>Access scope</th
+          >{#if canManage}<th
+              ><input
+                type="checkbox"
+                aria-label="Select all members on this page"
+                disabled={Boolean(busy)}
+                checked={Boolean(
+                  users.data?.items.filter((user) => user.id !== viewer?.id)
+                    .length
+                ) &&
+                  users.data?.items
+                    .filter((user) => user.id !== viewer?.id)
+                    .every((user) => selected.includes(user.id))}
+                onchange={(event) =>
+                  (selected = event.currentTarget.checked
+                    ? (users.data?.items ?? [])
+                        .filter((user) => user.id !== viewer?.id)
+                        .map((user) => user.id)
+                    : [])}
+              /></th
+            >{/if}<th>Member</th><th>Status</th><th>Fixed role</th><th
+            >Access scope</th
           ><th>Joined</th><th><span class="sr-only">Actions</span></th></tr
         ></thead
       >
       <tbody>
         {#each users.data?.items ?? [] as user (user.id)}
           <tr>
+            {#if canManage}<td
+                ><input
+                  type="checkbox"
+                  aria-label={`Select ${user.display_name}`}
+                  value={user.id}
+                  bind:group={selected}
+                  disabled={user.id === viewer?.id || Boolean(busy)}
+                /></td
+              >{/if}
             <td
               ><strong>{user.display_name}</strong><br /><span
                 >{user.email}</span
@@ -176,7 +275,7 @@
                   disabled={!canManage ||
                     !user.active ||
                     user.id === viewer?.id ||
-                    busy === `role-${user.id}`}
+                    Boolean(busy)}
                 >
                   {#each FIXED_ROLES as role (role)}<option value={role}
                       >{role}</option
@@ -195,7 +294,7 @@
                   disabled={!canManage ||
                     !user.active ||
                     user.id === viewer?.id ||
-                    busy === `scope-${user.id}`}
+                    Boolean(busy)}
                 >
                   <option value="global">Installation-wide</option>
                   <option value="assigned">Assigned projects</option>
@@ -231,11 +330,20 @@
   </div>
   <CursorPagination
     {...cursorPaginationProps(pagination, users.data?.nextCursor)}
+    hasPrevious={!busy && pagination.history.length > 0}
+    hasNext={!busy && Boolean(users.data?.nextCursor)}
     label="Member pages"
   />
 {/if}
 
 <style>
+  .bulk-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    margin-block: 1rem;
+  }
   .role-guide {
     display: grid;
     grid-template-columns: repeat(4, 1fr);

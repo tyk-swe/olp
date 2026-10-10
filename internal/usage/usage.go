@@ -81,6 +81,8 @@ const (
 	// TaskNotificationDelivery evaluates budget threshold rules and delivers
 	// every event notification rules subscribe their destinations to.
 	TaskNotificationDelivery Task = "notification_delivery"
+	// TaskManagedExportDelivery ships facts from operator-managed HTTPS sinks.
+	TaskManagedExportDelivery Task = "managed_export_delivery"
 	// TaskGrantRefresh refreshes grants ahead of their access tokens' expiry.
 	TaskGrantRefresh Task = "grant_refresh"
 	// TaskHealthProbes sends the active health probes connections opt into.
@@ -129,6 +131,14 @@ const checkpointTaskSQL = `INSERT INTO olp.worker_task_health
         failures_total = worker_task_health.failures_total + EXCLUDED.failures_total,
         skipped_total = worker_task_health.skipped_total + EXCLUDED.skipped_total`
 
+var regionalCheckpointTaskSQL = func() string {
+	sql := strings.ReplaceAll(checkpointTaskSQL, "olp.worker_task_health", "olp.regional_worker_task_health")
+	sql = strings.ReplaceAll(sql, "worker_task_health.", "regional_worker_task_health.")
+	sql = strings.Replace(sql, "(task, checked_at", "(region, task, checked_at", 1)
+	sql = strings.Replace(sql, "VALUES ($1,", "VALUES ($7, $1,", 1)
+	return strings.Replace(sql, "ON CONFLICT (task)", "ON CONFLICT (region, task)", 1)
+}()
+
 // CheckpointTask records one pass of a worker task. `progress` says whether the
 // pass actually moved work, which is what readiness distinguishes from a worker
 // that is merely awake.
@@ -148,6 +158,11 @@ func CheckpointTask(ctx context.Context, q Execer, task Task, outcome Outcome, p
 	if _, err := q.Exec(ctx, checkpointTaskSQL, string(task), success, progress,
 		successes, failures, skipped); err != nil {
 		return fmt.Errorf("checkpoint worker task %s: %w", task, err)
+	}
+	if region, _ := ctx.Value(workerRegionKey{}).(string); region != "" && RegionalTask(task) {
+		if _, err := q.Exec(ctx, regionalCheckpointTaskSQL, string(task), success, progress, successes, failures, skipped, region); err != nil {
+			return fmt.Errorf("checkpoint regional worker task %s: %w", task, err)
+		}
 	}
 	return nil
 }

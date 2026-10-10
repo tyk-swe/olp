@@ -41,7 +41,12 @@ const routeLatencySignalsSQL = `SELECT rt.slug,rt.project_id::text,
  WHERE rt.state='active' AND ($2::uuid IS NULL OR rt.project_id=$2 OR rt.project_id IS NULL)
  GROUP BY rt.slug,rt.project_id ORDER BY rt.slug LIMIT 10001`
 
-const workerStaleSignalsSQL = `SELECT task,GREATEST(0,EXTRACT(epoch FROM now()-COALESCE(last_success_at,first_seen_at)))::text FROM olp.worker_task_health ORDER BY task`
+const workerStaleSignalsSQL = `WITH workers AS (
+ SELECT w.task,''::text AS region,w.last_success_at,w.first_seen_at FROM olp.worker_task_health w
+ WHERE NOT EXISTS(SELECT 1 FROM olp.regional_worker_task_health r WHERE r.task=w.task AND r.first_seen_at>w.checked_at)
+ UNION ALL SELECT task,region,last_success_at,first_seen_at FROM olp.regional_worker_task_health
+ ) SELECT task,region,GREATEST(0,EXTRACT(epoch FROM now()-COALESCE(last_success_at,first_seen_at)))::text
+ FROM workers ORDER BY task,region`
 const runtimeInstallSignalsSQL = `SELECT gateway_instance,desired_generation,installed_generation,failed FROM olp.runtime_install_status
  WHERE checked_at>=now()-interval '2 minutes' ORDER BY gateway_instance LIMIT 10001`
 const providerCircuitSubjectsSQL = `SELECT id::text,name FROM olp.providers WHERE state='active' ORDER BY id LIMIT 10001`

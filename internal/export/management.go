@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -419,6 +420,10 @@ func (m *Management) deleteSink(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	if _, err := tx.Exec(r.Context(), deleteSinkSQL, current.ID); err != nil {
+		var constraint *pgconn.PgError
+		if errors.As(err, &constraint) && constraint.Code == "23503" {
+			return access.Reply{}, access.Fail(409, "sink_in_use", "Remove or repoint capture policies before deleting this sink.")
+		}
 		return access.Reply{}, err
 	}
 	if credentialID != nil {

@@ -204,12 +204,15 @@ const (
 	BudgetIncreaseTargetKindApiKey         BudgetIncreaseTargetKind = "api_key"
 	BudgetIncreaseTargetKindAttribution    BudgetIncreaseTargetKind = "attribution"
 	BudgetIncreaseTargetKindBudgetGroup    BudgetIncreaseTargetKind = "budget_group"
+	BudgetIncreaseTargetKindGuardrail      BudgetIncreaseTargetKind = "guardrail"
 	BudgetIncreaseTargetKindInstallation   BudgetIncreaseTargetKind = "installation"
 	BudgetIncreaseTargetKindKeyEndUser     BudgetIncreaseTargetKind = "key_end_user"
 	BudgetIncreaseTargetKindKeyRoute       BudgetIncreaseTargetKind = "key_route"
+	BudgetIncreaseTargetKindMcpServer      BudgetIncreaseTargetKind = "mcp_server"
 	BudgetIncreaseTargetKindOrganization   BudgetIncreaseTargetKind = "organization"
 	BudgetIncreaseTargetKindProject        BudgetIncreaseTargetKind = "project"
 	BudgetIncreaseTargetKindProjectEndUser BudgetIncreaseTargetKind = "project_end_user"
+	BudgetIncreaseTargetKindSink           BudgetIncreaseTargetKind = "sink"
 )
 
 // Valid indicates whether the value is a known member of the BudgetIncreaseTargetKind enum.
@@ -221,17 +224,23 @@ func (e BudgetIncreaseTargetKind) Valid() bool {
 		return true
 	case BudgetIncreaseTargetKindBudgetGroup:
 		return true
+	case BudgetIncreaseTargetKindGuardrail:
+		return true
 	case BudgetIncreaseTargetKindInstallation:
 		return true
 	case BudgetIncreaseTargetKindKeyEndUser:
 		return true
 	case BudgetIncreaseTargetKindKeyRoute:
 		return true
+	case BudgetIncreaseTargetKindMcpServer:
+		return true
 	case BudgetIncreaseTargetKindOrganization:
 		return true
 	case BudgetIncreaseTargetKindProject:
 		return true
 	case BudgetIncreaseTargetKindProjectEndUser:
+		return true
+	case BudgetIncreaseTargetKindSink:
 		return true
 	default:
 		return false
@@ -334,6 +343,63 @@ func (e CaptureSinkOptionType) Valid() bool {
 	case CaptureSinkOptionTypeOtlpLogs:
 		return true
 	case CaptureSinkOptionTypeS3:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CatalogCapabilitiesOperationSupport.
+const (
+	CatalogCapabilitiesOperationSupportGuaranteed      CatalogCapabilitiesOperationSupport = "guaranteed"
+	CatalogCapabilitiesOperationSupportTargetDependent CatalogCapabilitiesOperationSupport = "target_dependent"
+	CatalogCapabilitiesOperationSupportUnknown         CatalogCapabilitiesOperationSupport = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the CatalogCapabilitiesOperationSupport enum.
+func (e CatalogCapabilitiesOperationSupport) Valid() bool {
+	switch e {
+	case CatalogCapabilitiesOperationSupportGuaranteed:
+		return true
+	case CatalogCapabilitiesOperationSupportTargetDependent:
+		return true
+	case CatalogCapabilitiesOperationSupportUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CatalogSampleLanguage.
+const (
+	Python CatalogSampleLanguage = "python"
+)
+
+// Valid indicates whether the value is a known member of the CatalogSampleLanguage enum.
+func (e CatalogSampleLanguage) Valid() bool {
+	switch e {
+	case Python:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CatalogSampleSdk.
+const (
+	CatalogSampleSdkAnthropic CatalogSampleSdk = "anthropic"
+	CatalogSampleSdkGemini    CatalogSampleSdk = "gemini"
+	CatalogSampleSdkOpenai    CatalogSampleSdk = "openai"
+)
+
+// Valid indicates whether the value is a known member of the CatalogSampleSdk enum.
+func (e CatalogSampleSdk) Valid() bool {
+	switch e {
+	case CatalogSampleSdkAnthropic:
+		return true
+	case CatalogSampleSdkGemini:
+		return true
+	case CatalogSampleSdkOpenai:
 		return true
 	default:
 		return false
@@ -715,6 +781,36 @@ func (e ConfigurationDocumentApiVersion) Valid() bool {
 	}
 }
 
+// Defines values for ConfigurationGuardrailType.
+const (
+	ConfigurationGuardrailTypeBuiltinRegex ConfigurationGuardrailType = "builtin.regex"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationGuardrailType enum.
+func (e ConfigurationGuardrailType) Valid() bool {
+	switch e {
+	case ConfigurationGuardrailTypeBuiltinRegex:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationMCPServerTransport.
+const (
+	ConfigurationMCPServerTransportStreamableHttp ConfigurationMCPServerTransport = "streamable_http"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationMCPServerTransport enum.
+func (e ConfigurationMCPServerTransport) Valid() bool {
+	switch e {
+	case ConfigurationMCPServerTransportStreamableHttp:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConfigurationPlanItemAction.
 const (
 	ConfigurationPlanItemActionBind     ConfigurationPlanItemAction = "bind"
@@ -756,23 +852,33 @@ func (e ConfigurationPlanItemAction) Valid() bool {
 
 // Defines values for ConfigurationPlanItemKind.
 const (
-	ConfigurationPlanItemKindConfiguration     ConfigurationPlanItemKind = "configuration"
-	ConfigurationPlanItemKindCredential        ConfigurationPlanItemKind = "credential"
-	ConfigurationPlanItemKindNetworkCredential ConfigurationPlanItemKind = "network_credential"
-	ConfigurationPlanItemKindPlugin            ConfigurationPlanItemKind = "plugin"
-	ConfigurationPlanItemKindPricing           ConfigurationPlanItemKind = "pricing"
-	ConfigurationPlanItemKindProject           ConfigurationPlanItemKind = "project"
-	ConfigurationPlanItemKindProvider          ConfigurationPlanItemKind = "provider"
-	ConfigurationPlanItemKindRoute             ConfigurationPlanItemKind = "route"
-	ConfigurationPlanItemKindRouteTemplate     ConfigurationPlanItemKind = "route_template"
+	ConfigurationPlanItemKindCatalogPublication ConfigurationPlanItemKind = "catalog_publication"
+	ConfigurationPlanItemKindConfiguration      ConfigurationPlanItemKind = "configuration"
+	ConfigurationPlanItemKindCredential         ConfigurationPlanItemKind = "credential"
+	ConfigurationPlanItemKindGuardrail          ConfigurationPlanItemKind = "guardrail"
+	ConfigurationPlanItemKindMcpServer          ConfigurationPlanItemKind = "mcp_server"
+	ConfigurationPlanItemKindNetworkCredential  ConfigurationPlanItemKind = "network_credential"
+	ConfigurationPlanItemKindPlugin             ConfigurationPlanItemKind = "plugin"
+	ConfigurationPlanItemKindPricing            ConfigurationPlanItemKind = "pricing"
+	ConfigurationPlanItemKindProject            ConfigurationPlanItemKind = "project"
+	ConfigurationPlanItemKindProvider           ConfigurationPlanItemKind = "provider"
+	ConfigurationPlanItemKindRoute              ConfigurationPlanItemKind = "route"
+	ConfigurationPlanItemKindRouteTemplate      ConfigurationPlanItemKind = "route_template"
+	ConfigurationPlanItemKindSink               ConfigurationPlanItemKind = "sink"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationPlanItemKind enum.
 func (e ConfigurationPlanItemKind) Valid() bool {
 	switch e {
+	case ConfigurationPlanItemKindCatalogPublication:
+		return true
 	case ConfigurationPlanItemKindConfiguration:
 		return true
 	case ConfigurationPlanItemKindCredential:
+		return true
+	case ConfigurationPlanItemKindGuardrail:
+		return true
+	case ConfigurationPlanItemKindMcpServer:
 		return true
 	case ConfigurationPlanItemKindNetworkCredential:
 		return true
@@ -787,6 +893,8 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 	case ConfigurationPlanItemKindRoute:
 		return true
 	case ConfigurationPlanItemKindRouteTemplate:
+		return true
+	case ConfigurationPlanItemKindSink:
 		return true
 	default:
 		return false
@@ -850,6 +958,45 @@ func (e ConfigurationSCIMGroupMappingRole) Valid() bool {
 	case ConfigurationSCIMGroupMappingRoleOwner:
 		return true
 	case ConfigurationSCIMGroupMappingRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationSinkStreams.
+const (
+	ConfigurationSinkStreamsAttempts           ConfigurationSinkStreams = "attempts"
+	ConfigurationSinkStreamsAudit              ConfigurationSinkStreams = "audit"
+	ConfigurationSinkStreamsGuardrailDecisions ConfigurationSinkStreams = "guardrail_decisions"
+	ConfigurationSinkStreamsRequests           ConfigurationSinkStreams = "requests"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationSinkStreams enum.
+func (e ConfigurationSinkStreams) Valid() bool {
+	switch e {
+	case ConfigurationSinkStreamsAttempts:
+		return true
+	case ConfigurationSinkStreamsAudit:
+		return true
+	case ConfigurationSinkStreamsGuardrailDecisions:
+		return true
+	case ConfigurationSinkStreamsRequests:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationSinkType.
+const (
+	ConfigurationSinkTypeHttps ConfigurationSinkType = "https"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationSinkType enum.
+func (e ConfigurationSinkType) Valid() bool {
+	switch e {
+	case ConfigurationSinkTypeHttps:
 		return true
 	default:
 		return false
@@ -1090,6 +1237,36 @@ func (e CreateExportSinkRequestType) Valid() bool {
 	}
 }
 
+// Defines values for CreateGuardrailRequestType.
+const (
+	CreateGuardrailRequestTypeBuiltinRegex CreateGuardrailRequestType = "builtin.regex"
+)
+
+// Valid indicates whether the value is a known member of the CreateGuardrailRequestType enum.
+func (e CreateGuardrailRequestType) Valid() bool {
+	switch e {
+	case CreateGuardrailRequestTypeBuiltinRegex:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateMCPServerRequestTransport.
+const (
+	CreateMCPServerRequestTransportStreamableHttp CreateMCPServerRequestTransport = "streamable_http"
+)
+
+// Valid indicates whether the value is a known member of the CreateMCPServerRequestTransport enum.
+func (e CreateMCPServerRequestTransport) Valid() bool {
+	switch e {
+	case CreateMCPServerRequestTransportStreamableHttp:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateNotificationDestinationRequestType.
 const (
 	CreateNotificationDestinationRequestTypeDiscord   CreateNotificationDestinationRequestType = "discord"
@@ -1114,6 +1291,45 @@ func (e CreateNotificationDestinationRequestType) Valid() bool {
 	case CreateNotificationDestinationRequestTypeSlack:
 		return true
 	case CreateNotificationDestinationRequestTypeWebhook:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateSinkRequestStreams.
+const (
+	CreateSinkRequestStreamsAttempts           CreateSinkRequestStreams = "attempts"
+	CreateSinkRequestStreamsAudit              CreateSinkRequestStreams = "audit"
+	CreateSinkRequestStreamsGuardrailDecisions CreateSinkRequestStreams = "guardrail_decisions"
+	CreateSinkRequestStreamsRequests           CreateSinkRequestStreams = "requests"
+)
+
+// Valid indicates whether the value is a known member of the CreateSinkRequestStreams enum.
+func (e CreateSinkRequestStreams) Valid() bool {
+	switch e {
+	case CreateSinkRequestStreamsAttempts:
+		return true
+	case CreateSinkRequestStreamsAudit:
+		return true
+	case CreateSinkRequestStreamsGuardrailDecisions:
+		return true
+	case CreateSinkRequestStreamsRequests:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateSinkRequestType.
+const (
+	CreateSinkRequestTypeHttps CreateSinkRequestType = "https"
+)
+
+// Valid indicates whether the value is a known member of the CreateSinkRequestType enum.
+func (e CreateSinkRequestType) Valid() bool {
+	switch e {
+	case CreateSinkRequestTypeHttps:
 		return true
 	default:
 		return false
@@ -1237,6 +1453,30 @@ func (e ExportSinkType) Valid() bool {
 	}
 }
 
+// Defines values for ExternalCredentialReferenceStore.
+const (
+	Aws   ExternalCredentialReferenceStore = "aws"
+	Azure ExternalCredentialReferenceStore = "azure"
+	Gcp   ExternalCredentialReferenceStore = "gcp"
+	Vault ExternalCredentialReferenceStore = "vault"
+)
+
+// Valid indicates whether the value is a known member of the ExternalCredentialReferenceStore enum.
+func (e ExternalCredentialReferenceStore) Valid() bool {
+	switch e {
+	case Aws:
+		return true
+	case Azure:
+		return true
+	case Gcp:
+		return true
+	case Vault:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FallbackCondition.
 const (
 	Budget        FallbackCondition = "budget"
@@ -1297,6 +1537,21 @@ func (e GrantEnrollmentStatusStatus) Valid() bool {
 	case GrantEnrollmentStatusStatusExpired:
 		return true
 	case GrantEnrollmentStatusStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailResponseType.
+const (
+	GuardrailResponseTypeBuiltinRegex GuardrailResponseType = "builtin.regex"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailResponseType enum.
+func (e GuardrailResponseType) Valid() bool {
+	switch e {
+	case GuardrailResponseTypeBuiltinRegex:
 		return true
 	default:
 		return false
@@ -1552,6 +1807,57 @@ func (e KeyExpiringEventReason) Valid() bool {
 	}
 }
 
+// Defines values for MCPRegisteredCatalogProtocolVersion.
+const (
+	N20250326 MCPRegisteredCatalogProtocolVersion = "2025-03-26"
+	N20250618 MCPRegisteredCatalogProtocolVersion = "2025-06-18"
+	N20251125 MCPRegisteredCatalogProtocolVersion = "2025-11-25"
+)
+
+// Valid indicates whether the value is a known member of the MCPRegisteredCatalogProtocolVersion enum.
+func (e MCPRegisteredCatalogProtocolVersion) Valid() bool {
+	switch e {
+	case N20250326:
+		return true
+	case N20250618:
+		return true
+	case N20251125:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPServerResponseTransport.
+const (
+	MCPServerResponseTransportStreamableHttp MCPServerResponseTransport = "streamable_http"
+)
+
+// Valid indicates whether the value is a known member of the MCPServerResponseTransport enum.
+func (e MCPServerResponseTransport) Valid() bool {
+	switch e {
+	case MCPServerResponseTransportStreamableHttp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MCPServerSummaryTransport.
+const (
+	MCPServerSummaryTransportStreamableHttp MCPServerSummaryTransport = "streamable_http"
+)
+
+// Valid indicates whether the value is a known member of the MCPServerSummaryTransport enum.
+func (e MCPServerSummaryTransport) Valid() bool {
+	switch e {
+	case MCPServerSummaryTransportStreamableHttp:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MFAChallengeMethods.
 const (
 	MFAChallengeMethodsRecovery MFAChallengeMethods = "recovery"
@@ -1712,6 +2018,7 @@ const (
 	ManagementTokenScopeConfigure          ManagementTokenScope = "configure"
 	ManagementTokenScopeKeys               ManagementTokenScope = "keys"
 	ManagementTokenScopeManageOrganization ManagementTokenScope = "manage_organization"
+	ManagementTokenScopeManageProjects     ManagementTokenScope = "manage_projects"
 	ManagementTokenScopePlayground         ManagementTokenScope = "playground"
 	ManagementTokenScopeRead               ManagementTokenScope = "read"
 	ManagementTokenScopeSettings           ManagementTokenScope = "settings"
@@ -1730,6 +2037,8 @@ func (e ManagementTokenScope) Valid() bool {
 	case ManagementTokenScopeKeys:
 		return true
 	case ManagementTokenScopeManageOrganization:
+		return true
+	case ManagementTokenScopeManageProjects:
 		return true
 	case ManagementTokenScopePlayground:
 		return true
@@ -2935,6 +3244,45 @@ func (e SimulationDialect) Valid() bool {
 	}
 }
 
+// Defines values for SinkResponseStreams.
+const (
+	SinkResponseStreamsAttempts           SinkResponseStreams = "attempts"
+	SinkResponseStreamsAudit              SinkResponseStreams = "audit"
+	SinkResponseStreamsGuardrailDecisions SinkResponseStreams = "guardrail_decisions"
+	SinkResponseStreamsRequests           SinkResponseStreams = "requests"
+)
+
+// Valid indicates whether the value is a known member of the SinkResponseStreams enum.
+func (e SinkResponseStreams) Valid() bool {
+	switch e {
+	case SinkResponseStreamsAttempts:
+		return true
+	case SinkResponseStreamsAudit:
+		return true
+	case SinkResponseStreamsGuardrailDecisions:
+		return true
+	case SinkResponseStreamsRequests:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SinkResponseType.
+const (
+	SinkResponseTypeHttps SinkResponseType = "https"
+)
+
+// Valid indicates whether the value is a known member of the SinkResponseType enum.
+func (e SinkResponseType) Valid() bool {
+	switch e {
+	case SinkResponseTypeHttps:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Surface.
 const (
 	SurfaceAnthropic Surface = "anthropic"
@@ -3079,6 +3427,30 @@ func (e UpdateNotificationDestinationRequestType) Valid() bool {
 	}
 }
 
+// Defines values for UpdateSinkRequestStreams.
+const (
+	UpdateSinkRequestStreamsAttempts           UpdateSinkRequestStreams = "attempts"
+	UpdateSinkRequestStreamsAudit              UpdateSinkRequestStreams = "audit"
+	UpdateSinkRequestStreamsGuardrailDecisions UpdateSinkRequestStreams = "guardrail_decisions"
+	UpdateSinkRequestStreamsRequests           UpdateSinkRequestStreams = "requests"
+)
+
+// Valid indicates whether the value is a known member of the UpdateSinkRequestStreams enum.
+func (e UpdateSinkRequestStreams) Valid() bool {
+	switch e {
+	case UpdateSinkRequestStreamsAttempts:
+		return true
+	case UpdateSinkRequestStreamsAudit:
+		return true
+	case UpdateSinkRequestStreamsGuardrailDecisions:
+		return true
+	case UpdateSinkRequestStreamsRequests:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UpdateUserRoleRequestAccessScope.
 const (
 	UpdateUserRoleRequestAccessScopeAssigned UpdateUserRoleRequestAccessScope = "assigned"
@@ -3208,6 +3580,21 @@ func (e GetCodeClientConfigurationParamsClient) Valid() bool {
 	case GetCodeClientConfigurationParamsClientCodex:
 		return true
 	case GetCodeClientConfigurationParamsClientOpencode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagementMcpJSONBodyJsonrpc.
+const (
+	N20 ManagementMcpJSONBodyJsonrpc = "2.0"
+)
+
+// Valid indicates whether the value is a known member of the ManagementMcpJSONBodyJsonrpc enum.
+func (e ManagementMcpJSONBodyJsonrpc) Valid() bool {
+	switch e {
+	case N20:
 		return true
 	default:
 		return false
@@ -3508,9 +3895,12 @@ type ApiKeyDetailResponse struct {
 	Priority nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
 
 	// ProjectId Owning project; null means installation-wide.
-	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id"`
-	ProjectName       nullable.Nullable[string]             `json:"project_name"`
-	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
+	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	ProjectName nullable.Nullable[string]             `json:"project_name"`
+
+	// RegionalLimits Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global.
+	RegionalLimits    map[string]RegionalRateLimits `json:"regional_limits"`
+	RequestsPerMinute nullable.Nullable[int32]      `json:"requests_per_minute,omitempty"`
 
 	// RequiredAttributionKeys Required attribution labels, in addition to project requirements. Missing labels return 400 missing_attribution before dispatch.
 	RequiredAttributionKeys nullable.Nullable[[]string] `json:"required_attribution_keys,omitempty"`
@@ -3956,6 +4346,21 @@ type CaptureSinkOptionList struct {
 	Items []CaptureSinkOption `json:"items"`
 }
 
+// CatalogCapabilities defines model for CatalogCapabilities.
+type CatalogCapabilities struct {
+	ContextLength       nullable.Nullable[int64]                       `json:"context_length"`
+	InputModalities     []string                                       `json:"input_modalities"`
+	MaxOutputTokens     nullable.Nullable[int64]                       `json:"max_output_tokens"`
+	OperationSupport    map[string]CatalogCapabilitiesOperationSupport `json:"operation_support"`
+	Operations          []string                                       `json:"operations"`
+	OutputModalities    []string                                       `json:"output_modalities"`
+	SupportedParameters nullable.Nullable[[]string]                    `json:"supported_parameters"`
+	Unknown             []string                                       `json:"unknown"`
+}
+
+// CatalogCapabilitiesOperationSupport defines model for CatalogCapabilities.OperationSupport.
+type CatalogCapabilitiesOperationSupport string
+
 // CatalogCapabilityHints Capabilities the vendor documents; an absent hint is unknown. Hints never certify a capability.
 type CatalogCapabilityHints struct {
 	PromptCaching     *bool `json:"prompt_caching,omitempty"`
@@ -3963,6 +4368,67 @@ type CatalogCapabilityHints struct {
 	StructuredOutputs *bool `json:"structured_outputs,omitempty"`
 	Tools             *bool `json:"tools,omitempty"`
 }
+
+// CatalogModel defines model for CatalogModel.
+type CatalogModel struct {
+	Capabilities   CatalogCapabilities `json:"capabilities"`
+	Id             string              `json:"id"`
+	Prices         *[]CatalogPrice     `json:"prices,omitempty"`
+	Privacy        CatalogPrivacy      `json:"privacy"`
+	Samples        []CatalogSample     `json:"samples"`
+	UpstreamModels *[]string           `json:"upstream_models,omitempty"`
+}
+
+// CatalogPrice defines model for CatalogPrice.
+type CatalogPrice struct {
+	CacheWrite1hInputPerMillion nullable.Nullable[CatalogRange] `json:"cache_write_1h_input_per_million"`
+	CacheWrite5mInputPerMillion nullable.Nullable[CatalogRange] `json:"cache_write_5m_input_per_million"`
+	CacheWriteInputPerMillion   nullable.Nullable[CatalogRange] `json:"cache_write_input_per_million"`
+	CachedInputPerMillion       nullable.Nullable[CatalogRange] `json:"cached_input_per_million"`
+	Complete                    bool                            `json:"complete"`
+	Currency                    string                          `json:"currency"`
+	InputPerMillion             nullable.Nullable[CatalogRange] `json:"input_per_million"`
+	Operation                   string                          `json:"operation"`
+	OutputPerMillion            nullable.Nullable[CatalogRange] `json:"output_per_million"`
+	UnitPrice                   nullable.Nullable[CatalogRange] `json:"unit_price"`
+}
+
+// CatalogPrivacy defines model for CatalogPrivacy.
+type CatalogPrivacy struct {
+	DataCollection    nullable.Nullable[bool] `json:"data_collection"`
+	Regions           []string                `json:"regions"`
+	Unknown           []string                `json:"unknown"`
+	ZeroDataRetention nullable.Nullable[bool] `json:"zero_data_retention"`
+}
+
+// CatalogPublicationResponse defines model for CatalogPublicationResponse.
+type CatalogPublicationResponse struct {
+	Enabled bool `json:"enabled"`
+
+	// Etag Observed resource version; supply it in If-Match for updates.
+	Etag         string `json:"etag"`
+	PricesPublic bool   `json:"prices_public"`
+}
+
+// CatalogRange defines model for CatalogRange.
+type CatalogRange struct {
+	Maximum string `json:"maximum"`
+	Minimum string `json:"minimum"`
+}
+
+// CatalogSample defines model for CatalogSample.
+type CatalogSample struct {
+	Code      string                `json:"code"`
+	Language  CatalogSampleLanguage `json:"language"`
+	Operation string                `json:"operation"`
+	Sdk       CatalogSampleSdk      `json:"sdk"`
+}
+
+// CatalogSampleLanguage defines model for CatalogSample.Language.
+type CatalogSampleLanguage string
+
+// CatalogSampleSdk defines model for CatalogSample.Sdk.
+type CatalogSampleSdk string
 
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
@@ -4379,10 +4845,12 @@ type ConfigurationDocument struct {
 	BudgetTimeZone nullable.Nullable[string] `json:"budget_time_zone,omitempty"`
 
 	// ExportedAt Informational only; excluded from the artifact digest
-	ExportedAt *time.Time `json:"exported_at,omitempty"`
+	ExportedAt *time.Time                `json:"exported_at,omitempty"`
+	Guardrails *[]ConfigurationGuardrail `json:"guardrails,omitempty"`
 
 	// InstallationBudget Installation cap. Omitted or null preserves destination policy; an empty policy clears it. Exports always include the current policy. Changes require settings permission.
 	InstallationBudget nullable.Nullable[BudgetPolicy] `json:"installation_budget,omitempty"`
+	McpServers         *[]ConfigurationMCPServer       `json:"mcp_servers,omitempty"`
 
 	// Organizations Portable organization names and budgets. Memberships remain destination-local. Creation requires access; changing a budget additionally requires manage_organization and authority over that organization.
 	Organizations *[]ConfigurationOrganizationEntry            `json:"organizations,omitempty"`
@@ -4399,6 +4867,7 @@ type ConfigurationDocument struct {
 
 	// ScimGroupMappings Upsert role and project grants by group display name. Source IDs, external IDs, users and memberships stay local. Missing groups are created empty. Omission preserves destination mappings; an explicit empty grant set clears the named group. Export, plan, apply and replay containing these mappings additionally require installation Access.
 	ScimGroupMappings nullable.Nullable[[]ConfigurationSCIMGroupMapping] `json:"scim_group_mappings,omitempty"`
+	Sinks             *[]ConfigurationSink                               `json:"sinks,omitempty"`
 
 	// Templates Route templates; omitted when the installation declares none
 	Templates *[]ConfigurationTemplateEntry `json:"templates,omitempty"`
@@ -4418,6 +4887,36 @@ type ConfigurationExportResponse struct {
 	// Document Secret-free desired-state artifact identified by natural names, never UUIDs
 	Document ConfigurationDocument `json:"document"`
 }
+
+// ConfigurationGuardrail defines model for ConfigurationGuardrail.
+type ConfigurationGuardrail struct {
+	Name string `json:"name"`
+
+	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
+	Policy  ContentPolicy              `json:"policy"`
+	Project string                     `json:"project"`
+	Type    ConfigurationGuardrailType `json:"type"`
+}
+
+// ConfigurationGuardrailType defines model for ConfigurationGuardrail.Type.
+type ConfigurationGuardrailType string
+
+// ConfigurationMCPServer defines model for ConfigurationMCPServer.
+type ConfigurationMCPServer struct {
+	// CatalogDigest Reviewed tool catalog. Destination certification must match before configuration changes commit.
+	CatalogDigest string `json:"catalog_digest"`
+
+	// CredentialRef Logical destination sealed bearer binding; never source credential bytes.
+	CredentialRef *string                         `json:"credential_ref,omitempty"`
+	Enabled       bool                            `json:"enabled"`
+	Endpoint      string                          `json:"endpoint"`
+	Name          string                          `json:"name"`
+	Project       string                          `json:"project"`
+	Transport     ConfigurationMCPServerTransport `json:"transport"`
+}
+
+// ConfigurationMCPServerTransport defines model for ConfigurationMCPServer.Transport.
+type ConfigurationMCPServerTransport string
 
 // ConfigurationModelEntry defines model for ConfigurationModelEntry.
 type ConfigurationModelEntry struct {
@@ -4509,6 +5008,12 @@ type ConfigurationProjectEntry struct {
 	// Organization Organization name. Omitted/null preserves destination membership. First assignment requires installation access authority; existing membership cannot change.
 	Organization nullable.Nullable[string] `json:"organization,omitempty"`
 
+	// PublicCatalog Owner-enabled anonymous catalog. Changing this value through promotion requires installation access scope.
+	PublicCatalog *bool `json:"public_catalog,omitempty"`
+
+	// PublicCatalogPrices Independent opt-in for published catalog prices.
+	PublicCatalogPrices *bool `json:"public_catalog_prices,omitempty"`
+
 	// RouteGroups Portable project route groups. Omitted, null or empty removes groups. Changes require keys permission as well as configure.
 	RouteGroups nullable.Nullable[RouteGroups] `json:"route_groups,omitempty"`
 }
@@ -4520,6 +5025,9 @@ type ConfigurationPromotionRequest struct {
 
 	// ExpectedDigest Digest the destination must still export for the apply to proceed
 	ExpectedDigest nullable.Nullable[string] `json:"expected_digest,omitempty"`
+
+	// ExternalCredentialBindings Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings. Introducing an external reference requires installation-wide settings authority in addition to configure authority.
+	ExternalCredentialBindings *map[string]ExternalCredentialReference `json:"external_credential_bindings,omitempty"`
 
 	// SecretBindings Write-only map from credential_ref to secret; never echoed, audited, or replayed. A slot a grant backs takes no binding.
 	SecretBindings *map[string]string `json:"secret_bindings,omitempty"`
@@ -4549,6 +5057,9 @@ type ConfigurationRouteEntry struct {
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
 	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
 	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
+
+	// ExposeUpstreamModels Explicitly disclose upstream model names in route catalogs.
+	ExposeUpstreamModels *bool `json:"expose_upstream_models,omitempty"`
 
 	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
 	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
@@ -4622,6 +5133,24 @@ type ConfigurationSCIMGroupMappingProjectsRole string
 
 // ConfigurationSCIMGroupMappingRole defines model for ConfigurationSCIMGroupMapping.Role.
 type ConfigurationSCIMGroupMappingRole string
+
+// ConfigurationSink defines model for ConfigurationSink.
+type ConfigurationSink struct {
+	// CredentialRef Deterministic exported logical signing reference; destination bytes are supplied separately.
+	CredentialRef nullable.Nullable[string]  `json:"credential_ref,omitempty"`
+	Destination   string                     `json:"destination"`
+	Enabled       bool                       `json:"enabled"`
+	Name          string                     `json:"name"`
+	Project       nullable.Nullable[string]  `json:"project,omitempty"`
+	Streams       []ConfigurationSinkStreams `json:"streams"`
+	Type          ConfigurationSinkType      `json:"type"`
+}
+
+// ConfigurationSinkStreams defines model for ConfigurationSink.Streams.
+type ConfigurationSinkStreams string
+
+// ConfigurationSinkType defines model for ConfigurationSink.Type.
+type ConfigurationSinkType string
 
 // ConfigurationSlotEntry defines model for ConfigurationSlotEntry.
 type ConfigurationSlotEntry struct {
@@ -4828,8 +5357,11 @@ type CreateApiKeyRequest struct {
 	Priority nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
 
 	// ProjectId Owning project; omit or null for an installation-wide key. Required for assigned principals.
-	ProjectId         nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
-	RequestsPerMinute nullable.Nullable[int32]              `json:"requests_per_minute,omitempty"`
+	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+
+	// RegionalLimits Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global.
+	RegionalLimits    nullable.Nullable[map[string]RegionalRateLimits] `json:"regional_limits,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]                         `json:"requests_per_minute,omitempty"`
 
 	// RequiredAttributionKeys Required attribution labels, in addition to project requirements. Missing labels return 400 missing_attribution before dispatch.
 	RequiredAttributionKeys nullable.Nullable[[]string] `json:"required_attribution_keys,omitempty"`
@@ -4946,6 +5478,19 @@ type CreateExportSinkRequestStreams string
 // CreateExportSinkRequestType defines model for CreateExportSinkRequest.Type.
 type CreateExportSinkRequestType string
 
+// CreateGuardrailRequest defines model for CreateGuardrailRequest.
+type CreateGuardrailRequest struct {
+	Name string `json:"name"`
+
+	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
+	Policy    ContentPolicy              `json:"policy"`
+	ProjectId openapi_types.UUID         `json:"project_id"`
+	Type      CreateGuardrailRequestType `json:"type"`
+}
+
+// CreateGuardrailRequestType defines model for CreateGuardrailRequest.Type.
+type CreateGuardrailRequestType string
+
 // CreateInvitationRequest defines model for CreateInvitationRequest.
 type CreateInvitationRequest struct {
 	Email string `json:"email"`
@@ -4963,6 +5508,20 @@ type CreateInvitationResponse struct {
 	// Token Returned only by the invitation-creation response.
 	Token *string `json:"token,omitempty"`
 }
+
+// CreateMCPServerRequest defines model for CreateMCPServerRequest.
+type CreateMCPServerRequest struct {
+	// Credential Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata.
+	Credential nullable.Nullable[string]       `json:"credential,omitempty"`
+	Enabled    bool                            `json:"enabled"`
+	Endpoint   string                          `json:"endpoint"`
+	Name       string                          `json:"name"`
+	ProjectId  openapi_types.UUID              `json:"project_id"`
+	Transport  CreateMCPServerRequestTransport `json:"transport"`
+}
+
+// CreateMCPServerRequestTransport defines model for CreateMCPServerRequest.Transport.
+type CreateMCPServerRequestTransport string
 
 // CreateManagementTokenRequest defines model for CreateManagementTokenRequest.
 type CreateManagementTokenRequest struct {
@@ -5084,9 +5643,12 @@ type CreateProjectRequest struct {
 
 // CreateProviderRequest defines model for CreateProviderRequest.
 type CreateProviderRequest struct {
-	Configuration ProviderConfiguration     `json:"configuration"`
-	Credential    *string                   `json:"credential,omitempty"`
-	DisplayName   nullable.Nullable[string] `json:"display_name,omitempty"`
+	Configuration ProviderConfiguration `json:"configuration"`
+	Credential    *string               `json:"credential,omitempty"`
+
+	// CredentialReference Introducing an external reference requires installation-wide settings authority in addition to configure authority.
+	CredentialReference *ExternalCredentialReference `json:"credential_reference,omitempty"`
+	DisplayName         nullable.Nullable[string]    `json:"display_name,omitempty"`
 
 	// Model Optional seed/probe model. Vertex AI requires one because its publisher
 	// model collection has no list operation; other connectors can discover
@@ -5133,6 +5695,24 @@ type CreateRouteDraftRequest struct {
 	Targets   []RouteTargetRequest `json:"targets"`
 }
 
+// CreateSinkRequest defines model for CreateSinkRequest.
+type CreateSinkRequest struct {
+	// Credential HMAC signing credential; omitted updates retain it and null removes it.
+	Credential  nullable.Nullable[string]             `json:"credential,omitempty"`
+	Destination string                                `json:"destination"`
+	Enabled     bool                                  `json:"enabled"`
+	Name        string                                `json:"name"`
+	ProjectId   nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	Streams     []CreateSinkRequestStreams            `json:"streams"`
+	Type        CreateSinkRequestType                 `json:"type"`
+}
+
+// CreateSinkRequestStreams defines model for CreateSinkRequest.Streams.
+type CreateSinkRequestStreams string
+
+// CreateSinkRequestType defines model for CreateSinkRequest.Type.
+type CreateSinkRequestType string
+
 // CredentialGrant What grant enrollment recorded on a credential version, and when the current access token of the grant beneath it expires. Grant material never leaves OLP.
 type CredentialGrant struct {
 	// ExpiresAt When the grant's current access token expires, if the upstream said.
@@ -5167,7 +5747,8 @@ type CredentialResponse struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	// DraftSelected True when this credential is selected only by the mutable draft.
-	DraftSelected bool `json:"draft_selected"`
+	DraftSelected     bool                                           `json:"draft_selected"`
+	ExternalReference nullable.Nullable[ExternalCredentialReference] `json:"external_reference,omitempty"`
 
 	// Grant What grant enrollment recorded, for a version with a grant beneath it; null for a pasted credential.
 	Grant     nullable.Nullable[CredentialGrant] `json:"grant,omitempty"`
@@ -5196,6 +5777,37 @@ type CredentialSlot struct {
 	Name              *string                           `json:"name,omitempty"`
 	Priority          *int32                            `json:"priority,omitempty"`
 	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
+
+	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
+	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
+	TokensPerMinute   nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`
+	Weight            *int32                   `json:"weight,omitempty"`
+}
+
+// CredentialSlotDetail defines model for CredentialSlotDetail.
+type CredentialSlotDetail struct {
+	AllowedApiKeys *[]openapi_types.UUID `json:"allowed_api_keys,omitempty"`
+	AllowedModels  *[]string             `json:"allowed_models,omitempty"`
+	AllowedRoutes  *[]string             `json:"allowed_routes,omitempty"`
+
+	// CredentialVersionId The credential version the slot serves with. A slot write binds the version it names, which must be neither revoked nor lapsed; one that sends null or omits it keeps the slot's current version unless it stages a pasted credential.
+	CredentialVersionId nullable.Nullable[openapi_types.UUID] `json:"credential_version_id,omitempty"`
+
+	// DailyCostLimit Exact decimal amount in the installation currency.
+	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	Enabled        *bool                     `json:"enabled,omitempty"`
+	Etag           openapi_types.UUID        `json:"etag"`
+	Id             *openapi_types.UUID       `json:"id,omitempty"`
+	IsDefault      bool                      `json:"is_default"`
+	MaxConcurrency nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
+
+	// MonthlyCostLimit Exact decimal amount in the installation currency.
+	MonthlyCostLimit  nullable.Nullable[string]         `json:"monthly_cost_limit,omitempty"`
+	Name              *string                           `json:"name,omitempty"`
+	Priority          *int32                            `json:"priority,omitempty"`
+	PriorityShares    nullable.Nullable[PriorityShares] `json:"priority_shares,omitempty"`
+	ProviderId        openapi_types.UUID                `json:"provider_id"`
 	RequestsPerMinute nullable.Nullable[int32]          `json:"requests_per_minute,omitempty"`
 
 	// SaturationPercent Usage percentage of the quota above which each class is held to its share.
@@ -5316,6 +5928,18 @@ type ExportSinkListResponse struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// ExternalCredentialReference Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values.
+type ExternalCredentialReference struct {
+	Field    *string                          `json:"field,omitempty"`
+	Region   *string                          `json:"region,omitempty"`
+	SecretId string                           `json:"secret_id"`
+	Store    ExternalCredentialReferenceStore `json:"store"`
+	Version  string                           `json:"version"`
+}
+
+// ExternalCredentialReferenceStore defines model for ExternalCredentialReference.Store.
+type ExternalCredentialReferenceStore string
+
 // FallbackCondition exhausted: every attempt failed with a retryable class. context_window, content_filter, rate_limit: the route ended on that failure class. budget: a supply-side spend cap removed or refused the route's targets.
 type FallbackCondition string
 
@@ -5392,6 +6016,41 @@ type GrantEnrollmentStatus struct {
 
 // GrantEnrollmentStatusStatus `pending` until the operator approves the device upstream; `completed` once the grant created a credential version; `denied` when the operator denied the device; `expired` when the device authorization expired first.
 type GrantEnrollmentStatusStatus string
+
+// GuardrailListResponse defines model for GuardrailListResponse.
+type GuardrailListResponse struct {
+	Items      []GuardrailResponse       `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// GuardrailResponse defines model for GuardrailResponse.
+type GuardrailResponse struct {
+	Etag string             `json:"etag"`
+	Id   openapi_types.UUID `json:"id"`
+	Name string             `json:"name"`
+
+	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
+	Policy     ContentPolicy                `json:"policy"`
+	ProjectId  openapi_types.UUID           `json:"project_id"`
+	RetiredAt  nullable.Nullable[time.Time] `json:"retired_at"`
+	Revision   int64                        `json:"revision"`
+	RevisionId openapi_types.UUID           `json:"revision_id"`
+	Type       GuardrailResponseType        `json:"type"`
+}
+
+// GuardrailResponseType defines model for GuardrailResponse.Type.
+type GuardrailResponseType string
+
+// GuardrailRevisionResponse defines model for GuardrailRevisionResponse.
+type GuardrailRevisionResponse struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	GuardrailId openapi_types.UUID `json:"guardrail_id"`
+	Id          openapi_types.UUID `json:"id"`
+
+	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
+	Policy   ContentPolicy `json:"policy"`
+	Revision int64         `json:"revision"`
+}
 
 // HealthProbe Opts the connection into active health probes: bounded synthetic requests accounted to the installation.
 type HealthProbe struct {
@@ -5512,6 +6171,15 @@ type InspectedTurnRole string
 
 // InspectedTurnScope defines model for InspectedTurn.Scope.
 type InspectedTurnScope string
+
+// InstallationBrandingResponse defines model for InstallationBrandingResponse.
+type InstallationBrandingResponse struct {
+	Etag string `json:"etag"`
+
+	// Logo Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels.
+	Logo string `json:"logo"`
+	Name string `json:"name"`
+}
 
 // InteractionDisposition defines model for InteractionDisposition.
 type InteractionDisposition struct {
@@ -5640,6 +6308,78 @@ type LoginRequest struct {
 	Email    string  `json:"email"`
 	Password *string `json:"password,omitempty"`
 }
+
+// MCPRegisteredCatalog defines model for MCPRegisteredCatalog.
+type MCPRegisteredCatalog struct {
+	Digest          string                              `json:"digest"`
+	ProtocolVersion MCPRegisteredCatalogProtocolVersion `json:"protocol_version"`
+	Tools           []MCPRegisteredTool                 `json:"tools"`
+}
+
+// MCPRegisteredCatalogProtocolVersion defines model for MCPRegisteredCatalog.ProtocolVersion.
+type MCPRegisteredCatalogProtocolVersion string
+
+// MCPRegisteredTool defines model for MCPRegisteredTool.
+type MCPRegisteredTool struct {
+	Description string                 `json:"description"`
+	InputSchema map[string]interface{} `json:"input_schema"`
+	Name        string                 `json:"name"`
+}
+
+// MCPServerListResponse defines model for MCPServerListResponse.
+type MCPServerListResponse struct {
+	Items      []MCPServerSummary        `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// MCPServerResponse defines model for MCPServerResponse.
+type MCPServerResponse struct {
+	Catalog       MCPRegisteredCatalog         `json:"catalog"`
+	CertifiedAt   time.Time                    `json:"certified_at"`
+	Enabled       bool                         `json:"enabled"`
+	Endpoint      string                       `json:"endpoint"`
+	Etag          openapi_types.UUID           `json:"etag"`
+	HasCredential bool                         `json:"has_credential"`
+	Id            openapi_types.UUID           `json:"id"`
+	Name          string                       `json:"name"`
+	ProjectId     openapi_types.UUID           `json:"project_id"`
+	RetiredAt     nullable.Nullable[time.Time] `json:"retired_at"`
+	Revision      int64                        `json:"revision"`
+	RevisionId    openapi_types.UUID           `json:"revision_id"`
+	Transport     MCPServerResponseTransport   `json:"transport"`
+}
+
+// MCPServerResponseTransport defines model for MCPServerResponse.Transport.
+type MCPServerResponseTransport string
+
+// MCPServerRevisionResponse defines model for MCPServerRevisionResponse.
+type MCPServerRevisionResponse struct {
+	Catalog     MCPRegisteredCatalog `json:"catalog"`
+	CertifiedAt time.Time            `json:"certified_at"`
+	Endpoint    string               `json:"endpoint"`
+	Id          openapi_types.UUID   `json:"id"`
+	Revision    int64                `json:"revision"`
+	ServerId    openapi_types.UUID   `json:"server_id"`
+}
+
+// MCPServerSummary defines model for MCPServerSummary.
+type MCPServerSummary struct {
+	CertifiedAt   time.Time                    `json:"certified_at"`
+	Enabled       bool                         `json:"enabled"`
+	Endpoint      string                       `json:"endpoint"`
+	Etag          openapi_types.UUID           `json:"etag"`
+	HasCredential bool                         `json:"has_credential"`
+	Id            openapi_types.UUID           `json:"id"`
+	Name          string                       `json:"name"`
+	ProjectId     openapi_types.UUID           `json:"project_id"`
+	RetiredAt     nullable.Nullable[time.Time] `json:"retired_at"`
+	Revision      int64                        `json:"revision"`
+	RevisionId    openapi_types.UUID           `json:"revision_id"`
+	Transport     MCPServerSummaryTransport    `json:"transport"`
+}
+
+// MCPServerSummaryTransport defines model for MCPServerSummary.Transport.
+type MCPServerSummaryTransport string
 
 // MFABootstrapSession defines model for MFABootstrapSession.
 type MFABootstrapSession struct {
@@ -5801,6 +6541,14 @@ type MediaJobItem struct {
 type MediaJobListResponse struct {
 	Items      []MediaJobItem            `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
+}
+
+// ModelCatalogResponse defines model for ModelCatalogResponse.
+type ModelCatalogResponse struct {
+	Items []CatalogModel `json:"items"`
+
+	// PricesVisible Whether this catalog discloses configured prices. Missing current price records remain unknown.
+	PricesVisible bool `json:"prices_visible"`
 }
 
 // ModelLifecycle A model's deprecation and retirement as its vendor documents them in the reference catalog.
@@ -6525,8 +7273,10 @@ type PolicyDecision struct {
 
 // PolicyResponse defines model for PolicyResponse.
 type PolicyResponse struct {
-	Etag   openapi_types.UUID `json:"etag"`
-	Policy RoutingPolicy      `json:"policy"`
+	// Configured Whether an explicit policy exists. False represents inherited defaults with a fresh observed ETag after removal.
+	Configured *bool              `json:"configured,omitempty"`
+	Etag       openapi_types.UUID `json:"etag"`
+	Policy     RoutingPolicy      `json:"policy"`
 }
 
 // PriceCeiling defines model for PriceCeiling.
@@ -7477,6 +8227,13 @@ type ReferenceCatalog struct {
 	VendorCount int32  `json:"vendor_count"`
 }
 
+// RegionalRateLimits Explicit per-region key rate and concurrency values. Omitted or null fields inherit the full default; cost budgets are global.
+type RegionalRateLimits struct {
+	MaxConcurrency    nullable.Nullable[int64] `json:"max_concurrency,omitempty"`
+	RequestsPerMinute nullable.Nullable[int64] `json:"requests_per_minute,omitempty"`
+	TokensPerMinute   nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`
+}
+
 // ReplaceRouteDraftRequest defines model for ReplaceRouteDraftRequest.
 type ReplaceRouteDraftRequest struct {
 	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
@@ -7723,7 +8480,17 @@ type RotateApiKeyResponse struct {
 // RotateCredentialRequest defines model for RotateCredentialRequest.
 type RotateCredentialRequest struct {
 	Credential *string `json:"credential,omitempty"`
+
+	// CredentialReference Introducing an external reference requires installation-wide settings authority in addition to configure authority.
+	CredentialReference *ExternalCredentialReference `json:"credential_reference,omitempty"`
+	union               json.RawMessage
 }
+
+// RotateCredentialRequest0 defines model for RotateCredentialRequest.0.
+type RotateCredentialRequest0 = interface{}
+
+// RotateCredentialRequest1 defines model for RotateCredentialRequest.1.
+type RotateCredentialRequest1 = interface{}
 
 // RouteActivationResponse defines model for RouteActivationResponse.
 type RouteActivationResponse struct {
@@ -7761,6 +8528,13 @@ type RouteBehavior struct {
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry     RouteRetry      `json:"retry"`
 	Selectors []RouteSelector `json:"selectors"`
+}
+
+// RouteCatalogExposureResponse defines model for RouteCatalogExposureResponse.
+type RouteCatalogExposureResponse struct {
+	// Etag Observed resource version; supply it in If-Match for updates.
+	Etag                 string `json:"etag"`
+	ExposeUpstreamModels bool   `json:"expose_upstream_models"`
 }
 
 // RouteDetailResponse defines model for RouteDetailResponse.
@@ -8608,12 +9382,18 @@ type SessionListResponse struct {
 
 // SessionResponse defines model for SessionResponse.
 type SessionResponse struct {
-	CsrfToken        string `json:"csrf_token"`
-	InstallationName string `json:"installation_name"`
+	CsrfToken string `json:"csrf_token"`
+
+	// InstallationLogo Embedded PNG/JPEG installation logo; empty uses the default brand mark.
+	InstallationLogo *string `json:"installation_logo,omitempty"`
+	InstallationName string  `json:"installation_name"`
 
 	// Operations The management operations the signed-in member may perform now; the console shows only what the server would admit.
 	Operations []ManagementOperation `json:"operations"`
-	User       UserResponse          `json:"user"`
+
+	// SessionId Public session identifier for session-scoped console preferences; conveys no authentication proof.
+	SessionId *openapi_types.UUID `json:"session_id,omitempty"`
+	User      UserResponse        `json:"user"`
 }
 
 // SetModelRequest defines model for SetModelRequest.
@@ -8804,6 +9584,38 @@ type SimulationRequest struct {
 // SimulationSemanticHeaders Profile-owned semantic headers for the hypothetical inference request. Authentication, credentials, routing and arbitrary transport headers are rejected. Values are always redacted in inspection output.
 type SimulationSemanticHeaders map[string]string
 
+// SinkListResponse defines model for SinkListResponse.
+type SinkListResponse struct {
+	Items      []SinkResponse            `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// SinkResponse defines model for SinkResponse.
+type SinkResponse struct {
+	Delivery struct {
+		Delivered       int64                        `json:"delivered"`
+		Expired         int64                        `json:"expired"`
+		Failed          int64                        `json:"failed"`
+		LastDeliveredAt nullable.Nullable[time.Time] `json:"last_delivered_at"`
+	} `json:"delivery"`
+	Destination   string                                `json:"destination"`
+	Enabled       bool                                  `json:"enabled"`
+	Etag          string                                `json:"etag"`
+	HasCredential bool                                  `json:"has_credential"`
+	Id            openapi_types.UUID                    `json:"id"`
+	Name          string                                `json:"name"`
+	ProjectId     nullable.Nullable[openapi_types.UUID] `json:"project_id"`
+	RetiredAt     nullable.Nullable[time.Time]          `json:"retired_at"`
+	Streams       []SinkResponseStreams                 `json:"streams"`
+	Type          SinkResponseType                      `json:"type"`
+}
+
+// SinkResponseStreams defines model for SinkResponse.Streams.
+type SinkResponseStreams string
+
+// SinkResponseType defines model for SinkResponse.Type.
+type SinkResponseType string
+
 // SkippedPrice A catalog price this installation cannot store, such as an unknown vendor or operation a newer catalog names.
 type SkippedPrice struct {
 	Model     string `json:"model"`
@@ -8841,7 +9653,10 @@ type SlotList struct {
 // SlotWrite defines model for SlotWrite.
 type SlotWrite struct {
 	Credential nullable.Nullable[string] `json:"credential,omitempty"`
-	Slot       CredentialSlot            `json:"slot"`
+
+	// CredentialReference Introducing an external reference requires installation-wide settings authority in addition to configure authority.
+	CredentialReference *ExternalCredentialReference `json:"credential_reference,omitempty"`
+	Slot                CredentialSlot               `json:"slot"`
 }
 
 // SpendCap Daily and monthly cost caps. An exhausted cap removes its owner from selection.
@@ -8968,8 +9783,11 @@ type UpdateApiKeyRequest struct {
 	Name             *string                              `json:"name,omitempty"`
 
 	// Priority Admission class of requests that name none; defaults to normal.
-	Priority          nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
-	RequestsPerMinute nullable.Nullable[int32]             `json:"requests_per_minute,omitempty"`
+	Priority nullable.Nullable[AdmissionPriority] `json:"priority,omitempty"`
+
+	// RegionalLimits Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global.
+	RegionalLimits    nullable.Nullable[map[string]RegionalRateLimits] `json:"regional_limits,omitempty"`
+	RequestsPerMinute nullable.Nullable[int32]                         `json:"requests_per_minute,omitempty"`
 
 	// RequiredAttributionKeys Required attribution labels, in addition to project requirements. Missing labels return 400 missing_attribution before dispatch.
 	RequiredAttributionKeys nullable.Nullable[[]string] `json:"required_attribution_keys,omitempty"`
@@ -9026,6 +9844,12 @@ type UpdateCapturePolicyRequest struct {
 // UpdateCapturePolicyRequestInclude defines model for UpdateCapturePolicyRequest.Include.
 type UpdateCapturePolicyRequestInclude string
 
+// UpdateCatalogPublicationRequest defines model for UpdateCatalogPublicationRequest.
+type UpdateCatalogPublicationRequest struct {
+	Enabled      bool `json:"enabled"`
+	PricesPublic bool `json:"prices_public"`
+}
+
 // UpdateExportSinkRequest defines model for UpdateExportSinkRequest.
 type UpdateExportSinkRequest struct {
 	Credential  nullable.Nullable[map[string]interface{}] `json:"credential,omitempty"`
@@ -9041,6 +9865,30 @@ type UpdateExportSinkRequest struct {
 
 // UpdateExportSinkRequestFilterOutcome defines model for UpdateExportSinkRequest.Filter.Outcome.
 type UpdateExportSinkRequestFilterOutcome string
+
+// UpdateGuardrailRequest defines model for UpdateGuardrailRequest.
+type UpdateGuardrailRequest struct {
+	Name string `json:"name"`
+
+	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
+	Policy ContentPolicy `json:"policy"`
+}
+
+// UpdateInstallationBrandingRequest defines model for UpdateInstallationBrandingRequest.
+type UpdateInstallationBrandingRequest struct {
+	// Logo Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels.
+	Logo string `json:"logo"`
+	Name string `json:"name"`
+}
+
+// UpdateMCPServerRequest defines model for UpdateMCPServerRequest.
+type UpdateMCPServerRequest struct {
+	// Credential Static upstream bearer material. Omission retains it; null removes it. Never returned or copied into tool metadata.
+	Credential nullable.Nullable[string] `json:"credential,omitempty"`
+	Enabled    bool                      `json:"enabled"`
+	Endpoint   string                    `json:"endpoint"`
+	Name       string                    `json:"name"`
+}
 
 // UpdateNotificationDestinationRequest Replace parts of a destination; send the latest record's ETag with If-Match. type is immutable; url is an origin for chat/PagerDuty channels so changing it requires a matching sealed secret.
 type UpdateNotificationDestinationRequest struct {
@@ -9115,10 +9963,62 @@ type UpdateProviderRequest struct {
 	Name          string                `json:"name"`
 }
 
+// UpdatePublishedRouteRequest defines model for UpdatePublishedRouteRequest.
+type UpdatePublishedRouteRequest struct {
+	Affinity nullable.Nullable[RouteAffinity] `json:"affinity,omitempty"`
+
+	// Budget Spend cap of the route itself.
+	Budget nullable.Nullable[SpendCap] `json:"budget,omitempty"`
+
+	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
+	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
+	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
+
+	// Fallbacks Ordered routes to continue on for the named conditions. The graph must be acyclic, inside one project, at most three routes deep, and strict routes may fall back only to strict routes.
+	Fallbacks *[]RouteFallback `json:"fallbacks,omitempty"`
+
+	// Fidelity Omit, or send null, to declare a strict route.
+	Fidelity    nullable.Nullable[RouteFidelity] `json:"fidelity,omitempty"`
+	MaxAttempts int32                            `json:"max_attempts"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes     nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+	Operations       []string               `json:"operations"`
+	OverallTimeoutMs int32                  `json:"overall_timeout_ms"`
+
+	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
+	Retry *RouteRetry `json:"retry,omitempty"`
+
+	// Selectors Ordered request selectors; the first match wins.
+	Selectors *[]RouteSelector `json:"selectors,omitempty"`
+
+	// Slug The published slug is immutable.
+	Slug    string                      `json:"slug"`
+	Targets []ReplaceRouteTargetRequest `json:"targets"`
+}
+
+// UpdateRouteCatalogExposureRequest defines model for UpdateRouteCatalogExposureRequest.
+type UpdateRouteCatalogExposureRequest struct {
+	ExposeUpstreamModels bool `json:"expose_upstream_models"`
+}
+
 // UpdateSettingRequest defines model for UpdateSettingRequest.
 type UpdateSettingRequest struct {
 	Value string `json:"value"`
 }
+
+// UpdateSinkRequest defines model for UpdateSinkRequest.
+type UpdateSinkRequest struct {
+	// Credential HMAC signing credential; omitted updates retain it and null removes it.
+	Credential  nullable.Nullable[string]  `json:"credential,omitempty"`
+	Destination string                     `json:"destination"`
+	Enabled     bool                       `json:"enabled"`
+	Name        string                     `json:"name"`
+	Streams     []UpdateSinkRequestStreams `json:"streams"`
+}
+
+// UpdateSinkRequestStreams defines model for UpdateSinkRequest.Streams.
+type UpdateSinkRequestStreams string
 
 // UpdateUserRoleRequest defines model for UpdateUserRoleRequest.
 type UpdateUserRoleRequest struct {
@@ -9446,6 +10346,11 @@ type MfaVerify201JSONResponseBody struct {
 	union json.RawMessage
 }
 
+// UpdateInstallationBrandingParams defines parameters for UpdateInstallationBranding.
+type UpdateInstallationBrandingParams struct {
+	IfMatch string `json:"If-Match"`
+}
+
 // ListBudgetGroupsParams defines parameters for ListBudgetGroups.
 type ListBudgetGroupsParams struct {
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -9455,6 +10360,13 @@ type ListBudgetGroupsParams struct {
 // CreateBudgetGroupParams defines parameters for CreateBudgetGroup.
 type CreateBudgetGroupParams struct {
 	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteBudgetGroupParams defines parameters for DeleteBudgetGroup.
+type DeleteBudgetGroupParams struct {
+	// IfMatch Current budget group ETag
+	IfMatch        string `json:"If-Match"`
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
@@ -9647,6 +10559,30 @@ type ApplyConfigurationParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// ListGuardrailsParams defines parameters for ListGuardrails.
+type ListGuardrailsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
+}
+
+// CreateGuardrailParams defines parameters for CreateGuardrail.
+type CreateGuardrailParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteGuardrailParams defines parameters for DeleteGuardrail.
+type DeleteGuardrailParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// UpdateGuardrailParams defines parameters for UpdateGuardrail.
+type UpdateGuardrailParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListInvitationsParams defines parameters for ListInvitations.
 type ListInvitationsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -9687,6 +10623,54 @@ type RevokeManagementTokenParams struct {
 
 	// IdempotencyKey Unique mutation key
 	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ManagementMcpJSONBody defines parameters for ManagementMcp.
+type ManagementMcpJSONBody struct {
+	Id      *ManagementMcpJSONBody_Id    `json:"id,omitempty"`
+	Jsonrpc ManagementMcpJSONBodyJsonrpc `json:"jsonrpc"`
+	Method  string                       `json:"method"`
+	Params  *map[string]interface{}      `json:"params,omitempty"`
+}
+
+// ManagementMcpJSONBodyId0 defines parameters for ManagementMcp.
+type ManagementMcpJSONBodyId0 = string
+
+// ManagementMcpJSONBodyId1 defines parameters for ManagementMcp.
+type ManagementMcpJSONBodyId1 = float32
+
+// ManagementMcpJSONBody_Id defines parameters for ManagementMcp.
+type ManagementMcpJSONBody_Id struct {
+	union json.RawMessage
+}
+
+// ManagementMcpJSONBodyJsonrpc defines parameters for ManagementMcp.
+type ManagementMcpJSONBodyJsonrpc string
+
+// ListMcpServersParams defines parameters for ListMcpServers.
+type ListMcpServersParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateMcpServerParams defines parameters for CreateMcpServer.
+type CreateMcpServerParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteMcpServerParams defines parameters for DeleteMcpServer.
+type DeleteMcpServerParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// UpdateMcpServerParams defines parameters for UpdateMcpServer.
+type UpdateMcpServerParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
 }
 
 // ListMediaJobsParams defines parameters for ListMediaJobs.
@@ -9753,6 +10737,13 @@ type CreateNotificationDestinationParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// DeleteNotificationDestinationParams defines parameters for DeleteNotificationDestination.
+type DeleteNotificationDestinationParams struct {
+	// IfMatch Concurrency token returned with the resource
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // UpdateNotificationDestinationParams defines parameters for UpdateNotificationDestination.
 type UpdateNotificationDestinationParams struct {
 	// IfMatch Concurrency token returned with the resource
@@ -9771,6 +10762,13 @@ type ListNotificationRulesParams struct {
 // CreateNotificationRuleParams defines parameters for CreateNotificationRule.
 type CreateNotificationRuleParams struct {
 	// IdempotencyKey Unique mutation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteNotificationRuleParams defines parameters for DeleteNotificationRule.
+type DeleteNotificationRuleParams struct {
+	// IfMatch Concurrency token returned with the resource
+	IfMatch        string `json:"If-Match"`
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
@@ -10061,6 +11059,12 @@ type CreateProjectParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// DeleteProjectParams defines parameters for DeleteProject.
+type DeleteProjectParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // UpdateProjectParams defines parameters for UpdateProject.
 type UpdateProjectParams struct {
 	// IfMatch Current project ETag
@@ -10098,6 +11102,11 @@ type PutProjectBudgetJSONBody struct {
 // PutProjectBudgetParams defines parameters for PutProjectBudget.
 type PutProjectBudgetParams struct {
 	// IfMatch Quoted project etag from GET.
+	IfMatch string `json:"If-Match"`
+}
+
+// PutCatalogPublicationParams defines parameters for PutCatalogPublication.
+type PutCatalogPublicationParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
@@ -10206,6 +11215,12 @@ type CreateProviderParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// DeleteProviderParams defines parameters for DeleteProvider.
+type DeleteProviderParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // UpdateProviderParams defines parameters for UpdateProvider.
 type UpdateProviderParams struct {
 	IfMatch string `json:"If-Match"`
@@ -10229,9 +11244,18 @@ type AcceptProviderCatalogSuggestionsParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// DeleteCredentialSlotParams defines parameters for DeleteCredentialSlot.
+type DeleteCredentialSlotParams struct {
+	// IfMatch Observed individual credential-slot or collection ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique write key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // PutCredentialSlotParams defines parameters for PutCredentialSlot.
 type PutCredentialSlotParams struct {
-	// IfMatch Current credential-slot ETag
+	// IfMatch Observed individual credential-slot or collection ETag
 	IfMatch string `json:"If-Match"`
 
 	// IdempotencyKey Unique write key
@@ -10504,6 +11528,22 @@ type ListRoutesParams struct {
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// CreateRouteParams defines parameters for CreateRoute.
+type CreateRouteParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// UpdateRouteParams defines parameters for UpdateRoute.
+type UpdateRouteParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// PutRouteCatalogExposureParams defines parameters for PutRouteCatalogExposure.
+type PutRouteCatalogExposureParams struct {
+	IfMatch string `json:"If-Match"`
+}
+
 // RetireRouteParams defines parameters for RetireRoute.
 type RetireRouteParams struct {
 	IfMatch        string `json:"If-Match"`
@@ -10527,6 +11567,15 @@ type DiffRouteRevisionsParams struct {
 
 // RestoreRouteRevisionParams defines parameters for RestoreRouteRevision.
 type RestoreRouteRevisionParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteRoutingPolicyParams defines parameters for DeleteRoutingPolicy.
+type DeleteRoutingPolicyParams struct {
+	// IfMatch Current policy ETag
+	IfMatch string `json:"If-Match"`
+
+	// IdempotencyKey Unique write key
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
@@ -10604,6 +11653,32 @@ type UpdateSettingParams struct {
 type SetupParams struct {
 	// XOLPSetupToken One-time bootstrap token from OLP_BOOTSTRAP_TOKEN_FILE
 	XOLPSetupToken string `json:"X-OLP-Setup-Token"`
+}
+
+// ListSinksParams defines parameters for ListSinks.
+type ListSinksParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateSinkParams defines parameters for CreateSink.
+type CreateSinkParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteSinkParams defines parameters for DeleteSink.
+type DeleteSinkParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// UpdateSinkParams defines parameters for UpdateSink.
+type UpdateSinkParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
 }
 
 // UsageBreakdownParams defines parameters for UsageBreakdown.
@@ -10916,6 +11991,9 @@ type MfaBootstrapEnrollJSONRequestBody = MFAEnrollmentRequest
 // MfaVerifyJSONRequestBody defines body for MfaVerify for application/json ContentType.
 type MfaVerifyJSONRequestBody = MFAVerificationRequest
 
+// UpdateInstallationBrandingJSONRequestBody defines body for UpdateInstallationBranding for application/json ContentType.
+type UpdateInstallationBrandingJSONRequestBody = UpdateInstallationBrandingRequest
+
 // CreateBudgetGroupJSONRequestBody defines body for CreateBudgetGroup for application/json ContentType.
 type CreateBudgetGroupJSONRequestBody = CreateBudgetGroupRequest
 
@@ -10958,6 +12036,12 @@ type ApplyConfigurationJSONRequestBody = ConfigurationPromotionRequest
 // PlanConfigurationJSONRequestBody defines body for PlanConfiguration for application/json ContentType.
 type PlanConfigurationJSONRequestBody = ConfigurationPromotionRequest
 
+// CreateGuardrailJSONRequestBody defines body for CreateGuardrail for application/json ContentType.
+type CreateGuardrailJSONRequestBody = CreateGuardrailRequest
+
+// UpdateGuardrailJSONRequestBody defines body for UpdateGuardrail for application/json ContentType.
+type UpdateGuardrailJSONRequestBody = UpdateGuardrailRequest
+
 // CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
 type CreateInvitationJSONRequestBody = CreateInvitationRequest
 
@@ -10966,6 +12050,15 @@ type AcceptInvitationJSONRequestBody = AcceptInvitationRequest
 
 // CreateManagementTokenJSONRequestBody defines body for CreateManagementToken for application/json ContentType.
 type CreateManagementTokenJSONRequestBody = CreateManagementTokenRequest
+
+// ManagementMcpJSONRequestBody defines body for ManagementMcp for application/json ContentType.
+type ManagementMcpJSONRequestBody ManagementMcpJSONBody
+
+// CreateMcpServerJSONRequestBody defines body for CreateMcpServer for application/json ContentType.
+type CreateMcpServerJSONRequestBody = CreateMCPServerRequest
+
+// UpdateMcpServerJSONRequestBody defines body for UpdateMcpServer for application/json ContentType.
+type UpdateMcpServerJSONRequestBody = UpdateMCPServerRequest
 
 // CreateNotificationDestinationJSONRequestBody defines body for CreateNotificationDestination for application/json ContentType.
 type CreateNotificationDestinationJSONRequestBody = CreateNotificationDestinationRequest
@@ -11078,6 +12171,9 @@ type PutProjectAttributionPolicyJSONRequestBody PutProjectAttributionPolicyJSONB
 // PutProjectBudgetJSONRequestBody defines body for PutProjectBudget for application/json ContentType.
 type PutProjectBudgetJSONRequestBody PutProjectBudgetJSONBody
 
+// PutCatalogPublicationJSONRequestBody defines body for PutCatalogPublication for application/json ContentType.
+type PutCatalogPublicationJSONRequestBody = UpdateCatalogPublicationRequest
+
 // PutProjectEndUserPolicyJSONRequestBody defines body for PutProjectEndUserPolicy for application/json ContentType.
 type PutProjectEndUserPolicyJSONRequestBody PutProjectEndUserPolicyJSONBody
 
@@ -11138,6 +12234,15 @@ type CreateRouteTemplateJSONRequestBody = RouteTemplateRequest
 // ReplaceRouteTemplateJSONRequestBody defines body for ReplaceRouteTemplate for application/json ContentType.
 type ReplaceRouteTemplateJSONRequestBody = RouteTemplateRequest
 
+// CreateRouteJSONRequestBody defines body for CreateRoute for application/json ContentType.
+type CreateRouteJSONRequestBody = CreateRouteDraftRequest
+
+// UpdateRouteJSONRequestBody defines body for UpdateRoute for application/json ContentType.
+type UpdateRouteJSONRequestBody = UpdatePublishedRouteRequest
+
+// PutRouteCatalogExposureJSONRequestBody defines body for PutRouteCatalogExposure for application/json ContentType.
+type PutRouteCatalogExposureJSONRequestBody = UpdateRouteCatalogExposureRequest
+
 // PutRoutingPolicyJSONRequestBody defines body for PutRoutingPolicy for application/json ContentType.
 type PutRoutingPolicyJSONRequestBody = RoutingPolicy
 
@@ -11167,6 +12272,12 @@ type UpdateSettingJSONRequestBody = UpdateSettingRequest
 
 // SetupJSONRequestBody defines body for Setup for application/json ContentType.
 type SetupJSONRequestBody = SetupRequest
+
+// CreateSinkJSONRequestBody defines body for CreateSink for application/json ContentType.
+type CreateSinkJSONRequestBody = CreateSinkRequest
+
+// UpdateSinkJSONRequestBody defines body for UpdateSink for application/json ContentType.
+type UpdateSinkJSONRequestBody = UpdateSinkRequest
 
 // PermitUnconfinedPluginJSONRequestBody defines body for PermitUnconfinedPlugin for application/json ContentType.
 type PermitUnconfinedPluginJSONRequestBody = UnconfinedPluginPermitRequest
@@ -11842,6 +12953,116 @@ func (t *PlaygroundResponseFormat) UnmarshalJSON(b []byte) error {
 	return err
 }
 
+// AsRotateCredentialRequest0 returns the union data inside the RotateCredentialRequest as a RotateCredentialRequest0
+func (t RotateCredentialRequest) AsRotateCredentialRequest0() (RotateCredentialRequest0, error) {
+	var body RotateCredentialRequest0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromRotateCredentialRequest0 overwrites any union data inside the RotateCredentialRequest as the provided RotateCredentialRequest0
+func (t *RotateCredentialRequest) FromRotateCredentialRequest0(v RotateCredentialRequest0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeRotateCredentialRequest0 performs a merge with any union data inside the RotateCredentialRequest, using the provided RotateCredentialRequest0
+func (t *RotateCredentialRequest) MergeRotateCredentialRequest0(v RotateCredentialRequest0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsRotateCredentialRequest1 returns the union data inside the RotateCredentialRequest as a RotateCredentialRequest1
+func (t RotateCredentialRequest) AsRotateCredentialRequest1() (RotateCredentialRequest1, error) {
+	var body RotateCredentialRequest1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromRotateCredentialRequest1 overwrites any union data inside the RotateCredentialRequest as the provided RotateCredentialRequest1
+func (t *RotateCredentialRequest) FromRotateCredentialRequest1(v RotateCredentialRequest1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeRotateCredentialRequest1 performs a merge with any union data inside the RotateCredentialRequest, using the provided RotateCredentialRequest1
+func (t *RotateCredentialRequest) MergeRotateCredentialRequest1(v RotateCredentialRequest1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t RotateCredentialRequest) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	object := make(map[string]json.RawMessage)
+	if t.union != nil {
+		err = json.Unmarshal(b, &object)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if t.Credential != nil {
+		object["credential"], err = json.Marshal(t.Credential)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'credential': %w", err)
+		}
+	}
+
+	if t.CredentialReference != nil {
+		object["credential_reference"], err = json.Marshal(t.CredentialReference)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'credential_reference': %w", err)
+		}
+	}
+	b, err = json.Marshal(object)
+	return b, err
+}
+
+func (t *RotateCredentialRequest) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	if err != nil {
+		return err
+	}
+	object := make(map[string]json.RawMessage)
+	err = json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["credential"]; found {
+		err = json.Unmarshal(raw, &t.Credential)
+		if err != nil {
+			return fmt.Errorf("error reading 'credential': %w", err)
+		}
+	}
+
+	if raw, found := object["credential_reference"]; found {
+		err = json.Unmarshal(raw, &t.CredentialReference)
+		if err != nil {
+			return fmt.Errorf("error reading 'credential_reference': %w", err)
+		}
+	}
+
+	return err
+}
+
 // AsRoutingConstraints returns the union data inside the RoutingPolicy_Constraints as a RoutingConstraints
 func (t RoutingPolicy_Constraints) AsRoutingConstraints() (RoutingConstraints, error) {
 	var body RoutingConstraints
@@ -12034,6 +13255,68 @@ func (t MfaVerify201JSONResponseBody) MarshalJSON() ([]byte, error) {
 }
 
 func (t *MfaVerify201JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsManagementMcpJSONBodyId0 returns the union data inside the ManagementMcpJSONBody_Id as a ManagementMcpJSONBodyId0
+func (t ManagementMcpJSONBody_Id) AsManagementMcpJSONBodyId0() (ManagementMcpJSONBodyId0, error) {
+	var body ManagementMcpJSONBodyId0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromManagementMcpJSONBodyId0 overwrites any union data inside the ManagementMcpJSONBody_Id as the provided ManagementMcpJSONBodyId0
+func (t *ManagementMcpJSONBody_Id) FromManagementMcpJSONBodyId0(v ManagementMcpJSONBodyId0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeManagementMcpJSONBodyId0 performs a merge with any union data inside the ManagementMcpJSONBody_Id, using the provided ManagementMcpJSONBodyId0
+func (t *ManagementMcpJSONBody_Id) MergeManagementMcpJSONBodyId0(v ManagementMcpJSONBodyId0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsManagementMcpJSONBodyId1 returns the union data inside the ManagementMcpJSONBody_Id as a ManagementMcpJSONBodyId1
+func (t ManagementMcpJSONBody_Id) AsManagementMcpJSONBodyId1() (ManagementMcpJSONBodyId1, error) {
+	var body ManagementMcpJSONBodyId1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromManagementMcpJSONBodyId1 overwrites any union data inside the ManagementMcpJSONBody_Id as the provided ManagementMcpJSONBodyId1
+func (t *ManagementMcpJSONBody_Id) FromManagementMcpJSONBodyId1(v ManagementMcpJSONBodyId1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeManagementMcpJSONBodyId1 performs a merge with any union data inside the ManagementMcpJSONBody_Id, using the provided ManagementMcpJSONBodyId1
+func (t *ManagementMcpJSONBody_Id) MergeManagementMcpJSONBodyId1(v ManagementMcpJSONBodyId1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ManagementMcpJSONBody_Id) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ManagementMcpJSONBody_Id) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }

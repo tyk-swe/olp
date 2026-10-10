@@ -243,7 +243,7 @@ func TestIntegrationExportSinkMatrix(t *testing.T) {
 	}
 
 	recordID := map[string]map[string]string{}
-	queuedAt := map[string]map[string]time.Time{}
+	occurredAt := map[string]map[string]time.Time{}
 	for _, fx := range fixtures {
 		secretID, sinkID := uuid.NewString(), uuid.NewString()
 		credential, err := json.Marshal(fx.credential)
@@ -266,11 +266,11 @@ func TestIntegrationExportSinkMatrix(t *testing.T) {
 	for _, stream := range matrixStreams {
 		source := uuid.NewString()
 		payload, _ := json.Marshal(map[string]any{"stream": stream, "marker": "matrix-" + stream})
-		if _, err := pool.Exec(ctx, `SELECT olp.enqueue_export($1,$2::uuid,NULL,$3,'success',now(),$4::jsonb)`, stream, source, "matrix", payload); err != nil {
+		if _, err := pool.Exec(ctx, `SELECT olp.enqueue_export($1,$2::uuid,NULL,$3,'success',now()-interval '2 days',$4::jsonb)`, stream, source, "matrix", payload); err != nil {
 			t.Fatal(err)
 		}
 	}
-	rows, err := pool.Query(ctx, `SELECT s.type,r.stream,r.id::text,r.queued_at FROM olp.export_pending p JOIN olp.export_records r ON r.id=p.record_id JOIN olp.export_sinks s ON s.id=p.sink_id`)
+	rows, err := pool.Query(ctx, `SELECT s.type,r.stream,r.id::text,r.occurred_at FROM olp.export_pending p JOIN olp.export_records r ON r.id=p.record_id JOIN olp.export_sinks s ON s.id=p.sink_id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,10 +283,10 @@ func TestIntegrationExportSinkMatrix(t *testing.T) {
 		}
 		if recordID[typ] == nil {
 			recordID[typ] = map[string]string{}
-			queuedAt[typ] = map[string]time.Time{}
+			occurredAt[typ] = map[string]time.Time{}
 		}
 		recordID[typ][stream] = id
-		queuedAt[typ][stream] = at
+		occurredAt[typ][stream] = at
 	}
 	rows.Close()
 
@@ -366,8 +366,8 @@ func TestIntegrationExportSinkMatrix(t *testing.T) {
 					if eventID != recordID["otlp_logs"][stream] {
 						t.Errorf("otlp %s event_id %q want %q", stream, eventID, recordID["otlp_logs"][stream])
 					}
-					if lr.TimeUnixNano != uint64(queuedAt["otlp_logs"][stream].UnixNano()) {
-						t.Errorf("otlp %s time %d want %d", stream, lr.TimeUnixNano, queuedAt["otlp_logs"][stream].UnixNano())
+					if lr.TimeUnixNano != uint64(occurredAt["otlp_logs"][stream].UnixNano()) {
+						t.Errorf("otlp %s time %d want %d", stream, lr.TimeUnixNano, occurredAt["otlp_logs"][stream].UnixNano())
 					}
 					var env map[string]any
 					if err := json.Unmarshal([]byte(lr.Body.GetStringValue()), &env); err != nil {
@@ -409,7 +409,7 @@ func TestIntegrationExportSinkMatrix(t *testing.T) {
 			if id != recordID[name][stream] {
 				t.Errorf("%s %s event_id %q want %q", name, stream, id, recordID[name][stream])
 			}
-			wantKey := "/" + objectKey(Record{ID: id, Stream: stream, At: queuedAt[name][stream]})
+			wantKey := "/" + objectKey(Record{ID: id, Stream: stream, At: occurredAt[name][stream]})
 			if !strings.HasSuffix(hit.path, wantKey) {
 				t.Errorf("%s key %q does not end with %q", name, hit.path, wantKey)
 			}

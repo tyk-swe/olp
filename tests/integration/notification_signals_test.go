@@ -167,6 +167,44 @@ func TestSignalProducerWorkerStaleLifecycle(t *testing.T) {
 	}
 }
 
+func TestSignalProducerRegionalWorkerStaleLifecycle(t *testing.T) {
+	f := newSignalFixture(t)
+	f.rule(t, "worker.stale", f.destination(t, nil), nil, nil)
+	// An old unscoped checkpoint remains after this fleet adopts regions.
+	if _, err := f.h.Pool.Exec(t.Context(), `INSERT INTO olp.worker_task_health(task,checked_at,first_seen_at)
+	 VALUES('health_probes',now()-interval '1 hour',now()-interval '1 hour');
+	 INSERT INTO olp.regional_worker_task_health(region,task,checked_at,last_success_at,first_seen_at)
+	 VALUES('east','health_probes',now(),now(),now()-interval '10 minutes'),
+	       ('west','health_probes',now()-interval '10 minutes',NULL,now()-interval '10 minutes')`); err != nil {
+		t.Fatal(err)
+	}
+	f.pass(t, usage.NotificationDependencies{})
+	events := f.received(t)
+	if len(events) != 1 || events[0]["subject"] != "region:west:health_probes" || events[0]["resolved"] != false {
+		t.Fatalf("regional stale alerts did not isolate the failed region: %v", events)
+	}
+	if events[0]["evidence"].(map[string]any)["region"] != "west" {
+		t.Fatal("worker alert omitted its region")
+	}
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.regional_worker_task_health SET checked_at=now(),last_success_at=now() WHERE region='west'`); err != nil {
+		t.Fatal(err)
+	}
+	f.pass(t, usage.NotificationDependencies{})
+	events = f.received(t)
+	if len(events) != 2 || events[1]["resolved"] != true || events[1]["incident_key"] != events[0]["incident_key"] {
+		t.Fatalf("regional worker did not recover its own incident: %v", events)
+	}
+	// A still-running unscoped fleet keeps its own independently stale signal.
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.worker_task_health SET checked_at=now()-interval '5 minutes' WHERE task='health_probes'`); err != nil {
+		t.Fatal(err)
+	}
+	f.pass(t, usage.NotificationDependencies{})
+	events = f.received(t)
+	if len(events) != 3 || events[2]["subject"] != "health_probes" || events[2]["resolved"] != false {
+		t.Fatalf("regional checkpoints hid a current unscoped fleet: %v", events)
+	}
+}
+
 func TestSignalProducerErrorRateAndCooldown(t *testing.T) {
 	f := newSignalFixture(t)
 	f.h.want(f.owner, "POST", "/api/v1/api-keys", map[string]any{"name": "signal key", "scopes": []string{"inference"}},

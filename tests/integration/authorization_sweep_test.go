@@ -169,8 +169,10 @@ func sweepCallers(h *accessHarness, owner *browser, golden routeGolden, projectA
 // policy write needs the operation its scope implies, and the sweep writes a
 // route draft's policy, which a developer's keys operation does not cover.
 var sweepRefinements = map[string]bool{
-	"PUT /api/v1/routing-policies/{scope}/{id} as developer global":   true,
-	"PUT /api/v1/routing-policies/{scope}/{id} as developer assigned": true,
+	"PUT /api/v1/routing-policies/{scope}/{id} as developer global":      true,
+	"PUT /api/v1/routing-policies/{scope}/{id} as developer assigned":    true,
+	"DELETE /api/v1/routing-policies/{scope}/{id} as developer global":   true,
+	"DELETE /api/v1/routing-policies/{scope}/{id} as developer assigned": true,
 }
 
 // sweepBody is the request body for pattern: resources are placed in the
@@ -178,7 +180,7 @@ var sweepRefinements = map[string]bool{
 // would refine assigned callers the route itself admits.
 func sweepBody(pattern, projectID string) any {
 	switch pattern {
-	case "POST /api/v1/route-drafts", "POST /api/v1/route-templates", "POST /api/v1/notifications/destinations", "POST /api/v1/notifications/rules":
+	case "POST /api/v1/sinks", "POST /api/v1/routes", "POST /api/v1/route-drafts", "POST /api/v1/route-templates", "POST /api/v1/notifications/destinations", "POST /api/v1/notifications/rules":
 		return map[string]any{"project_id": projectID}
 	}
 	if strings.HasPrefix(pattern, "GET ") {

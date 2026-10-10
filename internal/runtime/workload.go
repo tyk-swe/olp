@@ -100,6 +100,7 @@ func (m *Manager) loadWorkloadAuthority(ctx context.Context, tx pgx.Tx, state *a
 		for _, mapping := range issuer.Config.Mappings {
 			project := mapping.ProjectID
 			a := access.Authority{Issuer: issuer.Creator, ProjectID: &project, InstallationID: m.installation, InstallationBudget: state.installationBudget, ProjectBudget: state.projectBudgets[project], ProjectAttributionBudgets: state.projectAttributionBudgets[project], BudgetIncreases: state.budgetIncreases, Policy: access.WorkloadKeyPolicy(mapping)}
+			a.Policy = a.Policy.InRegion(m.Region)
 			if org, ok := state.projectOrganizations[project]; ok {
 				a.OrganizationID = &org
 				a.OrganizationBudget = state.organizationBudgets[org]

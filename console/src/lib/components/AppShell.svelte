@@ -7,11 +7,13 @@
   import BrandMark from '$lib/components/BrandMark.svelte';
   import NavIcon from '$lib/components/NavIcon.svelte';
   import Navigation from '$lib/components/Navigation.svelte';
+  import InstallationSwitcher from '$lib/features/fleet/InstallationSwitcher.svelte';
 
   let {
     children,
     user,
     installationName,
+    installationLogo = '',
     signingOut = false,
     signOutError = '',
     onSignOut
@@ -19,6 +21,7 @@
     children: Snippet;
     user: SessionUser;
     installationName: string;
+    installationLogo?: string;
     signingOut?: boolean;
     signOutError?: string;
     onSignOut: () => void;
@@ -114,7 +117,11 @@
         href={resolve('/')}
         aria-label="OpenLLMProxy overview"
       >
-        <BrandMark size={22} />
+        {#if installationLogo}<img
+            class="installation-logo"
+            src={installationLogo}
+            alt=""
+          />{:else}<BrandMark size={22} />{/if}
         <span class="wordmark">OpenLLMProxy</span>
       </a>
 
@@ -123,11 +130,10 @@
       </div>
 
       <div class="topbar-actions">
-        <span class="edition" title={installationLabel}
-          ><span class="edition-dot" aria-hidden="true"></span><span
-            class="edition-name">{installationLabel}</span
-          ></span
-        >
+        <div class="edition">
+          <span class="edition-dot" aria-hidden="true"
+          ></span><InstallationSwitcher name={installationLabel} />
+        </div>
         <details
           class="account-menu"
           bind:this={accountMenu}
@@ -204,7 +210,11 @@
         aria-label="OpenLLMProxy overview"
         onclick={closeNavigation}
       >
-        <BrandMark size={22} />
+        {#if installationLogo}<img
+            class="installation-logo"
+            src={installationLogo}
+            alt=""
+          />{:else}<BrandMark size={22} />{/if}
         <span class="wordmark">OpenLLMProxy</span>
       </a>
       <button
@@ -329,10 +339,8 @@
 
   .edition {
     display: inline-flex;
-    /* An operator may name the installation with up to 100 characters: the
-       name is truncated with its full text kept in the tooltip rather than
-       pushing the account menu off the edge. */
-    overflow: hidden;
+    /* Keep the switcher popover outside this compact header label. */
+    overflow: visible;
     max-width: 14rem;
     min-height: 1.75rem;
     flex: 0 1 auto;
@@ -367,9 +375,11 @@
     animation: ping 2.4s var(--ease-out) infinite;
   }
 
-  .edition-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .installation-logo {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+    flex: none;
   }
 
   .account-label {
@@ -534,12 +544,6 @@
     display: grid;
   }
 
-  @media (max-width: 80rem) {
-    .edition {
-      display: none;
-    }
-  }
-
   @media (max-width: 62rem) {
     .topbar {
       padding: 0 1rem;
@@ -569,10 +573,13 @@
   }
 
   @media (max-width: 40rem) {
-    .edition,
     .account-label,
     .account-menu :global(svg) {
       display: none;
+    }
+
+    .edition {
+      max-width: 8rem;
     }
 
     .topbar {

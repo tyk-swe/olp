@@ -37,7 +37,7 @@ jobs:
     # official Codex sandbox needs under the unprivileged-userns restriction;
     # 24.04 lets the sandbox build its namespace but refuses it loopback.
     runs-on: ubuntu-26.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup

@@ -14,7 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/runtime"
-	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
 const maxSlots = 64
@@ -36,6 +36,7 @@ func (s *Server) credentials(r *http.Request, p access.Principal) (access.Reply,
 		'active',EXISTS(SELECT 1 FROM jsonb_array_elements(r.slots) slot WHERE slot->>'credential_id'=c.id::text),
 		'draft_selected',EXISTS(SELECT 1 FROM olp.provider_slots d WHERE d.provider_id=p.id AND d.credential_id=c.id),
 		'created_at',c.created_at,'revoked_at',c.revoked_at,
+		'external_reference',c.external_reference,
 		'grant',CASE WHEN c.plugin_digest IS NOT NULL THEN jsonb_build_object(
 			'plugin_digest',c.plugin_digest,'principal',c.principal,'facts',c.grant_facts,'expires_at',g.expires_at,'lapsed_at',g.lapsed_at) END)
 		FROM olp.provider_credentials c JOIN olp.providers p ON p.id=c.provider_id
@@ -53,7 +54,8 @@ func (s *Server) credentials(r *http.Request, p access.Principal) (access.Reply,
 }
 
 type rotateRequest struct {
-	Credential string `json:"credential"`
+	Credential          string                 `json:"credential"`
+	CredentialReference *secretstore.Reference `json:"credential_reference,omitempty"`
 }
 
 // rotate validates a new credential against the upstream, records it as the
@@ -69,7 +71,14 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if err = access.DecodeUnique(r, &input, 1<<20); err != nil {
 		return access.Reply{}, err
 	}
-	if err = ValidCredential(input.Credential); err != nil {
+	var plain *string
+	if input.Credential != "" {
+		plain = &input.Credential
+	}
+	if plain == nil && input.CredentialReference == nil {
+		return access.Reply{}, access.Invalid("credential", "Supply a credential or external reference.")
+	}
+	if err = validateCredentialInput(plain, input.CredentialReference); err != nil {
 		return access.Reply{}, err
 	}
 	tx, err := a.Begin(r)
@@ -79,6 +88,9 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	defer tx.Rollback(r.Context())
 	p, err := a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
 		return access.Reply{}, err
 	}
 	// The stored reply discloses the provider, so the caller must still reach
@@ -131,12 +143,20 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	for _, model := range models {
 		current.Configuration.ProbeModels = append(current.Configuration.ProbeModels, model.UpstreamModel)
 	}
-	if _, err = s.listModels(r.Context(), &current.Configuration, []byte(input.Credential)); err != nil {
+	credential := []byte(input.Credential)
+	if input.CredentialReference != nil {
+		credential, err = s.resolveReference(r.Context(), *input.CredentialReference)
+		if err != nil {
+			return access.Reply{}, err
+		}
+	}
+	defer clear(credential)
+	if _, err = s.listModels(r.Context(), &current.Configuration, credential); err != nil {
 		return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential was not accepted by the upstream: "+classify(err).Detail)
 	}
 	var validatedAt *time.Time
 	if defaultSlot.validationFingerprint(&current.Configuration, models) != "" {
-		if err = s.validateModelAccess(r.Context(), &current.Configuration, []byte(input.Credential), &defaultSlot, models); err != nil {
+		if err = s.validateModelAccess(r.Context(), &current.Configuration, credential, &defaultSlot, models); err != nil {
 			return access.Reply{}, access.Fail(422, "credential_invalid", "The new credential cannot access the enabled models: "+classify(err).Detail)
 		}
 		validatedAt = new(time.Now().UTC())
@@ -148,6 +168,9 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	defer tx.Rollback(r.Context())
 	p, err = a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
 		return access.Reply{}, err
 	}
 	// The stored reply discloses the provider, so the caller must still reach
@@ -169,7 +192,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if locked.ETag != current.ETag {
 		return access.Reply{}, access.Fail(412, "etag_mismatch", "The connection changed during validation; reload and retry.")
 	}
-	credentialID, version, err := s.StoreCredential(r.Context(), tx, id, input.Credential)
+	credentialID, version, err := s.storeCredentialInput(r.Context(), tx, id, plain, input.CredentialReference)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -259,8 +282,9 @@ func (in *slotInput) limits() Limits {
 }
 
 type slotWrite struct {
-	Slot       slotInput `json:"slot"`
-	Credential *string   `json:"credential"`
+	Slot                slotInput              `json:"slot"`
+	Credential          *string                `json:"credential"`
+	CredentialReference *secretstore.Reference `json:"credential_reference,omitempty"`
 }
 
 func slotJSON(row slotRow) map[string]any {
@@ -467,10 +491,11 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if err = validSlot(&input.Slot, slotID); err != nil {
 		return access.Reply{}, err
 	}
-	if input.Credential != nil {
-		if err = ValidCredential(*input.Credential); err != nil {
-			return access.Reply{}, err
-		}
+	if err = validateCredentialInput(input.Credential, input.CredentialReference); err != nil {
+		return access.Reply{}, err
+	}
+	if input.CredentialReference != nil && input.Slot.CredentialVersionID != nil {
+		return access.Reply{}, access.Invalid("credential_reference", "Choose a new reference or an existing credential version.")
 	}
 	tx, err := a.Begin(r)
 	if err != nil {
@@ -479,6 +504,9 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	defer tx.Rollback(r.Context())
 	p, err := a.Reauthorize(r, tx)
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err = authorizeCredentialReference(p, input.CredentialReference); err != nil {
 		return access.Reply{}, err
 	}
 	// The stored reply discloses the provider's slots, so the caller must
@@ -497,9 +525,6 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
-	if err = access.Match(r, current.SlotsETag); err != nil {
-		return access.Reply{}, err
-	}
 	slots, err := loadSlots(r.Context(), tx, id)
 	if err != nil {
 		return access.Reply{}, err
@@ -509,6 +534,9 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 		if slots[i].ID == slotID {
 			existing = &slots[i]
 		}
+	}
+	if err = matchSlot(r, current, existing); err != nil {
+		return access.Reply{}, err
 	}
 	if existing == nil && len(slots) >= maxSlots {
 		return access.Reply{}, access.Fail(422, "slot_limit", "A connection can hold at most 64 credential slots.")
@@ -525,14 +553,14 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	}
 	var credentialID *string
 	switch {
-	case input.Credential != nil:
+	case input.Credential != nil || input.CredentialReference != nil:
 		if !current.Configuration.CredentialRequired() {
 			return access.Reply{}, access.Fail(422, "credential_forbidden", "This authentication mode takes no stored credential.")
 		}
 		if current.Configuration.Grant() {
 			return access.Reply{}, access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 		}
-		stored, _, err := s.StoreCredential(r.Context(), tx, id, *input.Credential)
+		stored, _, err := s.storeCredentialInput(r.Context(), tx, id, input.Credential, input.CredentialReference)
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -585,6 +613,7 @@ func (s *Server) writeSlot(r *http.Request, _ access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
+	result.ParentMutation = &access.ParentMutation{Previous: current.ETag, Current: updated.ETag}
 	if err = a.CompleteReplay(r, tx, claim, result); err != nil {
 		return access.Reply{}, err
 	}
@@ -644,12 +673,16 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		if err = slot.credentialFits(&current.Configuration); err != nil {
 			return access.Reply{}, err
 		}
-		if credential, err = a.Keys.Read(r.Context(), tx, a.Installation, *slot.CredentialID, secrets.ProviderCredential); err != nil {
-			return access.Reply{}, err
-		}
 	}
 	if err = tx.Rollback(r.Context()); err != nil {
 		return access.Reply{}, err
+	}
+	if current.Configuration.CredentialRequired() {
+		credential, err = s.readCredential(r.Context(), a.Pool, *slot.CredentialID)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		defer clear(credential)
 	}
 	if err = current.Configuration.Validate(s.Egress); err != nil {
 		return access.Reply{}, err

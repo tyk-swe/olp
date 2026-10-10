@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SavedFilters from './SavedFilters.svelte';
   import { usageKeys } from '$lib/features/usage/usageKeys';
 
   import { goto } from '$app/navigation';
@@ -154,6 +155,16 @@
     >{exporting ? 'Exporting…' : 'Export CSV'}</button
   >
 </div>
+
+<SavedFilters
+  scope="usage"
+  search={`?${usageSearch(applied)}`}
+  apply={(search) => {
+    void showUsage(
+      readUsageState(new URLSearchParams(search), defaultUsageState())
+    );
+  }}
+/>
 
 {#if exportError}<div class="inline-problem" role="alert">
     {exportError}

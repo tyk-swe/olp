@@ -82,7 +82,7 @@ func activateScopedProvider(h *accessHarness, b *browser, provider map[string]an
 		h.t.Fatalf("certification must succeed: %v", certified)
 	}
 	detail = h.want(b, "GET", path, nil, nil, 200)
-	h.want(b, "POST", path+"/activate", nil, withMatch(detail, idem("provider-activate-"+provider["id"].(string))), 200)
+	h.want(b, "POST", path+"/activate", nil, withMatch(detail, idem("provider-activate-"+uuid.NewString())), 200)
 }
 
 func login(h *accessHarness, email string) *browser {

@@ -54,7 +54,7 @@ and [gateway execution](../gateway.md) describe it.
 ### Where it falls short
 
 The [parity matrix](parity.md) is exhaustive. The largest gaps are provider and
-media breadth, a model catalog, response caching, a guardrail ecosystem,
+media breadth, response caching, a guardrail ecosystem,
 observability integrations, an MCP and agent gateway, cost management for
 chargeback, and published performance evidence: the [M1](m01-measured-advantage.md)
 benchmark harness and regression gate exist, but no full-rate results are
@@ -89,19 +89,19 @@ Milestones are numbered in recommended order. The dependency graph is the
 binding constraint: milestones without a path between them may proceed in
 parallel.
 
-| ID  | Milestone                                                    | Outcome                                                                                                                                                                                         | Depends on | Status      |
-| --- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ----------- |
-| M1  | [Measured advantage](m01-measured-advantage.md)              | Published, regression-gated overhead and client compatibility; accurate admission token estimates; standard response metadata.                                                                  | None       | Implemented |
-| M2  | [Provider and catalog breadth](m02-provider-catalog.md)      | LiteLLM's production provider families reachable through certified tiers; media providers; a signed reference catalog of model facts and prices.                                                | None       | Implemented |
-| M3  | [Adaptive routing and resilience](m03-routing-resilience.md) | Cross-route fallbacks, capacity-aware selection, priority admission, supply-side budgets, active and fleet-shared health, shadow traffic, explainable request selectors.                        | M1         | Implemented |
-| M4  | [Tenancy, identity and budgets](m04-tenancy-identity.md)     | End users, a budget hierarchy with flexible windows, limit templates, route groups, workload JWTs, SAML, SCIM, MFA, organizations and caller-supplied credentials.                              | None       | Implemented |
-| M5  | [Observability, export and alerting](m05-observability.md)   | Durable export sinks, opt-in payload capture, OpenTelemetry GenAI conventions, business metrics, alert channels and events.                                                                     | M4         | Implemented |
-| M6  | [Cost management and chargeback](m06-cost-management.md)     | Complete pricing dimensions, rate cards, cost estimation, FOCUS and billing exports, invoice reconciliation.                                                                                    | M2, M4, M5 | Planned     |
-| M7  | [Guardrails platform](m07-guardrails.md)                     | One guardrail engine with built-in detectors, vendor adapters, webhook and WebAssembly guardrails, streaming inspection and tool governance.                                                    | M1         | Planned     |
-| M8  | [Response caching](m08-caching.md)                           | Sealed exact and semantic response caches, cache controls and provider prompt-cache automation.                                                                                                 | M7         | Planned     |
-| M9  | [API surface completion](m09-api-surface.md)                 | Legacy completions, cross-provider files and batches, fine-tuning, vector stores, Responses completion, realtime expansion, OCR, search, provider-retained resources and governed pass-through. | M2         | Planned     |
-| M10 | [Agent gateway](m10-agent-gateway.md)                        | An MCP gateway with pinned tools, gateway-executed tools, an A2A agent gateway and a prompt registry.                                                                                           | M4, M7     | Planned     |
-| M11 | [Operator ecosystem](m11-operator-ecosystem.md)              | A management CLI, a Terraform provider, KMS and external secret stores, a developer catalog, multi-region gateways and a management MCP server.                                                 | M4         | Planned     |
+| ID | Milestone | Outcome | Depends on | Status |
+| --- | --- | --- | --- | --- |
+| M1 | [Measured advantage](m01-measured-advantage.md) | Published, regression-gated overhead and client compatibility; accurate admission token estimates; standard response metadata. | None | Implemented |
+| M2 | [Provider and catalog breadth](m02-provider-catalog.md) | LiteLLM's production provider families reachable through certified tiers; media providers; a signed reference catalog of model facts and prices. | None | Implemented |
+| M3 | [Adaptive routing and resilience](m03-routing-resilience.md) | Cross-route fallbacks, capacity-aware selection, priority admission, supply-side budgets, active and fleet-shared health, shadow traffic, explainable request selectors. | M1 | Implemented |
+| M4 | [Tenancy, identity and budgets](m04-tenancy-identity.md) | End users, a budget hierarchy with flexible windows, limit templates, route groups, workload JWTs, SAML, SCIM, MFA, organizations and caller-supplied credentials. | None | Implemented |
+| M5 | [Observability, export and alerting](m05-observability.md) | Durable export sinks, opt-in payload capture, OpenTelemetry GenAI conventions, business metrics, alert channels and events. | M4 | Implemented |
+| M6 | [Cost management and chargeback](m06-cost-management.md) | Complete pricing dimensions, rate cards, cost estimation, FOCUS and billing exports, invoice reconciliation. | M2, M4, M5 | Planned |
+| M7 | [Guardrails platform](m07-guardrails.md) | One guardrail engine with built-in detectors, vendor adapters, webhook and WebAssembly guardrails, streaming inspection and tool governance. | M1 | Planned |
+| M8 | [Response caching](m08-caching.md) | Sealed exact and semantic response caches, cache controls and provider prompt-cache automation. | M7 | Planned |
+| M9 | [API surface completion](m09-api-surface.md) | Legacy completions, cross-provider files and batches, fine-tuning, vector stores, Responses completion, realtime expansion, OCR, search, provider-retained resources and governed pass-through. | M2 | Planned |
+| M10 | [Agent gateway](m10-agent-gateway.md) | An MCP gateway with pinned tools, gateway-executed tools, an A2A agent gateway and a prompt registry. | M4, M7 | Planned |
+| M11 | [Operator ecosystem](m11-operator-ecosystem.md) | A management CLI, a Terraform provider, KMS and external secret stores, a developer catalog, multi-region gateways and a management MCP server. | M4 | Implemented |
 
 ```mermaid
 flowchart LR
@@ -134,11 +134,13 @@ recomputed whenever a milestone closes:
 | Authorization coverage  | Management operations exercised by the authorization and isolation sweeps (must stay 100%).                                                                   |
 
 At the 0.1.0 baseline the matrix has 150 rows: 15 `Ahead`, 33 `Parity`, 30
-`Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 48 of 148 (32%). This historical scorecard remains unchanged until milestones close.
-The matrix also records ongoing implementation, including M4 end-user controls,
-network restrictions, route groups and explicit rotation with reminders; later tenancy requirements remain
-unfinished.
-Its current counts are 20 `Ahead`, 65 `Parity`, 16 `Partial`, 47 `Gap`, 2 `Excluded`.
+`Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 48 of 148 (32%).
+This historical scorecard is preserved for comparison.
+The current matrix includes M1–M4 qualification and the operator capabilities
+implemented for M11. Its counts are 23 `Ahead`, 70 `Parity`, 16 `Partial`, 39
+`Gap` and 2 `Excluded`: 93 of 148 non-excluded rows (63%). Remaining gaps retain
+their own milestones; named resources do not close the broader observability,
+guardrail execution or agent-gateway workstreams.
 
 ## Definition of done
 

@@ -159,6 +159,17 @@ spec:
                 secretKeyRef:
                   name: {{ required "config.databaseSecretName is required" $root.Values.config.databaseSecretName | quote }}
                   key: {{ required "config.databaseSecretKey is required" $root.Values.config.databaseSecretKey | quote }}
+            {{- if $root.Values.config.databaseReadSecretName }}
+            - name: OLP_DATABASE_READ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $root.Values.config.databaseReadSecretName | quote }}
+                  key: {{ required "config.databaseReadSecretKey is required" $root.Values.config.databaseReadSecretKey | quote }}
+            {{- end }}
+            {{- if $root.Values.config.region }}
+            - name: OLP_REGION
+              value: {{ $root.Values.config.region | quote }}
+            {{- end }}
             - name: OLP_VALKEY_URL
               valueFrom:
                 secretKeyRef:
@@ -200,6 +211,9 @@ spec:
             - name: OLP_BOOTSTRAP_TOKEN_FILE
               value: /run/secrets/bootstrap-token/token
             {{- end }}
+            {{- with $root.Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           startupProbe:
             httpGet: { path: /health/live, port: observability }
             failureThreshold: 30
@@ -228,6 +242,9 @@ spec:
           securityContext:
             {{- toYaml $root.Values.containerSecurityContext | nindent 12 }}
           volumeMounts:
+            {{- with $root.Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             - name: master-key
               mountPath: /run/secrets/master-key
               readOnly: true
@@ -249,6 +266,9 @@ spec:
             - name: media-spool
               mountPath: {{ $root.Values.mediaSpool.path | quote }}
       volumes:
+        {{- with $root.Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: master-key
           secret:
             secretName: {{ required "config.masterKeySecretName is required" $root.Values.config.masterKeySecretName | quote }}

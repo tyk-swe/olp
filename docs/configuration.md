@@ -1,5 +1,9 @@
 # Configuration reference
 
+For remote administration, see the [management CLI and MCP](operator-cli.md).
+These clients use `OLP_MANAGEMENT_URL` and `OLP_MANAGEMENT_TOKEN_FILE`, not the
+server configuration below.
+
 Runtime settings come from environment variables or CLI flags; flags take
 precedence. Use `olp <subcommand> --help` and the source in
 [`internal/config/config.go`](../internal/config/config.go) for accepted flags.
@@ -9,62 +13,56 @@ bind.
 
 ## Runtime variables
 
-| Variable                                       | Default                                                         | Purpose                                                                                                                                                                                                  |
-| ---------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OLP_DATABASE_URL`                             | required                                                        | PostgreSQL URL.                                                                                                                                                                                          |
-| `OLP_DATABASE_MAX_CONNECTIONS`                 | `20`                                                            | Pool size (1–10000), excluding detached worker sessions; see [connection budget](deployment.md#production-example-and-connection-budget).                                                                |
-| `OLP_DATABASE_URL_FILE`, `OLP_VALKEY_URL_FILE` | unset                                                           | Read the corresponding URL from a mounted file; mutually exclusive with its inline setting.                                                                                                              |
-| `OLP_VALKEY_TLS_CA_FILE`                       | unset                                                           | PEM trust roots for Valkey TLS; requires `OLP_VALKEY_URL`.                                                                                                                                               |
-| `OLP_VALKEY_URL`                               | optional for `all`, `gateway`, `control`; required for `worker` | Valkey for installation-scoped limits, hints, and streams.                                                                                                                                               |
-| `OLP_LISTEN_ADDR`                              | `127.0.0.1:8080`                                                | Public listener; containers override to `0.0.0.0:8080`.                                                                                                                                                  |
-| `OLP_OBSERVABILITY_LISTEN_ADDR`                | `127.0.0.1:9090`                                                | Private health and metrics listener.                                                                                                                                                                     |
-| `OLP_OTLP_TRACES_ENDPOINT`                     | unset                                                           | Complete HTTP or HTTPS OTLP traces endpoint. Unset disables tracing.                                                                                                                                     |
-| `OLP_OTLP_HEADERS_FILE`                        | unset                                                           | JSON object of additional OTLP exporter headers, read only when tracing is enabled.                                                                                                                      |
-| `OLP_TRACE_SAMPLE_RATIO`                       | `1.0`                                                           | Sampling ratio from `0.0` through `1.0` for locally rooted traces.                                                                                                                                       |
-| `OLP_TRACE_PROPAGATE_UPSTREAM`                 | `true`                                                          | Inject the current W3C trace context into provider attempts.                                                                                                                                             |
-| `OLP_TRACE_ACCEPT_INBOUND`                     | `true`                                                          | Accept a valid inbound W3C trace context as the request parent.                                                                                                                                          |
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OLP_DATABASE_URL` | required | PostgreSQL URL. |
+| `OLP_DATABASE_READ_URL` | unset | Optional regional PostgreSQL replica for runtime release and key/credential authority reads. Writes and historical secret reads use the primary. Replica delay consumes the 60-second authority-age budget; see [regional deployment](deployment.md#regional-read-replicas). |
+| `OLP_DATABASE_READ_URL_FILE` | unset | Mounted read-replica URL, mutually exclusive with `OLP_DATABASE_READ_URL`. |
+| `OLP_REGION` | unset | Deployment region for key rate/concurrency overrides, regional cost-reconciliation leadership and provider locality. Set the same name on gateways and workers sharing a Valkey. See [regional fleets](deployment.md#regional-fleets). |
+| `OLP_DATABASE_MAX_CONNECTIONS` | `20` | Pool size (1–10000), excluding detached worker sessions; see [connection budget](deployment.md#production-example-and-connection-budget). |
+| `OLP_DATABASE_URL_FILE`, `OLP_VALKEY_URL_FILE` | unset | Read the corresponding URL from a mounted file; mutually exclusive with its inline setting. |
+| `OLP_VALKEY_TLS_CA_FILE` | unset | PEM trust roots for Valkey TLS; requires `OLP_VALKEY_URL`. |
+| `OLP_VALKEY_URL` | optional for `all`, `gateway`, `control`; required for `worker` | Valkey for installation-scoped limits, hints, and streams. |
+| `OLP_LISTEN_ADDR` | `127.0.0.1:8080` | Public listener; containers override to `0.0.0.0:8080`. |
+| `OLP_OBSERVABILITY_LISTEN_ADDR` | `127.0.0.1:9090` | Private health and metrics listener. |
+| `OLP_OTLP_TRACES_ENDPOINT` | unset | Complete HTTP or HTTPS OTLP traces endpoint. Unset disables tracing. |
+| `OLP_OTLP_HEADERS_FILE` | unset | JSON object of additional OTLP exporter headers, read only when tracing is enabled. |
+| `OLP_TRACE_SAMPLE_RATIO` | `1.0` | Sampling ratio from `0.0` through `1.0` for locally rooted traces. |
+| `OLP_TRACE_PROPAGATE_UPSTREAM` | `true` | Inject the current W3C trace context into provider attempts. |
+| `OLP_TRACE_ACCEPT_INBOUND` | `true` | Accept a valid inbound W3C trace context as the request parent. |
+| `OLP_HTTP_MAX_CONNECTIONS` | `1024` | Admitted TCP connections. |
+| `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS` | `256` | Inference work admission (1–100000); excess work receives 503. |
+| `OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS` | `32` | Management and console work admission (1–100000). |
+| `OLP_HTTP_ADMISSION_QUEUE_DEPTH` | `0` | Inference requests that may wait for a full pool (0–100000), dequeued weighted fair by priority. `0` answers 503 at once. |
+| `OLP_HTTP_ADMISSION_QUEUE_TIMEOUT` | `2s` | Longest admission-queue wait (1ms–1m), never beyond the route deadline. |
+| `OLP_HTTP_MAX_IN_FLIGHT_SHADOW_REQUESTS` | `16` | Mirrored shadow attempts in flight per gateway (1–100000); excess mirrors are dropped, never queued. |
+| `OLP_HTTP_CONNECTION_MAX_AGE_SECONDS` | `300` | Age at which HTTP/2 connections receive GOAWAY (1–86400). |
+| `OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS` | `30` | Grace period for draining connections (1–600). |
+| `OLP_PUBLIC_ORIGIN` | `http://127.0.0.1:8080` | OIDC redirects and generated links. |
+| `OLP_LOCAL_LOGIN_ENABLED` | `true` | Keep local sign-in available after setup. |
+| `OLP_TRUSTED_PROXY_CIDRS` | empty | Proxies allowed to supply `X-Forwarded-For`. |
+| `OLP_MANAGEMENT_ALLOWED_CIDRS` | empty | Up to 64 client CIDRs allowed to reach management and the console, resolved through trusted proxies. Empty allows all; see [Management network restrictions](access.md#management-network-restrictions). |
+| `OLP_GATEWAY_CORS_ALLOWED_ORIGINS` | empty | Browser origins allowed to call the inference gateway cross-origin; wildcards are refused and the management API stays same-origin. |
+| `OLP_PROVIDER_EGRESS_ALLOW_CIDRS` | empty | CIDRs exempt from the non-public provider egress denylist; see [Provider egress policy](#provider-egress-policy). |
+| `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS` | empty | Hostnames or IP literals whose provider endpoints may use plain HTTP. |
+| `OLP_HTTP_MAX_JSON_BODY_BYTES` | `2097152` | Largest JSON request body, before and after gzip inflation (64 KiB–64 MiB). |
+| `OLP_HTTP_MAX_MEDIA_BODY_BYTES` | `67108864` | Largest raw or multipart media request body (1 MiB–1 GiB); see [Body size caps](#body-size-caps). |
+| `OLP_HTTP_MAX_INLINE_MEDIA_ITEMS` | `4` | Inline base64 media items accepted per JSON request (1–64). |
+| `OLP_HTTP_MAX_INLINE_MEDIA_ITEM_BYTES` | `1048576` | Decoded cap for one inline media item (1 KiB–64 MiB). |
+| `OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES` | `2097152` | Decoded cap for all inline media in one request (1 KiB–64 MiB). |
+| `OLP_PROVIDER_MAX_RESPONSE_BYTES` | `16777216` | Largest provider response body buffered for non-streaming operations, including a stream aggregated for a non-streaming caller (1 MiB–256 MiB). |
+| `OLP_PROVIDER_MAX_EVENT_BYTES` | `1048576` | Largest single streamed provider event (64 KiB up to the response cap). |
+| `OLP_CONSOLE_DIR` | `console/build` | Static console directory. |
+| `OLP_MEDIA_SPOOL_DIR` | unset | On-disk media spool; defaults to the system temp directory. |
+| `OLP_MEDIA_SPOOL_CAPACITY_BYTES` | `1073741824` | Spool capacity (1 GiB; at least 256 MiB). |
+| `OLP_CONNECTOR_CONFIG_FILE` | unset | Optional file-backed connector mapping. |
+| `OLP_UNCONFINED_PLUGIN_DIR` | unset | Experimental. Absolute directory of the image that holds unconfined plugin executables. Setting it enables the [unconfined plugin tier](plugins.md#unconfined-plugins-experimental); nothing else can. |
+| `OLP_LOG_LEVEL` | `info` | JSON log severity: debug, info, warn, error. |
+| `OLP_SHUTDOWN_TIMEOUT` | `30s` | Shared HTTP, metadata, delivery and worker shutdown budget (1ms–10m). |
+| `OLP_DEPENDENCY_REQUEST_TIMEOUT` | `2s` | Per-request dependency deadline (1ms–1m). |
+| `OLP_STARTUP_TIMEOUT` | `10s` | Startup and ordinary maintenance deadline (1ms–1m). |
 | `OLP_METRICS_TENANT_LABELS`                    | empty                                                           | Optional business-metric tenant labels from `project`, `key`, `end_user`. Empty keeps only the metric's route, provider kind, direction or currency labels.                                              |
 | `OLP_METRICS_SERIES_CAP`                       | `5000`                                                          | Per-process bound on active business-metric series (64–1000000); overflow is counted at `olp_metrics_series_overflow_total`.                                                                             |
-| `OLP_HTTP_MAX_CONNECTIONS`                     | `1024`                                                          | Admitted TCP connections.                                                                                                                                                                                |
-| `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS`    | `256`                                                           | Inference work admission (1–100000); excess work receives 503.                                                                                                                                           |
-| `OLP_HTTP_MAX_IN_FLIGHT_MANAGEMENT_REQUESTS`   | `32`                                                            | Management and console work admission (1–100000).                                                                                                                                                        |
-| `OLP_HTTP_ADMISSION_QUEUE_DEPTH`               | `0`                                                             | Inference requests that may wait for a full pool (0–100000), dequeued weighted fair by priority. `0` answers 503 at once.                                                                                |
-| `OLP_HTTP_ADMISSION_QUEUE_TIMEOUT`             | `2s`                                                            | Longest admission-queue wait (1ms–1m), never beyond the route deadline.                                                                                                                                  |
-| `OLP_HTTP_MAX_IN_FLIGHT_SHADOW_REQUESTS`       | `16`                                                            | Mirrored shadow attempts in flight per gateway (1–100000); excess mirrors are dropped, never queued.                                                                                                     |
-| `OLP_HTTP_CONNECTION_MAX_AGE_SECONDS`          | `300`                                                           | Age at which HTTP/2 connections receive GOAWAY (1–86400).                                                                                                                                                |
-| `OLP_HTTP_CONNECTION_DRAIN_TIMEOUT_SECONDS`    | `30`                                                            | Grace period for draining connections (1–600).                                                                                                                                                           |
-| `OLP_PUBLIC_ORIGIN`                            | `http://127.0.0.1:8080`                                         | OIDC redirects and generated links.                                                                                                                                                                      |
-| `OLP_LOCAL_LOGIN_ENABLED`                      | `true`                                                          | Keep local sign-in available after setup.                                                                                                                                                                |
-| `OLP_TRUSTED_PROXY_CIDRS`                      | empty                                                           | Proxies allowed to supply `X-Forwarded-For`.                                                                                                                                                             |
-| `OLP_MANAGEMENT_ALLOWED_CIDRS`                 | empty                                                           | Up to 64 client CIDRs allowed to reach management and the console, resolved through trusted proxies. Empty allows all; see [Management network restrictions](access.md#management-network-restrictions). |
-| `OLP_GATEWAY_CORS_ALLOWED_ORIGINS`             | empty                                                           | Browser origins allowed to call the inference gateway cross-origin; wildcards are refused and the management API stays same-origin.                                                                      |
-| `OLP_PROVIDER_EGRESS_ALLOW_CIDRS`              | empty                                                           | CIDRs exempt from the non-public provider egress denylist; see [Provider egress policy](#provider-egress-policy).                                                                                        |
-| `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS`         | empty                                                           | Hostnames or IP literals whose provider endpoints may use plain HTTP.                                                                                                                                    |
-| `OLP_HTTP_MAX_JSON_BODY_BYTES`                 | `2097152`                                                       | Largest JSON request body, before and after gzip inflation (64 KiB–64 MiB).                                                                                                                              |
-| `OLP_HTTP_MAX_MEDIA_BODY_BYTES`                | `67108864`                                                      | Largest raw or multipart media request body (1 MiB–1 GiB); see [Body size caps](#body-size-caps).                                                                                                        |
-| `OLP_HTTP_MAX_INLINE_MEDIA_ITEMS`              | `4`                                                             | Inline base64 media items accepted per JSON request (1–64).                                                                                                                                              |
-| `OLP_HTTP_MAX_INLINE_MEDIA_ITEM_BYTES`         | `1048576`                                                       | Decoded cap for one inline media item (1 KiB–64 MiB).                                                                                                                                                    |
-| `OLP_HTTP_MAX_INLINE_MEDIA_TOTAL_BYTES`        | `2097152`                                                       | Decoded cap for all inline media in one request (1 KiB–64 MiB).                                                                                                                                          |
-| `OLP_PROVIDER_MAX_RESPONSE_BYTES`              | `16777216`                                                      | Largest provider response body buffered for non-streaming operations, including a stream aggregated for a non-streaming caller (1 MiB–256 MiB).                                                          |
-| `OLP_PROVIDER_MAX_EVENT_BYTES`                 | `1048576`                                                       | Largest single streamed provider event (64 KiB up to the response cap).                                                                                                                                  |
-| `OLP_CONSOLE_DIR`                              | `console/build`                                                 | Static console directory.                                                                                                                                                                                |
-| `OLP_MEDIA_SPOOL_DIR`                          | unset                                                           | On-disk media spool; defaults to the system temp directory.                                                                                                                                              |
-| `OLP_MEDIA_SPOOL_CAPACITY_BYTES`               | `1073741824`                                                    | Spool capacity (1 GiB; at least 256 MiB).                                                                                                                                                                |
-| `OLP_CONNECTOR_CONFIG_FILE`                    | unset                                                           | Optional file-backed connector mapping.                                                                                                                                                                  |
-| `OLP_UNCONFINED_PLUGIN_DIR`                    | unset                                                           | Experimental. Absolute directory of the image that holds unconfined plugin executables. Setting it enables the [unconfined plugin tier](plugins.md#unconfined-plugins-experimental); nothing else can.   |
-| `OLP_LOG_LEVEL`                                | `info`                                                          | JSON log severity: debug, info, warn, error.                                                                                                                                                             |
-| `OLP_SHUTDOWN_TIMEOUT`                         | `30s`                                                           | Shared HTTP, metadata, delivery and worker shutdown budget (1ms–10m).                                                                                                                                    |
-| `OLP_DEPENDENCY_REQUEST_TIMEOUT`               | `2s`                                                            | Per-request dependency deadline (1ms–1m).                                                                                                                                                                |
-| `OLP_STARTUP_TIMEOUT`                          | `10s`                                                           | Startup and ordinary maintenance deadline (1ms–1m).                                                                                                                                                      |
-
-Durable export sinks and bounded payload capture are managed through the API,
-not environment variables — see the
-[export/capture runbook](operations.md#export-sinks-payload-capture-and-business-metrics).
-Sinks carry type, destination, stream, format, filter, and sealed credential
-fields. The installation capture switch is owner-only; policies pick an
-installation sink and bound `sample_ratio`, include sets, selectors, and
-`max_bytes`. `payload_capture_active` in the authentication capabilities response
-reports that installation switch, not an acknowledgement of capture delivery.
 
 At maximum connection age the server stops admitting requests on that connection
 and sends HTTP/2 GOAWAY. Existing streams have the configured drain interval to
@@ -134,12 +132,12 @@ setup. Workers require both the HMAC and master keys, including with mounted
 connectors. Every command refuses to start when `OLP_AUTH_HMAC_KEY`,
 `OLP_MASTER_KEY`, or `OLP_BOOTSTRAP_TOKEN` is set inline.
 
-| Variable                   | Required by                                                                                            | File contents                                       |
-| -------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
-| `OLP_MASTER_KEY_FILE`      | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | JSON master-key ring shown below.                   |
-| `OLP_AUTH_HMAC_KEY_FILE`   | `all`, `gateway`, `control`, `worker`, `doctor`, `master-key`                                          | 32 random bytes, encoded as hex or standard base64. |
-| `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run                                                                           | Random 32–256-byte token for one-time owner setup.  |
-| `OLP_OTLP_HEADERS_FILE`    | traced `all`, `gateway`, `control`, or `worker`                                                        | Optional JSON object of OTLP exporter headers.      |
+| Variable | Required by | File contents |
+| --- | --- | --- |
+| `OLP_MASTER_KEY_FILE` | `all`, `control`, `worker`, a `gateway` loading database-encrypted credentials, `doctor`, `master-key` | JSON master-key ring shown below; also supports [workload-identity wrapped keys](external-secrets.md). |
+| `OLP_AUTH_HMAC_KEY_FILE` | `all`, `gateway`, `control`, `worker`, `doctor`, `master-key` | 32 random bytes, encoded as hex or standard base64. |
+| `OLP_BOOTSTRAP_TOKEN_FILE` | first `all` or `control` run | Random 32–256-byte token for one-time owner setup. |
+| `OLP_OTLP_HEADERS_FILE` | traced `all`, `gateway`, `control`, or `worker` | Optional JSON object of OTLP exporter headers. |
 
 ```json
 {
