@@ -25,8 +25,9 @@ Credentials are never passed as arguments or printed in errors.
 ### Generated commands
 
 `olp GROUP help` lists commands, operation IDs, methods and paths in that group.
-`olp api help` lists every machine-admitted JSON operation. Use an operation ID
-to avoid ambiguity in nested resource names:
+`olp api help` lists machine-admitted operations with JSON or empty success
+responses. Uploads, downloads, live SSE and XML use their native console or HTTP
+transports. Use an operation ID to avoid ambiguity in nested resource names:
 
 ```sh
 olp keys get KEY_ID
@@ -198,7 +199,8 @@ Tool names are contract operation IDs. Generated JSON input schemas use `path`,
 
 Only currently authorized tools appear in `tools/list`. Read-only tokens
 cannot mutate; guessing a hidden tool's name does not bypass authorization.
-Session-only operations, raw uploads and MCP itself are not tools. Each call
+Session-only operations, raw uploads/downloads, live SSE, XML and MCP itself
+are not JSON tools. Each call
 uses the API's authentication, scoped project access, validation, ETag check,
 idempotency and audit handler. MCP requires an explicit idempotency key wherever
 the API does; it does not invent one.

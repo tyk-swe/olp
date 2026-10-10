@@ -74,6 +74,13 @@ export function operationsFrom(document) {
         properties.body = schema;
         if (body.required) required.push('body');
       }
+      const successResponses = Object.entries(operation.responses ?? {})
+        .filter(([status]) => /^2\d\d$/.test(status))
+        .map(([, response]) => resolve(response));
+      if (successResponses.some((response) => {
+        const types = Object.keys(response.content ?? {});
+        return types.length && !types.some((type) => type === 'application/json' || type.endsWith('+json'));
+      })) continue; // Download, SSE and XML bodies require their native transports.
       operations.push({
         name,
         group: operation.tags?.[0] ?? 'management',

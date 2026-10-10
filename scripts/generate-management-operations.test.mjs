@@ -24,3 +24,8 @@ test('tool schemas retain recursive references and required conditions', () => {
   assert.deepEqual(operation.input_schema.required, ['path', 'if_match', 'body']);
   assert.equal(operation.input_schema.$defs.Node.properties.next.$ref, '#/$defs/Node');
 });
+
+test('JSON clients omit downloads, SSE and XML but retain JSON and empty successes', () => {
+  const paths = Object.fromEntries(['application/octet-stream', 'text/event-stream', 'application/samlmetadata+xml', 'application/scim+json', 'application/json', null].map((type, index) => [`/api/v1/test-${index}`, { get: { operationId: `test_${index}`, security: [{ managementToken: ['read'] }], responses: { 200: type ? { content: { [type]: { schema: { type: 'object' } } } } : {} } } }]));
+  assert.deepEqual(operationsFrom({ paths }).map((operation) => operation.name), ['test_3', 'test_4', 'test_5']);
+});

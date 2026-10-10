@@ -116,6 +116,9 @@ func TestRegistryCoversEveryTokenJSONOperation(t *testing.T) {
 		Body     *struct {
 			Content map[string]any `json:"content"`
 		} `json:"requestBody"`
+		Responses map[string]struct {
+			Content map[string]any `json:"content"`
+		} `json:"responses"`
 	}
 	var document struct {
 		Paths map[string]map[string]json.RawMessage `json:"paths"`
@@ -146,6 +149,22 @@ func TestRegistryCoversEveryTokenJSONOperation(t *testing.T) {
 				if _, ok := op.Body.Content["application/json"]; !ok {
 					continue
 				}
+			}
+			jsonResponses := true
+			for status, response := range op.Responses {
+				if !strings.HasPrefix(status, "2") || len(response.Content) == 0 {
+					continue
+				}
+				supported := false
+				for mediaType := range response.Content {
+					if mediaType == "application/json" || strings.HasSuffix(mediaType, "+json") {
+						supported = true
+					}
+				}
+				jsonResponses = jsonResponses && supported
+			}
+			if !jsonResponses {
+				continue
 			}
 			expected[op.Name] = true
 		}
