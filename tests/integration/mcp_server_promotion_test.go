@@ -71,7 +71,8 @@ func TestMCPServerPromotionRecertifiesReviewedCatalogAndReusesPinnedDestination(
 		t.Fatal("changed catalog partially applied")
 	}
 	description.Store("Reviewed tool")
-	destination.want(destOwner, "POST", "/api/v1/configuration/apply", input, idem(uuid.NewString()), 200)
+	applyHeaders := idem(uuid.NewString())
+	destination.want(destOwner, "POST", "/api/v1/configuration/apply", input, applyHeaders, 200)
 	servers := destination.want(destOwner, "GET", "/api/v1/mcp-servers", nil, nil, 200)["items"].([]any)
 	if len(servers) != 1 {
 		t.Fatal("destination registration missing")
@@ -97,4 +98,17 @@ func TestMCPServerPromotionRecertifiesReviewedCatalogAndReusesPinnedDestination(
 	if !strings.Contains(string(mustJSON(after)), "Reviewed tool") || strings.Contains(string(mustJSON(after)), "New unapproved") {
 		t.Fatal("reuse adopted live upstream drift")
 	}
+	updateHeaders := etagHeader(after)
+	updateHeaders["Idempotency-Key"] = uuid.NewString()
+	changed := destination.want(destOwner, "PUT", path, map[string]any{
+		"name": "Lookup", "endpoint": upstream.URL, "enabled": false,
+	}, updateHeaders, 200)
+	before = requests.Load()
+	destination.want(destOwner, "POST", "/api/v1/configuration/apply", input, applyHeaders, 200)
+	unchanged := destination.want(destOwner, "GET", path, nil, nil, 200)
+	if unchanged["etag"] != changed["etag"] || requests.Load() != before {
+		t.Fatal("completed promotion replay recertified or overwrote a later registration")
+	}
+	upstream.Close()
+	destination.want(destOwner, "POST", "/api/v1/configuration/apply", input, applyHeaders, 200)
 }

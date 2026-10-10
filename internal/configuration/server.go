@@ -89,7 +89,7 @@ func (s *Server) planEndpoint(r *http.Request, p access.Principal) (access.Reply
 	return access.OK(result), nil
 }
 
-func (s *Server) applyEndpoint(r *http.Request, initial access.Principal) (access.Reply, error) {
+func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input promotionInput
 	if err := access.DecodeUnique(r, &input, 4<<20); err != nil {
 		return access.Reply{}, err
@@ -98,13 +98,6 @@ func (s *Server) applyEndpoint(r *http.Request, initial access.Principal) (acces
 		return access.Reply{}, access.Invalid("document", "Send the configuration artifact.")
 	}
 	bindings, err := input.bindings()
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if err := s.prepareWorkloadIssuers(r.Context(), initial, input.Document); err != nil {
-		return access.Reply{}, err
-	}
-	preparedMCP, err := s.prepareMCPServers(r.Context(), initial, input.Document, bindings)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -117,10 +110,17 @@ func (s *Server) applyEndpoint(r *http.Request, initial access.Principal) (acces
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if input.Document.SAML != nil || len(input.Document.WorkloadIssuers) > 0 || len(input.Document.SCIMGroupMappings) > 0 {
-		if err := p.Authorize(access.Access); err != nil {
-			return access.Reply{}, err
-		}
+	if err := authorizeIdentityPromotion(p, input.Document); err != nil {
+		return access.Reply{}, err
+	}
+	// Normalize the same local metadata used by network preparation before
+	// computing its replay fingerprint. Completed writes do not depend on the
+	// current availability or catalog of an upstream service.
+	if err := validateWorkloadEntries(input.Document); err != nil {
+		return access.Reply{}, err
+	}
+	if err := s.validateMCPServers(input.Document); err != nil {
+		return access.Reply{}, err
 	}
 	doc := input.Document
 	doc.canonicalize()
@@ -134,6 +134,39 @@ func (s *Server) applyEndpoint(r *http.Request, initial access.Principal) (acces
 	}
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
+	}
+	var preparedServers map[[2]string]preparedMCP
+	if len(doc.WorkloadIssuers) > 0 || len(doc.MCPServers) > 0 {
+		if err = tx.Rollback(r.Context()); err != nil {
+			return access.Reply{}, err
+		}
+		// Never hold the installation mutation lock during upstream discovery.
+		if err = s.prepareWorkloadIssuers(r.Context(), p, doc); err != nil {
+			return access.Reply{}, err
+		}
+		preparedServers, err = s.prepareMCPServers(r.Context(), p, doc, bindings)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		tx, err = s.Access.Begin(r)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		defer tx.Rollback(r.Context())
+		p, err = s.Access.Reauthorize(r, tx)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if err = authorizeIdentityPromotion(p, doc); err != nil {
+			return access.Reply{}, err
+		}
+		claim, replayed, err = s.Access.Replay(r, tx, p, bindingFingerprint(doc, digest, bindings, input.ExpectedDigest))
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if replayed != nil {
+			return access.Commit(r, tx, *replayed)
+		}
 	}
 	result, err := s.plan(r.Context(), tx, doc, bindings, input.ExpectedDigest)
 	if err != nil {
@@ -167,7 +200,7 @@ func (s *Server) applyEndpoint(r *http.Request, initial access.Principal) (acces
 	if err = s.applyDocument(r.Context(), tx, p, doc, bindings); err != nil {
 		return access.Reply{}, err
 	}
-	if err = s.applyMCPServers(r.Context(), tx, p, doc, bindings, preparedMCP); err != nil {
+	if err = s.applyMCPServers(r.Context(), tx, p, doc, bindings, preparedServers); err != nil {
 		return access.Reply{}, err
 	}
 	if err := s.applySAMLDefinition(r, tx, p, input.Document.SAML); err != nil {
@@ -182,4 +215,11 @@ func (s *Server) applyEndpoint(r *http.Request, initial access.Principal) (acces
 		return access.Reply{}, err
 	}
 	return access.Commit(r, tx, reply)
+}
+
+func authorizeIdentityPromotion(p access.Principal, doc *Document) error {
+	if doc.SAML != nil || len(doc.WorkloadIssuers) > 0 || len(doc.SCIMGroupMappings) > 0 {
+		return p.Authorize(access.Access)
+	}
+	return nil
 }

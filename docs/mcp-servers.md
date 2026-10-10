@@ -52,3 +52,9 @@ credential and ETag without consulting potentially changed upstream metadata.
 Signing/bearer bindings are supplied separately and never saved in CLI plan
 files. External secret-store bindings apply to provider credentials; MCP static
 bearers use sealed destination bindings.
+
+A completed configuration apply is replayed after current authorization and local
+request normalization, before upstream discovery. Later catalog drift or endpoint
+unavailability cannot make that completed request fail or overwrite a later
+registration. New applies release mutation locks for discovery and repeat
+reauthorization, replay lookup and destination preconditions before commit.
