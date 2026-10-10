@@ -65,3 +65,5 @@ that tab. A new session, including signing in as another member, starts without
 the earlier session's views and retires its stored presets. Installation origins
 have separate browser storage. Saved views never bypass current permissions or
 request-retention rules.
+
+Browser-qualified examples show [installation branding](assets/screenshots/m11-operator-identity.png) and [independent installations with session views](assets/screenshots/m11-independent-installations.png).

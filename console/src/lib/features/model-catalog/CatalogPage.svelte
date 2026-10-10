@@ -174,7 +174,11 @@
             onclick={() => copy(sample.code, `${model.id} ${sample.sdk}`)}
             >Copy {sample.sdk} example</button
           >
-          <pre><code>{sample.code}</code></pre>
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the complete example.) -->
+          <pre
+            role="region"
+            aria-label={`${model.id}: ${sample.sdk} ${sample.operation} SDK example`}
+            tabindex="0"><code>{sample.code}</code></pre>
         </details>
       {/each}
     </article>

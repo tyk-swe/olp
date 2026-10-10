@@ -9,3 +9,5 @@ Provider names, endpoints and upstream model names remain private by default. Un
 Installation owners can enable an anonymous catalog in **Project policies → Public model catalog**. `/catalog/public/{project_id}` provides the public page. `GET /api/v1/catalog/public/{project_id}` then lists only that project’s published routes. Publishing prices is a separate checkbox; anonymous responses include `prices_visible` so clients can distinguish withheld pricing from missing current declarations. Disabled projects return 404. Publication and disclosure changes use observed ETags and ordinary authorization/audit handling.
 
 Configuration exports preserve `public_catalog` and `public_catalog_prices` on projects and `expose_upstream_models` on routes. Changing publication through promotion requires installation access authority. Imported route disclosure is staged with its draft and takes effect when that draft is activated; normal draft activations preserve the route’s existing disclosure choice.
+
+See the browser-qualified [catalog example](assets/screenshots/m11-model-catalog.png). SDK code regions support keyboard focus and scrolling.

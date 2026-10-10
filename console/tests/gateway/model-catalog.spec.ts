@@ -154,6 +154,13 @@ test('catalog discovery, owner publishing and explicit upstream disclosure', asy
   await expect(card).not.toContainText('compatible-e2e-model');
   await card.locator('summary').filter({ hasText: 'openai' }).click();
   await expect(card.locator('code').first()).toContainText('OLP_API_KEY');
+  await card.getByRole('button', { name: 'Copy openai example' }).focus();
+  await page.keyboard.press('Tab');
+  await expect(
+    card.getByRole('region', {
+      name: 'catalog-browser: openai generation SDK example'
+    })
+  ).toBeFocused();
   await page.getByText('Catalog disclosure settings', { exact: true }).click();
   await page
     .getByLabel('Published route', { exact: true })
@@ -168,6 +175,9 @@ test('catalog discovery, owner publishing and explicit upstream disclosure', asy
   await expect(card).toContainText('compatible-e2e-model');
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.getByText('Catalog disclosure settings', { exact: true }).click();
+  await page
+    .getByLabel('Find a route', { exact: true })
+    .fill('catalog-browser');
   await page.screenshot({
     path: info.outputPath('model-catalog.png'),
     fullPage: true

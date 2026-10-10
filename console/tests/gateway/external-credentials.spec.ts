@@ -59,5 +59,9 @@ test('external credentials create and rotate through the operator console', asyn
   ).toBeVisible();
   await expect(page.getByText('vault · pinned store version 2')).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await page.screenshot({ path: info.outputPath('external-credentials.png') });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: info.outputPath('external-credentials.png'),
+    fullPage: true
+  });
 });
