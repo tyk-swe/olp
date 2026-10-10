@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -32,7 +33,7 @@ func catalogFixture(t *testing.T) (*runtime.Snapshot, runtime.Route, *usage.Rout
 	t.Helper()
 	now := time.Now()
 	snapshot := &runtime.Snapshot{Providers: map[string]runtime.Provider{}}
-	route := runtime.Route{Slug: "assistant", Operations: []string{"generation"}, Targets: []runtime.Target{}}
+	route := runtime.Route{Slug: "assistant", Fidelity: runtime.RouteFidelity{Mode: runtime.FidelityTransformed}, Operations: []string{"generation"}, Targets: []runtime.Target{}}
 	inputs := &usage.RoutingInputs{RefreshedAt: now}
 	for index, id := range []string{"first", "second"} {
 		name := "private-upstream-" + id
@@ -41,7 +42,7 @@ func catalogFixture(t *testing.T) (*runtime.Snapshot, runtime.Route, *usage.Rout
 		if err != nil {
 			t.Fatal(err)
 		}
-		snapshot.Providers[id] = runtime.Provider{ID: id, Name: "private-provider-" + id, Kind: "openai_compatible", Enabled: true, Endpoint: "https://private-provider.example", Capabilities: []runtime.Capability{{Model: name, Operation: "generation"}}, Models: map[string]json.RawMessage{name: raw}}
+		snapshot.Providers[id] = runtime.Provider{ID: id, Name: "private-provider-" + id, Kind: "openai_compatible", Enabled: true, Endpoint: "https://private-provider.example", Capabilities: []runtime.Capability{{Model: name, Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: name, Operation: "generation", Surface: "anthropic", Mode: "unary"}, {Model: name, Operation: "generation", Surface: "gemini", Mode: "unary"}}, Models: map[string]json.RawMessage{name: raw}}
 		route.Targets = append(route.Targets, runtime.Target{ProviderID: id, ProviderModel: name})
 		input := "1.200000000000000001"
 		if index == 1 {
@@ -109,5 +110,31 @@ func TestCatalogKeepsUnknownPrivacyAndPartialPricesExplicit(t *testing.T) {
 	}
 	if len(model.Prices) != 1 || model.Prices[0].Complete {
 		t.Fatal("partially priced targets asserted complete prices")
+	}
+}
+
+func TestCatalogSamplesRespectCertifiedModesAndStrictNativeDialect(t *testing.T) {
+	snapshot, route, inputs, now := catalogFixture(t)
+	first := snapshot.Providers["first"]
+	first.Capabilities = []runtime.Capability{{Model: route.Targets[0].ProviderModel, Operation: "generation", Surface: "openai", Mode: "unary"}, {Model: route.Targets[0].ProviderModel, Operation: "generation", Surface: "anthropic", Mode: "stream"}}
+	second := snapshot.Providers["second"]
+	second.Enabled = false
+	snapshot.Providers["first"], snapshot.Providers["second"] = first, second
+	model := Describe(snapshot, route, inputs, "https://gateway.example", false, false, now)
+	if len(model.Samples) != 1 || model.Samples[0].SDK != "openai" {
+		t.Fatalf("uncertified examples: %+v", model.Samples)
+	}
+	route.Fidelity = runtime.RouteFidelity{Mode: runtime.FidelityStrict}
+	first.ProfileID = "compatible-responses"
+	first.ProfileRevision = connectors.ProfileRevision
+	snapshot.Providers["first"] = first
+	model = Describe(snapshot, route, inputs, "https://gateway.example", false, false, now)
+	if len(model.Samples) != 1 || !strings.Contains(model.Samples[0].Code, "client.responses.create") || strings.Contains(model.Samples[0].Code, "chat.completions") {
+		t.Fatalf("strict dialect example: %+v", model.Samples)
+	}
+	first.Capabilities = nil
+	snapshot.Providers["first"] = first
+	if got := Describe(snapshot, route, inputs, "https://gateway.example", false, false, now).Samples; len(got) != 0 {
+		t.Fatalf("uncertified route examples: %+v", got)
 	}
 }

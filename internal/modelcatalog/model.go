@@ -58,7 +58,7 @@ type Model struct {
 // Describe exposes only the route identity by default. Prices are consumer
 // ranges, rather than provider records; upstream names require a separate opt-in.
 func Describe(snapshot *runtime.Snapshot, route runtime.Route, inputs *usage.RoutingInputs, origin string, prices, upstream bool, now time.Time) Model {
-	model := Model{ID: route.Slug, Capabilities: runtime.EffectiveCapabilities(snapshot, route), Samples: samples(route, origin)}
+	model := Model{ID: route.Slug, Capabilities: runtime.EffectiveCapabilities(snapshot, route), Samples: certifiedSamples(snapshot, route, origin)}
 	metadata := []runtime.ModelMetadata{}
 	for _, target := range route.Targets {
 		provider, ok := snapshot.Providers[target.ProviderID]
@@ -190,6 +190,56 @@ func priceRanges(snapshot *runtime.Snapshot, route runtime.Route, inputs *usage.
 		}
 		return strings.Compare(a.Currency, b.Currency)
 	})
+	return result
+}
+
+// Samples use a certified unary tuple. A strict generation example must also
+// speak its target's pinned native dialect, rather than imply translation.
+func certifiedSamples(snapshot *runtime.Snapshot, route runtime.Route, origin string) []Sample {
+	result := []Sample{}
+	for _, candidate := range samples(route, origin) {
+		surface := candidate.SDK
+		if candidate.Operation == "embeddings" {
+			surface = "openai"
+		}
+		if candidate.SDK == "gemini" && candidate.Operation == "embeddings" && !route.Fidelity.Strict() {
+			continue
+		}
+		for _, target := range route.Targets {
+			provider, ok := snapshot.Providers[target.ProviderID]
+			if !ok || !provider.Enabled || target.Shadow != nil || !provider.Supports(target.ProviderModel, candidate.Operation, surface, "unary") {
+				continue
+			}
+			sample := candidate
+			if route.Fidelity.Strict() && candidate.Operation == "generation" {
+				profile, err := provider.Connector().Profile()
+				if err != nil {
+					continue
+				}
+				var want string
+				switch profile.Dialect {
+				case "openai-chat", "openai-responses":
+					want = "openai"
+				case "anthropic-messages":
+					want = "anthropic"
+				case "gemini-generate-content":
+					want = "gemini"
+				}
+				if candidate.SDK != want {
+					continue
+				}
+				if profile.Dialect == "openai-responses" {
+					prefix, _, found := strings.Cut(sample.Code, "response = ")
+					if !found {
+						continue
+					}
+					sample.Code = prefix + fmt.Sprintf("response = client.responses.create(model=%s, input=\"Hello\", store=False)\n", strconv.Quote(route.Slug))
+				}
+			}
+			result = append(result, sample)
+			break
+		}
+	}
 	return result
 }
 

@@ -93,6 +93,12 @@ func TestModelCatalogVisibilityPublishingAndUpstreamDisclosure(t *testing.T) {
 	if len(all["items"].([]any)) != 2 {
 		t.Fatalf("owner catalog: %v", all)
 	}
+	for _, raw := range all["items"].([]any) {
+		samples := raw.(map[string]any)["samples"].([]any)
+		if len(samples) != 1 || samples[0].(map[string]any)["sdk"] != "openai" {
+			t.Fatalf("catalog advertised an uncertified SDK: %v", samples)
+		}
+	}
 	serialized, _ := json.Marshal(all)
 	if strings.Contains(string(serialized), vendorModel) || strings.Contains(string(serialized), "Catalog catalog-") || strings.Contains(string(serialized), vendorSecret) {
 		t.Fatal("default catalog disclosed provider identity or credentials")
