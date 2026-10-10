@@ -49,9 +49,17 @@ test('external credentials create and rotate through the operator console', asyn
   await page
     .getByLabel('Pinned external credential reference', { exact: true })
     .fill(JSON.stringify({ ...reference, version: '2' }));
+  const rotation = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname ===
+        `/api/v1/providers/${provider.id}/credentials`
+  );
   await page
     .getByRole('button', { name: 'Stage rotation', exact: true })
     .click();
+  const rotated = await rotation;
+  expect(rotated.status(), await rotated.text()).toBe(201);
   await expect(
     page.getByText(
       'Credential version staged. Test and activate the provider to publish it; the current runtime credential remains live until then.'

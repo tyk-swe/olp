@@ -66,6 +66,7 @@ export default defineConfig({
       reuseExistingServer: false,
       env: {
         OLP_DATABASE_URL: database('olp_packaged'),
+        OLP_VAULT_ADDR: 'http://127.0.0.1:4199',
         OLP_VAULT_ROLE: 'olp',
         OLP_VAULT_JWT_FILE: join(vaultDirectory, 'identity.jwt'),
         OLP_PUBLIC_ORIGIN: 'http://127.0.0.1:4182',
@@ -82,6 +83,7 @@ export default defineConfig({
       reuseExistingServer: false,
       env: {
         OLP_DATABASE_URL: database('olp_vite'),
+        OLP_VAULT_ADDR: 'http://127.0.0.1:4199',
         OLP_VAULT_ROLE: 'olp',
         OLP_VAULT_JWT_FILE: join(vaultDirectory, 'identity.jwt'),
         OLP_PUBLIC_ORIGIN: 'http://localhost:4183',
