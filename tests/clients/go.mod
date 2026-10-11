@@ -3,7 +3,7 @@ module github.com/tyk-swe/olp/tests/clients
 go 1.27.1
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.78.0
+	github.com/anthropics/anthropic-sdk-go v1.79.1
 	github.com/openai/openai-go/v3 v3.70.0
 	google.golang.org/genai v1.72.0
 )
