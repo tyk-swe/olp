@@ -104,7 +104,7 @@ jobs:
         run: node olp-source/scripts/promotion-comment.mjs "$RUNNER_TEMP/olp-plan.json" "$RUNNER_TEMP/olp-comment.json" "$RUNNER_TEMP/olp-plan-review.json"
       - name: Upload complete review
         if: always() && (steps.plan.outcome == 'success' || steps.plan.outcome == 'failure')
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: olp-plan-review
           path: ${{ runner.temp }}/olp-plan-review.json
