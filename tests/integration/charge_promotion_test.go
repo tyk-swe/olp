@@ -156,4 +156,12 @@ func TestConfigurationChargePromotion(t *testing.T) {
 	if nowRevisions != revisionRows+1 {
 		t.Fatalf("card revisions = %d, want a neutral revision", nowRevisions)
 	}
+
+	// The stale-digest check exports inside the apply transaction, where every
+	// export query shares one connection. It must refuse 409, not 503.
+	status, refused, _ := destination.request(destinationOwner, http.MethodPost, "/api/v1/configuration/apply",
+		map[string]any{"document": reDoc, "expected_digest": "stale-digest"}, idem("charge-stale"))
+	if status != http.StatusConflict {
+		t.Fatalf("a stale digest over pricing state must refuse 409: %d %v", status, refused)
+	}
 }

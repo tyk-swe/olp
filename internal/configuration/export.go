@@ -367,6 +367,10 @@ func applySlotPositions(slots []SlotEntry, positions map[string]int) {
 // scopes ended by a multiplier-one discount included, so ending a discount
 // promotes as multiplier "1".
 func exportDiscounts(ctx context.Context, q access.Queryer) ([]DiscountEntry, error) {
+	names, err := providerNameMap(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := q.Query(ctx, `SELECT DISTINCT ON (provider_kind,COALESCE(vendor_id,''),COALESCE(provider_id::text,''))
  provider_kind,vendor_id,provider_id::text,multiplier::text
  FROM olp.pricing_discounts WHERE effective_at<=now()
@@ -376,10 +380,6 @@ func exportDiscounts(ctx context.Context, q access.Queryer) ([]DiscountEntry, er
 		return nil, err
 	}
 	defer rows.Close()
-	names, err := providerNameMap(ctx, q)
-	if err != nil {
-		return nil, err
-	}
 	entries := []DiscountEntry{}
 	for rows.Next() {
 		var entry DiscountEntry
