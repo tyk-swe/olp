@@ -265,13 +265,14 @@
             projectName = '';
             client.setQueryData<
               Awaited<ReturnType<typeof api.organizationProjects>>
-            >([...root, selected, 'projects'], (current = []) => [
-              ...current.filter((item) => item.id !== p.id),
-              p
-            ]);
-            projectId = p.id;
-            projectName = '';
-            projectId = p.id;
+            >(
+              [...root, submission.input.organization, 'projects'],
+              (current = []) => [
+                ...current.filter((item) => item.id !== p.id),
+                p
+              ]
+            );
+            if (selected === submission.input.organization) projectId = p.id;
           });
         }}
       >
