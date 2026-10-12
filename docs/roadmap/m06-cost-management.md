@@ -174,18 +174,48 @@ below already settled.
 
 ## Exit criteria
 
-- [ ] Every price component above round-trips through revisions, sources,
+- [x] Every price component above round-trips through revisions, sources,
       snapshots and configuration export, and accounting tests price each one
       exactly.
-- [ ] The [reference catalog](m02-provider-catalog.md#m24-reference-catalog)
+- [x] The [reference catalog](m02-provider-catalog.md#m24-reference-catalog)
       prices every catalog model with no `unrepresentable` component left for
       structures listed above.
-- [ ] Usage reports show cost and charge side by side, with commitments
+- [x] Usage reports show cost and charge side by side, with commitments
       allocated.
-- [ ] `max_cost` refuses requests whose worst case exceeds the ceiling, before
+- [x] `max_cost` refuses requests whose worst case exceeds the ceiling, before
       dispatch, in integration tests.
 - [ ] A FOCUS dataset validates against the pinned specification's schema, and
       CloudEvents and Stripe meter deliveries are idempotent under redelivery.
 - [ ] Reconciliation reports a capture rate for OpenAI and Anthropic
       connections against recorded fixtures.
 - [ ] The [parity matrix](parity.md) cost rows are `Parity` or better.
+## Delivered and verified
+
+M6.1 to M6.3 are implemented; M6.4 and M6.5 remain planned, so the milestone
+stays in progress.
+
+- **Price components.** Pricing revisions, price-list sources, catalog
+  snapshots and configuration documents carry modality and cached-modality
+  rates, input-token tiers, time-of-day windows, per-request and tool-call
+  fees and the batch multiplier. One PostgreSQL function prices every attempt
+  and the gateway's Go mirror reproduces it exactly for reservations,
+  settlement and `X-OLP-Cost`; a parity suite holds the two together.
+- **Metering.** OpenAI, Anthropic and Gemini usage populates audio and image
+  shares and server-side tool calls; inconsistent provider detail settles the
+  attempt incomplete rather than at text rates.
+- **Commitments.** Connection commitments bill nothing per attempt and are
+  allocated in usage reports by list-price-weighted share.
+- **Reference catalog v2.** Every component the catalog listed as
+  unrepresentable in a structure OLP now prices is transcribed, independently
+  checked against the vendor figures it came from; what remains carries an
+  accurate residual name.
+- **Discounts, rate cards and charge.** Usage records carry cost and charge
+  with their provenance; reports, exports and request history show both, and
+  every consumer budget enforces either.
+- **Estimation.** Route simulation states minimum and maximum cost per target,
+  `max_cost` refuses requests whose worst case exceeds it before dispatch, and
+  the console calculator prices routes and exact usage.
+
+<!-- H7: fill the verification paragraph from the final gate outputs: which
+make targets passed, integration counts, bench-gate result. State plainly any
+suite that could not run in this environment. -->

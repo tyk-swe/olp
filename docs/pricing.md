@@ -90,7 +90,7 @@ produces yet, so the marker and its multiplier are inert until one does.
 
 ## The bill
 
-For a complete attempt the charge is
+For a complete attempt the billed cost is
 
 ```
 input_charge/1e6 + output_charge/1e6 + media_units × unit_price
@@ -199,36 +199,6 @@ records `discount_pinned` and `discount_id`, which may be null — a pinned
 null prices at one, not "resolve later". Without a pin, accounting selects at
 the observed time.
 
-## Estimates and quotes
-
-Simulation decisions carry `estimated_cost` per target: `minimum` prices the
-input estimate at the cheapest input-side rate of the selected tier plus the
-per-request fee, and `maximum` is the bound the gateway would reserve — the
-highest input-side rate for the estimate, the declared or default reply
-allowance for generation, the per-request fee, the window multiplier at the
-instant, and the attempt's pinned discount. A committed provider reports zero
-for both. The pair is null when the target has no price, the price cannot bound
-the request, or no token demand is known; server-side tool fees and batch
-multipliers are excluded from both figures.
-
-`POST /api/v1/pricing/quote` prices one attempt's usage document exactly as
-accounting records it — the same price selection, discount, commitment and
-rate-card charge — in a read-only transaction that writes and audits nothing.
-It takes `provider_id`, `model`, `operation`, the usage dimensions, and
-optionally `started_at` (default now), `successful` (default true) and
-`project_id` naming the consumer whose card prices the charge; absent, the
-installation's card applies.
-
-## Budget basis
-
-Every consumer budget — API-key, budget-group, installation, organization,
-project, route, key-route, attribution and end-user — chooses `cost_basis`:
-`cost` (the default) enforces provider cost and `charge` enforces the charge a
-rate card produces. A billable attempt whose charge is NULL counts as an
-uncharged attempt and adds zero; supply-side caps always measure provider
-cost. See [access](access.md#installation-and-project-budgets) for where each
-budget is configured.
-
 ## Rate cards and charge
 
 *Cost* is what the provider bills; *charge* is what the consumer owes. A rate
@@ -265,3 +235,34 @@ The gateway resolves the card for requests with an authority project at
 admission and pins `rate_card_pinned` and `rate_card_revision_id` — null
 included — on every attempt; keyless origins stay unpinned and accounting
 resolves the card itself.
+
+## Budget basis
+
+Every consumer budget — API-key, budget-group, installation, organization,
+project, key-route, attribution and end-user — chooses `cost_basis`:
+`cost` (the default) enforces provider cost and `charge` enforces the charge a
+rate card produces. A billable attempt whose charge is NULL counts as an
+uncharged attempt and adds zero; supply-side caps always measure provider
+cost. See [access](access.md#installation-and-project-budgets) for where each
+budget is configured.
+
+## Estimates and quotes
+
+Simulation decisions carry `estimated_cost` per target: `minimum` prices the
+input estimate at the cheapest input-side rate of the selected tier plus the
+per-request fee, and `maximum` is the bound the gateway would reserve — the
+highest input-side rate for the estimate, the declared or default reply
+allowance for generation, the per-request fee, the window multiplier at the
+instant, and the attempt's pinned discount. A committed provider reports zero
+for both. The pair is null when the target has no price, the price cannot bound
+the request, or no token demand is known; server-side tool fees and batch
+multipliers are excluded from both figures.
+
+`POST /api/v1/pricing/quote` prices one attempt's usage document exactly as
+accounting records it — the same price selection, discount, commitment and
+rate-card charge — in a read-only transaction that writes and audits nothing.
+It takes `provider_id`, `model`, `operation`, the usage dimensions, and
+optionally `started_at` (default now), `successful` (default true) and
+`project_id` naming the consumer whose card prices the charge; absent, the
+installation's card applies.
+

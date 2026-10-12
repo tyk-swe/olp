@@ -38,9 +38,32 @@ semantic versioning and take their source from root `package.json`;
 
 - Condense and refresh operational/developer documentation; move repository
   guidance into contributor/console guides and remove `AGENTS.md`.
+- The reference catalog is `openllmproxy.dev/catalog/v2`, carrying the new
+  price components; older releases refuse it as an unsupported version.
+  Gemini image models price text and thinking output at the text rate and
+  image output at the image output rate.
+- An attempt that used a metered server-side tool its price has no fee for is
+  recorded unpriced; publish the catalog snapshot or add tool fees (a fee may be
+  `0`) to price such attempts.
+- Migrations 0063 to 0066 add the price components, commitments, discounts,
+  rate cards, charges and budget cost bases.
 
 ### Added
 
+- Price components for every structure the major vendors publish: audio and
+  image rates with cached shares, input-token tiers, time-of-day windows,
+  per-request and per-tool-call fees and a batch multiplier, priced exactly in
+  accounting and admission. See [pricing](docs/pricing.md).
+- Audio, image and server-side tool-call metering from OpenAI, Anthropic and
+  Gemini responses.
+- Connection commitments for provisioned capacity, allocated across consumers
+  in usage reports.
+- Pricing discounts by connection, vendor or kind, and rate cards for the
+  installation, organizations and projects. Usage records, reports, exports
+  and request history carry charge beside cost, and each budget enforces cost
+  or charge (`cost_basis`).
+- Cost estimates in route simulation, the `max_cost` routing control, a
+  pricing quote endpoint and a console cost calculator.
 - Project-scoped code-mode accounts, explicit pools, published native-model
   routes, conversation-tree pins, token budgets and metadata-only diagnostics,
   with management APIs and console controls.

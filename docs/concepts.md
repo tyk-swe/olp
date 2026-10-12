@@ -130,8 +130,9 @@ selection and rounding rules.
 ## What is stored — and what never is
 
 Durable diagnostics contain identifiers, timing, token/media units, status,
-error classification, pricing provenance, and allowed attribution labels. They
-exclude prompts, outputs, reasoning, tool payloads, uploads, raw request
+error classification, pricing provenance — pinned pricing revisions, discounts
+and rate cards, components, cost and charge — and allowed attribution labels.
+They exclude prompts, outputs, reasoning, tool payloads, uploads, raw request
 headers, and credentials. Keep secrets out of operator names and labels too.
 
 Payload capture is a separate, explicit exception for operator-owned external
