@@ -154,9 +154,18 @@
         oninput={(e) => setPrice(field.key, e.currentTarget.value)}
       />
     {/each}
+    <label for="{id}-max-cost">Maximum cost per request</label><input
+      id="{id}-max-cost"
+      value={typeof current.max_cost === 'string' ? current.max_cost : ''}
+      inputmode="decimal"
+      placeholder="No ceiling"
+      oninput={(e) =>
+        set('max_cost', e.currentTarget.value.trim() || undefined)}
+    />
     <p class="hint">
       Decimal amounts in the model's own currency. A target priced above any
-      ceiling you set is excluded.
+      ceiling you set is excluded; the maximum cost compares each target's
+      worst-case request cost.
     </p>
   </div>
   {#if !constraintsOnly}

@@ -580,3 +580,52 @@ func TestCommittedUnpricedAttemptReportsUnpriced(t *testing.T) {
 		t.Fatal("unpriced committed usage returned a cost")
 	}
 }
+
+// settledCharge honours a commitment: a committed attempt's priced cost is
+// zeroed before the card sees it, so a markup card or no card at all settles
+// zero — exactly what accounting records — while an explicit card rate still
+// prices the committed usage.
+func TestSettledChargeHonoursCommitment(t *testing.T) {
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 2,
+		runtime.Attempt{Price: costPrice()})
+	provider := x.snapshot().Providers[x.attempts[0].ProviderID]
+	provider.Commitment = &runtime.Commitment{Amount: "300", Period: "day"}
+	x.snapshot().Providers[provider.ID] = provider
+	u := &openai.Usage{InputTokens: 100, OutputTokens: 50}
+	x.facts = []AttemptFact{{UsageObserved: true, UsageComplete: true,
+		ProviderID: provider.ID, UpstreamModel: "model-a", Usage: u, Price: costPrice()}}
+
+	if got := (&Server{}).settledCharge(x); !got.IsZero() {
+		t.Fatalf("committed no-card settled charge = %s, want 0", got)
+	}
+	x.cardPinned = true
+	x.cardRev = &usage.RoutingCardRevision{Markup: "2"}
+	if got := (&Server{}).settledCharge(x); !got.IsZero() {
+		t.Fatalf("committed markup settled charge = %s, want 0", got)
+	}
+	x.cardRev = &usage.RoutingCardRevision{Markup: "2", Prices: []usage.RoutingPrice{{Price: usage.Price{
+		ProviderKind: provider.Kind, Model: "model-a", Operation: x.operationName(),
+		InputPerMillion: costText("100"), OutputPerMillion: costText("0"),
+	}}}}
+	if got := (&Server{}).settledCharge(x); got.String() != "0.01" {
+		t.Fatalf("committed explicit-rate settled charge = %s, want 0.01", got)
+	}
+}
+
+// An attempt the provider price cannot bound — no price list at all — still
+// settles what an explicit card rate bills for it, as accounting records.
+func TestSettledChargeExplicitForProviderUnpriced(t *testing.T) {
+	x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 2,
+		runtime.Attempt{Price: costPrice()})
+	provider := x.snapshot().Providers[x.attempts[0].ProviderID]
+	x.cardPinned = true
+	x.cardRev = &usage.RoutingCardRevision{Markup: "1", Prices: []usage.RoutingPrice{{Price: usage.Price{
+		ProviderKind: provider.Kind, Model: "model-a", Operation: x.operationName(),
+		InputPerMillion: costText("100"), OutputPerMillion: costText("0"),
+	}}}}
+	x.facts = []AttemptFact{{UsageObserved: true, UsageComplete: true,
+		ProviderID: provider.ID, UpstreamModel: "model-a", Usage: &openai.Usage{InputTokens: 100}}}
+	if got := (&Server{}).settledCharge(x); got.String() != "0.01" {
+		t.Fatalf("provider-unpriced explicit settled charge = %s, want 0.01", got)
+	}
+}

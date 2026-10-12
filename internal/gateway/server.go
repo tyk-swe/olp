@@ -489,6 +489,17 @@ func requestError(err error) *Error {
 	return invalidRequest("invalid_request", err.Error(), nil)
 }
 
+// costLimitExceeded reports whether the plan's only blocker was a maximum cost
+// ceiling, so the caller can reject with 400 rather than route-unavailable.
+func costLimitExceeded(plan runtime.Plan) *Error {
+	for index := range plan.Decisions {
+		if plan.Decisions[index].Reason != nil && *plan.Decisions[index].Reason == "cost_limit_exceeded" && !plan.Decisions[index].Shadow {
+			return invalidRequest("cost_limit_exceeded", "Every candidate exceeds the request's maximum cost.", func() *string { p := "max_cost"; return &p }())
+		}
+	}
+	return nil
+}
+
 func selectionError(err error, model string) *Error {
 	if se, ok := errors.AsType[*runtime.SelectionError](err); ok {
 		switch se.Code {
@@ -891,6 +902,9 @@ func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
 					return invalidRequest(*decision.Reason, "The effective invocation exceeds a declared model limit; its controls were not reduced.", nil)
 				}
 			}
+		}
+		if exceeded := costLimitExceeded(plan); exceeded != nil {
+			return exceeded
 		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}

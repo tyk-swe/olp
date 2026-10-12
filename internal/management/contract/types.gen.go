@@ -7938,6 +7938,67 @@ type PriceWindows struct {
 	TimeZone string `json:"time_zone"`
 }
 
+// PricingQuoteRequest defines model for PricingQuoteRequest.
+type PricingQuoteRequest struct {
+	Model     string `json:"model"`
+	Operation string `json:"operation"`
+
+	// ProjectId The consumer project the charge is priced for; absent, the installation's card applies.
+	ProjectId  nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	ProviderId openapi_types.UUID                    `json:"provider_id"`
+
+	// StartedAt Defaults to now.
+	StartedAt nullable.Nullable[time.Time] `json:"started_at,omitempty"`
+
+	// Successful Defaults to true.
+	Successful *bool `json:"successful,omitempty"`
+
+	// Usage Attempt usage dimensions, the same members accounting records.
+	Usage struct {
+		AudioInputTokens        *int64 `json:"audio_input_tokens,omitempty"`
+		AudioOutputTokens       *int64 `json:"audio_output_tokens,omitempty"`
+		Batch                   *bool  `json:"batch,omitempty"`
+		CacheWrite1hInputTokens *int64 `json:"cache_write_1h_input_tokens,omitempty"`
+		CacheWrite5mInputTokens *int64 `json:"cache_write_5m_input_tokens,omitempty"`
+		CacheWriteInputTokens   *int64 `json:"cache_write_input_tokens,omitempty"`
+		CachedAudioInputTokens  *int64 `json:"cached_audio_input_tokens,omitempty"`
+		CachedImageInputTokens  *int64 `json:"cached_image_input_tokens,omitempty"`
+		CachedInputTokens       *int64 `json:"cached_input_tokens,omitempty"`
+		ImageInputTokens        *int64 `json:"image_input_tokens,omitempty"`
+		ImageOutputTokens       *int64 `json:"image_output_tokens,omitempty"`
+		InputTokens             *int64 `json:"input_tokens,omitempty"`
+
+		// MediaUnits Exact decimal media units, as the wire carries them.
+		MediaUnits   *string           `json:"media_units,omitempty"`
+		OutputTokens *int64            `json:"output_tokens,omitempty"`
+		ToolCalls    *map[string]int64 `json:"tool_calls,omitempty"`
+	} `json:"usage"`
+}
+
+// PricingQuoteResponse defines model for PricingQuoteResponse.
+type PricingQuoteResponse struct {
+	// Charge Consumer charge under the applicable rate card.
+	Charge     nullable.Nullable[string] `json:"charge"`
+	Commitment nullable.Nullable[struct {
+		Amount string `json:"amount"`
+		Period string `json:"period"`
+	}] `json:"commitment"`
+
+	// Complete Every priced dimension had a rate.
+	Complete   bool     `json:"complete"`
+	Components []string `json:"components"`
+
+	// Cost Provider cost after discount and commitment.
+	Cost       nullable.Nullable[string]             `json:"cost"`
+	Currency   nullable.Nullable[string]             `json:"currency"`
+	DiscountId nullable.Nullable[openapi_types.UUID] `json:"discount_id,omitempty"`
+
+	// ListCost Undiscounted, uncommitted cost.
+	ListCost           nullable.Nullable[string]             `json:"list_cost"`
+	PricingRevisionId  nullable.Nullable[openapi_types.UUID] `json:"pricing_revision_id,omitempty"`
+	RateCardRevisionId nullable.Nullable[openapi_types.UUID] `json:"rate_card_revision_id,omitempty"`
+}
+
 // PricingRevisionRequest defines model for PricingRevisionRequest.
 type PricingRevisionRequest struct {
 	EffectiveAt time.Time      `json:"effective_at"`
@@ -9696,8 +9757,11 @@ type RouteTemplateResultOutcome string
 
 // RoutingConstraints defines model for RoutingConstraints.
 type RoutingConstraints struct {
-	DenyDataCollection       *bool                           `json:"deny_data_collection,omitempty"`
-	Ignore                   *[]string                       `json:"ignore,omitempty"`
+	DenyDataCollection *bool     `json:"deny_data_collection,omitempty"`
+	Ignore             *[]string `json:"ignore,omitempty"`
+
+	// MaxCost Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded.
+	MaxCost                  nullable.Nullable[string]       `json:"max_cost,omitempty"`
 	MaxPrice                 nullable.Nullable[PriceCeiling] `json:"max_price,omitempty"`
 	Only                     nullable.Nullable[[]string]     `json:"only,omitempty"`
 	Quantizations            nullable.Nullable[[]string]     `json:"quantizations,omitempty"`
@@ -9715,6 +9779,13 @@ type RoutingDecision struct {
 
 	// EstimateProvenance How estimated_input_tokens was counted: tokenizer for an exact count by the model's own tokenizer of a prompt that is all text and message framing, calibrated for a count that is partly a measured ratio or a guess (the tail of a prompt too long to count exactly, or one with images or media charged at a flat rate, or with tool schemas or tool calls, which a model reads in a rendering of its own), heuristic for the four-characters-per-token rule, which also prices the tail of a long prompt that follows too little exact text to measure a ratio from. Null when the caller supplied the estimate or no request was inspected.
 	EstimateProvenance nullable.Nullable[string] `json:"estimate_provenance,omitempty"`
+
+	// EstimatedCost The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve. Null when the price cannot bound the request or no demand is known.
+	EstimatedCost nullable.Nullable[struct {
+		Currency string `json:"currency"`
+		Maximum  string `json:"maximum"`
+		Minimum  string `json:"minimum"`
+	}] `json:"estimated_cost,omitempty"`
 
 	// EstimatedInputTokens The request's input tokens as this target's model counts them, which is the estimate routing weighs the target's context window by, or the estimate the caller supplied. Null when neither exists.
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
@@ -9777,7 +9848,10 @@ type RoutingPreferences struct {
 	Ignore             *[]string               `json:"ignore,omitempty"`
 
 	// MaxAttempts Optional request ceiling; cannot exceed the published route budget.
-	MaxAttempts            nullable.Nullable[int]          `json:"max_attempts,omitempty"`
+	MaxAttempts nullable.Nullable[int] `json:"max_attempts,omitempty"`
+
+	// MaxCost Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded.
+	MaxCost                nullable.Nullable[string]       `json:"max_cost,omitempty"`
 	MaxPrice               nullable.Nullable[PriceCeiling] `json:"max_price,omitempty"`
 	Only                   nullable.Nullable[[]string]     `json:"only,omitempty"`
 	Order                  nullable.Nullable[[]string]     `json:"order,omitempty"`
@@ -13004,6 +13078,9 @@ type ApprovePluginJSONRequestBody = PluginApprovalRequest
 
 // CreatePricingDiscountJSONRequestBody defines body for CreatePricingDiscount for application/json ContentType.
 type CreatePricingDiscountJSONRequestBody = DiscountRequest
+
+// PricingQuoteJSONRequestBody defines body for PricingQuote for application/json ContentType.
+type PricingQuoteJSONRequestBody = PricingQuoteRequest
 
 // CreatePricingRevisionJSONRequestBody defines body for CreatePricingRevision for application/json ContentType.
 type CreatePricingRevisionJSONRequestBody = PricingRevisionRequest

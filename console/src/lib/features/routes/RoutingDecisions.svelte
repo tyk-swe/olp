@@ -53,6 +53,11 @@
         </dd>
         {#if row.estimate}<dt>Estimated input</dt>
           <dd>{row.estimate}</dd>{/if}
+        {#if row.estimatedCost}<dt>Estimated cost</dt>
+          <dd>
+            {row.estimatedCost.minimum} – {row.estimatedCost.maximum}
+            {row.estimatedCost.currency}
+          </dd>{/if}
         {#if row.notes.length}<dt>Adaptive routing</dt>
           <dd>{row.notes.join(' · ')}</dd>{/if}
         <dt>Model facts observed</dt>

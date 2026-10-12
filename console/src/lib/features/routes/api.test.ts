@@ -37,6 +37,7 @@ describe('simulateRouting', () => {
       strategy: null,
       deny_data_collection: false,
       ignore: [],
+      max_cost: null,
       max_price: null,
       only: null,
       quantizations: null,
@@ -80,6 +81,8 @@ describe('simulateRouting', () => {
       mode: 'unary',
       preferences,
       api_key_id: '01980000-0000-7000-8000-000000000402',
+      estimated_input_tokens: null,
+      max_output_tokens: null,
       seed: 'repeatable'
     });
   });

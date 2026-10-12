@@ -254,6 +254,7 @@
     "POST /api/v1/plugins": "Y-----------",
     "POST /api/v1/plugins/{plugin_digest}/approve": "Y-----------",
     "POST /api/v1/pricing/discounts": "Y-Y-----Y-Y-",
+    "POST /api/v1/pricing/quote": "Y-Y-Y-Y-Y-Y-",
     "POST /api/v1/pricing/revisions": "Y-Y-----Y-Y-",
     "POST /api/v1/pricing/source-snapshots/{pricing_source_snapshot_id}/publish": "Y-Y-----Y-Y-",
     "POST /api/v1/pricing/sources": "Y-Y-----Y-Y-",

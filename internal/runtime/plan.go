@@ -73,6 +73,13 @@ type SelectionOptions struct {
 	Permitted func(Route) bool
 	// Mirror seeds shadow sampling; without it no shadow target is sampled.
 	Mirror []byte
+	// EstimateCost asks the plan to record each target's minimum and maximum
+	// possible cost; only simulations set it, so live planning adds nothing.
+	EstimateCost bool
+	// WorstCost bounds one candidate's attempt cost — provider cost with the
+	// attempt's pinned discount — or reports it cannot be bounded. It runs only
+	// when an effective maximum-cost ceiling or cost estimation calls for it.
+	WorstCost func(Provider, Target, *usage.RoutingPrice, *usage.RoutingDiscount) (usage.Cost, bool)
 }
 type Decision struct {
 	Incompatibility       *Incompatibility    `json:"incompatibility,omitempty"`
@@ -97,6 +104,18 @@ type Decision struct {
 	Shadow                bool                `json:"shadow,omitempty"`
 	Unhealthy             bool                `json:"unhealthy,omitempty"`
 	Headroom              *float64            `json:"headroom,omitempty"`
+	// EstimatedCost is the attempt's cost bound pair for a simulation, null
+	// when the target's price cannot bound or no demand is known.
+	EstimatedCost *EstimatedCost `json:"estimated_cost"`
+}
+
+// EstimatedCost is the minimum and maximum one attempt on a target could
+// cost: the floor prices the input estimate at the cheapest input rate; the
+// bound prices the worst case the gateway would reserve.
+type EstimatedCost struct {
+	Minimum  string `json:"minimum"`
+	Maximum  string `json:"maximum"`
+	Currency string `json:"currency"`
 }
 
 // Incompatibility describes an unsatisfied semantic obligation without retaining
@@ -258,6 +277,31 @@ func baseline(rows []rankedCandidate, operation string) *Baseline {
 	return &Baseline{ProviderID: most.attempt.ProviderID, UpstreamModel: most.attempt.UpstreamModel, VendorID: most.attempt.VendorID}
 }
 
+// estimatedCost is the bound pair a simulation reports for a target. A
+// committed provider can only charge zero; a target without a demand or a
+// boundable price reports nothing.
+func estimatedCost(provider Provider, price *usage.RoutingPrice, discount *usage.RoutingDiscount, demand *TokenDemand, now time.Time, worst func(Provider, Target, *usage.RoutingPrice, *usage.RoutingDiscount) (usage.Cost, bool), target Target) *EstimatedCost {
+	if price == nil || demand == nil {
+		return nil
+	}
+	estimated := &EstimatedCost{Minimum: "0", Maximum: "0", Currency: price.Currency}
+	if provider.Commitment != nil {
+		return estimated
+	}
+	bound, ok := worst(provider, target, price, discount)
+	if !ok {
+		return nil
+	}
+	floor, ok := price.CostFloor(demand.EstimatedInputTokens, now, discount)
+	if !ok {
+		return nil
+	}
+	estimated.Minimum, estimated.Maximum = floor.String(), bound.String()
+	return estimated
+}
+
+func strptr(s string) *string { return &s }
+
 // evaluateCandidates preserves admission order: published eligibility and
 // source constraints precede preparation, then effective request constraints.
 func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode string, affinity []byte, policy EffectivePolicy, chosen selection, options SelectionOptions) ([]rankedCandidate, error) {
@@ -307,6 +351,9 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 		}
 		row.decision.Price = options.Inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, operation, now)
 		row.attempt.Discount = options.Inputs.Discount(provider.Kind, provider.ID, provider.VendorID, now)
+		if options.EstimateCost && options.WorstCost != nil {
+			row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, now, options.WorstCost, target)
+		}
 		row.decision.Performance = options.Inputs.Metrics(provider.ID, target.ProviderModel, operation, mode, now)
 		reason := ""
 		switch {
@@ -376,6 +423,12 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 				input := demand.EstimatedInputTokens
 				row.decision.EstimatedInputTokens = &input
 				row.decision.RequestedOutputTokens = demand.MaxOutputTokens
+			}
+		}
+		if reason == "" && policy.MaxCost != nil && options.WorstCost != nil {
+			bound, ok := options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount)
+			if !ok || !lessOrEqual(strptr(bound.String()), policy.MaxCost) {
+				reason = "cost_limit_exceeded"
 			}
 		}
 		targetID, e := uuid.Parse(target.RoutingID)

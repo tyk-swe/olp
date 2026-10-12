@@ -686,6 +686,52 @@ func (p *RoutingPrice) CostBound(input, output int64, generation bool, at time.T
 	return clampCost(bound), true
 }
 
+// CostFloor is the least one attempt could cost on this price at `at` under the
+// pinned discount: the input estimate at the lowest input-side rate the
+// selected rate set carries (the estimate itself picks the tier), no output,
+// plus the per-request fee, times the window multiplier and the discount,
+// rounded down. It is false when no input rate exists.
+func (p *RoutingPrice) CostFloor(input int64, at time.Time, discount *RoutingDiscount) (Cost, bool) {
+	if p == nil {
+		return Cost{}, false
+	}
+	r := p.parsed()
+	if !r.valid {
+		return Cost{}, false
+	}
+	rates := r.selectRates(&input)
+	if !rates.inputHead() {
+		return Cost{}, false
+	}
+	rate := minRate(rates.input, rates.cached, rates.cacheWrite, rates.cacheWrite5m,
+		rates.cacheWrite1h, rates.audioInput, rates.cachedAudioInput,
+		rates.imageInput, rates.cachedImageInput)
+	floor := new(big.Int).Quo(new(big.Int).Mul(big.NewInt(max(input, 0)), rate), perMillion)
+	if r.perRequest != nil {
+		floor.Add(floor, r.perRequest)
+	}
+	if window := r.windowAt(at); window != nil {
+		floor.Mul(floor, window)
+		floor.Quo(floor, costUnit)
+	}
+	if discount != nil {
+		floor.Mul(floor, discount.parsedMultiplier())
+		floor.Quo(floor, costUnit)
+	}
+	return clampCost(floor), true
+}
+
+// minRate is the lowest of the rates present, nil when none is.
+func minRate(rates ...*big.Int) *big.Int {
+	var lowest *big.Int
+	for _, rate := range rates {
+		if rate != nil && (lowest == nil || rate.Cmp(lowest) < 0) {
+			lowest = rate
+		}
+	}
+	return lowest
+}
+
 // maxRate is the highest of the rates present, nil when none is.
 func maxRate(rates ...*big.Int) *big.Int {
 	var highest *big.Int

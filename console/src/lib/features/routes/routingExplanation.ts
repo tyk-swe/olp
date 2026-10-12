@@ -28,6 +28,7 @@ export type ExplanationRow = {
   /** The input tokens the request was estimated at for this target, and how
    * they were counted, as one line; null when nothing was estimated. */
   estimate: string | null;
+  estimatedCost: RoutingDecision['estimated_cost'];
   interaction: RoutingDecision['interaction'];
   incompatibility: RoutingDecision['incompatibility'];
   /** What adaptive routing contributed: shadowing, selectors, health and
@@ -90,6 +91,7 @@ function decisionRow(
     performance: decision.performance,
     metadataObservedAt: decision.metadata_observed_at ?? null,
     estimate: describeEstimate(decision),
+    estimatedCost: decision.estimated_cost,
     interaction: decision.interaction,
     incompatibility: decision.incompatibility,
     notes: adaptiveNotes(decision)
@@ -147,6 +149,12 @@ export function simulationRows(targets: SimulationTarget[]): ExplanationRow[] {
       performance: null,
       metadataObservedAt: null,
       estimate: null,
+      estimatedCost:
+        'estimated_cost' in target &&
+        target.estimated_cost != null &&
+        typeof target.estimated_cost === 'object'
+          ? (target.estimated_cost as ExplanationRow['estimatedCost'])
+          : null,
       interaction: undefined,
       incompatibility: undefined,
       notes: []

@@ -245,6 +245,40 @@ func (x *execution) attemptChargeBound(attempt runtime.Attempt, costBound usage.
 	return bound
 }
 
+// targetCostBound is attemptCostBound for a planned candidate rather than a
+// dispatched attempt: the same worst case under the same pinned price and
+// discount, or false when the request cannot be bounded.
+func (x *execution) targetCostBound(provider runtime.Provider, target runtime.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
+	if x.callerCostExempt() || price == nil {
+		return usage.Cost{}, false
+	}
+	if x.committed(provider.ID) {
+		return usage.Cost{}, true
+	}
+	if x.media != nil {
+		if x.media.Op != media.OpVideoCreate {
+			return usage.Cost{}, false
+		}
+		seconds := "4"
+		if x.media.Seconds != nil {
+			seconds = *x.media.Seconds
+		}
+		return price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, x.request.startedAt, true, discount)
+	}
+	if x.parsed == nil && x.unary == nil {
+		input, reply := max(resourceEstimate, x.estimate), int64(0)
+		if x.operationName() == "generation" || x.operationName() == "realtime" {
+			reply = estimate.DefaultOutputTokens
+		}
+		return price.CostBound(input, reply, reply > 0, x.request.startedAt, discount)
+	}
+	admitted, err := x.attemptEstimate(&provider, target.ProviderModel)
+	if err != nil {
+		return usage.Cost{}, false
+	}
+	return price.CostBound(admitted.input, admitted.reply, admitted.reply > 0, x.request.startedAt, discount)
+}
+
 // committed reports whether the attempt's provider settled under provisioned
 // capacity, whose usage has a price but no marginal cost.
 func (x *execution) committed(providerID string) bool {
@@ -342,16 +376,24 @@ func (s *Server) settleAdmission(ctx context.Context, x *execution) {
 // settledCharge is what the request's consumers owe from the attempts that
 // reported usage, priced under the card the request pinned exactly as
 // accounting will charge it: an unpriced or uncharged attempt adds nothing.
+// Commitment zeroes a priced cost before the card sees it — a marked-up zero is
+// zero, and a fact with no card charges its zero cost — while an explicit card
+// rate still prices a committed or provider-unpriced attempt.
 func (s *Server) settledCharge(x *execution) usage.Cost {
 	var total usage.Cost
 	operation := x.operationName()
 	for index := range x.facts {
 		fact := &x.facts[index]
-		if fact.BudgetExempt || !fact.UsageObserved || fact.Price == nil {
+		if fact.BudgetExempt || !fact.UsageObserved {
 			continue
 		}
-		cost, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount)
-		if !ok {
+		var cost usage.Cost
+		if fact.Price != nil {
+			if priced, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount); ok {
+				cost = priced
+			}
+		}
+		if x.committed(fact.ProviderID) {
 			cost = usage.Cost{}
 		}
 		rev := s.factCardRevision(x, fact)
@@ -376,11 +418,23 @@ func (s *Server) factCardRevision(x *execution, fact *AttemptFact) *usage.Routin
 	if x.cardPinned {
 		return x.cardRev
 	}
+	// The consumer is the aggregate-ownership project: the provider's, else
+	// the route's — the same precedence accounting applies.
 	var project *string
 	if provider, ok := x.snapshot().Providers[fact.ProviderID]; ok {
 		project = provider.ProjectID
 	}
-	if revision, known := s.Runtime.RoutingInputs().RateCardRevision(project, fact.StartedAt); known && revision != nil {
+	if project == nil && x.route != nil {
+		project = x.route.ProjectID
+	}
+	if s.Runtime == nil {
+		return nil
+	}
+	inputs := s.Runtime.RoutingInputs()
+	if inputs == nil {
+		return nil
+	}
+	if revision, known := inputs.RateCardRevision(project, fact.StartedAt); known && revision != nil {
 		return revision
 	}
 	return nil

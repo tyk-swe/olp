@@ -32,6 +32,9 @@ type attemptPricing struct {
 	commitmentWeight *string
 	commitmentAmount *string
 	commitmentPeriod *string
+	// listCost is the undiscounted, uncommitted price the charge and weight
+	// are measured from.
+	listCost *string
 	// discountID is the discount the cost was priced under; charge is what
 	// the attempt's consumer was billed under the rate card revision named.
 	discountID         *string
@@ -140,7 +143,8 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
         CASE WHEN priced.cost IS NOT NULL AND discount.id IS NOT NULL
              THEN discount.id::text END AS discount_id,
         cardrev.rate_card_revision_id::text,
-        charge.charge
+        charge.charge,
+        priced.list_cost::text
     FROM olp.providers provider
     LEFT JOIN olp.provider_revisions provider_revision
         ON provider_revision.id = COALESCE($9::uuid, provider.active_revision_id)
@@ -196,10 +200,12 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
         SELECT jsonb_typeof(commitment.commitment::jsonb) = 'object' AS present
     ) committed
     CROSS JOIN LATERAL (
-        SELECT COALESCE(
-            (SELECT k.project_id FROM olp.api_keys k WHERE k.id = NULLIF($16::text,'')::uuid),
-            (SELECT p.project_id FROM olp.providers p WHERE p.id = provider.id),
-            (SELECT r.project_id FROM olp.routes r WHERE r.slug = $17)) AS project_id
+        SELECT CASE WHEN $18::boolean
+                    THEN NULLIF($19::text,'')::uuid
+                    ELSE COALESCE(
+                        (SELECT k.project_id FROM olp.api_keys k WHERE k.id = NULLIF($16::text,'')::uuid),
+                        (SELECT p.project_id FROM olp.providers p WHERE p.id = provider.id),
+                        (SELECT r.project_id FROM olp.routes r WHERE r.slug = $17)) END AS project_id
     ) consumer
     LEFT JOIN LATERAL (
         SELECT rev.id AS rate_card_revision_id, rev.markup
@@ -269,8 +275,21 @@ func priceBaseline(ctx context.Context, tx pgx.Tx, event *Event, attempt Validat
 	return pricing.estimatedCost, err
 }
 
+// quoteConsumer names an explicit consumer project for the charge leg, used
+// only by the pricing quote: accounting always derives the consumer from the
+// attempt's key, provider and route.
+type quoteConsumer struct {
+	set     bool
+	project string
+}
+
 func priceUsage(ctx context.Context, tx pgx.Tx, event *Event, usage AttemptUsage,
 	startedAt time.Time, successful bool, providerID, model string, pin routingPin) (attemptPricing, error) {
+	return priceUsageQuoted(ctx, tx, event, usage, startedAt, successful, providerID, model, pin, quoteConsumer{})
+}
+
+func priceUsageQuoted(ctx context.Context, tx pgx.Tx, event *Event, usage AttemptUsage,
+	startedAt time.Time, successful bool, providerID, model string, pin routingPin, consumer quoteConsumer) (attemptPricing, error) {
 	// The pricing function returns a cost only for complete usage. The fact
 	// still needs to know whether an incomplete attempt's dimensions had
 	// rates, so the usage document it prices reports completeness: its
@@ -290,10 +309,10 @@ func priceUsage(ctx context.Context, tx pgx.Tx, event *Event, usage AttemptUsage
 		string(document), startedAt, successful,
 		pin.pricingRevisionID, pin.providerRevisionID, pin.pinned, pin.vendorID,
 		pin.discountPinned, pin.discountID, pin.rateCardPinned, pin.rateCardRevisionID,
-		event.APIKeyID, event.RouteSlug,
+		event.APIKeyID, event.RouteSlug, consumer.set, consumer.project,
 	).Scan(&pricing.pricingRevisionID, &pricing.currency, &pricing.complete, &cost,
 		&pricing.components, &pricing.commitmentWeight, &pricing.commitmentAmount, &pricing.commitmentPeriod,
-		&pricing.discountID, &pricing.rateCardRevisionID, &pricing.charge)
+		&pricing.discountID, &pricing.rateCardRevisionID, &pricing.charge, &pricing.listCost)
 	if err != nil {
 		return attemptPricing{}, fmt.Errorf("price attempt: %w", err)
 	}

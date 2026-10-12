@@ -67,6 +67,7 @@ const route: ActiveRoute = {
       constraints: {
         deny_data_collection: false,
         ignore: [],
+        max_cost: null,
         max_price: null,
         only: null,
         quantizations: null,
@@ -78,6 +79,7 @@ const route: ActiveRoute = {
         allow_fallbacks: null,
         deny_data_collection: false,
         ignore: [],
+        max_cost: null,
         max_price: null,
         only: null,
         order: null,

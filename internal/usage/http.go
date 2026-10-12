@@ -55,6 +55,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/reference-catalog", s.referenceCatalog)
 	s.Access.Route(mux, "GET /api/v1/pricing/discounts", s.listPricingDiscounts)
 	s.Access.Route(mux, "POST /api/v1/pricing/discounts", s.createPricingDiscount)
+	s.Access.Route(mux, "POST /api/v1/pricing/quote", s.quotePricing)
 	s.Access.Route(mux, "GET /api/v1/rate-cards", s.listRateCards)
 	s.Access.Route(mux, "POST /api/v1/rate-cards", s.createRateCard)
 	s.Access.Route(mux, "GET /api/v1/rate-cards/{rate_card_id}", s.getRateCard)

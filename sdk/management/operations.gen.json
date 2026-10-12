@@ -726,6 +726,14 @@
             "require_zero_data_retention": {
               "default": false,
               "type": "boolean"
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -887,6 +895,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -9213,6 +9229,14 @@
             "require_zero_data_retention": {
               "default": false,
               "type": "boolean"
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -9374,6 +9398,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -11429,6 +11461,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -18722,6 +18762,14 @@
             "require_zero_data_retention": {
               "default": false,
               "type": "boolean"
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -18883,6 +18931,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -21727,6 +21783,164 @@
     }
   },
   {
+    "name": "pricing_quote",
+    "group": "usage",
+    "method": "POST",
+    "read_only": true,
+    "path": "/api/v1/pricing/quote",
+    "description": "pricing quote",
+    "scopes": [
+      [
+        "usage",
+        "installation"
+      ]
+    ],
+    "parameters": [],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/PricingQuoteRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "body"
+      ],
+      "$defs": {
+        "PricingQuoteRequest": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "provider_id",
+            "model",
+            "operation",
+            "usage"
+          ],
+          "properties": {
+            "provider_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "model": {
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "usage": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Attempt usage dimensions, the same members accounting records.",
+              "properties": {
+                "input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "output_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "cached_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "cache_write_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "cache_write_5m_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "cache_write_1h_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "audio_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "cached_audio_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "audio_output_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "image_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "cached_image_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "image_output_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "media_units": {
+                  "type": "string",
+                  "description": "Exact decimal media units, as the wire carries them."
+                },
+                "tool_calls": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1
+                  }
+                },
+                "batch": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "started_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time",
+              "description": "Defaults to now."
+            },
+            "successful": {
+              "type": "boolean",
+              "description": "Defaults to true."
+            },
+            "project_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid",
+              "default": null,
+              "description": "The consumer project the charge is priced for; absent, the installation's card applies."
+            }
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "probe_provider",
     "group": "providers",
     "method": "POST",
@@ -24465,6 +24679,14 @@
             "require_zero_data_retention": {
               "default": false,
               "type": "boolean"
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -24626,6 +24848,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -26462,6 +26692,14 @@
             "require_zero_data_retention": {
               "default": false,
               "type": "boolean"
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -26623,6 +26861,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -29897,6 +30143,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -30277,6 +30531,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"

@@ -66,8 +66,11 @@ multipart bodies. Uploads have a 15-second read deadline, separate from the
 inference deadline; timeout releases admission.
 
 `X-OLP-Routing` is one local JSON object, for example
-`{"strategy":"price","allow_fallbacks":false,"max_attempts":1}`. It may narrow
-published constraints/budgets, never increase authority or deadlines.
+`{"strategy":"price","allow_fallbacks":false,"max_attempts":1,"max_cost":"0.25"}`.
+It may narrow published constraints/budgets, never increase authority or
+deadlines. `max_cost` caps the worst-case attempt cost the reservation would
+hold; a request every non-shadow candidate excludes for it fails `400`
+`cost_limit_exceeded` with `param: max_cost` before dispatch.
 `priority` is bounded by the key ceiling. Raw controls are not persisted/forwarded.
 `X-OLP-Attribution` accepts one object, at most 4096 bytes/four labels with bounded
 machine-token values and key allowlist permission. Project/key requirements and

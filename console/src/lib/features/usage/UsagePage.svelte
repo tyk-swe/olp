@@ -18,6 +18,7 @@
     budgetWindowState
   } from '$lib/features/access/api-keys/budgetPresentation';
   import UsageChart from '$lib/features/usage/UsageChart.svelte';
+  import CostCalculator from '$lib/features/usage/CostCalculator.svelte';
   import { presentEstimate } from '$lib/features/usage/estimatePresentation';
   import UsageCompletenessStatus from '$lib/features/usage/UsageCompletenessStatus.svelte';
   import { errorMessage } from '$lib/api/http';
@@ -599,6 +600,7 @@
       </div>
     {/if}
   </section>
+  <CostCalculator />
 {/if}
 
 <style>

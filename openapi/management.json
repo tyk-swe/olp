@@ -11396,6 +11396,14 @@
           "require_zero_data_retention": {
             "default": false,
             "type": "boolean"
+          },
+          "max_cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
           }
         },
         "type": "object"
@@ -11548,6 +11556,30 @@
             "type": [
               "number",
               "null"
+            ]
+          },
+          "estimated_cost": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "description": "The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve. Null when the price cannot bound the request or no demand is known.",
+            "properties": {
+              "minimum": {
+                "type": "string"
+              },
+              "maximum": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "minimum",
+              "maximum",
+              "currency"
             ]
           }
         },
@@ -11747,6 +11779,14 @@
                 "$ref": "#/components/schemas/AdmissionPriority"
               }
             ]
+          },
+          "max_cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
           }
         },
         "type": "object"
@@ -23046,6 +23086,223 @@
           "next_cursor"
         ],
         "type": "object"
+      },
+      "PricingQuoteRequest": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider_id",
+          "model",
+          "operation",
+          "usage"
+        ],
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "model": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "usage": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Attempt usage dimensions, the same members accounting records.",
+            "properties": {
+              "input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "output_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cached_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_write_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_write_5m_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_write_1h_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "audio_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cached_audio_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "audio_output_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "image_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cached_image_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "image_output_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "media_units": {
+                "type": "string",
+                "description": "Exact decimal media units, as the wire carries them."
+              },
+              "tool_calls": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1
+                }
+              },
+              "batch": {
+                "type": "boolean"
+              }
+            }
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Defaults to now."
+          },
+          "successful": {
+            "type": "boolean",
+            "description": "Defaults to true."
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "default": null,
+            "description": "The consumer project the charge is priced for; absent, the installation's card applies."
+          }
+        }
+      },
+      "PricingQuoteResponse": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "currency",
+          "complete",
+          "list_cost",
+          "cost",
+          "charge",
+          "components",
+          "commitment"
+        ],
+        "properties": {
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pricing_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "discount_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "rate_card_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "Every priced dimension had a rate."
+          },
+          "list_cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Undiscounted, uncommitted cost."
+          },
+          "cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Provider cost after discount and commitment."
+          },
+          "charge": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Consumer charge under the applicable rate card."
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "commitment": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "amount": {
+                "type": "string"
+              },
+              "period": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "amount",
+              "period"
+            ]
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -55016,6 +55273,72 @@
         ],
         "tags": [
           "pricing"
+        ]
+      }
+    },
+    "/api/v1/pricing/quote": {
+      "post": {
+        "operationId": "pricing_quote",
+        "x-olp-read-only": true,
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingQuoteResponse"
+                }
+              }
+            },
+            "description": "The priced quote."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid quote request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unknown provider"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
         ]
       }
     }
