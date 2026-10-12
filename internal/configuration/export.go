@@ -363,9 +363,9 @@ func applySlotPositions(slots []SlotEntry, positions map[string]int) {
 	}
 }
 
-// exportDiscounts reads the multiplier in force for each discount scope,
-// omitting scopes whose in-force multiplier is one: a scope ended at export
-// time stays ended on apply.
+// exportDiscounts reads the multiplier in force for each discount scope —
+// scopes ended by a multiplier-one discount included, so ending a discount
+// promotes as multiplier "1".
 func exportDiscounts(ctx context.Context, q access.Queryer) ([]DiscountEntry, error) {
 	rows, err := q.Query(ctx, `SELECT DISTINCT ON (provider_kind,COALESCE(vendor_id,''),COALESCE(provider_id::text,''))
  provider_kind,vendor_id,provider_id::text,multiplier::text
@@ -391,9 +391,7 @@ func exportDiscounts(ctx context.Context, q access.Queryer) ([]DiscountEntry, er
 			name := names[*providerID]
 			entry.Provider = &name
 		}
-		if entry.Multiplier != "1" {
-			entries = append(entries, entry)
-		}
+		entries = append(entries, entry)
 	}
 	return entries, rows.Err()
 }

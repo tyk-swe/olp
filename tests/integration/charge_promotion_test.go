@@ -11,7 +11,7 @@ import (
 
 // TestConfigurationChargePromotion exports discounts and rate cards, applies
 // them to a fresh installation, then exports again for a no-change plan. A
-// document that omits an in-force scope ends it with a neutral revision.
+// document that omits them merges: nothing is ended or neutralized.
 func TestConfigurationChargePromotion(t *testing.T) {
 	source := newAccessHarness(t)
 	sourceOwner := source.owner()
@@ -110,8 +110,8 @@ func TestConfigurationChargePromotion(t *testing.T) {
 		t.Fatalf("re-exported discounts = %v", discountsAgain)
 	}
 
-	// A document that drops the in-force scope ends it: the destination gets a
-	// multiplier-one discount and the project's card is neutralized.
+	// A document without discounts or rate cards leaves them untouched, like
+	// every other collection member.
 	changed := map[string]any{}
 	encoded, _ := json.Marshal(reDoc)
 	if err := json.Unmarshal(encoded, &changed); err != nil {
@@ -119,21 +119,41 @@ func TestConfigurationChargePromotion(t *testing.T) {
 	}
 	delete(changed, "discounts")
 	delete(changed, "rate_cards")
+	var discountRows, revisionRows int64
+	destination.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.pricing_discounts`).Scan(&discountRows)
+	destination.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.rate_card_revisions`).Scan(&revisionRows)
 	destination.want(destinationOwner, http.MethodPost, "/api/v1/configuration/apply",
 		map[string]any{"document": changed}, idem("charge-strip"), 200)
+	var nowDiscounts, nowRevisions int64
+	destination.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.pricing_discounts`).Scan(&nowDiscounts)
+	destination.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.rate_card_revisions`).Scan(&nowRevisions)
+	if nowDiscounts != discountRows || nowRevisions != revisionRows {
+		t.Fatalf("an omitted document touched discounts %d→%d or revisions %d→%d",
+			discountRows, nowDiscounts, revisionRows, nowRevisions)
+	}
+
+	// Ending a discount promotes as a listed multiplier-one scope; the card is
+	// neutralized by a listed markup-one revision with no prices.
+	changed["discounts"] = []any{map[string]any{
+		"provider_kind": "openai_compatible", "provider": "Chargeable", "multiplier": "1"}}
+	changed["rate_cards"] = []any{map[string]any{
+		"owner": map[string]any{"kind": "project", "project": "Charge project"}, "markup": "1"}}
+	destination.want(destinationOwner, http.MethodPost, "/api/v1/configuration/apply",
+		map[string]any{"document": changed}, idem("charge-end"), 200)
 	endList := usageWant(destination, destinationUsage, destinationOwner, http.MethodGet,
 		"/api/v1/pricing/discounts", nil, nil, 200)
 	items := endList["items"].([]any)
 	if len(items) < 2 {
-		t.Fatalf("discounts after strip = %v", items)
+		t.Fatalf("discounts after ending = %v", items)
 	}
-	newest := items[0].(map[string]any)
-	if newest["multiplier"].(string) != "1.000000000000" {
+	if newest := items[0].(map[string]any); newest["multiplier"].(string) != "1.000000000000" {
 		t.Fatalf("scope ended with multiplier %v", newest["multiplier"])
 	}
-	var revisions int64
-	destination.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.rate_card_revisions`).Scan(&revisions)
-	if revisions != 2 {
-		t.Fatalf("card revisions = %d, want the strip to publish a neutral one", revisions)
+	if err := destination.Pool.QueryRow(t.Context(),
+		`SELECT count(*) FROM olp.rate_card_revisions`).Scan(&nowRevisions); err != nil {
+		t.Fatal(err)
+	}
+	if nowRevisions != revisionRows+1 {
+		t.Fatalf("card revisions = %d, want a neutral revision", nowRevisions)
 	}
 }

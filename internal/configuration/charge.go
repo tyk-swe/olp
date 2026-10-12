@@ -56,9 +56,9 @@ func inForceDiscounts(ctx context.Context, q access.Queryer) (map[string]usage.D
 	return out, rows.Err()
 }
 
-// applyDiscounts writes a new effective-now discount for each scope the
-// document changes, and a multiplier-one discount ending each in-force scope
-// (not already one) the document omits.
+// applyDiscounts writes a new effective-now discount for each listed scope
+// whose multiplier differs from the one in force — including an explicit
+// multiplier-one ending — and leaves scopes the document omits untouched.
 func (s *Server) applyDiscounts(ctx context.Context, tx pgx.Tx, p access.Principal,
 	doc *Document, providerIDs map[string]string) error {
 	inForce, err := inForceDiscounts(ctx, tx)
@@ -95,27 +95,16 @@ func (s *Server) applyDiscounts(ctx context.Context, tx pgx.Tx, p access.Princip
 	slices.Sort(scopeNames)
 	for _, scope := range scopeNames {
 		d := desired[scope]
-		if current, ok := inForce[scope]; ok && decimalEqual(current.Multiplier, d.Multiplier) {
-			delete(inForce, scope)
+		current, ok := inForce[scope]
+		switch {
+		case ok && decimalEqual(current.Multiplier, d.Multiplier):
+			continue
+		case !ok && neutralMultiplier(d.Multiplier):
+			// A multiplier-one discount for a scope that prices at one
+			// anyway changes nothing.
 			continue
 		}
 		if _, err := s.storeDiscount(ctx, tx, p, d); err != nil {
-			return err
-		}
-		delete(inForce, scope)
-	}
-	remaining := make([]string, 0, len(inForce))
-	for scope := range inForce {
-		remaining = append(remaining, scope)
-	}
-	slices.Sort(remaining)
-	for _, scope := range remaining {
-		current := inForce[scope]
-		if neutralMultiplier(current.Multiplier) {
-			continue
-		}
-		current.Multiplier = "1"
-		if _, err := s.storeDiscount(ctx, tx, p, current); err != nil {
 			return err
 		}
 	}
@@ -256,8 +245,8 @@ func organizationIDs(ctx context.Context, q access.Queryer) (map[string]string, 
 }
 
 // applyRateCards creates missing cards and publishes a new effective-now
-// revision wherever the document's in-force revision differs; a card the
-// document omits gets a neutral revision when it is not already neutral.
+// revision wherever the listed revision differs from the one in force; cards
+// the document omits are left untouched.
 func (s *Server) applyRateCards(ctx context.Context, tx pgx.Tx, p access.Principal,
 	doc *Document, organizationIDs, projectIDs map[string]string) error {
 	inForce, cardIDs, err := inForceCards(ctx, tx)
@@ -329,18 +318,6 @@ func (s *Server) applyRateCards(ctx context.Context, tx pgx.Tx, p access.Princip
 			return err
 		}
 	}
-	for key, entry := range inForce {
-		if _, kept := desired[key]; kept {
-			continue
-		}
-		if neutralMultiplier(entry.Markup) && len(entry.Prices) == 0 {
-			continue
-		}
-		if _, err = usage.CreateCardRevision(ctx, tx, p.UserID(), cardIDs[key], "1",
-			time.Now().UTC(), nil, "", s.VendorKind); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -351,9 +328,8 @@ func deref(v *string) string {
 	return *v
 }
 
-// planDiscounts diffs the document's scopes against those in force: each new
-// or changed scope creates a discount, and each omitted in-force scope gets
-// its multiplier-one ending.
+// planDiscounts diffs the document's scopes against those in force: a new or
+// changed scope creates a discount; scopes the document omits are untouched.
 func (s *Server) planDiscounts(ctx context.Context, q access.Queryer, doc *Document, result *planResult) error {
 	inForce, err := inForceDiscounts(ctx, q)
 	if err != nil {
@@ -377,14 +353,11 @@ func (s *Server) planDiscounts(ctx context.Context, q access.Queryer, doc *Docum
 		key := discountScope(current.ProviderKind, provider, current.VendorID)
 		entry, declared := desired[key]
 		switch {
-		case declared && decimalEqual(entry.Multiplier, current.Multiplier):
-			result.item("discount", key, "noop", "")
-		case declared:
-			result.item("discount", key, "create", "")
-		case neutralMultiplier(current.Multiplier):
+		case !declared:
+		case decimalEqual(entry.Multiplier, current.Multiplier):
 			result.item("discount", key, "noop", "")
 		default:
-			result.item("discount", key, "end", "")
+			result.item("discount", key, "create", "")
 		}
 		delete(desired, key)
 	}
@@ -399,8 +372,8 @@ func (s *Server) planDiscounts(ctx context.Context, q access.Queryer, doc *Docum
 }
 
 // planRateCards diffs each document card's revision against the in-force one:
-// a new card is created, a differing revision publishes, and a card the
-// document omits is neutralized when it is not already neutral.
+// a new card is created and a differing revision publishes; cards the
+// document omits are untouched.
 func (s *Server) planRateCards(ctx context.Context, q access.Queryer, doc *Document, result *planResult) error {
 	inForce, _, err := inForceCards(ctx, q)
 	if err != nil {
@@ -413,14 +386,11 @@ func (s *Server) planRateCards(ctx context.Context, q access.Queryer, doc *Docum
 	for key, current := range inForce {
 		entry, declared := desired[key]
 		switch {
-		case declared && cardEntryEqual(entry, current):
-			result.item("rate_card", key, "noop", "")
-		case declared:
-			result.item("rate_card", key, "revision", "")
-		case neutralMultiplier(current.Markup) && len(current.Prices) == 0:
+		case !declared:
+		case cardEntryEqual(entry, current):
 			result.item("rate_card", key, "noop", "")
 		default:
-			result.item("rate_card", key, "neutralize", "")
+			result.item("rate_card", key, "revision", "")
 		}
 		delete(desired, key)
 	}
