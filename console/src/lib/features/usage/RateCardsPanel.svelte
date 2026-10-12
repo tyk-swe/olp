@@ -333,7 +333,7 @@
           ><tr
             ><th scope="col">Owner</th><th scope="col">Revisions</th><th
               scope="col">Created</th
-            ><th scope="col"></th></tr
+            ><th scope="col">Actions</th></tr
           ></thead
         >
         <tbody

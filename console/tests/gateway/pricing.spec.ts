@@ -1,9 +1,7 @@
 import { manage, provisionGenerationRoute } from '../helpers/management';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '../playwright';
-import { waitForRoutePublication } from '../journeys/fixtures';
-
+import { expect, test } from '../playwright';
 test.describe.configure({ mode: 'serial' });
 
 const upstream = {
@@ -15,41 +13,6 @@ const upstream = {
 const provider = 'Priced upstream';
 const route = 'pricing-chat';
 const price = { input: '1000.00', output: '2600.00' };
-
-// Provision the priced provider and published route every pricing journey
-// needs, then keep the issued key secret for gateways that require it.
-async function provision(page: Page): Promise<string> {
-  await provisionGenerationRoute(page, {
-    providerName: provider,
-    route,
-    endpoint: upstream.endpoint,
-    model: upstream.model,
-    credential: upstream.credential
-  });
-  const key = await page.evaluate(async () => {
-    const session = await fetch('/api/v1/sessions/current').then((r) =>
-      r.json()
-    );
-    const response = await fetch('/api/v1/api-keys', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': session.csrf_token,
-        'Idempotency-Key': crypto.randomUUID()
-      },
-      body: JSON.stringify({
-        name: 'Pricing key',
-        scopes: ['inference'],
-        allowed_routes: []
-      })
-    });
-    const body = await response.json();
-    expect(response.status, JSON.stringify(body)).toBe(201);
-    return body.secret as string;
-  });
-  await waitForRoutePublication(page, key, route);
-  return key;
-}
 
 test.beforeEach(async ({ page }) => {
   await signIn(page);
@@ -77,13 +40,21 @@ test('publish a discount, a rate card revision, and a tiered, windowed price', a
   // A provider-scoped discount by name: the panel keeps the published rows
   // newest first and repeats the multiplier back.
   await page.goto('/settings');
+  const discounts = page.getByRole('region', {
+    name: 'Provider cost discounts'
+  });
   await expect(
-    page.getByRole('heading', { name: 'Provider cost discounts' })
+    discounts.getByRole('heading', { name: 'Provider cost discounts' })
   ).toBeVisible();
-  await page.getByLabel('Provider kind').selectOption('openai_compatible');
-  await page.getByLabel('Provider ID').fill(providerId);
-  await page.getByLabel('Multiplier').fill('0.8');
-  await page.getByRole('button', { name: 'Publish discount' }).click();
+  await discounts.getByLabel('Provider kind').selectOption('openai_compatible');
+  await discounts.getByLabel('Provider ID').fill(providerId);
+  await discounts.getByLabel('Multiplier').fill('0.8');
+  // The default effective time is the form's minute; a later minute still
+  // proves the discount without racing the "now or future" check.
+  await discounts
+    .getByLabel('Effective at')
+    .fill(new Date(Date.now() + 120_000).toISOString().slice(0, 16));
+  await discounts.getByRole('button', { name: 'Publish discount' }).click();
   await expect(
     page.getByText('Discount published. New usage will price under it.')
   ).toBeVisible();
@@ -92,19 +63,23 @@ test('publish a discount, a rate card revision, and a tiered, windowed price', a
   );
 
   // An installation rate card at a 50% markup, then a revision.
+  const cards = page.getByRole('region', { name: 'Consumer charge terms' });
   await expect(
-    page.getByRole('heading', { name: 'Consumer charge terms' })
+    cards.getByRole('heading', { name: 'Consumer charge terms' })
   ).toBeVisible();
-  await page.getByLabel('Owner kind').selectOption('installation');
-  await page.getByRole('button', { name: 'Create card' }).click();
+  await cards.getByLabel('Owner kind').selectOption('installation');
+  await cards.getByRole('button', { name: 'Create card' }).click();
   await expect(
     page.getByText('Rate card created. Publish a revision to charge with it.')
   ).toBeVisible();
-  await page
+  await cards
     .getByRole('button', { name: 'Publish revision', exact: true })
     .click();
-  await page.getByLabel('Markup').fill('1.5');
-  await page
+  await cards.getByLabel('Markup').fill('1.5');
+  await cards
+    .getByLabel('Effective at')
+    .fill(new Date(Date.now() + 120_000).toISOString().slice(0, 16));
+  await cards
     .getByRole('button', { name: 'Publish revision', exact: true })
     .last()
     .click();
@@ -116,20 +91,28 @@ test('publish a discount, a rate card revision, and a tiered, windowed price', a
   );
 
   // A pricing revision with one tier and one window survives as revision 1.
+  const revisions = page.getByRole('region', { name: 'Pricing revisions' });
   await expect(
-    page.getByRole('heading', { name: 'Pricing revisions' })
+    revisions.getByRole('heading', { name: 'Pricing revisions' })
   ).toBeVisible();
-  await page.getByLabel('Provider kind').selectOption('openai_compatible');
-  await page.getByLabel('Upstream model').fill(upstream.model);
-  await page
+  await revisions.getByLabel('Provider kind').selectOption('openai_compatible');
+  await revisions.getByLabel('Upstream model').fill(upstream.model);
+  await revisions
     .getByLabel('Operation', { exact: true })
     .selectOption('generation');
-  await page.getByLabel('Input / million', { exact: true }).fill(price.input);
-  await page.getByLabel('Output / million', { exact: true }).fill(price.output);
-  await page.getByRole('button', { name: 'Add tier' }).click();
-  await page.getByLabel('Above input tokens').fill('1000');
-  const windows = page.locator('[aria-label="Time windows"]');
-  await page.getByRole('button', { name: 'Add window period' }).click();
+  await revisions
+    .getByLabel('Input / million', { exact: true })
+    .fill(price.input);
+  await revisions
+    .getByLabel('Output / million', { exact: true })
+    .fill(price.output);
+  await revisions.getByRole('button', { name: 'Add tier' }).click();
+  await revisions.getByLabel('Above input tokens').fill('1000');
+  const tierRows = revisions.locator('[aria-label="Input-token tiers"]');
+  await tierRows.getByTitle('input per million').fill(price.input);
+  await tierRows.getByTitle('output per million').fill(price.output);
+  const windows = revisions.locator('[aria-label="Time windows"]');
+  await revisions.getByRole('button', { name: 'Add window period' }).click();
   await windows.getByLabel('Window time zone').fill('America/New_York');
   await windows
     .getByRole('group', { name: 'Window 1 days' })
@@ -138,7 +121,9 @@ test('publish a discount, a rate card revision, and a tiered, windowed price', a
   await windows.getByLabel('Start').fill('00:00');
   await windows.getByLabel('End').fill('06:00');
   await windows.getByLabel('Multiplier').fill('0.5');
-  await page.getByRole('button', { name: 'Create pricing revision' }).click();
+  await revisions
+    .getByRole('button', { name: 'Create pricing revision' })
+    .click();
   await expect(
     page.getByText(
       'Pricing revision created. New usage will use the effective revision.'
@@ -156,33 +141,49 @@ test('publish a discount, a rate card revision, and a tiered, windowed price', a
 test('the cost calculator bounds routes and quotes usage', async ({
   page
 }, info) => {
-  await provision(page);
+  // The first journey's priced provider and route are still in force.
+  const names = { provider, route };
 
   // Route mode: the published route's target reports min/max bounds.
   await page.goto('/usage');
+  const calculator = page.getByRole('region', { name: 'Cost calculator' });
   await expect(
-    page.getByRole('heading', { name: 'Cost calculator' })
+    calculator.getByRole('heading', { name: 'Cost calculator' })
   ).toBeVisible();
-  await page.getByLabel('Route').selectOption(route);
-  await page.getByLabel('Input tokens').fill('1000');
-  await page.getByLabel('Output token limit').fill('100');
-  await page.getByRole('button', { name: 'Simulate' }).click();
-  await expect(
-    page.getByRole('table').filter({ hasText: upstream.model }).first()
-  ).toContainText('USD');
+  await calculator.getByLabel('Route').selectOption(names.route);
+  await calculator.getByLabel('Input tokens').fill('1000');
+  await calculator.getByLabel('Output token limit').fill('100');
+  // Routing inputs refresh on an interval, so a price published moments ago
+  // may take a few seconds to bound the target.
+  await expect
+    .poll(
+      async () => {
+        await calculator.getByRole('button', { name: 'Simulate' }).click();
+        return await page
+          .getByRole('table')
+          .filter({ hasText: upstream.model })
+          .first()
+          .textContent();
+      },
+      { timeout: 30_000 }
+    )
+    .toContain('USD');
 
-  // Usage mode: the same provider's usage quotes cost and the 2x card's
-  // charge.
-  await page.getByRole('tab', { name: 'Usage' }).click();
-  await page.getByLabel('Provider').selectOption({ label: provider });
-  await page.getByLabel('Model').fill(upstream.model);
-  await page.getByLabel('Operation').selectOption('generation');
-  await page.locator('#calc-input').fill('1000');
-  await page.locator('#calc-output').fill('100');
-  await page.getByRole('button', { name: 'Add tool call' }).click();
-  await page.locator('#calc-tool-name-0').fill('web_search');
-  await page.locator('#calc-tool-count-0').fill('2');
-  await page.getByRole('button', { name: 'Quote' }).click();
+  // Usage mode: the same provider's usage quotes list cost, cost and the
+  // installation card's charge.
+  await calculator.getByRole('tab', { name: 'Usage' }).click();
+  await calculator
+    .getByLabel('Provider')
+    .selectOption({ label: names.provider });
+  await calculator.getByLabel('Model').fill(upstream.model);
+  await calculator.getByLabel('Operation').selectOption('generation');
+  await calculator.locator('#calc-input').fill('1000');
+  await calculator.locator('#calc-output').fill('100');
+  await calculator.getByText('More usage').click();
+  await calculator.getByRole('button', { name: 'Add tool call' }).click();
+  await calculator.locator('#calc-tool-name-0').fill('web_search');
+  await calculator.locator('#calc-tool-count-0').fill('2');
+  await calculator.getByRole('button', { name: 'Quote' }).click();
   const result = page.locator('.quote-result');
   await expect(result).toContainText('USD');
   await expect(result).toContainText('Charge');

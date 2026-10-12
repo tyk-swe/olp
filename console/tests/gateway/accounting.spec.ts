@@ -207,10 +207,11 @@ test('a browser user prices gateway traffic and reads the accounting it produced
 
   // A price published now covers only the traffic that follows it.
   await page.goto('/settings');
+  const revisions = page.getByRole('region', { name: 'Pricing revisions' });
   await expect(
-    page.getByRole('heading', { name: 'Pricing revisions' })
+    revisions.getByRole('heading', { name: 'Pricing revisions' })
   ).toBeVisible();
-  await page.getByLabel('Provider kind').selectOption('openai_compatible');
+  await revisions.getByLabel('Provider kind').selectOption('openai_compatible');
   await page.getByLabel('Upstream model').fill(upstream.model);
   await page
     .getByLabel('Operation', { exact: true })
