@@ -1,6 +1,7 @@
 package protocols
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -377,7 +378,7 @@ func geminiUsageDetails(u *openai.Usage, f Object) error {
 // keys are emitted together so a price can bill per query or per grounded
 // prompt and set the other fee to zero.
 func geminiGrounding(u *openai.Usage, f Object) error {
-	if u == nil || !present(f["candidates"]) {
+	if u == nil || !present(f["candidates"]) || !bytes.Contains(f["candidates"], []byte("webSearchQueries")) {
 		return nil
 	}
 	var candidates []struct {
