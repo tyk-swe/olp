@@ -23,11 +23,12 @@ export async function listInvitationPage(
 export async function createInvitation(
   email: string,
   role: string,
-  expiresInHours?: number
+  expiresInHours: number | undefined,
+  requestId: string
 ): Promise<InvitationSecret> {
   return unwrap(
     await apiClient.POST('/api/v1/invitations', {
-      params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+      params: { header: { 'Idempotency-Key': requestId } },
       // Omitting the field lets the API apply its seven-day default; it caps
       // the lifetime at thirty days (720 hours).
       body: {
@@ -39,12 +40,15 @@ export async function createInvitation(
   );
 }
 
-export async function revokeInvitation(id: string): Promise<void> {
+export async function revokeInvitation(
+  id: string,
+  requestId: string
+): Promise<void> {
   unwrap(
     await apiClient.DELETE('/api/v1/invitations/{invitation_id}', {
       params: {
         path: { invitation_id: id },
-        header: { 'Idempotency-Key': crypto.randomUUID() }
+        header: { 'Idempotency-Key': requestId }
       }
     })
   );

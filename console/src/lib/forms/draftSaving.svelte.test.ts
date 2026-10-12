@@ -253,12 +253,18 @@ it('preserves resolved connection options when returning to a saved wizard draft
     items: [],
     nextCursor: null
   }));
-  vi.mocked(probeProvider).mockResolvedValue({
-    succeeded: true,
-    detail: 'Ready',
-    probe_type: 'model_listing',
-    discovered_models: 0
-  } as never);
+  vi.mocked(probeProvider).mockImplementation(
+    async (current) =>
+      ({
+        result: {
+          succeeded: true,
+          detail: 'Ready',
+          probe_type: 'model_listing',
+          discovered_models: 0
+        },
+        etag: current.etag
+      }) as never
+  );
   window.history.replaceState({}, '', `/?copy=${provider.id}`);
   render('wizard');
   await vi.waitFor(() => {
@@ -911,7 +917,11 @@ it('preserves the unified native draft and its original ETag across provider ref
   button('Reload').click();
   await vi.waitFor(() => {
     flushSync();
-    expect(JSON.parse(options.value)).toEqual(remote.configuration);
+    expect(
+      JSON.parse(
+        host.querySelector<HTMLTextAreaElement>('#detail-native-json')!.value
+      )
+    ).toEqual(remote.configuration);
     expect(navigationBlocked()).toBe(false);
   });
 });

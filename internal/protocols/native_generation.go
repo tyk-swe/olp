@@ -154,17 +154,11 @@ func cohereUsage(raw json.RawMessage) (*openai.Usage, error) {
 	if err != nil || billed == nil {
 		return nil, protocolError("usage has no billed units")
 	}
-	// Cohere types its counts as numbers that may carry a fraction.
-	tokens := func(name string) (int64, bool) {
-		var n float64
-		if json.Unmarshal(billed[name], &n) != nil || n < 0 || math.IsInf(n, 0) || n != math.Trunc(n) {
-			return 0, false
-		}
-		return int64(n), true
-	}
-	input, inputOK := tokens("input_tokens")
-	output, outputOK := tokens("output_tokens")
-	if !inputOK || !outputOK {
+	// Cohere uses numeric counts, including integral decimal spellings such as
+	// 5.0. Parse those exactly before narrowing to the accounting integer.
+	input, inputOK := cohereTokens(billed["input_tokens"])
+	output, outputOK := cohereTokens(billed["output_tokens"])
+	if !inputOK || !outputOK || output > math.MaxInt64-input {
 		return nil, protocolError("invalid billed units")
 	}
 	return &openai.Usage{InputTokens: input, OutputTokens: output, TotalTokens: input + output}, nil
@@ -177,7 +171,7 @@ func streamCohereEvents(r io.Reader, limit int, emit openai.Emit, observe func(o
 	c := &openai.Completion{}
 	done := false
 	sequence := uint64(0)
-	err := sse.Decode(r, limit, func(frame sse.Frame) error {
+	err := sse.Decode(r, limit, func(frame sse.Frame) (parsed error) {
 		if done {
 			return protocolError("event after message-end")
 		}
@@ -186,11 +180,8 @@ func streamCohereEvents(r io.Reader, limit int, emit openai.Emit, observe func(o
 			return err
 		}
 		sequence++
-		if observe != nil {
-			if err := observe(event); err != nil {
-				return err
-			}
-		}
+		var encoded []byte
+		defer func() { parsed = emitObservedEvent(event, observe, parsed, encoded, emit) }()
 		f := event.Source().Fields()
 		if f == nil {
 			return protocolError("event is not a JSON object")
@@ -213,12 +204,14 @@ func streamCohereEvents(r io.Reader, limit int, emit openai.Emit, observe func(o
 			if c.Usage, err = cohereUsage(delta["usage"]); err != nil {
 				return err
 			}
+			c.UsageComplete = c.Usage != nil
 			done = true
 		case "content-start", "content-delta", "content-end", "tool-plan-delta", "tool-call-start", "tool-call-delta", "tool-call-end", "citation-start", "citation-end", "debug":
 		default:
 			return protocolError("unknown event " + kind)
 		}
-		return emit(frame.Encode())
+		encoded = frame.Encode()
+		return nil
 	})
 	if err != nil {
 		return c, streamError(err)

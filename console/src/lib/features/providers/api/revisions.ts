@@ -87,8 +87,9 @@ export async function diffProviderRevisions(
 }
 
 export async function restoreProviderRevision(
-  provider: Provider,
-  revisionId: string
+  provider: Pick<Provider, 'id' | 'etag'>,
+  revisionId: string,
+  requestId: string
 ): Promise<ProviderRevisionRestore> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/revisions/{revision_id}/restore-as-draft',
@@ -97,7 +98,7 @@ export async function restoreProviderRevision(
         path: { provider_id: provider.id, revision_id: revisionId },
         header: {
           'If-Match': provider.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': requestId
         }
       }
     }

@@ -1,4 +1,8 @@
 <script lang="ts">
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -49,6 +53,10 @@
   let revisionTo = $state('');
   let revisionDiff = $state<ProviderRevisionDiff | null>(null);
   let comparisonError = $state('');
+  let refreshPending = $state(false);
+  usePrincipalLifetime(() => {
+    refreshPending = false;
+  });
   const revisions = createQuery(() => ({
     queryKey: providerKeys.revisions(current.id, pagination.cursor),
     queryFn: ({ signal }) =>
@@ -87,37 +95,66 @@
       return;
     }
     comparisonError = '';
-    await run('revision-diff', async () => {
-      revisionDiff = await diffProviderRevisions(
+    await run('revision-diff', async (isCurrent) => {
+      const result = await diffProviderRevisions(
         current.id,
         revisionFrom,
         revisionTo
       );
+      if (isCurrent()) revisionDiff = result;
     });
   }
 
   async function restore(revisionId: string, revision: number) {
-    if (!canManage) return;
+    if (!canManage || refreshPending) return;
     if (
       !confirm(
         `Restore provider revision ${revision} as a new draft? The current credential remains selected.`
       )
     )
       return;
-    await run('revision-restore', async () => {
-      await restoreProviderRevision(current, revisionId);
-      revisionDiff = null;
-      onResetModelPage();
-      await onProviderChanged();
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.summaries
-      });
-      // `credential_restored` is hardcoded false by the API: historical
-      // credential material is never restored, so state the guarantee.
+    await run('revision-restore', async (isCurrent) => {
+      const submission = restoreIntent.prepare(
+        { providerId: current.id, revisionId },
+        () => ({ provider: { id: current.id, etag: current.etag }, revisionId })
+      );
+      await restoreProviderRevision(
+        submission.input.provider,
+        submission.input.revisionId,
+        submission.requestId
+      );
+      if (!isCurrent()) return;
+      restoreIntent.reset();
+      refreshPending = true;
       onNotice(
         `Revision ${revision} restored as a new draft. No historical credential was restored; the current credential selection was preserved. Test and certify before activation.`
       );
+      revisionDiff = null;
+      onResetModelPage();
+      try {
+        await refreshRestoredDraft(isCurrent);
+      } catch (cause) {
+        throw new Error(
+          `Draft restored, but refreshing failed. ${providerDetailError(cause)}`,
+          { cause }
+        );
+      }
     });
+  }
+
+  async function refreshRestoredDraft(isCurrent: () => boolean) {
+    if (!isCurrent()) return;
+    await onProviderChanged();
+    if (!isCurrent()) return;
+    await queryClient.invalidateQueries(
+      { queryKey: providerKeys.summaries },
+      { throwOnError: true }
+    );
+    if (isCurrent()) refreshPending = false;
+  }
+
+  async function retryRefresh() {
+    await run('revision-refresh', refreshRestoredDraft);
   }
 
   function resetComparison() {
@@ -130,12 +167,23 @@
     viewed = { id: revisionId, revision };
   }
   import ProviderRevisionComparison from '$lib/features/providers/ProviderRevisionComparison.svelte';
+
+  const restoreIntent = useMutationIntent();
 </script>
 
 <section
   class="card editor revisions"
   aria-labelledby="provider-revisions-heading"
 >
+  {#if refreshPending}<p class="inline-problem" role="status">
+      The draft was restored. Refresh the view before another restore.
+      <button
+        type="button"
+        class="button button-secondary"
+        disabled={Boolean(busy)}
+        onclick={retryRefresh}>Retry refresh</button
+      >
+    </p>{/if}
   <div class="section-heading">
     <div>
       <p class="eyebrow">Immutable history</p>
@@ -218,7 +266,7 @@
                 class="button button-secondary"
                 type="button"
                 onclick={() => restore(item.id, item.revision)}
-                disabled={Boolean(busy)}
+                disabled={Boolean(busy) || refreshPending}
                 >{busy === 'revision-restore'
                   ? 'Restoring…'
                   : 'Restore as draft'}</button

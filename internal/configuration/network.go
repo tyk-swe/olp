@@ -2,7 +2,6 @@ package configuration
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -65,28 +64,5 @@ func (s *Server) bindNetwork(ctx context.Context, tx pgx.Tx, providerID string, 
 	if err != nil {
 		return err
 	}
-	var current []byte
-	if err := tx.QueryRow(ctx, "SELECT configuration FROM olp.providers WHERE id=$1", providerID).Scan(&current); err != nil {
-		return err
-	}
-	encoded, err := json.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	var stored providers.Configuration
-	if err := json.Unmarshal(current, &stored); err != nil {
-		return err
-	}
-	canonical, err := json.Marshal(stored)
-	if err != nil {
-		return err
-	}
-	if string(canonical) == string(encoded) {
-		return nil
-	}
-	if err := providers.PreserveCredentialBoundary(ctx, tx, providerID, &stored, &cfg); err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, "UPDATE olp.providers SET configuration=$2,etag=$3,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, encoded, access.NewID())
-	return err
+	return providers.StoreDraftConfiguration(ctx, tx, providerID, entry.Name, &cfg, s.Egress)
 }

@@ -2,8 +2,10 @@ package openai
 
 import (
 	"encoding/json"
-	"github.com/tyk-swe/olp/internal/oif"
+	"math"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/oif"
 )
 
 // Usage is the token accounting observed on one generation.
@@ -21,6 +23,147 @@ type Usage struct {
 	// seconds processed — carried as decimal text so it survives the usage
 	// event wire shape unchanged.
 	MediaUnits *string `json:"media_units,omitempty"`
+}
+
+// ResponseUsageObservation describes one native Responses accounting snapshot.
+// Complete requires valid usage on an explicitly terminal response; a missing
+// usage object remains unknown, including when the response itself is terminal.
+type ResponseUsageObservation struct {
+	Status   string
+	Usage    *Usage
+	Complete bool
+}
+
+// ObserveResponseUsage validates Responses usage without projecting its output
+// or rewriting native bytes. The operation owning an event or result decides
+// whether this snapshot can replace previously observed accounting evidence.
+func ObserveResponseUsage(body []byte) (ResponseUsageObservation, error) {
+	source, err := liftResult(FamilyResponses, body)
+	if err != nil {
+		return ResponseUsageObservation{}, err
+	}
+	return ObserveResponseDocumentUsage(source.Source())
+}
+
+// ObserveResponseDocumentUsage observes a validated immutable native document
+// without parsing it again. It has the same nullable/provisional status and
+// exact counter semantics as ObserveResponseUsage.
+func ObserveResponseDocumentUsage(source oif.Document) (ResponseUsageObservation, error) {
+	if source.Root().Kind() != oif.Object {
+		return ResponseUsageObservation{}, &ProtocolError{Detail: "response is not a JSON object"}
+	}
+	// Accounting owns these fields alone. Do not copy generated output or
+	// opaque provider extensions merely to observe a small usage snapshot.
+	fields := make(map[string]json.RawMessage, 2)
+	for _, name := range []string{"status", "usage"} {
+		if value, present := source.Root().Lookup(name); present {
+			fields[name] = json.RawMessage(value.Raw())
+		}
+	}
+	return observeResponseUsage(fields)
+}
+
+func observeResponseUsage(fields map[string]json.RawMessage) (ResponseUsageObservation, error) {
+	observation := ResponseUsageObservation{}
+	if raw, present := fields["status"]; present && !isNull(raw) {
+		var ok bool
+		if observation.Status, ok = stringField(fields, "status"); !ok || observation.Status == "" {
+			return ResponseUsageObservation{}, &ProtocolError{Detail: "response status is not a nonempty string"}
+		}
+	}
+	var err error
+	if observation.Usage, err = responseUsage(fields); err != nil {
+		return ResponseUsageObservation{}, err
+	}
+	switch observation.Status {
+	case "completed", "incomplete", "failed", "cancelled":
+		observation.Complete = observation.Usage != nil
+	}
+	return observation, nil
+}
+
+// ObserveResponseEventUsage recognizes native Responses lifecycle events and
+// validates their accounting before an observer may change retained state.
+// Unknown events remain opaque. A terminal event owns completeness even when a
+// compatible response omits status; nonterminal events never own completeness.
+func ObserveResponseEventUsage(event oif.Event) (ResponseUsageObservation, bool, error) {
+	fields := event.Source().Fields()
+	kind, _ := stringField(fields, "type")
+	observed, err := observeResponseEventUsage(event, fields, kind)
+	if err != nil {
+		return ResponseUsageObservation{}, observed.lifecycle, err
+	}
+	return observed.usage, observed.lifecycle, err
+}
+
+type responseEventUsage struct {
+	lifecycle bool
+	response  map[string]json.RawMessage
+	usage     ResponseUsageObservation
+}
+
+func observeResponseEventUsage(event oif.Event, fields map[string]json.RawMessage, kind string) (responseEventUsage, error) {
+	observed := responseEventUsage{}
+	switch kind {
+	case "response.created", "response.queued", "response.in_progress", "response.completed", "response.incomplete", "response.failed":
+		observed.lifecycle = true
+	default:
+		return observed, nil
+	}
+	if event.Name() != "" && event.Name() != kind {
+		return observed, &ProtocolError{Detail: "event name disagrees with type"}
+	}
+	if raw, present := fields["response"]; !present || isNull(raw) {
+		switch kind {
+		case "response.completed", "response.incomplete", "response.failed":
+			return observed, &ProtocolError{Detail: "terminal event has no response object"}
+		case "response.created":
+			observed.usage.Status = "in_progress"
+		case "response.queued", "response.in_progress":
+			observed.usage.Status = strings.TrimPrefix(kind, "response.")
+		}
+		return observed, nil
+	}
+	var err error
+	if observed.response, err = object(fields["response"]); err != nil {
+		return observed, &ProtocolError{Detail: "lifecycle event has no response object"}
+	}
+	switch kind {
+	case "response.completed", "response.incomplete", "response.failed":
+		if raw, present := observed.response["status"]; present && isNull(raw) {
+			return observed, &ProtocolError{Detail: "terminal response has an invalid status"}
+		}
+	}
+	if observed.usage, err = observeResponseUsage(observed.response); err != nil {
+		return observed, err
+	}
+	status := observed.usage.Status
+	switch status {
+	case "", "queued", "in_progress", "completed", "incomplete", "failed", "cancelled":
+	default:
+		return observed, &ProtocolError{Detail: "lifecycle event has an invalid response status"}
+	}
+	switch kind {
+	case "response.created":
+		// SDKs use a generic Response snapshot, including replayed terminal
+		// snapshots. Creation itself supplies only a nonterminal phase.
+		if status != "queued" {
+			status = "in_progress"
+		}
+		observed.usage.Status = status
+		observed.usage.Complete = false
+	case "response.queued", "response.in_progress":
+		observed.usage.Status = strings.TrimPrefix(kind, "response.")
+		observed.usage.Complete = false
+	default:
+		expected := strings.TrimPrefix(kind, "response.")
+		if status != "" && status != expected {
+			return observed, &ProtocolError{Detail: "lifecycle event disagrees with response status"}
+		}
+		observed.usage.Status = expected
+		observed.usage.Complete = observed.usage.Usage != nil
+	}
+	return observed, nil
 }
 
 // ToolCall is a function call requested by the model.
@@ -44,6 +187,20 @@ type Completion struct {
 	Refusal       string
 	ToolCalls     []ToolCall
 	Usage         *Usage
+	// UsageComplete reports authoritative terminal generation counters. A partial
+	// stream may retain Usage without proving that no further work was billed.
+	UsageComplete    bool `json:"-"`
+	responseTerminal bool
+	responseFailure  *UpstreamError
+}
+
+// NativeResponseOutcome reports a validated terminal Responses event,
+// independently of usage disclosure and local projection or delivery.
+func (c *Completion) NativeResponseOutcome() (terminal bool, failure *UpstreamError) {
+	if c == nil {
+		return false, nil
+	}
+	return c.responseTerminal, c.responseFailure
 }
 
 // ProtocolError reports an upstream document or stream that violates the
@@ -309,6 +466,7 @@ func decodeResponse(body []byte, route string, background bool) (*Completion, er
 	if err != nil {
 		return nil, err
 	}
+	c.UsageComplete = !pending && c.Usage != nil
 	c.Native = source
 	if pending {
 		c.Native, _ = oif.NewResult(source.Descriptor(), source.Source(), oif.Pending)
@@ -347,6 +505,14 @@ func terminalResponseError(fields map[string]json.RawMessage) error {
 }
 
 func responseSummary(fields map[string]json.RawMessage) (*Completion, error) {
+	usage, err := responseUsage(fields)
+	if err != nil {
+		return nil, err
+	}
+	return responseSummaryWithUsage(fields, usage)
+}
+
+func responseSummaryWithUsage(fields map[string]json.RawMessage, usage *Usage) (*Completion, error) {
 	if kind, ok := stringField(fields, "object"); ok && kind != "response" {
 		return nil, &ProtocolError{Detail: "unexpected object " + kind}
 	}
@@ -354,7 +520,7 @@ func responseSummary(fields map[string]json.RawMessage) (*Completion, error) {
 	if !ok {
 		return nil, &ProtocolError{Detail: "response has no output array"}
 	}
-	c := &Completion{}
+	c := &Completion{Usage: usage}
 	c.UpstreamID, _ = stringField(fields, "id")
 	c.ProviderModel, _ = stringField(fields, "model")
 	var text strings.Builder
@@ -407,10 +573,6 @@ func responseSummary(fields map[string]json.RawMessage) (*Completion, error) {
 	default:
 		c.FinishReason = status
 	}
-	var err error
-	if c.Usage, err = responseUsage(fields); err != nil {
-		return nil, err
-	}
 	return c, nil
 }
 
@@ -431,12 +593,48 @@ func responseUsage(fields map[string]json.RawMessage) (*Usage, error) {
 	if u.OutputTokens, ok = int64Field(usage, "output_tokens"); !ok {
 		return nil, &ProtocolError{Detail: "usage.output_tokens is not a non-negative integer"}
 	}
-	if u.TotalTokens, ok = int64Field(usage, "total_tokens"); !ok {
+	if raw, present := usage["total_tokens"]; present && !isNull(raw) {
+		if u.TotalTokens, ok = int64Field(usage, "total_tokens"); !ok {
+			return nil, &ProtocolError{Detail: "usage.total_tokens is not a non-negative integer"}
+		}
+	} else {
+		if u.InputTokens > math.MaxInt64-u.OutputTokens {
+			return nil, &ProtocolError{Detail: "usage token total is out of range"}
+		}
 		u.TotalTokens = u.InputTokens + u.OutputTokens
 	}
-	u.CachedInputTokens = nestedCount(usage, "input_tokens_details", "cached_tokens")
-	u.ReasoningTokens = nestedCount(usage, "output_tokens_details", "reasoning_tokens")
+	if u.CachedInputTokens, err = responseDetailCount(usage, "input_tokens_details", "cached_tokens"); err != nil {
+		return nil, err
+	}
+	if u.CachedInputTokens != nil && *u.CachedInputTokens > u.InputTokens {
+		return nil, &ProtocolError{Detail: "usage cached input exceeds input tokens"}
+	}
+	if u.ReasoningTokens, err = responseDetailCount(usage, "output_tokens_details", "reasoning_tokens"); err != nil {
+		return nil, err
+	}
+	if u.ReasoningTokens != nil && *u.ReasoningTokens > u.OutputTokens {
+		return nil, &ProtocolError{Detail: "usage reasoning tokens exceed output tokens"}
+	}
 	return u, nil
+}
+
+func responseDetailCount(usage map[string]json.RawMessage, parent, name string) (*int64, error) {
+	raw, present := usage[parent]
+	if !present || isNull(raw) {
+		return nil, nil
+	}
+	details, err := object(raw)
+	if err != nil {
+		return nil, &ProtocolError{Detail: "usage." + parent + " is not an object"}
+	}
+	if raw, present := details[name]; !present || isNull(raw) {
+		return nil, nil
+	}
+	n, ok := int64Field(details, name)
+	if !ok {
+		return nil, &ProtocolError{Detail: "usage." + parent + "." + name + " is not a non-negative integer"}
+	}
+	return &n, nil
 }
 
 func rewriteModel(fields map[string]json.RawMessage, route string) error {

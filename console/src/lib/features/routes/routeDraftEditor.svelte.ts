@@ -35,6 +35,7 @@ import {
 import { listProviderModelInventory } from '$lib/features/providers/api/models';
 import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
 import { useRole } from '$lib/features/access/session/useRole.svelte';
+import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import {
   buildCreateRouteDraftInput,
   buildReplaceRouteDraftInput,
@@ -52,11 +53,17 @@ import {
   type EditableTarget,
   type RouteBehavior
 } from '$lib/features/routes/routeEditor';
+import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
 
 const simulationNotice =
   'Deterministic attempt order calculated from the saved draft.';
 
 export class RouteDraftEditorState {
+  activateRouteIntent = useMutationIntent();
+
+  createIntent = useMutationIntent();
+  private createdDraftId = '';
+
   readRouteId: () => string | undefined;
   get routeId() {
     return this.readRouteId();
@@ -166,6 +173,8 @@ export class RouteDraftEditorState {
    * invalidates every in-flight action captured under the previous resource.
    */
   private resetResource() {
+    this.createdDraftId = '';
+    this.createIntent.reset();
     this.ownerEpoch += 1;
     this.slug = 'default';
     this.projectId = '';
@@ -196,16 +205,27 @@ export class RouteDraftEditorState {
   }
   run = async (
     label: string,
-    action: (isCurrent: () => boolean) => Promise<void>
+    action: (
+      isCurrent: () => boolean,
+      samePrincipal: () => boolean
+    ) => Promise<void>
   ) => {
     if (this.busy) return;
     const epoch = this.ownerEpoch;
-    const isCurrent = () => this.current(epoch);
+    const user = authLifecycle.snapshot().user;
+    const partition = user ? authLifecycle.principalPartition(user) : '';
+    const samePrincipal = () => {
+      const current = authLifecycle.snapshot().user;
+      return (
+        partition === (current ? authLifecycle.principalPartition(current) : '')
+      );
+    };
+    const isCurrent = () => samePrincipal() && this.current(epoch);
     this.busy = label;
     this.errorMessage = '';
     this.notice = '';
     try {
-      await action(isCurrent);
+      await action(isCurrent, samePrincipal);
     } catch (error) {
       if (!isCurrent()) return;
       if (isEtagMismatch(error)) this.sync = markConflict(this.sync);
@@ -296,23 +316,40 @@ export class RouteDraftEditorState {
   create = async (event: SubmitEvent) => {
     event.preventDefault();
     if (!this.canManage || this.busy) return;
+    if (this.createdDraftId) {
+      await this.run('open', async (isCurrent) => {
+        if (isCurrent()) await goto(resolve(`/routes/${this.createdDraftId}`));
+      });
+      return;
+    }
     const issue = validateRouteEditor(this.editorValues);
     if (issue) {
       this.errorMessage = issue;
       return;
     }
-    await this.run('save', async (isCurrent) => {
-      const { id } = await createRouteDraft(
-        buildCreateRouteDraftInput(this.editorValues, this.modelOptions)
+    await this.run('save', async (isCurrent, samePrincipal) => {
+      const { id } = await this.createIntent.submit(
+        buildCreateRouteDraftInput(this.editorValues, this.modelOptions),
+        (input, requestId) => createRouteDraft(input, requestId)
       );
+      if (!samePrincipal()) return;
       // The create already committed, so the list invalidation stays valid
       // even if this editor has since been replaced or destroyed.
-      await this.queryClient.invalidateQueries({
-        queryKey: routeKeys.lists
-      });
-      if (!isCurrent()) return;
-      this.sync = initialConcurrentEdit();
-      await goto(resolve(`/routes/${id}`));
+      if (isCurrent()) {
+        this.createdDraftId = id;
+        this.sync = initialConcurrentEdit();
+        this.notice = 'Draft saved.';
+      }
+      try {
+        await this.queryClient.invalidateQueries(
+          { queryKey: routeKeys.lists },
+          { throwOnError: true }
+        );
+      } catch (cause) {
+        if (isCurrent())
+          this.errorMessage = `Draft saved, but refreshing failed. ${message(cause)}`;
+      }
+      if (isCurrent()) await goto(resolve(`/routes/${id}`));
     });
   };
   save = async (current: RouteDraft) => {
@@ -329,7 +366,7 @@ export class RouteDraftEditorState {
       return;
     }
     this.invalidateSimulation();
-    await this.run('save', async (isCurrent) => {
+    await this.run('save', async (isCurrent, samePrincipal) => {
       if (!this.sync.snapshotEtag)
         throw new Error('Reload the draft before saving.');
       const submittedVersion = this.editVersion;
@@ -338,8 +375,9 @@ export class RouteDraftEditorState {
         this.sync.snapshotEtag,
         buildReplaceRouteDraftInput(this.editorValues)
       );
-      // The response is stored under the originating draft's key, which is
-      // correct regardless of which resource the editor now shows.
+      // A committed write may update its originating resource after disposal,
+      // while its original principal still owns the query partition.
+      if (!samePrincipal()) return;
       this.queryClient.setQueryData(routeKeys.draft(current.id), updated);
       if (!isCurrent()) return;
       this.sync = markSaved(
@@ -387,8 +425,9 @@ export class RouteDraftEditorState {
   };
   validate = async (current: RouteDraft) => {
     if (!this.canManage || this.publicationBlocked) return;
-    await this.run('validate', async (isCurrent) => {
+    await this.run('validate', async (isCurrent, samePrincipal) => {
       const validation = await validateRoute(current);
+      if (!samePrincipal()) return;
       this.queryClient.setQueryData<RouteDraft>(routeKeys.draft(current.id), {
         ...current,
         state: validation.state,
@@ -401,8 +440,12 @@ export class RouteDraftEditorState {
   };
   activate = async (current: RouteDraft) => {
     if (!this.canManage || this.publicationBlocked) return;
-    await this.run('activate', async (isCurrent) => {
-      const activation = await activateRoute(current);
+    await this.run('activate', async (isCurrent, samePrincipal) => {
+      const activation = await this.activateRouteIntent.submit(
+        { id: current.id, etag: current.etag },
+        (input, requestId) => activateRoute(input, requestId)
+      );
+      if (!samePrincipal()) return;
       // Adopt our activation's ETag before cache reconciliation can treat it
       // as a remote change to edits made while activation was in flight.
       if (isCurrent()) {

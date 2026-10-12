@@ -27,9 +27,10 @@ export async function listCatalogSuggestions(
  * is refused rather than storing facts nobody saw.
  */
 export async function acceptCatalogSuggestions(
-  provider: Provider,
+  provider: Pick<Provider, 'id' | 'etag'>,
   catalogSHA256: string,
-  upstreamModels: string[]
+  upstreamModels: string[],
+  requestId: string
 ): Promise<Provider> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/catalog-suggestions/accept',
@@ -38,7 +39,7 @@ export async function acceptCatalogSuggestions(
         path: { provider_id: provider.id },
         header: {
           'If-Match': provider.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': requestId
         }
       },
       body: { catalog_sha256: catalogSHA256, upstream_models: upstreamModels }

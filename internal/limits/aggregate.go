@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,46 +35,80 @@ func EnsureAggregateBudget(ctx context.Context, tx pgx.Tx, level, subject string
 	return err
 }
 
-var addAggregateCostDeltaSQL = strings.NewReplacer("olp.api_key_cost_windows", "olp.aggregate_cost_windows", "api_key_id", "account_id").Replace(addCostDeltaSQL)
+var addAggregateCostDeltaSQL = costDeltaSQL(costOwnerAggregate)
 
-// AddAggregateCostDelta accounts caller and system work. The first observation
-// reconstructs all current-window history instead of treating a newly enabled cap as zero.
-func AddAggregateCostDelta(ctx context.Context, tx pgx.Tx, keyID string, providerID *string, route string, labels map[string]string, at time.Time, cost string, unpriced int64) ([]CostSnapshot, error) {
-	rows, err := tx.Query(ctx, `SELECT id::text FROM olp.aggregate_budget_accounts
- WHERE installation_id IS NOT NULL OR organization_id=(SELECT organization_id FROM olp.projects WHERE id=COALESCE(
- (SELECT project_id FROM olp.api_keys WHERE id=NULLIF($1,'')::uuid),
- (SELECT project_id FROM olp.providers WHERE id=NULLIF($2,'')::uuid),
- (SELECT project_id FROM olp.routes WHERE slug=$3))) OR (project_id=COALESCE(
- (SELECT project_id FROM olp.api_keys WHERE id=NULLIF($1,'')::uuid),
- (SELECT project_id FROM olp.providers WHERE id=NULLIF($2,'')::uuid),
- (SELECT project_id FROM olp.routes WHERE slug=$3)) AND (attribution_key IS NULL OR $4::jsonb->>attribution_key=attribution_value)) OR (api_key_id=NULLIF($1,'')::uuid AND route_slug=$3) ORDER BY id`, keyID, providerID, route, attribution.JSON(labels))
+// Aggregate ownership follows the same project precedence everywhere: the
+// calling key, then the attempt provider, then its route. Keyless work on an
+// installation-wide provider therefore still belongs to the route's project.
+func budgetProjectSQL(key, provider, route string) string {
+	return fmt.Sprintf("COALESCE((SELECT project_id FROM olp.api_keys WHERE id=%s),(SELECT project_id FROM olp.providers WHERE id=%s),(SELECT project_id FROM olp.routes WHERE slug=%s))", key, provider, route)
+}
+func usageProjectSQL(alias string) string {
+	return budgetProjectSQL(alias+".api_key_id", alias+".provider_id", alias+".route_slug")
+}
+func aggregateOwnershipSQL(account, project, key, route, labels string) string {
+	return fmt.Sprintf(`(%[1]s.installation_id IS NOT NULL OR
+ %[1]s.organization_id=(SELECT organization_id FROM olp.projects WHERE id=%[2]s) OR
+ (%[1]s.project_id=%[2]s AND (%[1]s.attribution_key IS NULL OR %[5]s->>%[1]s.attribution_key=%[1]s.attribution_value)) OR
+ (%[1]s.api_key_id=%[3]s AND %[1]s.route_slug=%[4]s))`, account, project, key, route, labels)
+}
+
+var aggregateEventDeltasSQL = `WITH event_facts AS MATERIALIZED (
+ SELECT * FROM olp.attempt_usage_facts WHERE event_id=$5::uuid AND NOT budget_exempt
+), subjects AS MATERIALIZED (
+ SELECT ` + usageProjectSQL("f") + ` AS project_id,f.api_key_id,f.route_slug,f.attribution FROM event_facts f
+ UNION SELECT ` + budgetProjectSQL("NULLIF($1,'')::uuid", "$2::uuid", "$3") + `,NULLIF($1,'')::uuid,$3,$4::jsonb
+), owners AS (
+ SELECT id FROM olp.aggregate_budget_accounts WHERE installation_id IS NOT NULL
+ UNION SELECT a.id FROM subjects s JOIN olp.projects p ON p.id=s.project_id
+ JOIN olp.aggregate_budget_accounts a ON a.organization_id=p.organization_id
+ UNION SELECT a.id FROM subjects s JOIN olp.aggregate_budget_accounts a ON a.project_id=s.project_id
+ WHERE a.attribution_key IS NULL OR s.attribution->>a.attribution_key=a.attribution_value
+ UNION SELECT a.id FROM subjects s JOIN olp.aggregate_budget_accounts a ON a.api_key_id=s.api_key_id AND a.route_slug=s.route_slug
+) SELECT a.id::text,COALESCE(SUM(f.estimated_cost),0)::text,
+ count(f.attempt_id) FILTER(WHERE f.charge_status<>'not_billable' AND f.unpriced)
+ FROM owners o JOIN olp.aggregate_budget_accounts a ON a.id=o.id LEFT JOIN event_facts f ON ` +
+	aggregateOwnershipSQL("a", usageProjectSQL("f"), "f.api_key_id", "f.route_slug", "f.attribution") + `
+ GROUP BY a.id ORDER BY a.id`
+
+// AddAggregateCostDelta accounts each attempt to its own aggregate subjects.
+// The enclosing idempotent event transaction owns the facts and their deltas.
+// A first observation reconstructs all history, including this entire event;
+// an existing account adds only this event's eligible facts. A refusal still
+// initializes the subjects whose current balance admission needs to observe.
+func AddAggregateCostDelta(ctx context.Context, tx pgx.Tx, eventID, keyID string, providerID *string, route string, labels map[string]string, at time.Time) ([]CostSnapshot, error) {
+	rows, err := tx.Query(ctx, aggregateEventDeltasSQL, keyID, providerID, route, attribution.JSON(labels), eventID)
 	if err != nil {
 		return nil, err
 	}
-	var ids []string
+	type delta struct {
+		id, cost string
+		unpriced int64
+	}
+	var deltas []delta
 	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
+		var row delta
+		if err = rows.Scan(&row.id, &row.cost, &row.unpriced); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		ids = append(ids, id)
+		deltas = append(deltas, row)
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
 	var snapshots []CostSnapshot
-	for _, id := range ids {
-		tag, err := tx.Exec(ctx, `UPDATE olp.aggregate_budget_accounts SET initialized=true WHERE id=$1 AND NOT initialized`, id)
+	for _, row := range deltas {
+		tag, err := tx.Exec(ctx, `UPDATE olp.aggregate_budget_accounts SET initialized=true WHERE id=$1 AND NOT initialized`, row.id)
 		if err != nil {
 			return nil, err
 		}
 		var snapshot CostSnapshot
 		if tag.RowsAffected() > 0 {
-			snapshot, err = scanSnapshot(tx.QueryRow(ctx, aggregateSnapshotsSQL, at, id))
+			snapshot, err = scanSnapshot(tx.QueryRow(ctx, aggregateSnapshotsSQL, at, row.id))
 		} else {
-			snapshot, err = addOwnerDelta(ctx, tx, addAggregateCostDeltaSQL, id, at, cost, unpriced)
+			snapshot, err = addOwnerDelta(ctx, tx, addAggregateCostDeltaSQL, row.id, at, row.cost, row.unpriced)
 		}
 		if err != nil {
 			return nil, err
@@ -85,7 +118,7 @@ func AddAggregateCostDelta(ctx context.Context, tx pgx.Tx, keyID string, provide
 	return snapshots, nil
 }
 
-const aggregateSnapshotsSQL = `WITH budget_calendar AS MATERIALIZED (SELECT * FROM olp.budget_windows($1::timestamptz)),
+var aggregateSnapshotsSQL = `WITH budget_calendar AS MATERIALIZED (SELECT * FROM olp.budget_windows($1::timestamptz)),
 accounts AS (
  SELECT a.* FROM olp.aggregate_budget_accounts a
  WHERE $1::timestamptz IS NOT NULL AND ($2::uuid IS NULL OR a.id=$2::uuid)
@@ -95,14 +128,16 @@ accounts AS (
  FROM accounts a JOIN (SELECT * FROM olp.attempt_usage_facts WHERE NOT budget_exempt) f ON true
  LEFT JOIN olp.api_keys k ON k.id=f.api_key_id
  LEFT JOIN olp.providers p ON p.id=f.provider_id
- WHERE (a.installation_id IS NOT NULL OR a.organization_id=(SELECT organization_id FROM olp.projects WHERE id=COALESCE(k.project_id,p.project_id)) OR (a.project_id=COALESCE(k.project_id,p.project_id) AND (a.attribution_key IS NULL OR f.attribution->>a.attribution_key=a.attribution_value)) OR (a.api_key_id=k.id AND a.route_slug=f.route_slug))
+ LEFT JOIN olp.routes r ON r.slug=f.route_slug
+ WHERE ` + aggregateOwnershipSQL("a", "COALESCE(k.project_id,p.project_id,r.project_id)", "f.api_key_id", "f.route_slug", "f.attribution") + `
    AND f.observed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND f.observed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
  UNION ALL
  SELECT a.id,h.budget_bucket,COALESCE(h.estimated_cost,0)::numeric,h.unpriced_attempt_count
  FROM accounts a JOIN (SELECT * FROM olp.attempt_usage_hourly WHERE NOT budget_exempt) h ON true
  LEFT JOIN olp.api_keys k ON k.id=h.api_key_id
  LEFT JOIN olp.providers p ON p.id=h.provider_id
- WHERE (a.installation_id IS NOT NULL OR a.organization_id=(SELECT organization_id FROM olp.projects WHERE id=COALESCE(k.project_id,p.project_id)) OR (a.project_id=COALESCE(k.project_id,p.project_id) AND (a.attribution_key IS NULL OR h.attribution->>a.attribution_key=a.attribution_value)) OR (a.api_key_id=k.id AND a.route_slug=h.route_slug))
+ LEFT JOIN olp.routes r ON r.slug=h.route_slug
+ WHERE ` + aggregateOwnershipSQL("a", "COALESCE(k.project_id,p.project_id,r.project_id)", "h.api_key_id", "h.route_slug", "h.attribution") + `
    AND h.budget_bucket >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND h.budget_bucket < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 ), totals AS (
  SELECT a.id,
@@ -167,12 +202,11 @@ func aggregateSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time) ([]C
 // AggregateBudgetSQL reports authoritative live and retained spend. The project
 // expression expects the surrounding project row to be named p.
 func AggregateBudgetSQL(project bool) string {
-	raw, hourly := "", ""
+	owner := budgetOwnership{"true", "true"}
 	if project {
-		raw = "COALESCE((SELECT project_id FROM olp.api_keys WHERE id=f.api_key_id),(SELECT project_id FROM olp.providers WHERE id=f.provider_id))=p.id AND "
-		hourly = "COALESCE((SELECT project_id FROM olp.api_keys WHERE id=h.api_key_id),(SELECT project_id FROM olp.providers WHERE id=h.provider_id))=p.id AND "
+		owner = budgetOwnership{usageProjectSQL("f") + "=p.id", usageProjectSQL("h") + "=p.id"}
 	}
-	return strings.NewReplacer("f.api_key_id=k.id AND ", raw, "h.api_key_id=k.id AND ", hourly).Replace(BudgetSQL)
+	return budgetReportSQL(owner)
 }
 
 func KeyRouteBudgetID(key, route string) string {
@@ -194,10 +228,16 @@ func EnsureAttributionBudget(ctx context.Context, tx pgx.Tx, project, key, value
 // AttributionBudgetsSQL returns live/retained usage for each configured pair in
 // one control-plane query. The surrounding project row must be named p.
 var AttributionBudgetsSQL = `(SELECT COALESCE(jsonb_object_agg(label,pair_usage),'{}'::jsonb) FROM (
- SELECT b.key AS label,jsonb_object_agg(v.key,` + strings.NewReplacer("f.api_key_id=k.id AND ", "COALESCE((SELECT project_id FROM olp.api_keys WHERE id=f.api_key_id),(SELECT project_id FROM olp.providers WHERE id=f.provider_id))=p.id AND f.attribution->>b.key=v.key AND ", "h.api_key_id=k.id AND ", "COALESCE((SELECT project_id FROM olp.api_keys WHERE id=h.api_key_id),(SELECT project_id FROM olp.providers WHERE id=h.provider_id))=p.id AND h.attribution->>b.key=v.key AND ").Replace(BudgetSQL) + `) AS pair_usage
+ SELECT b.key AS label,jsonb_object_agg(v.key,` + budgetReportSQL(budgetOwnership{
+	usageProjectSQL("f") + "=p.id AND f.attribution->>b.key=v.key",
+	usageProjectSQL("h") + "=p.id AND h.attribution->>b.key=v.key",
+}) + `) AS pair_usage
  FROM jsonb_each(p.attribution_budgets) b CROSS JOIN LATERAL jsonb_each(b.value) v GROUP BY b.key
 ) grouped)`
 
 // Organization ownership is immutable once assigned, so live and retained spend
 // retain the same boundary when aggregate policies change.
-var OrganizationBudgetSQL = strings.NewReplacer("f.api_key_id=k.id AND ", "(SELECT organization_id FROM olp.projects WHERE id=COALESCE((SELECT project_id FROM olp.api_keys WHERE id=f.api_key_id),(SELECT project_id FROM olp.providers WHERE id=f.provider_id)))=p.id AND ", "h.api_key_id=k.id AND ", "(SELECT organization_id FROM olp.projects WHERE id=COALESCE((SELECT project_id FROM olp.api_keys WHERE id=h.api_key_id),(SELECT project_id FROM olp.providers WHERE id=h.provider_id)))=p.id AND ").Replace(BudgetSQL)
+var OrganizationBudgetSQL = budgetReportSQL(budgetOwnership{
+	"(SELECT organization_id FROM olp.projects WHERE id=" + usageProjectSQL("f") + ")=p.id",
+	"(SELECT organization_id FROM olp.projects WHERE id=" + usageProjectSQL("h") + ")=p.id",
+})

@@ -25,6 +25,14 @@
   } from '$lib/features/observability/api';
   import { observabilityKeys } from '$lib/features/observability/observabilityKeys';
 
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
+
+  const sinkIntent = useMutationIntent();
+  const policyIntent = useMutationIntent();
+
   const queryClient = useQueryClient();
   const access = useRole();
   const globalScope = $derived(access.user?.access_scope === 'global');
@@ -118,6 +126,8 @@
   }
 
   function startSinkEdit(sink: ExportSink) {
+    if (sinkBusy) return;
+    sinkIntent.reset();
     editingSink = sink;
     sinkName = sink.name;
     sinkType = sink.type;
@@ -135,6 +145,7 @@
   }
 
   function resetSinkForm() {
+    sinkIntent.reset();
     editingSink = null;
     sinkName = '';
     sinkDestination = '';
@@ -145,6 +156,10 @@
     sinkClearCredential = false;
   }
 
+  function cancelSinkEdit() {
+    if (!sinkBusy) resetSinkForm();
+  }
+
   async function submitSink(event: SubmitEvent) {
     event.preventDefault();
     const editing = editingSink;
@@ -153,8 +168,10 @@
       : canMutate(sinkProjectId || null);
     if (!allowed || sinkBusy || !sinkName.trim() || !sinkDestination.trim())
       return;
+    const isCurrent = captureOwner();
     sinkBusy = true;
     error = notice = '';
+    let committed = false;
     try {
       let credential: unknown;
       if (sinkCredential.trim()) {
@@ -176,10 +193,14 @@
               ? { credential: credential as Record<string, unknown> }
               : {})
         });
+        committed = true;
+        if (!isCurrent()) return;
         notice = 'Sink updated.';
       } else {
         if (!sinkStreams.length) return;
-        await createExportSink({
+        const submission = sinkIntent.prepare<
+          Parameters<typeof createExportSink>[0]
+        >({
           name: sinkName.trim(),
           type: sinkType,
           destination: sinkDestination.trim(),
@@ -191,43 +212,59 @@
             ? { credential: credential as Record<string, unknown> }
             : {})
         });
+        await createExportSink(submission.input, submission.requestId);
+        committed = true;
+        if (!isCurrent()) return;
+        sinkIntent.reset();
         notice = 'Sink created.';
       }
       resetSinkForm();
-      await queryClient.invalidateQueries({
-        queryKey: observabilityKeys.root
-      });
-    } catch (cause) {
-      error = errorMessage(
-        cause,
-        editing
-          ? 'The sink could not be updated.'
-          : 'The sink could not be created.'
+      await queryClient.invalidateQueries(
+        {
+          queryKey: observabilityKeys.root
+        },
+        { throwOnError: true }
       );
+    } catch (cause) {
+      if (!isCurrent()) return;
+      error = committed
+        ? `${notice} Refresh failed. ${errorMessage(cause)}`
+        : errorMessage(
+            cause,
+            editing
+              ? 'The sink could not be updated.'
+              : 'The sink could not be created.'
+          );
     } finally {
-      sinkBusy = false;
+      if (isCurrent()) sinkBusy = false;
     }
   }
 
   async function toggleSink(sink: ExportSink) {
     if (!canMutate(sink.project_id)) return;
+    const isCurrent = captureOwner();
     error = notice = '';
     try {
       await updateExportSink(sink, { enabled: !sink.enabled });
+      if (!isCurrent()) return;
       await queryClient.invalidateQueries({ queryKey: observabilityKeys.root });
     } catch (cause) {
+      if (!isCurrent()) return;
       error = errorMessage(cause, 'The sink could not be updated.');
     }
   }
 
   async function removeSink(sink: ExportSink) {
     if (!canMutate(sink.project_id)) return;
+    const isCurrent = captureOwner();
     error = notice = '';
     try {
       await deleteExportSink(sink);
+      if (!isCurrent()) return;
       notice = 'Sink deleted.';
       await queryClient.invalidateQueries({ queryKey: observabilityKeys.root });
     } catch (cause) {
+      if (!isCurrent()) return;
       error = errorMessage(cause, 'The sink could not be deleted.');
     }
   }
@@ -251,6 +288,8 @@
   }
 
   function startPolicyEdit(policy: CapturePolicy) {
+    if (policyBusy) return;
+    policyIntent.reset();
     editingPolicy = policy;
     policyProjectId = policy.project_id ?? '';
     policyRoute = policy.route_slug ?? '';
@@ -265,6 +304,7 @@
   }
 
   function resetPolicyForm() {
+    policyIntent.reset();
     editingPolicy = null;
     policyRoute = policyKeyIds = policyEndUsers = '';
     policySinkId = '';
@@ -272,17 +312,31 @@
     policyEnabled = true;
   }
 
+  function cancelPolicyEdit() {
+    if (!policyBusy) resetPolicyForm();
+  }
+
+  const captureOwner = usePrincipalLifetime(() => {
+    resetSinkForm();
+    resetPolicyForm();
+    sinkBusy = policyBusy = false;
+    error = notice = '';
+  });
+
   async function toggleMaster() {
     if (!ownerOnly || !captureConfig.data) return;
+    const isCurrent = captureOwner();
     error = notice = '';
     try {
       await updateCaptureConfiguration(captureConfig.data, {
         enabled: !captureConfig.data.enabled
       });
+      if (!isCurrent()) return;
       await queryClient.invalidateQueries({
         queryKey: observabilityKeys.capture()
       });
     } catch (cause) {
+      if (!isCurrent()) return;
       error = errorMessage(cause, 'Capture could not be changed.');
     }
   }
@@ -306,8 +360,10 @@
       error = 'Max bytes must be a positive integer.';
       return;
     }
+    const isCurrent = captureOwner();
     policyBusy = true;
     error = notice = '';
+    let committed = false;
     const fields = {
       sink: policySinkId,
       sample_ratio: policyRatio.trim(),
@@ -326,54 +382,74 @@
     try {
       if (editing) {
         await updateCapturePolicy(editing, fields);
+        committed = true;
+        if (!isCurrent()) return;
         notice = 'Capture policy updated.';
       } else {
-        await createCapturePolicy({
+        const submission = policyIntent.prepare<
+          Parameters<typeof createCapturePolicy>[0]
+        >({
           project_id: policyProjectId || null,
           route_slug: policyRoute.trim() || null,
           ...fields
         });
+        await createCapturePolicy(submission.input, submission.requestId);
+        committed = true;
+        if (!isCurrent()) return;
+        policyIntent.reset();
         notice = 'Capture policy created.';
       }
       resetPolicyForm();
-      await queryClient.invalidateQueries({
-        queryKey: observabilityKeys.capturePolicies()
-      });
-    } catch (cause) {
-      error = errorMessage(
-        cause,
-        editing
-          ? 'The capture policy could not be updated.'
-          : 'The capture policy could not be created.'
+      await queryClient.invalidateQueries(
+        {
+          queryKey: observabilityKeys.capturePolicies()
+        },
+        { throwOnError: true }
       );
+    } catch (cause) {
+      if (!isCurrent()) return;
+      error = committed
+        ? `${notice} Refresh failed. ${errorMessage(cause)}`
+        : errorMessage(
+            cause,
+            editing
+              ? 'The capture policy could not be updated.'
+              : 'The capture policy could not be created.'
+          );
     } finally {
-      policyBusy = false;
+      if (isCurrent()) policyBusy = false;
     }
   }
 
   async function togglePolicy(policy: CapturePolicy) {
     if (!canMutate(policy.project_id)) return;
+    const isCurrent = captureOwner();
     error = notice = '';
     try {
       await updateCapturePolicy(policy, { enabled: !policy.enabled });
+      if (!isCurrent()) return;
       await queryClient.invalidateQueries({
         queryKey: observabilityKeys.capturePolicies()
       });
     } catch (cause) {
+      if (!isCurrent()) return;
       error = errorMessage(cause, 'The capture policy could not be updated.');
     }
   }
 
   async function removePolicy(policy: CapturePolicy) {
     if (!canMutate(policy.project_id)) return;
+    const isCurrent = captureOwner();
     error = notice = '';
     try {
       await deleteCapturePolicy(policy);
+      if (!isCurrent()) return;
       notice = 'Capture policy deleted.';
       await queryClient.invalidateQueries({
         queryKey: observabilityKeys.capturePolicies()
       });
     } catch (cause) {
+      if (!isCurrent()) return;
       error = errorMessage(cause, 'The capture policy could not be deleted.');
     }
   }
@@ -446,122 +522,124 @@
   <h3>Export sinks</h3>
   {#if canManageInstallation || canManageProjects}
     <form class="create-form" onsubmit={submitSink}>
-      <div class="form-grid">
-        <div class="form-field">
-          <label for="sink-name">Name</label><input
-            id="sink-name"
-            bind:value={sinkName}
-            required
-          />
-        </div>
-        <div class="form-field">
-          <label for="sink-type">Type</label><select
-            id="sink-type"
-            bind:value={sinkType}
-            disabled={!!editingSink}
-            >{#each Object.keys(typeFormats) as type (type)}<option value={type}
-                >{type}</option
-              >{/each}</select
-          >
-        </div>
-        <div class="form-field">
-          <label for="sink-destination">Destination</label><input
-            id="sink-destination"
-            bind:value={sinkDestination}
-            required
-            placeholder="https://collector.example.com/olp or bucket URL"
-          />
-        </div>
-        <ProjectScopeField
-          id="sink-project"
-          bind:value={sinkProjectId}
-          unassigned={canManageInstallation}
-          disabled={!!editingSink}
-        />
-        <div class="form-field">
-          <label for="sink-format">Format</label><select
-            id="sink-format"
-            bind:value={sinkFormat}
-            disabled={!!editingSink}
-            >{#each typeFormats[sinkType] ?? [] as option (option.value)}<option
-                value={option.value}>{option.label}</option
-              >{/each}</select
-          >
-        </div>
-        <fieldset class="form-field">
-          <legend>Streams</legend>
-          {#each streamOptions as stream (stream.value)}
-            <label class="inline-check"
-              ><input
-                type="checkbox"
-                checked={sinkStreams.includes(stream.value)}
-                disabled={!!editingSink}
-                onchange={() => toggleStream(stream.value)}
-              />{stream.label}</label
+      <fieldset class="submission-fields" disabled={sinkBusy}>
+        <div class="form-grid">
+          <div class="form-field">
+            <label for="sink-name">Name</label><input
+              id="sink-name"
+              bind:value={sinkName}
+              required
+            />
+          </div>
+          <div class="form-field">
+            <label for="sink-type">Type</label><select
+              id="sink-type"
+              bind:value={sinkType}
+              disabled={!!editingSink}
+              >{#each Object.keys(typeFormats) as type (type)}<option
+                  value={type}>{type}</option
+                >{/each}</select
             >
-          {/each}
-        </fieldset>
-        <div class="form-field">
-          <label for="sink-filter-project">Filter project</label><input
-            id="sink-filter-project"
-            class="mono"
-            bind:value={sinkFilterProject}
-            placeholder="Optional project UUID"
+          </div>
+          <div class="form-field">
+            <label for="sink-destination">Destination</label><input
+              id="sink-destination"
+              bind:value={sinkDestination}
+              required
+              placeholder="https://collector.example.com/olp or bucket URL"
+            />
+          </div>
+          <ProjectScopeField
+            id="sink-project"
+            bind:value={sinkProjectId}
+            unassigned={canManageInstallation}
+            disabled={!!editingSink}
           />
+          <div class="form-field">
+            <label for="sink-format">Format</label><select
+              id="sink-format"
+              bind:value={sinkFormat}
+              disabled={!!editingSink}
+              >{#each typeFormats[sinkType] ?? [] as option (option.value)}<option
+                  value={option.value}>{option.label}</option
+                >{/each}</select
+            >
+          </div>
+          <fieldset class="form-field">
+            <legend>Streams</legend>
+            {#each streamOptions as stream (stream.value)}
+              <label class="inline-check"
+                ><input
+                  type="checkbox"
+                  checked={sinkStreams.includes(stream.value)}
+                  disabled={!!editingSink}
+                  onchange={() => toggleStream(stream.value)}
+                />{stream.label}</label
+              >
+            {/each}
+          </fieldset>
+          <div class="form-field">
+            <label for="sink-filter-project">Filter project</label><input
+              id="sink-filter-project"
+              class="mono"
+              bind:value={sinkFilterProject}
+              placeholder="Optional project UUID"
+            />
+          </div>
+          <div class="form-field">
+            <label for="sink-filter-route">Route filter</label><input
+              id="sink-filter-route"
+              bind:value={sinkFilterRoute}
+              placeholder="Optional route slug"
+            />
+          </div>
+          <div class="form-field">
+            <label for="sink-filter-outcome">Outcome filter</label><select
+              id="sink-filter-outcome"
+              bind:value={sinkFilterOutcome}
+              ><option value="">All outcomes</option><option value="success"
+                >Success</option
+              ><option value="failure">Failure</option></select
+            >
+          </div>
+          <div class="form-field">
+            <label for="sink-credential">Credential JSON</label><textarea
+              id="sink-credential"
+              bind:value={sinkCredential}
+              rows="2"
+              placeholder={editingSink
+                ? 'Optional sealed replacement — blank keeps current'
+                : 'Optional sealed credential object'}></textarea>
+            {#if editingSink}<label class="inline-check"
+                ><input
+                  type="checkbox"
+                  aria-label="Clear stored credential"
+                  bind:checked={sinkClearCredential}
+                />Clear stored credential</label
+              >{/if}
+          </div>
         </div>
-        <div class="form-field">
-          <label for="sink-filter-route">Route filter</label><input
-            id="sink-filter-route"
-            bind:value={sinkFilterRoute}
-            placeholder="Optional route slug"
-          />
-        </div>
-        <div class="form-field">
-          <label for="sink-filter-outcome">Outcome filter</label><select
-            id="sink-filter-outcome"
-            bind:value={sinkFilterOutcome}
-            ><option value="">All outcomes</option><option value="success"
-              >Success</option
-            ><option value="failure">Failure</option></select
+        <div class="form-actions">
+          {#if editingSink}<button
+              class="button button-secondary"
+              type="button"
+              onclick={cancelSinkEdit}>Cancel</button
+            >{/if}
+          <button
+            class="button button-primary"
+            type="submit"
+            disabled={sinkBusy ||
+              !sinkName.trim() ||
+              !sinkDestination.trim() ||
+              (!editingSink && !sinkStreams.length)}
+            >{sinkBusy
+              ? 'Saving…'
+              : editingSink
+                ? 'Save sink'
+                : 'Create sink'}</button
           >
         </div>
-        <div class="form-field">
-          <label for="sink-credential">Credential JSON</label><textarea
-            id="sink-credential"
-            bind:value={sinkCredential}
-            rows="2"
-            placeholder={editingSink
-              ? 'Optional sealed replacement — blank keeps current'
-              : 'Optional sealed credential object'}></textarea>
-          {#if editingSink}<label class="inline-check"
-              ><input
-                type="checkbox"
-                aria-label="Clear stored credential"
-                bind:checked={sinkClearCredential}
-              />Clear stored credential</label
-            >{/if}
-        </div>
-      </div>
-      <div class="form-actions">
-        {#if editingSink}<button
-            class="button button-secondary"
-            type="button"
-            onclick={resetSinkForm}>Cancel</button
-          >{/if}
-        <button
-          class="button button-primary"
-          type="submit"
-          disabled={sinkBusy ||
-            !sinkName.trim() ||
-            !sinkDestination.trim() ||
-            (!editingSink && !sinkStreams.length)}
-          >{sinkBusy
-            ? 'Saving…'
-            : editingSink
-              ? 'Save sink'
-              : 'Create sink'}</button
-        >
-      </div>
+      </fieldset>
     </form>
   {/if}
 
@@ -626,6 +704,7 @@
                 >{#if canMutate(sink.project_id)}<button
                     class="text-button"
                     type="button"
+                    disabled={sinkBusy}
                     onclick={() => startSinkEdit(sink)}>Edit</button
                   ><button
                     class="text-button"
@@ -701,104 +780,106 @@
 
   {#if canManageProjects || canManageInstallation}
     <form class="create-form" onsubmit={submitPolicy}>
-      <div class="form-grid">
-        <ProjectScopeField
-          id="policy-project"
-          bind:value={policyProjectId}
-          unassigned={canManageInstallation}
-          disabled={!!editingPolicy}
-        />
-        <div class="form-field">
-          <label for="policy-route">Route</label><input
-            id="policy-route"
-            bind:value={policyRoute}
-            placeholder="Optional route slug"
+      <fieldset class="submission-fields" disabled={policyBusy}>
+        <div class="form-grid">
+          <ProjectScopeField
+            id="policy-project"
+            bind:value={policyProjectId}
+            unassigned={canManageInstallation}
             disabled={!!editingPolicy}
           />
-        </div>
-        <div class="form-field">
-          <label for="policy-sink">Sink</label><select
-            id="policy-sink"
-            bind:value={policySinkId}
-            required
-            ><option value="" disabled>Choose an installation sink</option
-            >{#each sinkOptions.data ?? [] as option (option.export_sink_id)}<option
-                value={option.export_sink_id}
-                >{option.name} ({option.type})</option
-              >{/each}</select
-          >
-        </div>
-        <div class="form-field">
-          <label for="policy-ratio">Sample ratio</label><input
-            id="policy-ratio"
-            bind:value={policyRatio}
-            required
-            placeholder="0.25"
-          />
-        </div>
-        <fieldset class="form-field">
-          <legend>Include</legend>
-          {#each ['input', 'output', 'tool_calls'] as part (part)}
+          <div class="form-field">
+            <label for="policy-route">Route</label><input
+              id="policy-route"
+              bind:value={policyRoute}
+              placeholder="Optional route slug"
+              disabled={!!editingPolicy}
+            />
+          </div>
+          <div class="form-field">
+            <label for="policy-sink">Sink</label><select
+              id="policy-sink"
+              bind:value={policySinkId}
+              required
+              ><option value="" disabled>Choose an installation sink</option
+              >{#each sinkOptions.data ?? [] as option (option.export_sink_id)}<option
+                  value={option.export_sink_id}
+                  >{option.name} ({option.type})</option
+                >{/each}</select
+            >
+          </div>
+          <div class="form-field">
+            <label for="policy-ratio">Sample ratio</label><input
+              id="policy-ratio"
+              bind:value={policyRatio}
+              required
+              placeholder="0.25"
+            />
+          </div>
+          <fieldset class="form-field">
+            <legend>Include</legend>
+            {#each ['input', 'output', 'tool_calls'] as part (part)}
+              <label class="inline-check"
+                ><input
+                  type="checkbox"
+                  checked={policyInclude.includes(part)}
+                  onchange={() => toggleInclude(part)}
+                />{part}</label
+              >
+            {/each}
+          </fieldset>
+          <div class="form-field">
+            <label for="policy-keys">Key IDs</label><input
+              id="policy-keys"
+              bind:value={policyKeyIds}
+              placeholder="Optional comma-separated UUIDs"
+            />
+          </div>
+          <div class="form-field">
+            <label for="policy-users">End-user digests</label><input
+              id="policy-users"
+              bind:value={policyEndUsers}
+              placeholder="Optional comma-separated digests"
+            />
+          </div>
+          <div class="form-field">
+            <label for="policy-max">Max bytes</label><input
+              id="policy-max"
+              inputmode="numeric"
+              bind:value={policyMaxBytes}
+              required
+            />
+          </div>
+          <div class="form-field">
             <label class="inline-check"
               ><input
                 type="checkbox"
-                checked={policyInclude.includes(part)}
-                onchange={() => toggleInclude(part)}
-              />{part}</label
+                bind:checked={policyEnabled}
+              />Enabled</label
             >
-          {/each}
-        </fieldset>
-        <div class="form-field">
-          <label for="policy-keys">Key IDs</label><input
-            id="policy-keys"
-            bind:value={policyKeyIds}
-            placeholder="Optional comma-separated UUIDs"
-          />
+          </div>
         </div>
-        <div class="form-field">
-          <label for="policy-users">End-user digests</label><input
-            id="policy-users"
-            bind:value={policyEndUsers}
-            placeholder="Optional comma-separated digests"
-          />
-        </div>
-        <div class="form-field">
-          <label for="policy-max">Max bytes</label><input
-            id="policy-max"
-            inputmode="numeric"
-            bind:value={policyMaxBytes}
-            required
-          />
-        </div>
-        <div class="form-field">
-          <label class="inline-check"
-            ><input
-              type="checkbox"
-              bind:checked={policyEnabled}
-            />Enabled</label
+        <div class="form-actions">
+          {#if editingPolicy}<button
+              class="button button-secondary"
+              type="button"
+              onclick={cancelPolicyEdit}>Cancel</button
+            >{/if}
+          <button
+            class="button button-primary"
+            type="submit"
+            disabled={policyBusy ||
+              !policySinkId ||
+              !policyRatio.trim() ||
+              !policyInclude.length}
+            >{policyBusy
+              ? 'Saving…'
+              : editingPolicy
+                ? 'Save capture policy'
+                : 'Create capture policy'}</button
           >
         </div>
-      </div>
-      <div class="form-actions">
-        {#if editingPolicy}<button
-            class="button button-secondary"
-            type="button"
-            onclick={resetPolicyForm}>Cancel</button
-          >{/if}
-        <button
-          class="button button-primary"
-          type="submit"
-          disabled={policyBusy ||
-            !policySinkId ||
-            !policyRatio.trim() ||
-            !policyInclude.length}
-          >{policyBusy
-            ? 'Saving…'
-            : editingPolicy
-              ? 'Save capture policy'
-              : 'Create capture policy'}</button
-        >
-      </div>
+      </fieldset>
     </form>
   {/if}
 
@@ -845,6 +926,7 @@
                 >{#if canMutate(policy.project_id)}<button
                     class="text-button"
                     type="button"
+                    disabled={policyBusy}
                     onclick={() => startPolicyEdit(policy)}>Edit</button
                   ><button
                     class="text-button"
@@ -888,6 +970,14 @@
     margin: 0;
     color: var(--foreground-muted);
     font-size: 0.8rem;
+  }
+  .submission-fields {
+    display: grid;
+    gap: 1rem;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
   }
   .create-form {
     display: grid;

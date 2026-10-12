@@ -30,17 +30,17 @@ func (x *execution) servingAllowed(provider *runtime.Provider, model string, slo
 			return false
 		}
 	} else if x.unary != nil {
-		plan, err := x.unaryPlan(provider, model)
+		admission, err := x.unaryAdmission(provider, model)
 		if err != nil {
 			return false
 		}
-		serving = plan.Serving()
+		serving = admission.receipt.Serving
 	} else {
-		prepared, err := x.preparedProvider(provider, model)
-		if err != nil || prepared.plan == nil {
+		prepared, err := x.providerAdmission(provider, model)
+		if err != nil || prepared.receipt == nil {
 			return false
 		}
-		serving = prepared.plan.Serving()
+		serving = prepared.receipt.Serving
 	}
 	if x.serving == nil {
 		if selectBaseline {

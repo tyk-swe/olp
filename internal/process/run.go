@@ -150,7 +150,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
+	defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "PostgreSQL", func(context.Context) error { pool.Close(); return nil })
 	var readPool *pgxpool.Pool
 	if c.DatabaseReadURL != "" && (c.Mode.Inference() || c.Mode == config.Worker) {
 		readConfig, err := database.Configuration(c.DatabaseReadURL, c.DatabaseMaxConnections, c.RequestTimeout)
@@ -161,7 +161,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		if err != nil {
 			return errors.New("runtime read database connection failed")
 		}
-		defer readPool.Close()
+		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "runtime read PostgreSQL", func(context.Context) error { readPool.Close(); return nil })
 	}
 	installation, err := database.Installation(startup, pool)
 	if err != nil {
@@ -187,7 +187,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		defer vk.Close()
+		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "Valkey", func(context.Context) error { vk.Close(); return nil })
 		if limiter, err = limits.New(vk, prefix+"limits"); err != nil {
 			return err
 		}
@@ -263,9 +263,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		defer hostRuntime.Close(context.Background())
+		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "plugin runtime", hostRuntime.Close)
 		pluginHost = plugins.NewHost(hostRuntime, unconfined, pool)
-		defer pluginHost.Close(context.Background())
+		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "plugin host", func(ctx context.Context) error { pluginHost.Close(ctx); return nil })
 		if c.Mode.Management() || c.Mode.Inference() {
 			gw = gateway.New(rt, &policy, gateway.Config{
 				Region:             c.Region,
@@ -310,13 +310,6 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			prober.Business = business
 			prober.Admission = gateway.NewAdmission(limiter, nil, log)
 		}
-		// Plugins that providers pin are compiled now rather than by the
-		// first call that needs them.
-		go func() {
-			if err := pluginHost.PreparePinned(ctx); err != nil && ctx.Err() == nil {
-				log.Warn("plugins could not be prepared", "error", err)
-			}
-		}()
 		if c.Mode.Management() || c.Mode.Inference() || c.Mode == config.Worker {
 			spoolDir := c.MediaSpoolDir
 			if spoolDir == "" {
@@ -327,7 +320,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 			mediaSpool = spool
-			defer spool.Close()
+			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "media spool", func(context.Context) error { return spool.Close() })
 			mediaService = &media.Service{
 				Pool:         pool,
 				Keys:         keys,
@@ -366,6 +359,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				if server == nil {
 					continue
 				}
+				server.Admission.PendingCostAccountingReady = resources.New(pool).CheckPendingCostOwner
 				server.Admission.CostAccountingReady = func(ctx context.Context) error {
 					return usage.CheckBudgetAccounting(ctx, pool, emitter)
 				}
@@ -396,18 +390,89 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			if err != nil {
 				return err
 			}
-			defer pluginRuntime.Close(context.Background())
+			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", pluginRuntime.Close)
 			Management{Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, PluginIndex: pluginIndex}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {
 		return err
 	}
+	// Finish dependency acquisition before starting any task. The one cleanup
+	// owner below is registered after these closes, so every startup failure
+	// drains/cancels and joins tasks before their dependencies are closed.
+	var reader *coordination.Client
+	var workerStream string
+	if limiter != nil && (c.Mode == config.Worker || c.Mode == config.All) {
+		reader, err = openValkey(startup)
+		if err != nil {
+			return err
+		}
+		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "worker Valkey reader", func(context.Context) error { reader.Close(); return nil })
+		workerStream = usage.StreamName(prefix)
+	}
+	auxiliary, stopAuxiliary := context.WithCancel(context.WithoutCancel(ctx))
+	delivery, stopDelivery := context.WithCancel(context.WithoutCancel(ctx))
+	workers, stopWorkers := context.WithCancel(context.WithoutCancel(ctx))
+	probes, stopProbes := context.WithCancel(context.WithoutCancel(ctx))
+	requestContext, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
+	var background, delivered sync.WaitGroup
+	var writerDone, probesStopped chan struct{}
+	var workersStopped func()
+	var listeners []boundListener
+	defer func() {
+		stop()
+		shutdownDeadline = time.Now().Add(c.ShutdownTimeout)
+		shutdown, cancel := context.WithDeadline(context.Background(), shutdownDeadline)
+		defer cancel()
+		stopAuxiliary()
+		drainListeners(shutdown, listeners, emitter)
+		cancelRequests()
+		if gw != nil {
+			if err := gw.DrainShadows(shutdown); err != nil {
+				log.Warn("shutdown budget reached before shadows drained", "error", err)
+				if emitter != nil {
+					emitter.MarkUnclean()
+				}
+			}
+		}
+		drainProbes(shutdown, stopProbes, probesStopped, emitter, log)
+		// Accepted requests and probes have stopped producing while their live
+		// authority remained available. Runtime joins against the same budget.
+		if rt != nil {
+			if err := rt.StopContext(shutdown); err != nil {
+				log.Warn("shutdown budget reached before runtime stopped", "error", err)
+			}
+		}
+		if emitter != nil {
+			emitter.Close()
+			if writerDone != nil {
+				awaitPlane(shutdown, func() { <-writerDone }, log, "request metadata flush")
+			}
+		}
+		stopDelivery()
+		awaitPlane(shutdown, delivered.Wait, log, "request metadata delivery")
+		stopWorkers()
+		if workersStopped != nil && !awaitPlane(shutdown, workersStopped, log, "worker plane") {
+			// A blocking stream read must be explicitly unblocked at deadline;
+			// closing it normally before cancellation races active consumers.
+			if reader != nil {
+				closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "forced worker Valkey reader", func(context.Context) error { reader.Close(); return nil })
+			}
+		}
+		awaitPlane(shutdown, background.Wait, log, "background tasks")
+		log.Info("process stopped", "mode", c.Mode)
+	}()
+	if pluginHost != nil {
+		background.Go(func() {
+			if err := pluginHost.PreparePinned(auxiliary); err != nil && auxiliary.Err() == nil {
+				log.Warn("plugins could not be prepared", "error", err)
+			}
+		})
+	}
 	if rt != nil {
 		// Authority must stay fresh while accepted requests drain, so
 		// polling outlives the listeners and stops once handlers finish.
 		rt.Start(context.WithoutCancel(ctx))
-		defer rt.Stop()
 	}
 	// The observability collectors probe only what this process composes: an
 	// unconfigured dependency is reported as absent, never as failed.
@@ -429,14 +494,10 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 	}
 	configureObservability(obsState, rt, gw, emitter, mediaSpool, &policy)
-	go obsCache.Run(ctx, obsState, log)
+	background.Go(func() { obsCache.Run(auxiliary, obsState, log) })
 	// The delivery plane outlives the listeners: it is cancelled only once the
 	// producers have drained, so every emitted event is written and this
 	// process's epoch is closed against what it actually delivered.
-	delivery, stopDelivery := context.WithCancel(context.WithoutCancel(ctx))
-	defer stopDelivery()
-	var delivered sync.WaitGroup
-	var writerDone chan struct{}
 	if emitter != nil {
 		stream, instance := usage.StreamName(prefix), gatewayInstance
 		// Register before listeners bind or probes start: even a crash before
@@ -456,45 +517,28 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		delivered.Go(func() { capturer.Run(delivery) })
 	}
 	if outage != nil {
-		go outage.run(ctx)
+		background.Go(func() { outage.run(auxiliary) })
 	}
 	if gw != nil {
 		// Circuits are shared with the fleet only through Valkey; without it
 		// this returns at once and local circuits alone decide.
-		go gw.RunFleetHealth(ctx)
+		background.Go(func() { gw.RunFleetHealth(auxiliary) })
 	}
 	// The worker plane is cancelled last of all, because the consumer it runs
 	// is what turns the events the delivery plane just flushed into accounting.
-	workers, stopWorkers := context.WithCancel(context.WithoutCancel(ctx))
-	defer stopWorkers()
-	var workersStopped func()
 	if c.Mode == config.Worker || c.Mode == config.All {
 		// The consumer reads its stream with a blocking XREADGROUP, and a
 		// client answers one connection in order: on the shared client a
 		// second spent blocking is a second every admission decision and
 		// every emitted event waits behind. The consumer gets its own.
-		var reader *coordination.Client
-		var stream string
-		if limiter != nil {
-			var err error
-			reader, err = openValkey(startup)
-			if err != nil {
-				return err
-			}
-			defer reader.Close()
-			stream = usage.StreamName(prefix)
-		}
 		// Media reconciliation and grant refresh need only PostgreSQL and the
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, limiter, stream, mediaService, pluginHost, keys, installation, c.Region, &policy, log, exporter, referenceCatalog)
+		workersStopped = startWorkers(workers, pool, reader, limiter, workerStream, mediaService, pluginHost, keys, installation, c.Region, &policy, log, exporter, referenceCatalog)
 	}
 	// Probes produce accounting events, so they stop before delivery closes;
 	// the consumer and recovery workers remain alive until delivery drains.
-	probes, stopProbes := context.WithCancel(context.WithoutCancel(ctx))
-	defer stopProbes()
-	var probesStopped chan struct{}
 	if prober != nil {
 		probesStopped = make(chan struct{})
 		go func() {
@@ -522,45 +566,11 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 		listenerConfigs = append(listenerConfigs, listenerConfig{name: "public", address: c.ListenAddr, handler: Perimeter(c.PublicOrigin, managementNetwork(c.ManagementAllowedCIDRs, c.TrustedProxyCIDRs, admission.Wrap(public)))})
 	}
-	requestContext, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
-	defer cancelRequests()
-	listeners, err := bindListeners(startup, listenerConfigs, c, requestContext)
+	listeners, err = bindListeners(startup, listenerConfigs, c, requestContext)
 	if err != nil {
 		return err
 	}
 	serveErr := serveListeners(ctx, listeners, c.Mode, log)
-	stop()
-	shutdownDeadline = time.Now().Add(c.ShutdownTimeout)
-	shutdown, cancel := context.WithDeadline(context.Background(), shutdownDeadline)
-	defer cancel()
-	drainListeners(shutdown, listeners, emitter)
-	cancelRequests()
-	if gw != nil {
-		if err := gw.DrainShadows(shutdown); err != nil {
-			log.Warn("shutdown budget reached before shadows drained", "error", err)
-			if emitter != nil {
-				emitter.MarkUnclean()
-			}
-		}
-	}
-	drainProbes(shutdown, stopProbes, probesStopped, emitter, log)
-	if rt != nil {
-		rt.Stop()
-	}
-	// Stop intake and flush accepted events before stopping the workers. If
-	// HTTP draining was forced, the epoch stays open to report the uncertainty
-	// from handlers that could still finish after intake closes.
-	if emitter != nil {
-		emitter.Close()
-		awaitPlane(shutdown, func() { <-writerDone }, log, "request metadata flush")
-	}
-	stopDelivery()
-	awaitPlane(shutdown, delivered.Wait, log, "request metadata delivery")
-	stopWorkers()
-	if workersStopped != nil {
-		awaitPlane(shutdown, workersStopped, log, "worker plane")
-	}
-	log.Info("process stopped", "mode", c.Mode)
 	if errors.Is(serveErr, http.ErrServerClosed) {
 		return nil
 	}

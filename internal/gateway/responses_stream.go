@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -80,7 +82,7 @@ func responseRetrievalQuery(raw string) (url.Values, bool, *Error) {
 // and an echoed previous_response_id, which previous resolves to the caller's
 // local id ("" withholds it); untouched extensions and numeric lexemes stay
 // byte-identical.
-func projectStoredResponseFrame(frame []byte, projection responseProjection, strict bool, previous func(string) string) ([]byte, []byte, error) {
+func projectStoredResponseFrame(frame []byte, projection responseProjection, strict bool, previous func(string) string) ([]byte, *openai.ResponseUsageObservation, error) {
 	i := bytes.Index(frame, []byte("\ndata: "))
 	if i < 0 {
 		return nil, nil, errors.New("response stream frame has no data")
@@ -89,6 +91,17 @@ func projectStoredResponseFrame(frame []byte, projection responseProjection, str
 	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: len(frame) + 2048})
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return nil, nil, errors.New("response stream frame is malformed")
+	}
+	nativeEvent, err := oif.NewEvent(openai.Descriptor(openai.FamilyResponses, true), doc, "", 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	observation, lifecycle, err := openai.ObserveResponseEventUsage(nativeEvent)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !lifecycle {
+		return frame, nil, nil
 	}
 	response, present := doc.Root().Lookup("response")
 	if !present {
@@ -127,13 +140,13 @@ func projectStoredResponseFrame(frame []byte, projection responseProjection, str
 		mapped, err = oif.Apply(doc, changes)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, &observation, err
 	}
 	out := make([]byte, 0, i+7+mapped.Len()+2)
 	out = append(out, frame[:i+7]...)
 	out = append(out, mapped.Bytes()...)
 	out = append(out, '\n', '\n')
-	return out, response.Bytes(), nil
+	return out, &observation, nil
 }
 
 // A provider error can echo authentication with arbitrary JSON escape
@@ -245,35 +258,44 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 	previous := func(upstream string) string {
 		lookupCtx, stopLookup := resourceCommitContext(ctx)
 		defer stopLookup()
-		return s.previousResponseLocal(lookupCtx, res.APIKeyID, res.ProviderID, nil, upstream)
+		return s.previousResponseLocal(lookupCtx, res.NativeIdentity(), nil, upstream)
+	}
+	observe := func(event oif.Event) error {
+		observation, lifecycle, err := openai.ObserveResponseEventUsage(event)
+		if err != nil {
+			return err
+		}
+		if !lifecycle {
+			return nil
+		}
+		id, present := event.Source().Lookup("/response/id")
+		upstreamID, valid := id.Text()
+		if !present || !valid || upstreamID != res.UpstreamID {
+			return errors.New("retained response observation has a different identifier")
+		}
+		status := observation.Status
+		if status == "incomplete" {
+			nativeIncomplete = true
+		}
+		if status == "failed" {
+			nativeTerminalFailure = true
+		}
+		switch status {
+		case "completed", "failed", "incomplete", "cancelled":
+			x.completePinned()
+		}
+		commitCtx, stopCommit := resourceCommitContext(ctx)
+		reconcileErr := s.applyResponseObservation(commitCtx, res.ID, observation)
+		stopCommit()
+		if reconcileErr != nil {
+			return errors.New("retained response observation could not be committed")
+		}
+		return nil
 	}
 	emit := func(frame []byte) error {
-		projected, original, err := projectStoredResponseFrame(frame, projection, res.Kind == resources.KindStrictResponse, previous)
+		projected, _, err := projectStoredResponseFrame(frame, projection, res.Kind == resources.KindStrictResponse, previous)
 		if err != nil || len(projected) > limit {
 			return errors.New("retained response event could not be projected")
-		}
-		if original != nil {
-			if status, ok := upstreamString(original, "status"); ok {
-				if status == "incomplete" {
-					nativeIncomplete = true
-				}
-				if status == "failed" {
-					nativeTerminalFailure = true
-				}
-				switch status {
-				case "completed", "failed", "incomplete", "cancelled":
-					commitCtx, stopCommit := resourceCommitContext(ctx)
-					reconcileErr := s.reconcileResponse(commitCtx, res.ID, original)
-					var updateErr error
-					if reconcileErr == nil {
-						updateErr = s.Resources.Update(commitCtx, res.ID, status, nil, nil)
-					}
-					stopCommit()
-					if reconcileErr != nil || updateErr != nil {
-						return errors.New("retained response terminal state could not be committed")
-					}
-				}
-			}
 		}
 		if bytes.Contains(projected, []byte("event: response.failed\n")) || bytes.Contains(projected, []byte("event: error\n")) {
 			projected, err = redactFailedResponseFrame(projected, credentialValues)
@@ -291,20 +313,24 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 			w.WriteHeader(http.StatusOK)
 			committed = true
 		}
-		if _, err := w.Write(projected); err != nil {
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+		if n, err := w.Write(projected); err != nil || n != len(projected) {
+			if err == nil {
+				err = io.ErrShortWrite
+			}
+			return fmt.Errorf("%w: %v", errClientWrite, err)
+		}
+		if err := http.NewResponseController(w).Flush(); err != nil {
 			return fmt.Errorf("%w: %v", errClientWrite, err)
 		}
 		x.delivered(s.now())
 		if fact.Interaction != nil {
 			fact.Interaction.ClientState = usage.ClientPartial
 		}
-		if err := http.NewResponseController(w).Flush(); err != nil {
-			return fmt.Errorf("%w: %v", errClientWrite, err)
-		}
 		return nil
 	}
 	_, streamErr := protocols.StreamWithEvents(openai.FamilyResponses, openai.FamilyResponses,
-		p.provider.Connector().StreamPayload(resp.Body, limit), limit, x.route.Slug, true, emit, nil)
+		p.provider.Connector().StreamPayload(resp.Body, limit), limit, x.route.Slug, true, emit, observe)
 	if streamErr != nil && (errors.Is(streamErr, errClientWrite) || errors.Is(ctx.Err(), context.Canceled)) {
 		// The client left; the provider is not at fault.
 		x.failure = (&attemptFailure{class: classCancelled}).toError()
@@ -345,6 +371,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		s.finish(x, &outcome{err: x.failure, committed: true}, http.StatusOK)
 		return nil
 	}
+	x.completePinned()
 	if fact.Interaction != nil {
 		fact.Interaction.UpstreamState, fact.Interaction.ClientState = usage.UpstreamTerminal, usage.ClientTerminal
 	}

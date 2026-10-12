@@ -8,6 +8,36 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
+func TestResponseStreamBindingKeepsOneIdentityPerAttempt(t *testing.T) {
+	x := &execution{responseBinding: &responseStreamBinding{attemptOrdinal: 1, upstreamID: "native-first", localID: "local-first"}}
+	first, err := x.responseStreamIdentity(1, "native-first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local, found := first.mappedID(1, "native-first"); !found || local != "local-first" {
+		t.Fatalf("same accepted work lost its binding: local=%q found=%t", local, found)
+	}
+	if _, err := x.responseStreamIdentity(1, "native-second"); err == nil {
+		t.Fatal("one attempt admitted another native response")
+	}
+	second, err := x.responseStreamIdentity(2, "native-second")
+	if err != nil || second == first || second.localID != "" {
+		t.Fatalf("new attempt reused a prior binding: binding=%+v err=%v", second, err)
+	}
+	second.localID = "local-second"
+	if local, found := second.mappedID(2, "native-second"); !found || local != "local-second" {
+		t.Fatalf("new accepted work lost its binding: local=%q found=%t", local, found)
+	}
+	for _, identity := range []struct {
+		ordinal int
+		id      string
+	}{{1, "native-second"}, {2, "native-first"}} {
+		if _, found := second.mappedID(identity.ordinal, identity.id); found {
+			t.Fatal("projection reused a binding from another native response or attempt")
+		}
+	}
+}
+
 func TestStrictResponseProjectionPreservesNativeSourceAndParentIdentity(t *testing.T) {
 	source := []byte(`{"id":"resp_up","object":"response","status":"in_progress","model":"native-model","previous_response_id":"resp_parent","opaque":{"big":9007199254740993,"zero":-0,"order":[3,1]}}`)
 	doc, err := oif.ParseJSON(source, oif.Limits{})
@@ -22,6 +52,15 @@ func TestStrictResponseProjectionPreservesNativeSourceAndParentIdentity(t *testi
 	want := []byte(`{"id":"strict_response_local","object":"response","status":"in_progress","model":"published-route","previous_response_id":"strict_response_parent","opaque":{"big":9007199254740993,"zero":-0,"order":[3,1]}}`)
 	if !bytes.Equal(mapped.Bytes(), want) || !bytes.Equal(doc.Bytes(), source) {
 		t.Fatalf("native response source changed beyond identity overlays:\n got %s\nwant %s", mapped.Bytes(), want)
+	}
+	native, err := validateNativeResponse(doc, "", projection.upstreamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := projection
+	other.upstreamID = "another-response"
+	if _, err := native.project(other); err == nil {
+		t.Fatal("validated native response projected under another retained identity")
 	}
 	for _, changed := range [][]byte{
 		bytes.Replace(source, []byte(`"id":"resp_up"`), []byte(`"id":"other"`), 1),
@@ -41,13 +80,13 @@ func TestStrictResponseProjectionPreservesNativeSourceAndParentIdentity(t *testi
 func TestStrictResponseStreamProjectionRetainsSSEAndOpaqueNumbers(t *testing.T) {
 	frame := []byte("id: cursor-7\nevent: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_up\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"native\",\"native\":{\"large\":9007199254740993,\"zero\":-0}}}\n\n")
 	projection := responseProjection{upstreamID: "resp_up", localID: "strict_response_local", route: "published-route"}
-	out, original, err := projectStoredResponseFrame(frame, projection, true, nil)
+	out, observed, err := projectStoredResponseFrame(frame, projection, true, nil)
 	if err != nil || !bytes.HasPrefix(out, []byte("id: cursor-7\nevent: response.created\ndata: ")) ||
 		!bytes.Contains(out, []byte(`"id":"strict_response_local"`)) ||
 		!bytes.Contains(out, []byte(`"model":"published-route"`)) ||
 		!bytes.Contains(out, []byte(`"large":9007199254740993,"zero":-0`)) ||
-		!bytes.Contains(original, []byte(`"id":"resp_up"`)) || bytes.Contains(out, []byte(`"id":"resp_up"`)) {
-		t.Fatalf("native stream projection: err=%v output=%s original=%s", err, out, original)
+		observed == nil || observed.Status != "in_progress" || observed.Complete || bytes.Contains(out, []byte(`"id":"resp_up"`)) {
+		t.Fatalf("native stream projection: err=%v output=%s observed=%+v", err, out, observed)
 	}
 }
 

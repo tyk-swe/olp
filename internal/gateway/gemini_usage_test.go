@@ -3,19 +3,25 @@ package gateway
 import (
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
 func TestGeminiLiveUsageCountsThinkingAndToolUse(t *testing.T) {
-	const frame = `{"usageMetadata":{"promptTokenCount":500,"responseTokenCount":80,"thoughtsTokenCount":900,"toolUsePromptTokenCount":20,"totalTokenCount":1500}}`
-	u := geminiLiveUsage([]byte(frame), 1024)
+	const frame = `{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":500,"responseTokenCount":80,"thoughtsTokenCount":900,"toolUsePromptTokenCount":20,"totalTokenCount":1500}}`
+	observation, err := geminilifecycle.ObserveLiveServerFrame([]byte(frame), 1024)
+	if err != nil || observation.Usage == nil {
+		t.Fatal("lost usage", err)
+	}
+	native := observation.Usage
+	u := geminiExtendedUsage(*native.Input, *native.Output, native.Cached, native.Thoughts, native.ToolUse, native.Total)
 	if u == nil || u.InputTokens != 520 || u.OutputTokens != 980 || u.ReasoningTokens == nil || *u.ReasoningTokens != 900 {
 		t.Fatalf("Live thinking and tool-use usage: %+v", u)
 	}
 	if total := totalTokens(u); total == nil || *total != 1500 {
 		t.Fatalf("Live total usage: %v", total)
 	}
-	if got := geminiLiveUsage([]byte(`{"usageMetadata":{"promptTokenCount":5,"responseTokenCount":1,"thoughtsTokenCount":-1}}`), 1024); got != nil {
+	if got, err := geminilifecycle.ObserveLiveServerFrame([]byte(`{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":5,"responseTokenCount":1,"thoughtsTokenCount":-1}}`), 1024); err != nil || got.Usage != nil {
 		t.Fatalf("accepted negative thinking usage: %+v", got)
 	}
 }

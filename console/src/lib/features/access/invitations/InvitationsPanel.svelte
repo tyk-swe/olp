@@ -1,8 +1,11 @@
 <script lang="ts">
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   import { invitationKeys } from '$lib/features/access/invitations/invitationKeys';
 
-  import { onDestroy } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import {
     createInvitation,
@@ -23,6 +26,10 @@
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
   import { formatDate } from '$lib/format';
+
+  const revokeInvitationIntent = useMutationIntent();
+
+  const createIntent = useMutationIntent();
 
   // The API defaults to seven days and rejects anything over thirty.
   const DEFAULT_EXPIRY_HOURS = 7 * 24;
@@ -58,19 +65,28 @@
     queryFn: () => listInvitationPage(pagination.cursor)
   }));
 
-  onDestroy(() => {
+  const captureOwner = usePrincipalLifetime(() => {
     invitationSecret = null;
+    email = '';
+    role = 'developer';
+    expiresInHours = DEFAULT_EXPIRY_HOURS;
+    copied = false;
+    copyError = error = notice = busy = '';
   });
 
-  async function run(label: string, action: () => Promise<void>) {
+  async function run(
+    label: string,
+    action: (isCurrent: () => boolean) => Promise<void>
+  ) {
+    const isCurrent = captureOwner();
     busy = label;
     error = notice = '';
     try {
-      await action();
+      await action(isCurrent);
     } catch (cause) {
-      error = errorMessage(cause);
+      if (isCurrent()) error = errorMessage(cause);
     } finally {
-      busy = '';
+      if (isCurrent()) busy = '';
     }
   }
 
@@ -81,21 +97,40 @@
       error = 'Enter a valid email address.';
       return;
     }
-    await run('invite', async () => {
-      invitationSecret = await createInvitation(
-        email.trim(),
+    await run('invite', async (isCurrent) => {
+      const submission = createIntent.prepare({
+        email: email.trim(),
         role,
         expiresInHours
+      });
+      const result = await createInvitation(
+        submission.input.email,
+        submission.input.role,
+        submission.input.expiresInHours,
+        submission.requestId
       );
+      if (!isCurrent()) return;
+      invitationSecret = result;
+      createIntent.reset();
       email = '';
-      await invitations.refetch();
+      notice = 'Invitation created.';
+      try {
+        const observation = await invitations.refetch();
+        if (observation?.isError) throw observation.error;
+      } catch (cause) {
+        if (isCurrent())
+          error = `Invitation created, but refreshing failed. ${errorMessage(cause)}`;
+      }
     });
   }
 
   async function removeInvitation(id: string, invitationEmail: string) {
     if (!confirm(`Revoke the invitation for ${invitationEmail}?`)) return;
-    await run(`invitation-${id}`, async () => {
-      await revokeInvitation(id);
+    await run(`invitation-${id}`, async (isCurrent) => {
+      await revokeInvitationIntent.submit(id, (input, requestId) =>
+        revokeInvitation(input, requestId)
+      );
+      if (!isCurrent()) return;
       await invitations.refetch();
       notice = 'Invitation revoked.';
     });
@@ -110,7 +145,10 @@
 
   async function copyInvitation() {
     if (!invitationSecret) return;
-    if (!(await copyText(invitationLink()))) {
+    const isCurrent = captureOwner();
+    const didCopy = await copyText(invitationLink());
+    if (!isCurrent()) return;
+    if (!didCopy) {
       copied = false;
       copyError =
         'Clipboard access is unavailable. Copy this invitation link manually.';

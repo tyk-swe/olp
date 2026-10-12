@@ -39,9 +39,9 @@ go test -race -tags=integration -count=1 -timeout=5m -v \
   -run '^TestCodeQualificationPublic' ./tests/integration
 ```
 
-After the supported transport/authorizer and Codex enrollment fixture are
-integrated, `./scripts/code-mode-qualification.sh process` runs the real gateway
-fleet suite. It requires `OLP_TEST_DATABASE_URL`, `OLP_TEST_VALKEY_URL` and
+`./scripts/code-mode-qualification.sh process` runs the real gateway fleet suite
+through the supported transport, authorizer and enrollment fixture. It requires
+`OLP_TEST_DATABASE_URL`, `OLP_TEST_VALKEY_URL` and
 `OLP_TEST_BINARY`; missing prerequisites fail rather than skip. It uses the
 additional `codecli` build tag, and includes the Claude Code and OpenCode
 journeys through the OpenCode Go and GLM Coding Plan adapters, which also need
@@ -49,9 +49,9 @@ journeys through the OpenCode Go and GLM Coding Plan adapters, which also need
 process suites.
 
 See [qualification evidence and integration prerequisites](../docs/qualification/code-mode.md)
-for the exact upstream source/package pins and unrun release gates. The foundation
-alone returns 404 at the code transport seam; a successful compile is not a
-passing fleet test. These shell suites do not run browser tests.
+for the exact upstream source/package pins and recorded qualification scope.
+A successful compile is not a passing fleet test. These shell suites do not run
+browser tests.
 
 ### Other focused suites
 
@@ -93,10 +93,13 @@ protected deep-link and unary/streaming inference proxy checks. Failure-path
 restores assert that the destination stays empty.
 Each test installation has an independent database and installation namespace.
 Code-mode process tests run with a separate 25-minute suite deadline. The
-remaining process tests retain their 30-minute deadline in two disjoint groups:
-names starting `TestA` through `TestM`, and every other test name. Both exclude
-`TestCode`, which runs in the first phase. The three selections cover the complete
-package, with the same build tags and race detection.
+remaining process tests retain their 30-minute deadline in three disjoint groups:
+names starting `TestA` through `TestF`, `TestG` through `TestM`, and every other
+test name. All exclude `TestCode`, which runs in the first phase. The four
+selections cover the complete package, with the same build tags and race
+detection. Separating the two alphabetic cohorts leaves room for intentional
+recovery, enrollment and certification waits without extending operation or
+package deadlines.
 
 Service-dependent Go tests live in `tests/integration/` or beside feature code
 and require the `integration` build tag. Internal service tests use the

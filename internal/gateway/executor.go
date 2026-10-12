@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -77,30 +78,27 @@ type execution struct {
 	serving              *interaction.ServingIdentity
 	servingSlot          string
 	servingBinding       string
-	preparedProviders    map[string]preparedProvider
-	encoded              map[string]encodedRequest
-	effectiveOutputs     map[string]effectiveOutput
-	sourceSummary        *requestSummary
-	request              request
-	family               openai.Family
-	ingress              string // the caller's wire surface, when it differs from family.Surface()
-	parsed               *openai.Request
-	media                *media.Request
-	actor                string
-	endUserDigest        string
-	keyID                string
-	budgetGroupID        *string
-	attribution          map[string]string
-	userID               string
-	affinity             []byte
-	authority            access.Authority
-	route                *runtime.Route
-	mode                 string
-	attempts             []runtime.Attempt
-	budget               int
-	preferences          *runtime.Preferences
-	decisions            []runtime.Decision
-	policy               runtime.EffectivePolicy
+	requestPreparation
+	request       request
+	family        openai.Family
+	ingress       string // the caller's wire surface, when it differs from family.Surface()
+	parsed        *openai.Request
+	media         *media.Request
+	actor         string
+	endUserDigest string
+	keyID         string
+	budgetGroupID *string
+	attribution   map[string]string
+	userID        string
+	affinity      []byte
+	authority     access.Authority
+	route         *runtime.Route
+	mode          string
+	attempts      []runtime.Attempt
+	budget        int
+	preferences   *runtime.Preferences
+	decisions     []runtime.Decision
+	policy        runtime.EffectivePolicy
 
 	// primary is the route the caller named. Its deadline and attempt budget
 	// bound the request across every route it moves on to; route is the one
@@ -155,10 +153,12 @@ type execution struct {
 	pin                *resources.Resource
 	pinnedSlot         *runtime.Slot
 	providerState      bool
-	responseMap        map[string]string
+	responseBinding    *responseStreamBinding
+	generationHTTP     *generationHTTPFinalizer
 
 	once       sync.Once
 	facts      []AttemptFact
+	exchange   *pinnedExchange
 	failure    *Error         // terminal error decided before the attempt loop ran
 	firstByte  *time.Duration // request start to the first payload byte the client received
 	lease      *limits.Lease  // the API key reservation, settled once the request ends
@@ -597,11 +597,11 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 				fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: "native_identity", UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 			}
 		} else if x.unary != nil {
-			if plan, err := x.unaryPlan(&provider, a.UpstreamModel); err == nil {
-				fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: plan.Receipt().Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+			if admission, err := x.unaryAdmission(&provider, a.UpstreamModel); err == nil {
+				fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: admission.receipt.Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 			}
-		} else if prepared, err := x.preparedProvider(&provider, a.UpstreamModel); err == nil && prepared.plan != nil {
-			fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: prepared.plan.Receipt().Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
+		} else if prepared, err := x.providerAdmission(&provider, a.UpstreamModel); err == nil && prepared.receipt != nil {
+			fact.Interaction = &usage.InteractionEvidence{Fidelity: runtime.FidelityStrict, PlanClass: prepared.receipt.Class, UpstreamState: usage.UpstreamNotSent, ClientState: usage.ClientUnobserved}
 		}
 	}
 	return fact
@@ -628,7 +628,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	fact.Carried = cfg.CarriedByPlugin()
 	// A plugin that carries the request reports only whether it was sent, so
 	// the attempt must not risk repeating work it may have done.
-	st := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: fact.Interaction != nil || fact.Carried, Declared: cfg.Classification()}}
+	retainedResponse := x.family == openai.FamilyResponses && x.providerState && responseStoreRequested(x.parsed)
+	st := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: fact.Interaction != nil || fact.Carried || retainedResponse, Declared: cfg.Classification()}}
+	nativeDeliveryClass := ""
 	attemptCtx, atr := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finishTrace := func() {
 		if atr == nil {
@@ -654,7 +656,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 			cancel()
 		}
 
-		if fact.Interaction != nil || fact.Carried {
+		if fact.Interaction != nil || fact.Carried || (retainedResponse && f.acceptance.Unresolved()) {
 			f.noRetry = f.noRetry || f.dispatched
 		}
 		if fact.Interaction != nil {
@@ -662,6 +664,11 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		}
 		f.class = class
 		fact.Class = class
+		if nativeDeliveryClass != "" {
+			fact.Class = nativeDeliveryClass
+		} else if fact.localRefusal && st.settled {
+			fact.Class = classSuccess
+		}
 		fact.Committed = f.committed
 		fact.Duration = s.now().Sub(fact.StartedAt)
 		if f.retryAfter > 0 {
@@ -679,6 +686,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	}
 	var body []byte
 	var wire openai.Family
+	var streamCandidates int64
 	var contract *interaction.Plan
 	if provider.ProfileID != "" || x.strict() || x.route.ContentPolicy != nil {
 		prepared, prepareErr := x.preparedProvider(provider, a.UpstreamModel)
@@ -688,13 +696,15 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				recordDecision(x, decision)
 			}
 			body, wire = prepared.invocation.Prepared.Document().Bytes(), prepared.invocation.Wire
+			native := openai.NewSourceEnvelope(wire, x.parsed.Route, x.parsed.Stream, prepared.invocation.Prepared.Document())
+			_, streamCandidates = estimate.OutputBounds(native, nil)
 			contract = prepared.plan
 			if contract != nil {
 				cfg = contract.Config()
 			}
 		}
 	} else {
-		body, wire, err = x.encoding(kept, provider, cfg, a.UpstreamModel)
+		body, wire, streamCandidates, err = x.encoding(kept, provider, cfg, a.UpstreamModel)
 	}
 	if err != nil {
 		return fail(classProtocol, nil)
@@ -804,7 +814,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		}()
 		emit := func(frame []byte) error {
 			if x.providerState {
-				mapped, mapErr := s.mapStreamResponseFrame(ctx, x, &fact, frame)
+				mapped, mapErr := s.mapStreamResponseFrame(ctx, x, &fact, frame, wire != openai.FamilyResponses)
 				if mapErr != nil {
 					return mapErr
 				}
@@ -865,6 +875,18 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				return nil
 			}
 		}
+		if wire == openai.FamilyResponses && x.providerState {
+			contractObserve := observe
+			observe = func(event oif.Event) error {
+				if err := s.observeStreamResponseEvent(ctx, x, &fact, event); err != nil {
+					return err
+				}
+				if contractObserve != nil {
+					return contractObserve(event)
+				}
+				return nil
+			}
+		}
 		if contract != nil && contract.ToolContinuation() {
 			var projection *interaction.ToolProjection
 			projection, err = contract.NewToolProjection(min(resources.MaxContinuationBytes, int(s.cfg.MaxResponseBytes)))
@@ -910,7 +932,7 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				}
 			}
 		} else {
-			completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.named().Slug, x.parsed.IncludeUsage, emit, observe)
+			completion, err = protocols.StreamWithEvents(wire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.named().Slug, x.parsed.IncludeUsage, emit, observe, streamCandidates)
 		}
 		if err == nil && strictResponseIncomplete {
 			st.settled = true
@@ -928,7 +950,11 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 				var native *openai.Completion
 				native, err = protocols.DecodeRequest(wire, wire, raw, x.named().Slug, "", contract.EffectiveRequest())
 				if native != nil {
-					fact.Usage = native.Usage
+					if wire == openai.FamilyResponses {
+						fact.observeUsage(native.Usage, native.UsageComplete)
+					} else {
+						fact.Usage = native.Usage
+					}
 				}
 				if err == nil {
 					st.settled = true
@@ -956,6 +982,9 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 						if _, present := source.Lookup("/model"); present {
 							model, _ := json.Marshal(x.named().Slug)
 							source, err = oif.Apply(source, []oif.Change{{Pointer: "/model", Value: string(model), Origin: oif.IdentityBinding, Reason: "published response model"}})
+							if err != nil {
+								err = &responseLocalRefusal{cause: err}
+							}
 						}
 						if err == nil {
 							completion.Body = source.Bytes()
@@ -969,7 +998,11 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 		}
 	}
 	if completion != nil {
-		fact.Usage = completion.Usage
+		if x.parsed.Stream || wire == openai.FamilyResponses {
+			fact.observeUsage(completion.Usage, completion.UsageComplete)
+		} else {
+			fact.Usage = completion.Usage
+		}
 		fact.ResponseModel = completion.ProviderModel
 		if completion.FinishReason != "" {
 			fact.FinishReasons = []string{completion.FinishReason}
@@ -980,6 +1013,41 @@ func (s *Server) attempt(ctx context.Context, x *execution, a runtime.Attempt, p
 	}
 	if err != nil {
 		f := &attemptFailure{status: resp.StatusCode, committed: committed}
+		if errors.Is(err, errClientWrite) {
+			if terminal, nativeFailure := completion.NativeResponseOutcome(); terminal {
+				// The native result arrived before its client write failed.
+				// Keep that provider outcome independent of the interruption
+				// returned to the caller, including a native failure payload.
+				st.settled = true
+				// A retained create still owns accepted work even when its
+				// terminal result never reached the original caller.
+				f.noRetry = retainedResponse && st.dispatched.Load()
+				nativeDeliveryClass = classSuccess
+				if nativeFailure != nil {
+					nativeDeliveryClass = string(st.classifier.Classify(upstream.Evidence{Settled: true, Error: nativeFailure}).Class)
+				}
+				return fail(st.classify(err, committed), f)
+			}
+		}
+		_, localMapping := errors.AsType[*responseLocalRefusal](err)
+		if localMapping || openai.IsResponseProjectionError(err) {
+			fact.localRefusal = true
+			f.overall, f.noRetry = true, st.dispatched.Load()
+			terminal, nativeFailure := completion.NativeResponseOutcome()
+			st.settled = st.settled || terminal
+			if nativeFailure != nil {
+				fact.localRefusal = false
+				// A known failed stateless generation remains retryable. An
+				// accepted retained create keeps its original resource owner.
+				f.overall = retainedResponse || fact.GenerationUsageDeferred
+				f.noRetry = f.overall && st.dispatched.Load()
+				f.upstream = x.redacted(nativeFailure)
+				class := st.classify(nativeFailure, committed)
+				f.status = inBandStatus(class)
+				return fail(class, f)
+			}
+			return fail(classAmbiguous, f)
+		}
 		var ue *openai.UpstreamError
 		var violation *interaction.Error
 		switch {
@@ -1028,7 +1096,7 @@ func (s *Server) aggregate(fact *AttemptFact, resp *http.Response, cfg connector
 	if streamed == nil {
 		return nil, err
 	}
-	fact.Usage = streamed.Usage
+	fact.observeUsage(streamed.Usage, streamed.UsageComplete)
 	return streamed.Body, err
 }
 
@@ -1072,6 +1140,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 func (s *Server) finish(x *execution, out *outcome, status int) {
 	x.once.Do(func() {
 		completedAt := s.now()
+		x.finalizePinned(out, completedAt)
 		env := Envelope{
 			RequestID:       x.request.id,
 			AccountingID:    x.request.accountingID(),
@@ -1183,6 +1252,7 @@ func (s *Server) finish(x *execution, out *outcome, status int) {
 				TraceID: traceID, SpanID: spanID, Outcome: env.Outcome, Mode: mode,
 			}, completedAt)
 		}
+		s.finalizeGenerationHTTP(x, env)
 		s.recordBusiness(env, x)
 		s.Sink.Terminal(env)
 	})

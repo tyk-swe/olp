@@ -46,13 +46,14 @@ export async function planConfiguration(
 export async function applyConfiguration(
   document: ConfigurationDocument,
   secretBindings: Record<string, string>,
+  requestId: string,
   signal?: AbortSignal,
   externalBindings?: Record<string, ExternalCredentialReference>
 ): Promise<ConfigurationPlan> {
   const { data, error, response } = await apiClient.POST(
     '/api/v1/configuration/apply',
     {
-      params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+      params: { header: { 'Idempotency-Key': requestId } },
       body: {
         document,
         secret_bindings: secretBindings,

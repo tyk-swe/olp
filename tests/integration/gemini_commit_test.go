@@ -88,7 +88,7 @@ func TestGeminiAcceptedResourceCommitsOutliveClientDisconnect(t *testing.T) {
 		if method == http.MethodPost && providerSuffix == "/v1beta/interactions" {
 			waitForLock("olp.api_keys")
 		} else {
-			waitForLock("UPDATE olp.provider_resources SET state")
+			waitForLock("FROM olp.provider_resources")
 		}
 		cancel()
 		if err := tx.Commit(t.Context()); err != nil {

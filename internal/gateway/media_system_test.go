@@ -399,6 +399,43 @@ func seedVendorMediaFixture(t *testing.T, authMode string, withCredential bool, 
 	return f
 }
 
+// republish freezes fixture edits into a new serving release and durable pin.
+// Historical jobs keep their original release, including after live quota edits.
+func (f *mediaFixture) republish(t *testing.T) {
+	t.Helper()
+	old := f.rt.Release()
+	f.snapshot.Generation = runtime.Generation{
+		ID: uuid.NewString(), Ordinal: old.Sequence + 1, ActivatedAt: time.Now(),
+	}
+	credentials := map[string][]byte{}
+	for _, provider := range old.Snapshot.Providers {
+		for _, slot := range provider.Slots {
+			if slot.CredentialID != nil {
+				if secret, ok := old.Credential(*slot.CredentialID); ok {
+					credentials[*slot.CredentialID] = secret
+				}
+			}
+		}
+	}
+	release, err := runtime.NewRelease(f.snapshot.Generation.ID, old.Sequence+1, f.snapshot, credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(release.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(t.Context(),
+		"INSERT INTO olp.runtime_releases(id,sequence,sha256,snapshot,created_by) VALUES($1,$2,$3,$4,$5)",
+		release.ID, release.Sequence, release.Digest, encoded, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	f.generationID = release.ID
+	f.rt.mu.Lock()
+	f.rt.release = release
+	f.rt.mu.Unlock()
+}
+
 func bytes32(seed byte) []byte {
 	b := make([]byte, 32)
 	for i := range b {

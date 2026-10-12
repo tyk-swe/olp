@@ -89,7 +89,8 @@ route:
 			if !x.servingAllowed(&provider, attempt.UpstreamModel, slot, false) {
 				continue
 			}
-			gate := s.gateAttempt(ctx, x, attempt, &provider, &slot, adapter.estimate(attempt, &provider), deadline)
+			estimate := adapter.estimate(attempt, &provider)
+			gate := s.gateAttempt(ctx, x, attempt, &provider, &slot, estimate, deadline)
 			switch gate.verdict {
 			case gateExpired:
 				return attemptOutcome[Result]{err: (&attemptFailure{class: classTimeout}).toError()}, nil
@@ -118,6 +119,7 @@ route:
 					continue
 				}
 				x.spent++
+				x.activatePreparation(&provider, attempt.UpstreamModel)
 				x.grantGeneration = 0
 				fact := s.newFact(x, attempt, slot, x.spent)
 				// Streams can persist accounting before dispatch returns.
@@ -127,7 +129,7 @@ route:
 				// reservation. Local failures remain refundable.
 				dispatched := failure == nil || failure.dispatched
 				x.dispatched = x.dispatched || dispatched
-				gate.hold.settle(ctx, dispatched, totalTokens(fact.Usage))
+				gate.hold.settle(ctx, dispatched, settledAttemptTokens(&fact, estimate))
 				if dispatched {
 					x.spendCaps(gate.hold.budgets, attempt)
 				}

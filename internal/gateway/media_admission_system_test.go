@@ -185,6 +185,7 @@ func TestIntegrationVideoCreatePreservesAttemptOrdinalsAfterSlotQuotaRejection(t
 	rejected.RequestsPerMinute = &one
 	provider.Slots = append([]runtime.Slot{rejected}, provider.Slots...)
 	f.snapshot.Providers[f.providerID] = provider
+	f.republish(t)
 	held, err := limiter.Reserve(t.Context(), slotRequest(&rejected, 0, time.Minute, ""))
 	if err != nil {
 		t.Fatal(err)
@@ -214,6 +215,7 @@ func TestIntegrationVideoCreateKeepsSingleUpstreamAttemptUnderWiderBudget(t *tes
 	route := f.snapshot.Routes["video-default"]
 	route.MaxAttempts = 3
 	f.snapshot.Routes["video-default"] = route
+	f.republish(t)
 	f.upstream.createStatus.Store(http.StatusInternalServerError)
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.server.URL+"/v1/videos", strings.NewReader(videoCreateBody))

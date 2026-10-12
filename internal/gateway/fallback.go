@@ -90,6 +90,7 @@ func (x *execution) adoptPlan(plan runtime.Plan) {
 		x.allowance = plan.Budget
 	}
 	x.decisions, x.policy, x.attempts, x.shadows = plan.Decisions, plan.Policy, plan.Attempts, plan.Shadows
+	x.finishPreparationPlanning()
 	x.budget = x.spent + min(plan.Budget, x.allowance-x.spent)
 	x.selector, x.baseline = plan.Selected(), nil
 	if b := plan.Baseline; b != nil {
@@ -202,12 +203,7 @@ func (x *execution) useRoute(route *runtime.Route, via string) {
 	x.route = route
 	x.visited = append(x.visited, route.Slug)
 	x.leg = &usage.RouteLeg{Route: route.Slug, RevisionID: route.RevisionID, Via: via}
-	clear(x.preparedProviders)
-	clear(x.encoded)
-	clear(x.effectiveOutputs)
-	if x.unary != nil {
-		clear(x.unary.plans)
-	}
+	x.requestPreparation = requestPreparation{}
 	x.affinity = x.routeSeed(route)
 }
 

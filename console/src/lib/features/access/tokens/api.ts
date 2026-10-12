@@ -40,11 +40,12 @@ export async function createManagementToken(
   name: string,
   scopes: ManagementTokenScope[],
   expiresAt: string,
-  projectIds?: string[]
+  projectIds: string[] | undefined,
+  requestId: string
 ): Promise<ManagementTokenSecret> {
   return unwrap(
     await apiClient.POST('/api/v1/management-tokens', {
-      params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+      params: { header: { 'Idempotency-Key': requestId } },
       body: {
         name,
         scopes,
@@ -57,7 +58,8 @@ export async function createManagementToken(
 
 export async function revokeManagementToken(
   id: string,
-  etag: string
+  etag: string,
+  requestId: string
 ): Promise<void> {
   ensureOk(
     await apiClient.POST(
@@ -67,7 +69,7 @@ export async function revokeManagementToken(
           path: { management_token_id: id },
           header: {
             'If-Match': etag,
-            'Idempotency-Key': crypto.randomUUID()
+            'Idempotency-Key': requestId
           }
         }
       }

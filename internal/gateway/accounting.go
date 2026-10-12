@@ -103,7 +103,7 @@ func accountingEvent(e Envelope) *usage.Event {
 	if (e.KeyID == "" && !usage.Keyless(e.Origin)) || e.Route == "" || e.RuntimeGenerationID == "" {
 		return nil
 	}
-	if len(e.Attempts) > 0 && e.Attempts[len(e.Attempts)-1].ResponseUsageDeferred {
+	if len(e.Attempts) > 0 && e.Attempts[len(e.Attempts)-1].GenerationUsageDeferred {
 		return nil
 	}
 	event := &usage.Event{

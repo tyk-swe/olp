@@ -28,10 +28,11 @@ export async function listBudgetGroupPage(
 }
 
 export async function createBudgetGroup(
-  input: CreateBudgetGroupInput
+  input: CreateBudgetGroupInput,
+  requestId: string
 ): Promise<{ id: string; etag: string }> {
   const response = await apiClient.POST('/api/v1/budget-groups', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': requestId } },
     body: input
   });
   return unwrap(response);

@@ -155,11 +155,15 @@ func TestIntegrationBedrockRequestsEnforceAndSettleSupplyCaps(t *testing.T) {
 					}
 					if mode == "streaming" {
 						w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
+						encoder := eventstream.NewEncoder()
 						message := bedrockMetadata(`{"usage":{"inputTokens":3,"outputTokens":2,"totalTokens":5}}`)
 						if name == "bedrock_invoke" {
 							message = bedrockChunk(t, `{"type":"message_stop","amazon-bedrock-invocationMetrics":{"inputTokenCount":3,"outputTokenCount":2}}`)
+						} else if err := encoder.Encode(w, *bedrockEvent(t, "messageStop", map[string]string{"stopReason": "end_turn"})); err != nil {
+							t.Error(err)
+							return
 						}
-						if err := eventstream.NewEncoder().Encode(w, *message); err != nil {
+						if err := encoder.Encode(w, *message); err != nil {
 							t.Error(err)
 						}
 						return

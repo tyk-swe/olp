@@ -139,6 +139,9 @@ func (s *Server) holdCaps(ctx context.Context, x *execution, attempt runtime.Att
 			}
 			checked = true
 		}
+		if e := s.Admission.checkPendingCostAccounting(ctx, owner.id); e != nil {
+			return capCheck{quota: owner.quota}
+		}
 		check.owners = append(check.owners, owner.id)
 		index := slices.IndexFunc(x.caps, func(h capHold) bool { return h.owner == owner.id })
 		bound := x.attemptCostBound(attempt)

@@ -12,6 +12,29 @@ export function operationsFrom(document) {
     if (!resolved) throw new Error(`Missing reference ${value.$ref}`);
     return resolved;
   };
+  // Standard ETag metadata is always safe when supplied. The contract selects
+  // additional allowed mutation facts; no other response headers are exposed.
+  const safeResponseHeaders = new Map([
+    ['etag', 'etag'],
+    ['olp-previous-parent-etag', 'previous_parent_etag'],
+    ['olp-parent-etag', 'parent_etag']
+  ]);
+  const parameterType = (parameter) => {
+    const schema = resolve(parameter.schema);
+    const type = schema?.type;
+    const supported = parameter.in === 'query'
+      ? ['string', 'integer', 'boolean'].includes(type) && (parameter.style ?? 'form') === 'form'
+      : parameter.in === 'path'
+        ? type === 'string' && parameter.required && (parameter.style ?? 'simple') === 'simple'
+        : parameter.in === 'header'
+          && ['if-match', 'idempotency-key'].includes(parameter.name.toLowerCase())
+          && (type === 'string' || (Array.isArray(type) && type.length === 2 && type.includes('string') && type.includes('null')))
+          && (parameter.style ?? 'simple') === 'simple';
+    if (!supported || parameter.content || parameter.allowReserved || parameter.explode === true && parameter.in !== 'query') {
+      throw new Error(`Unsupported management parameter ${parameter.in} ${parameter.name}`);
+    }
+    return Array.isArray(type) ? 'string' : type;
+  };
   const operations = [];
   const names = new Set();
   const bundle = (schema) => {
@@ -43,6 +66,9 @@ export function operationsFrom(document) {
         .filter((alternative) => 'managementToken' in alternative)
         .map((alternative) => alternative.managementToken);
       if (!scopes.length || path === '/api/v1/mcp') continue;
+      if ('x-olp-read-only' in operation && typeof operation['x-olp-read-only'] !== 'boolean') {
+        throw new Error(`Invalid reviewed read-only effect for ${operation.operationId}`);
+      }
       const name = operation.operationId;
       if (!name || names.has(name)) throw new Error(`Duplicate or missing operationId at ${path}`);
       names.add(name);
@@ -85,10 +111,16 @@ export function operationsFrom(document) {
         name,
         group: operation.tags?.[0] ?? 'management',
         method: method.toUpperCase(),
+        read_only: operation['x-olp-read-only'] ?? method === 'get',
         path,
         description: operation.summary ?? operation.description ?? name.replaceAll('_', ' '),
         scopes,
-        parameters: parameters.map((p) => ({ name: p.name, in: p.in, required: !!p.required })),
+        parameters: parameters.map((p) => ({ name: p.name, in: p.in, required: !!p.required, type: parameterType(p) })),
+        response_headers: Object.fromEntries([['ETag', 'etag'], ...successResponses.flatMap((response) =>
+          Object.keys(response.headers ?? {})
+            .filter((name) => safeResponseHeaders.has(name.toLowerCase()))
+            .map((name) => [name, safeResponseHeaders.get(name.toLowerCase())])
+        )]),
         body_required: !!body?.required,
         input_schema: bundle({ type: 'object', properties, additionalProperties: false, ...(required.length ? { required } : {}) })
       });

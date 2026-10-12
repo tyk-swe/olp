@@ -137,6 +137,18 @@ func (r InteractionResponse) WithProjection(id, previous, route string) ([]byte,
 	return doc.Bytes(), nil
 }
 
+// InteractionTurnFinished identifies a generation that has stopped consuming
+// work. requires_action hands control to the caller; continuing it is a new
+// generation submission, even though the retained interaction remains usable.
+func InteractionTurnFinished(status string) bool {
+	switch status {
+	case "requires_action", "completed", "failed", "cancelled", "incomplete":
+		return true
+	default:
+		return false
+	}
+}
+
 func validInteractionStatus(status string) bool {
 	switch status {
 	case "pending", "queued", "in_progress", "requires_action", "completed", "failed", "cancelled", "incomplete":
@@ -338,33 +350,80 @@ func ValidateLiveClientFrame(data []byte, maxBytes int) error {
 	return errors.New("Gemini Live client frame has no supported message")
 }
 
+// LiveUsage is the provider's native token observation. Missing or malformed
+// counts remain absent; absence never means zero consumption.
+type LiveUsage struct {
+	Input    *int64 `json:"promptTokenCount"`
+	Output   *int64 `json:"responseTokenCount"`
+	Cached   *int64 `json:"cachedContentTokenCount"`
+	Thoughts *int64 `json:"thoughtsTokenCount"`
+	ToolUse  *int64 `json:"toolUsePromptTokenCount"`
+	Total    *int64 `json:"totalTokenCount"`
+}
+
+// LiveServerFrame projects one validated immutable source. The gateway owns
+// sockets and settlement; this operation owner owns native grammar and usage.
+type LiveServerFrame struct {
+	Source       oif.Document
+	Kind         string
+	TurnComplete bool
+	Usage        *LiveUsage
+}
+
 func ValidateLiveServerFrame(data []byte, maxBytes int) error {
+	_, err := ObserveLiveServerFrame(data, maxBytes)
+	return err
+}
+
+func ObserveLiveServerFrame(data []byte, maxBytes int) (LiveServerFrame, error) {
 	doc, err := oif.ParseJSON(data, oif.Limits{MaxBytes: maxBytes})
 	if err != nil || doc.Root().Kind() != oif.Object {
-		return errors.New("Gemini Live server frame must be a bounded JSON object")
+		return LiveServerFrame{}, errors.New("Gemini Live server frame must be a bounded JSON object")
 	}
+	observation := LiveServerFrame{Source: doc}
 	principals := 0
 	for _, member := range doc.Root().Members() {
 		if member.Name == "usageMetadata" {
 			if member.Value.Kind() != oif.Object {
-				return errors.New("Gemini Live usage metadata must be an object")
+				return LiveServerFrame{}, errors.New("Gemini Live usage metadata must be an object")
+			}
+			var u LiveUsage
+			if json.Unmarshal(member.Value.Bytes(), &u) == nil && validLiveUsage(u) {
+				observation.Usage = &u
 			}
 			continue
 		}
 		switch member.Name {
 		case "setupComplete", "serverContent", "toolCall", "toolCallCancellation", "sessionResumptionUpdate", "goAway", "error":
 			if member.Value.Kind() != oif.Object {
-				return errors.New("Gemini Live principal event must be an object")
+				return LiveServerFrame{}, errors.New("Gemini Live principal event must be an object")
+			}
+			observation.Kind = member.Name
+			if member.Name == "serverContent" {
+				complete, present := member.Value.Lookup("turnComplete")
+				observation.TurnComplete = present && complete.Kind() == oif.Boolean && complete.Raw() == "true"
 			}
 			principals++
 		default:
-			return errors.New("Gemini Live server frame has an unregistered principal event")
+			return LiveServerFrame{}, errors.New("Gemini Live server frame has an unregistered principal event")
 		}
 	}
 	if principals != 1 {
-		return errors.New("Gemini Live server frame must carry one principal event")
+		return LiveServerFrame{}, errors.New("Gemini Live server frame must carry one principal event")
 	}
-	return nil
+	return observation, nil
+}
+
+func validLiveUsage(u LiveUsage) bool {
+	if u.Input == nil || u.Output == nil {
+		return false
+	}
+	for _, value := range []*int64{u.Input, u.Output, u.Cached, u.Thoughts, u.ToolUse, u.Total} {
+		if value != nil && *value < 0 {
+			return false
+		}
+	}
+	return u.Cached == nil || *u.Cached <= *u.Input
 }
 
 func stringField(parent oif.Value, name string) (string, bool) {

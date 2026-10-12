@@ -59,32 +59,37 @@ type Event struct {
 	Origin          string  `json:"origin,omitempty"`
 	ParentRequestID *string `json:"parent_request_id,omitempty"`
 
-	PolicyDecisions         []contentpolicy.Decision `json:"policy_decisions,omitempty"`
-	BudgetGroupID           *string                  `json:"budget_group_id"`
-	ProviderID              *string                  `json:"provider_id"`
-	RouteSlug               string                   `json:"route_slug"`
-	UpstreamModel           *string                  `json:"upstream_model"`
-	Operation               string                   `json:"operation"`
-	Surface                 string                   `json:"surface"`
-	RequestStartedAt        time.Time                `json:"request_started_at"`
-	RequestCompletedAt      time.Time                `json:"request_completed_at"`
-	ObservedAt              time.Time                `json:"observed_at"`
-	StatusCode              *int                     `json:"status_code"`
-	ErrorClass              *string                  `json:"error_class"`
-	Committed               bool                     `json:"committed"`
-	LatencyMS               int64                    `json:"latency_ms"`
-	FirstByteMS             *int64                   `json:"first_byte_ms"`
-	InputTokens             *int64                   `json:"input_tokens"`
-	OutputTokens            *int64                   `json:"output_tokens"`
-	CachedInputTokens       *int64                   `json:"cached_input_tokens"`
-	CacheWriteInputTokens   *int64                   `json:"cache_write_input_tokens"`
-	CacheWrite5MInputTokens *int64                   `json:"cache_write_5m_input_tokens"`
-	CacheWrite1HInputTokens *int64                   `json:"cache_write_1h_input_tokens"`
-	MediaUnits              *string                  `json:"media_units"`
-	UsageComplete           bool                     `json:"usage_complete"`
-	Unpriced                bool                     `json:"unpriced"`
-	PayloadCaptured         bool                     `json:"payload_captured"`
-	Attempts                []Attempt                `json:"attempts"`
+	PolicyDecisions    []contentpolicy.Decision `json:"policy_decisions,omitempty"`
+	BudgetGroupID      *string                  `json:"budget_group_id"`
+	ProviderID         *string                  `json:"provider_id"`
+	RouteSlug          string                   `json:"route_slug"`
+	UpstreamModel      *string                  `json:"upstream_model"`
+	Operation          string                   `json:"operation"`
+	Surface            string                   `json:"surface"`
+	RequestStartedAt   time.Time                `json:"request_started_at"`
+	RequestCompletedAt time.Time                `json:"request_completed_at"`
+	// HTTPOutcomePending is used only by retained generation templates. Their
+	// financial evidence may settle before the original HTTP exchange ends.
+	// Snapshot timestamps remain valid, but persistence leaves its final HTTP
+	// metadata unknown until the gateway supplies the actual completion.
+	HTTPOutcomePending      bool      `json:"http_outcome_pending,omitempty"`
+	ObservedAt              time.Time `json:"observed_at"`
+	StatusCode              *int      `json:"status_code"`
+	ErrorClass              *string   `json:"error_class"`
+	Committed               bool      `json:"committed"`
+	LatencyMS               int64     `json:"latency_ms"`
+	FirstByteMS             *int64    `json:"first_byte_ms"`
+	InputTokens             *int64    `json:"input_tokens"`
+	OutputTokens            *int64    `json:"output_tokens"`
+	CachedInputTokens       *int64    `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64    `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64    `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64    `json:"cache_write_1h_input_tokens"`
+	MediaUnits              *string   `json:"media_units"`
+	UsageComplete           bool      `json:"usage_complete"`
+	Unpriced                bool      `json:"unpriced"`
+	PayloadCaptured         bool      `json:"payload_captured"`
+	Attempts                []Attempt `json:"attempts"`
 }
 
 // Attempt is one provider attempt made while serving the request. Routing and
@@ -293,6 +298,8 @@ func Decode(payload []byte) (*Event, error) {
 // The wire types mirror the event shape with every required field behind a
 // pointer, so an absent field is a decode failure instead of a zero value.
 type wireEvent struct {
+	HTTPOutcomePending      bool               `json:"http_outcome_pending,omitempty"`
+	PayloadCaptured         bool               `json:"payload_captured"`
 	BudgetBoundary          string             `json:"budget_boundary,omitempty"`
 	EventID                 *string            `json:"event_id"`
 	RequestID               *string            `json:"request_id"`
@@ -407,7 +414,7 @@ var knownSurfaces = map[string]struct{}{
 var knownOrigins = map[string]struct{}{OriginCaller: {}, OriginShadow: {}, OriginClassifier: {}, OriginProbe: {}, OriginPlayground: {}}
 
 func (w wireEvent) decode() (*Event, error) {
-	event := &Event{Version: WireVersion}
+	event := &Event{Version: WireVersion, HTTPOutcomePending: w.HTTPOutcomePending, PayloadCaptured: w.PayloadCaptured}
 	var err error
 	if event.EventID, err = requiredUUID("event_id", w.EventID); err != nil {
 		return nil, err
@@ -868,6 +875,15 @@ func Validate(e *Event) (*Validated, error) {
 		return nil, fmt.Errorf("%w: invalid budget boundary", ErrInvalidEvent)
 	}
 	hasAttempts := len(e.Attempts) > 0
+	if e.HTTPOutcomePending {
+		if !hasAttempts || e.StatusCode != nil || e.ErrorClass != nil || e.Committed || e.FirstByteMS != nil || e.PayloadCaptured || e.BudgetBoundary != "" {
+			return nil, fmt.Errorf("%w: pending HTTP outcome carries finalized request metadata", ErrInvalidEvent)
+		}
+		final := e.Attempts[len(e.Attempts)-1]
+		if final.Committed || final.ErrorClass != nil {
+			return nil, fmt.Errorf("%w: pending HTTP outcome carries a finalized attempt", ErrInvalidEvent)
+		}
+	}
 	finalTargetMatches := true
 	if hasAttempts {
 		final := e.Attempts[len(e.Attempts)-1]
@@ -976,12 +992,12 @@ func validateUsage(usage *AttemptUsage, index int) (*AttemptUsage, error) {
 	if usage == nil {
 		return nil, fmt.Errorf("%w: attempt %d has no usage evidence", ErrInvalidEvent, index)
 	}
-	// Observed usage settles the attempt; unobserved usage is either settled as
-	// not billable, or explicitly uncertain. Nothing else is a state the charge
-	// model can price.
+	// Native counters can be observed before completion. Incomplete observed
+	// usage may remain billing-uncertain; complete observed usage cannot.
+	// Unobserved usage is either not billable or explicitly uncertain.
 	stateIsValid := (!usage.Observed && usage.Complete && !usage.BillingUncertain) ||
 		(!usage.Observed && !usage.Complete && usage.BillingUncertain) ||
-		(usage.Observed && !usage.BillingUncertain)
+		(usage.Observed && (!usage.BillingUncertain || !usage.Complete))
 	if !stateIsValid {
 		return nil, fmt.Errorf("%w: attempt %d usage state is inconsistent", ErrInvalidEvent, index)
 	}

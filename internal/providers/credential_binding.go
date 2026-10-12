@@ -16,6 +16,16 @@ func (c *Configuration) credentialBoundary() string {
 	return string(encoded)
 }
 
+// An enrollment also pins the concrete network credential version used by
+// its challenge. Ordinary credentials can rotate within the same destination.
+func (c *Configuration) enrollmentBoundary() string {
+	networkCredential := ""
+	if c.Options.Network != nil {
+		networkCredential = c.Options.Network.CredentialID
+	}
+	return c.credentialBoundary() + "\x00" + networkCredential
+}
+
 func (c *Configuration) credentialNetwork() [2]string {
 	if c.Options.Network == nil {
 		return [2]string{}

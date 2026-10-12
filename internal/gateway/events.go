@@ -111,9 +111,9 @@ type AttemptFact struct {
 	Usage         *openai.Usage
 	ResponseModel string
 	FinishReasons []string
-	// ResponseUsageDeferred delegates accounting to the durable background
+	// GenerationUsageDeferred delegates accounting to the durable background
 	// resource, which retains this generation request until final usage arrives.
-	ResponseUsageDeferred bool
+	GenerationUsageDeferred bool
 	// UsageObserved reports that the upstream told this gateway what the
 	// attempt consumed, UsageComplete that no further consumption can be
 	// attributed to it, and BillingUncertain that the upstream may have
@@ -122,6 +122,8 @@ type AttemptFact struct {
 	UsageObserved    bool
 	UsageComplete    bool
 	BillingUncertain bool
+	usageIncomplete  bool // native stream counters observed before terminal proof
+	localRefusal     bool // valid native work could not be projected or persisted locally
 	// EstimateProvenance says how the admission estimate of this attempt's
 	// input was produced: usage.EstimateTokenizer, usage.EstimateCalibrated or
 	// usage.EstimateHeuristic. It is empty when no estimate was made, as for a
@@ -134,17 +136,21 @@ type AttemptFact struct {
 	ModelFamily          string
 }
 
-// recordEvidence records what the attempt proves about upstream billing.
-// Observed usage settles the attempt; otherwise the caller decides whether
-// the upstream may still have billed for work that was never reported.
+// observeUsage retains counters without promoting intermediate stream evidence
+// to proof that no further work was billed.
+func (a *AttemptFact) observeUsage(observed *openai.Usage, complete bool) {
+	a.Usage = observed
+	a.usageIncomplete = observed != nil && !complete
+}
+
+// recordEvidence records what the attempt proves about upstream billing. The
+// caller's fallback matters when counters are absent; native partial counters
+// retain their explicit uncertainty even when the transport has ended.
 func (a *AttemptFact) recordEvidence(uncertain bool) {
 	switch {
-	case a.ResponseUsageDeferred:
-		a.Usage = nil
-		a.UsageObserved, a.UsageComplete, a.BillingUncertain = false, true, false
 	case a.Usage != nil:
-		a.UsageObserved, a.UsageComplete, a.BillingUncertain = true, true, false
-	case uncertain:
+		a.UsageObserved, a.UsageComplete, a.BillingUncertain = true, !a.usageIncomplete, a.usageIncomplete
+	case a.GenerationUsageDeferred || uncertain:
 		a.UsageObserved, a.UsageComplete, a.BillingUncertain = false, false, true
 	default:
 		a.UsageObserved, a.UsageComplete, a.BillingUncertain = false, true, false

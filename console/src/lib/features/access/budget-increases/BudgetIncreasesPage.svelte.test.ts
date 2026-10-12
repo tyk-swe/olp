@@ -48,6 +48,37 @@ it('retries identical grant evidence after a lost response', async () => {
     const first = vi.mocked(createIncrease).mock.calls[0];
     expect(vi.mocked(createIncrease).mock.calls[1]).toEqual(first);
     expect(first[0].amount).toBe('0.000000000001');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    vi.mocked(createIncrease).mockResolvedValueOnce({
+      id: 'saved-increase',
+      owner_id: 'owner',
+      project_id: null,
+      organization_id: null,
+      target: first[0].target,
+      window_kind: 'day',
+      window_id: Date.parse('2026-10-11T00:00:00Z') / 1000,
+      amount: first[0].amount,
+      reason: first[0].reason,
+      starts_at: '2026-10-11T00:00:00Z',
+      expires_at: '2026-10-12T00:00:00Z',
+      window_ends_at: '2026-10-12T00:00:00Z',
+      created_at: '2026-10-11T00:00:00Z',
+      created_by: 'owner',
+      revoked_at: null,
+      revoked_by: null,
+      etag: 'saved-etag'
+    });
+    vi.spyOn(client, 'invalidateQueries').mockRejectedValueOnce(
+      new Error('Refresh unavailable')
+    );
+    target
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(target.textContent).toContain('refreshing the view failed')
+    );
+    expect(target.textContent).toContain('Increase recorded until');
+    expect(target.querySelector('fieldset')!.disabled).toBe(false);
   } finally {
     await unmount(component);
     client.clear();

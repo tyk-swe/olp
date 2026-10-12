@@ -25,6 +25,11 @@
     sourceFormatLabel
   } from '$lib/features/usage/pricingSourcePresentation';
 
+  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+
+  const createIntent = useMutationIntent();
+  const publishIntent = useMutationIntent();
+
   const queryClient = useQueryClient();
   const access = useRole();
   const canEdit = $derived(access.can('pricing.update'));
@@ -78,18 +83,29 @@
     if (!canEdit || createBusy || !createReady) return;
     createBusy = true;
     error = notice = '';
+    let committed = false;
     try {
-      await createPricingSource({
+      const submission = createIntent.prepare<
+        Parameters<typeof createPricingSource>[0]
+      >({
         name: createName.trim(),
         format: createFormat,
         url: createUrl.trim() || null
       });
+      await createPricingSource(submission.input, submission.requestId);
+      createIntent.reset();
+      committed = true;
       createName = createUrl = '';
       createFormat = 'prices';
       notice = 'Pricing source created.';
-      await queryClient.invalidateQueries({ queryKey: pricingKeys.sources() });
+      await queryClient.invalidateQueries(
+        { queryKey: pricingKeys.sources() },
+        { throwOnError: true }
+      );
     } catch (cause) {
-      error = errorMessage(cause, 'The pricing source could not be created.');
+      error = committed
+        ? `Pricing source created, but refreshing failed. ${errorMessage(cause)}`
+        : errorMessage(cause, 'The pricing source could not be created.');
     } finally {
       createBusy = false;
     }
@@ -187,17 +203,31 @@
     busy = snapshot.id;
     error = notice = '';
     try {
-      const revision = await publishPricingSnapshot(snapshot, {
-        effective_at: publishEffectiveAt
-          ? new Date(publishEffectiveAt).toISOString()
-          : null,
-        overrides
+      const submission = publishIntent.prepare({
+        snapshot: { id: snapshot.id },
+        input: {
+          effective_at: publishEffectiveAt
+            ? new Date(publishEffectiveAt).toISOString()
+            : null,
+          overrides
+        }
       });
+      const revision = await publishPricingSnapshot(
+        submission.input.snapshot,
+        submission.input.input,
+        submission.requestId
+      );
+      publishIntent.reset();
       publishId = '';
       notice = `Published pricing revision ${revision.revision} from ${snapshot.sha256.slice(0, 12)}….`;
-      await queryClient.invalidateQueries({ queryKey: pricingKeys.root });
+      await queryClient.invalidateQueries(
+        { queryKey: pricingKeys.root },
+        { throwOnError: true }
+      );
     } catch (cause) {
-      error = errorMessage(cause, 'The snapshot could not be published.');
+      error = notice
+        ? `${notice} Refresh failed. ${errorMessage(cause)}`
+        : errorMessage(cause, 'The snapshot could not be published.');
     } finally {
       busy = '';
     }

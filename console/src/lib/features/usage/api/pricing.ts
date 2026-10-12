@@ -19,12 +19,13 @@ export async function listPricing(
 
 export async function createPricingRevision(
   effectiveAt: string,
-  prices: PriceDraft[]
+  prices: PriceDraft[],
+  requestId: string
 ): Promise<PricingRevision> {
   const { data, error, response } = await apiClient.POST(
     '/api/v1/pricing/revisions',
     {
-      params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+      params: { header: { 'Idempotency-Key': requestId } },
       body: { effective_at: effectiveAt, prices }
     }
   );

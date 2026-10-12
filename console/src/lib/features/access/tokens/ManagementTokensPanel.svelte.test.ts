@@ -10,6 +10,7 @@ import {
 } from '$lib/features/access/tokens/api';
 import { listProjects } from '$lib/features/access/projects/api';
 import ManagementTokensProbe from './test/ManagementTokensProbe.svelte';
+import { authLifecycle } from '$lib/features/access/session/lifecycle';
 
 const role = vi.hoisted(() => ({ current: 'owner' }));
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
@@ -101,6 +102,7 @@ afterEach(async () => {
     else delete dialogPrototype[name];
   }
   originalMethods.clear();
+  vi.restoreAllMocks();
 });
 
 function render() {
@@ -117,6 +119,49 @@ async function settle() {
   flushSync();
 }
 
+function changePrincipal() {
+  const callbacks = new Set<() => void>();
+  vi.spyOn(authLifecycle, 'onPrincipalChange').mockImplementation(
+    (callback) => {
+      callbacks.add(callback);
+      return () => callbacks.delete(callback);
+    }
+  );
+  return () => {
+    for (const callback of [...callbacks]) callback();
+  };
+}
+
+it.each(['pending', 'revealed'] as const)(
+  'forgets the %s token secret when the principal authority changes',
+  async (phase) => {
+    const change = changePrincipal();
+    const response = Promise.withResolvers<typeof token & { secret: string }>();
+    vi.mocked(createManagementToken).mockReturnValue(response.promise);
+    render();
+    await settle();
+    const input = host.querySelector<HTMLInputElement>('input[type="text"]')!;
+    input.value = 'prior-principal-deployment';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    host
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(createManagementToken).toHaveBeenCalledOnce();
+    if (phase === 'revealed') {
+      response.resolve({ ...token, secret: 'old-principal-secret' });
+      await settle();
+      expect(host.textContent).toContain('old-principal-secret');
+    }
+    change();
+    response.resolve({ ...token, secret: 'old-principal-secret' });
+    await settle();
+    expect(host.textContent).not.toContain('old-principal-secret');
+    expect(host.querySelector('dialog')).toBeNull();
+  }
+);
+
 it('lists tokens for an owner and revokes with its etag', async () => {
   vi.mocked(revokeManagementToken).mockResolvedValue();
   render();
@@ -128,7 +173,11 @@ it('lists tokens for an owner and revokes with its etag', async () => {
   revoke!.click();
   await settle();
   expect(confirm).toHaveBeenCalled();
-  expect(revokeManagementToken).toHaveBeenCalledWith(token.id, token.etag);
+  expect(revokeManagementToken).toHaveBeenCalledWith(
+    token.id,
+    token.etag,
+    expect.any(String)
+  );
   expect(host.textContent).toContain('Management token revoked.');
 });
 
@@ -164,7 +213,8 @@ it('shows the created secret once behind an explicit acknowledgement', async () 
     'nightly sync',
     ['read'],
     expect.any(String),
-    undefined
+    undefined,
+    expect.any(String)
   );
   const dialog = host.querySelector('dialog');
   expect(dialog?.open).toBe(true);
@@ -223,7 +273,8 @@ it('submits selected project ids for a scoped token', async () => {
     'scoped sync',
     ['read'],
     expect.any(String),
-    [project.id]
+    [project.id],
+    expect.any(String)
   );
 });
 
@@ -310,4 +361,32 @@ it('keeps the longest expiry choice inside the server cap', async () => {
   expect(new Date(expiresAt).getTime()).toBeGreaterThanOrEqual(
     before + 365 * day
   );
+});
+
+it('recovers a lost create response with the same expiry and submission identity', async () => {
+  let now = Date.parse('2026-10-11T09:00:00Z');
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  vi.mocked(createManagementToken)
+    .mockRejectedValueOnce(new TypeError('response lost'))
+    .mockResolvedValue({ ...token, secret: 'olpm_recovered_secret' });
+  render();
+  await settle();
+  const input = host.querySelector<HTMLInputElement>('input[type="text"]')!;
+  input.value = 'recover token';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  host
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  now += 60 * 60 * 1000;
+  host
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(createManagementToken).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(createManagementToken).mock.calls[1]).toEqual(
+    vi.mocked(createManagementToken).mock.calls[0]
+  );
+  expect(host.textContent).toContain('olpm_recovered_secret');
 });

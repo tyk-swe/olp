@@ -86,8 +86,7 @@ func (s *Server) enforceContentPolicy(x *execution) *Error {
 			return invalidRequest("content_policy_blocked", "The request was blocked by the route's content policy.", nil)
 		case matched:
 			x.parsed = transformed
-			x.preparedProviders = nil
-			x.sourceSummary = nil
+			x.requestPreparation = requestPreparation{}
 			recordDecision(x, contentpolicy.Decision{RuleID: rule.ID, Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Outcome: contentpolicy.OutcomeRedacted})
 		}
 	}

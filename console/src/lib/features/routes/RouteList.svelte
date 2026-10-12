@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+
   import { routeKeys } from '$lib/features/routes/routeKeys';
   import { retiringTargets } from '$lib/features/routes/routeEditor';
 
@@ -18,6 +20,8 @@
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { formatDate, formatInteger } from '$lib/format';
   import type { RouteListState } from '$lib/features/routes/routeListState';
+
+  const retireRouteIntent = useMutationIntent();
 
   let { listState = $bindable() }: { listState: RouteListState } = $props();
   const access = useRole();
@@ -54,7 +58,10 @@
     retiring = item.id;
     retireError = null;
     try {
-      await retireRoute(item.id, item.etag);
+      await retireRouteIntent.submit(
+        [item.id, item.etag] as const,
+        (input, requestId) => retireRoute(...input, requestId)
+      );
       await queryClient.invalidateQueries({ queryKey: routeKeys.lists });
     } catch (error) {
       retireError = `${item.slug}: ${message(error)}`;

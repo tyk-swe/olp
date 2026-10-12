@@ -695,13 +695,26 @@ func validateBedrockImageProbe(data []byte) error {
 
 func readBedrockProbeStream(data []byte, limit int) error {
 	reader := bytes.NewReader(data)
+	terminal := false
 	for {
-		if _, err := protocols.ReadBedrockEvent(reader, limit); err != nil {
+		message, err := protocols.ReadBedrockEvent(reader, limit)
+		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return nil
+				if terminal {
+					return nil
+				}
+				return errors.New("Bedrock probe ended before its native terminal event")
 			}
 			return err
 		}
+		observation, err := protocols.ObserveBedrockEvent(&message, limit)
+		if err != nil {
+			return err
+		}
+		if observation.Failed {
+			return errors.New("Bedrock probe returned a native failure")
+		}
+		terminal = terminal || observation.Terminal
 	}
 }
 

@@ -566,8 +566,21 @@ export class AuthenticationLifecycle {
 
   // Cached queries belong to one principal's exact authority: a changed role,
   // access scope, or operation set starts a fresh partition.
-  private principalPartition(user: AuthenticatedUser): string {
+  principalPartition(user: AuthenticatedUser): string {
     return `principal:${user.id}:${user.role}:${user.access_scope}:${[...user.operations].sort().join(',')}`;
+  }
+
+  onPrincipalChange(listener: () => void): () => void {
+    const partition = (snapshot: AuthenticationSnapshot) =>
+      snapshot.user ? this.principalPartition(snapshot.user) : '';
+    let current = partition(this.snapshotValue);
+    return this.subscribe((snapshot) => {
+      const next = partition(snapshot);
+      if (next !== current) {
+        current = next;
+        listener();
+      }
+    });
   }
 
   private rotateAuthenticatedRequests(): void {

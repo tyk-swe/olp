@@ -1,5 +1,6 @@
 <script lang="ts">
   import { providerKeys } from '$lib/features/providers/providerKeys';
+  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -80,6 +81,13 @@
     {}
   );
   let previousProviderEtag = $state('');
+  let refreshPending = $state(false);
+  let pendingResetPage = false;
+  const captureOwner = usePrincipalLifetime(() => {
+    refreshPending = false;
+    manualModelNames = '';
+    certificationResults = {};
+  });
   // Discovery, manual declaration and capability review all fail with the same
   // 409 on a disabled provider, so they stay locked until it is a draft again.
   const editingLocked = $derived(providerDisabled(current));
@@ -114,38 +122,70 @@
     await onProviderChanged();
   }
 
-  async function discover() {
-    if (!canManage || editingLocked) return;
-    await run('detail-discover', async () => {
-      const updated = await discoverProviderModels(current);
-      certificationResults = {};
-      await refresh(true);
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.summaries
+  async function refreshConfirmedChange(isCurrent: () => boolean) {
+    if (!isCurrent()) return;
+    await refresh(pendingResetPage);
+    if (!isCurrent()) return;
+    await queryClient.invalidateQueries(
+      { queryKey: providerKeys.summaries },
+      { throwOnError: true }
+    );
+    if (isCurrent()) refreshPending = false;
+  }
+
+  async function observeChange(
+    isCurrent: () => boolean,
+    resetPage: boolean,
+    notice: string
+  ) {
+    if (!isCurrent()) return;
+    pendingResetPage = resetPage;
+    refreshPending = true;
+    onNotice(notice);
+    try {
+      await refreshConfirmedChange(isCurrent);
+    } catch (cause) {
+      if (!isCurrent()) return;
+      throw new Error('The model change succeeded, but refreshing failed.', {
+        cause
       });
-      onNotice(
+    }
+  }
+
+  async function retryRefresh() {
+    await run('models-refresh', refreshConfirmedChange);
+  }
+
+  async function discover() {
+    if (!canManage || editingLocked || refreshPending) return;
+    await run('detail-discover', async (isCurrent) => {
+      const updated = await discoverProviderModels(current);
+      if (!isCurrent()) return;
+      certificationResults = {};
+      await observeChange(
+        isCurrent,
+        true,
         `${updated.model_count} model${updated.model_count === 1 ? '' : 's'} discovered. Review capabilities before activation.`
       );
     });
   }
 
   async function declareModels() {
-    if (!canManage || editingLocked) return;
+    if (!canManage || editingLocked || refreshPending) return;
     const submittedModelNames = manualModelNames;
     const names = parseManualModelNames(submittedModelNames);
     if (!names.length) {
       onError('Enter at least one upstream model identifier.');
       return;
     }
-    await run('detail-declare', async () => {
+    await run('detail-declare', async (isCurrent) => {
       const updated = await declareProviderModels(current, names);
+      if (!isCurrent()) return;
       if (manualModelNames === submittedModelNames) manualModelNames = '';
       certificationResults = {};
-      await refresh(true);
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.summaries
-      });
-      onNotice(
+      await observeChange(
+        isCurrent,
+        true,
         `${updated.model_count} manually declared model${updated.model_count === 1 ? '' : 's'} ready for capability review.`
       );
     });
@@ -157,21 +197,29 @@
     enabled: boolean,
     capabilities: CapabilityDeclaration[]
   ) {
-    return run(`model-${model.id}`, async () => {
+    if (refreshPending) return false;
+    const owned = captureOwner();
+    let confirmed = false;
+    await run(`model-${model.id}`, async (isCurrent) => {
       await setProviderModel(provider, model.id, enabled, capabilities);
+      if (!isCurrent()) return;
+      confirmed = true;
       certificationResults = {};
-      await refresh(false);
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.summaries
-      });
-      onNotice('Capability review saved with declared provenance.');
+      await observeChange(
+        isCurrent,
+        false,
+        'Capability review saved with declared provenance.'
+      );
     });
+    return confirmed && owned();
   }
 
   async function certifyModel(provider: Provider, modelId: string) {
-    await run(`certify-${modelId}`, async () => {
+    if (refreshPending) return;
+    await run(`certify-${modelId}`, async (isCurrent) => {
       if (!certificationPrerequisiteReady(provider)) {
-        const probe = await probeProvider(provider);
+        const { result: probe } = await probeProvider(provider);
+        if (!isCurrent()) return;
         if (!probe.succeeded) throw new Error(probe.detail);
         provider = {
           ...provider,
@@ -180,14 +228,13 @@
           last_probe_detail: probe.detail
         };
       }
-      const result = await certifyProviderModel(provider, modelId);
+      const { result } = await certifyProviderModel(provider, modelId);
+      if (!isCurrent()) return;
       certificationResults = { ...certificationResults, [modelId]: result };
 
-      await refresh(false);
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.summaries
-      });
-      onNotice(
+      await observeChange(
+        isCurrent,
+        false,
         `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`
       );
     });
@@ -195,6 +242,15 @@
 </script>
 
 <section class="card editor models" aria-labelledby="models-heading">
+  {#if refreshPending}<p class="inline-problem" role="status">
+      The model change succeeded. Refresh the view before another change.
+      <button
+        type="button"
+        class="button button-secondary"
+        disabled={Boolean(busy)}
+        onclick={retryRefresh}>Retry refresh</button
+      >
+    </p>{/if}
   <div class="section-heading">
     <div>
       <p class="eyebrow">Discovery</p>
@@ -215,7 +271,7 @@
       class="button button-secondary"
       type="button"
       onclick={discover}
-      disabled={!canManage || Boolean(busy) || editingLocked}
+      disabled={!canManage || Boolean(busy) || refreshPending || editingLocked}
       >{busy === 'detail-discover'
         ? 'Discovering…'
         : declared
@@ -298,7 +354,10 @@
                   options={capabilityOptions.data?.capabilities ?? []}
                   optionsPending={capabilityOptions.isPending}
                   optionsError={capabilityOptions.isError}
-                  disabled={!canManage || Boolean(busy) || editingLocked}
+                  disabled={!canManage ||
+                    Boolean(busy) ||
+                    refreshPending ||
+                    editingLocked}
                   {reloadVersion}
                   certification={certificationResults[model.id]}
                   onSave={(enabled, capabilities, providerEtag) =>
@@ -316,6 +375,7 @@
                     onclick={() => certifyModel(modelPage.provider, model.id)}
                     disabled={!canManage ||
                       Boolean(busy) ||
+                      refreshPending ||
                       editingLocked ||
                       !model.capabilities.length}
                     >{busy === `certify-${model.id}`

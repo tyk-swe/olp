@@ -1,8 +1,14 @@
 <script lang="ts">
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
+
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
   import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
   import { parseExternalReference } from './externalReference';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, unanswered } from '$lib/api/http';
+  import { errorMessage } from '$lib/api/http';
   import type { Provider } from './api/providers';
   import GrantEnrollmentPanel from './GrantEnrollmentPanel.svelte';
   import {
@@ -11,17 +17,11 @@
     validateCredentialSlot,
     type CredentialSlot as Slot
   } from './api/credentials';
-  import {
-    cancelGrantEnrollment,
-    continueGrantEnrollment,
-    pollGrantEnrollment,
-    startGrantEnrollment,
-    type GrantEnrollment,
-    type GrantEnrollmentCompletion,
-    type GrantEnrollmentStatus
-  } from './api/grants';
+  import { GrantEnrollmentState } from './grantEnrollment.svelte';
   import { parseManualModelNames } from './providerEditor';
   import { providerKeys } from './providerKeys';
+
+  const putCredentialSlotIntent = useMutationIntent();
   let {
     provider,
     canManage,
@@ -36,14 +36,32 @@
     onChanged: () => void | Promise<void>;
   } = $props();
   const queryClient = useQueryClient();
-  let busy = $state('');
+  let operationBusy = $state('');
   let error = $state('');
   let notice = $state('');
   /** The grant enrollment an operator is signing in through, and the slot
    * whose grant it re-enrolls. */
-  let enrollment = $state<GrantEnrollment | null>(null);
+  const access = useRole();
+  const grantPrincipal = access.user?.id;
+  const grantState = new GrantEnrollmentState({
+    allowed: () => canManage && access.user?.id === grantPrincipal,
+    error: (message) => (error = message),
+    completed: async (completion, { isCurrent }) => {
+      notice = `${enrollmentSlot}: grant enrolled for ${completion.principal} as credential version ${completion.credential_version}, pending activation. Validate its access, then test and activate the provider.`;
+      await queryClient.invalidateQueries(
+        {
+          queryKey: providerKeys.credentials(provider.id)
+        },
+        { throwOnError: true }
+      );
+      if (!isCurrent()) return;
+      await onChanged();
+      if (isCurrent()) await pool.refetch();
+    }
+  });
+  const enrollment = $derived(grantState.enrollment);
+  const busy = $derived(operationBusy || grantState.busy);
   let enrollmentSlot = $state('');
-  let grantInput = $state('');
   let editing = $state<Slot | null>(null);
   let editingEtag = $state('');
   let secret = $state('');
@@ -52,11 +70,27 @@
   let models = $state('');
   let routes = $state('');
   let keys = $state('');
+  const captureOwner = usePrincipalLifetime(() => {
+    clearDraft();
+    operationBusy = error = notice = '';
+  });
   const pool = createQuery(() => ({
     queryKey: providerKeys.slots(provider.id, provider.etag),
     queryFn: ({ signal }) => listCredentialSlots(provider.id, signal)
   }));
+  function clearDraft() {
+    putCredentialSlotIntent.reset();
+    secret = externalValue = editingEtag = '';
+    models = routes = keys = '';
+    useExternal = false;
+    editing = null;
+  }
+  function cancelEdit() {
+    if (!busy) clearDraft();
+  }
   function edit(slot?: Slot) {
+    if (!canManage || busy) return;
+    clearDraft();
     editingEtag = pool.data?.etag ?? '';
     editing = slot
       ? structuredClone(slot)
@@ -84,155 +118,70 @@
   async function save(event: SubmitEvent) {
     event.preventDefault();
     if (!canManage || busy || !editing || !editingEtag) return;
-    busy = 'save';
+    const isCurrent = captureOwner();
+    operationBusy = 'save';
     error = '';
     notice = '';
     try {
-      await putCredentialSlot(provider.id, editingEtag, {
-        slot: {
-          ...editing,
-          // A write that names no credential version keeps the slot's.
-          // Naming it would bind it again, which OLP refuses once it is
-          // revoked or its grant lapsed.
-          credential_version_id: null,
-          allowed_models: parseManualModelNames(models),
-          allowed_routes: parseManualModelNames(routes),
-          allowed_api_keys: parseManualModelNames(keys)
-        },
-        credential: useExternal ? null : secret || null,
-        ...(useExternal
-          ? { credential_reference: parseExternalReference(externalValue) }
-          : {})
-      });
-      secret = '';
-      editing = null;
+      await putCredentialSlotIntent.submit(
+        [
+          provider.id,
+          editingEtag,
+          {
+            slot: {
+              ...editing,
+              // A write that names no credential version keeps the slot's.
+              // Naming it would bind it again, which OLP refuses once it is
+              // revoked or its grant lapsed.
+              credential_version_id: null,
+              allowed_models: parseManualModelNames(models),
+              allowed_routes: parseManualModelNames(routes),
+              allowed_api_keys: parseManualModelNames(keys)
+            },
+            credential: useExternal ? null : secret || null,
+            ...(useExternal
+              ? { credential_reference: parseExternalReference(externalValue) }
+              : {})
+          }
+        ] as const,
+        (input, requestId) => putCredentialSlot(...input, requestId)
+      );
+      if (!isCurrent()) return;
+      clearDraft();
       notice =
         'Credential staged. Validate its model access, then test and activate the completed provider draft.';
       await onChanged();
-      await pool.refetch();
+      if (!isCurrent()) return;
+      await pool.refetch({ throwOnError: true });
     } catch (e) {
-      error = errorMessage(e);
+      if (isCurrent())
+        error = `${notice ? 'Credential staged, but refreshing failed. ' : ''}${errorMessage(e)}`;
     } finally {
-      busy = '';
+      if (isCurrent()) operationBusy = '';
     }
   }
   async function enroll(slot: Slot) {
     if (!canManage || busy) return;
-    busy = `enroll-${slot.id}`;
-    error = '';
     notice = '';
-    try {
-      enrollment = await startGrantEnrollment(provider, slot.id!);
-      enrollmentSlot = slot.name;
-      editing = null;
-    } catch (e) {
-      error = errorMessage(e);
-    } finally {
-      busy = '';
-    }
-  }
-  async function continueEnrollment() {
-    const current = enrollment;
-    const input = grantInput.trim();
-    if (!current || busy) return;
-    if (!input) {
-      error = 'Paste the callback URL, or the code the upstream displayed.';
-      return;
-    }
-    busy = 'grant';
-    error = '';
-    notice = '';
-    try {
-      let completion;
-      try {
-        completion = await continueGrantEnrollment(current, input);
-      } finally {
-        // A grant enrollment is continued once, whether or not it succeeds.
-        enrollment = null;
-        grantInput = '';
-      }
-      await enrolled(completion);
-    } catch (e) {
-      error = errorMessage(e);
-    } finally {
-      busy = '';
-    }
-  }
-  /** Asks whether the operator approved the device upstream, and returns how
-   * many seconds to wait before asking again, or null once the enrollment
-   * ended. A request that fails without an answer, such as while OLP
-   * restarts, is asked again. */
-  async function pollEnrollment(): Promise<number | null> {
-    const current = enrollment;
-    if (!current) return null;
-    let status: GrantEnrollmentStatus | undefined;
-    let failure: unknown;
-    try {
-      status = await pollGrantEnrollment(current);
-    } catch (e) {
-      failure = e;
-    }
-    // Cancelled meanwhile.
-    if (enrollment !== current) return null;
-    const interval = current.device?.interval ?? null;
-    if (status?.status === 'pending') return status.interval ?? interval;
-    if (unanswered(failure)) return interval;
-    enrollment = null;
-    try {
-      if (status?.status === 'completed' && status.completion) {
-        await enrolled(status.completion);
-      } else if (status?.status === 'denied') {
-        error = `${enrollmentSlot}: the device sign-in was denied upstream. Sign in again to enroll its grant.`;
-      } else if (status?.status === 'expired') {
-        error = `${enrollmentSlot}: the device sign-in expired before it was approved. Sign in again to enroll its grant.`;
-      } else {
-        error = errorMessage(failure);
-      }
-    } catch (e) {
-      error = errorMessage(e);
-    }
-    return null;
-  }
-  /** Reports the credential version a completed enrollment staged on the
-   * slot, and reloads the provider. */
-  async function enrolled(completion: GrantEnrollmentCompletion) {
-    notice = `${enrollmentSlot}: grant enrolled for ${completion.principal} as credential version ${completion.credential_version}, pending activation. Validate its access, then test and activate the provider.`;
-    await queryClient.invalidateQueries({
-      queryKey: providerKeys.credentials(provider.id)
-    });
-    await onChanged();
-    await pool.refetch();
-  }
-  async function cancelEnrollment() {
-    const current = enrollment;
-    if (!current || busy) return;
-    busy = 'grant-cancel';
-    error = '';
-    try {
-      // Abandoned at once, so a status request answering meanwhile is
-      // ignored.
-      enrollment = null;
-      grantInput = '';
-      await cancelGrantEnrollment(current);
-    } catch (e) {
-      error = errorMessage(e);
-    } finally {
-      busy = '';
-    }
+    enrollmentSlot = slot.name;
+    clearDraft();
+    await grantState.start(provider, slot.id!);
   }
   async function validate(slot: Slot) {
-    if (!pool.data) return;
-    busy = slot.id!;
+    if (!canManage || busy || !pool.data) return;
+    const isCurrent = captureOwner();
+    operationBusy = slot.id!;
     error = '';
     notice = '';
     try {
       await validateCredentialSlot(provider.id, slot.id!, pool.data.etag);
+      if (!isCurrent()) return;
       notice = `${slot.name}: model access validated.`;
-      await pool.refetch();
+      await pool.refetch({ throwOnError: true });
     } catch (e) {
-      error = errorMessage(e);
+      if (isCurrent()) error = errorMessage(e);
     } finally {
-      busy = '';
+      if (isCurrent()) operationBusy = '';
     }
   }
 </script>
@@ -339,11 +288,11 @@
   </ul>
   {#if enrollment}<GrantEnrollmentPanel
       {enrollment}
-      bind:input={grantInput}
+      bind:input={grantState.input}
       {busy}
-      onContinue={continueEnrollment}
-      onPoll={pollEnrollment}
-      onCancel={cancelEnrollment}
+      onContinue={() => grantState.continue()}
+      onPoll={() => grantState.poll()}
+      onCancel={() => grantState.cancel()}
     />{/if}
   {#if canManage && !editing}<button
       class="button button-secondary"
@@ -436,10 +385,7 @@
         <button
           class="button button-secondary"
           type="button"
-          onclick={() => {
-            editing = null;
-            secret = '';
-          }}>Cancel</button
+          onclick={cancelEdit}>Cancel</button
         >
       </fieldset>
     </form>

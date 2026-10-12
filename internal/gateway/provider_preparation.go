@@ -24,6 +24,7 @@ type preparedProvider struct {
 	parameters      runtime.Names
 	demand          *runtime.TokenDemand
 	plan            *interaction.Plan
+	receipt         *oif.Receipt
 	policyDecisions []contentpolicy.Decision
 }
 
@@ -62,6 +63,7 @@ func (x *execution) summarize(request *openai.Request) requestSummary {
 }
 
 func (x *execution) summarizeSource() requestSummary {
+	x.prepareSource()
 	if x.sourceSummary == nil || x.sourceSummary.request != x.parsed {
 		summary := x.summarize(x.parsed)
 		x.sourceSummary = &summary
@@ -87,8 +89,9 @@ func (x *execution) strict() bool {
 // by its published route targets. Admission, estimation and dispatch consume the
 // same effective defaults; accounting is still owned by the existing Attempt.
 func (x *execution) preparedProvider(provider *runtime.Provider, model string) (preparedProvider, error) {
-	key := provider.ID + "/" + provider.RevisionID + "/" + model
-	if prepared, ok := x.preparedProviders[key]; ok {
+	x.prepareSource()
+	key := encodedKey(provider, model)
+	if prepared, ok := x.preparedProviders[key]; ok && prepared.invocation.Prepared.Document().Valid() {
 		return prepared, nil
 	}
 	if x.strict() {
@@ -114,7 +117,8 @@ func (x *execution) preparedProvider(provider *runtime.Provider, model string) (
 		}
 		decisions, err := plan.CheckInput()
 		effective := x.summarize(plan.EffectiveRequest())
-		prepared := preparedProvider{plan: plan, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()}, parameters: effective.parameters, policyDecisions: decisions}
+		receipt := plan.Receipt()
+		prepared := preparedProvider{plan: plan, receipt: &receipt, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()}, parameters: effective.parameters, policyDecisions: decisions}
 		prepared.admitted, prepared.demand = x.preparedEstimate(model, effective)
 		if err != nil {
 			return prepared, err
@@ -217,6 +221,8 @@ type encodedRequest struct {
 	source oif.Document
 	body   []byte
 	wire   openai.Family
+	// candidates belongs to this native document, including effective defaults.
+	candidates int64
 }
 
 // effectiveOutput retains the merged destination controls after planning lets
@@ -246,6 +252,7 @@ func encodedKey(provider *runtime.Provider, model string) string {
 // one, and a request that is served for an hour must not hold a copy of itself for
 // each target of its route.
 func (x *execution) encodes(provider *runtime.Provider, cfg connectors.Config, model string) error {
+	x.prepareSource()
 	invocation, err := x.prepareTransformed(provider, cfg, model)
 	if err != nil {
 		return err
@@ -260,7 +267,7 @@ func (x *execution) encodes(provider *runtime.Provider, cfg connectors.Config, m
 		if x.encoded == nil {
 			x.encoded = map[string]encodedRequest{}
 		}
-		x.encoded[encodedKey(provider, model)] = encodedRequest{source: x.parsed.OIF().Document(), body: invocation.Prepared.Document().Bytes(), wire: invocation.Wire}
+		x.encoded[encodedKey(provider, model)] = encodedRequest{source: x.parsed.OIF().Document(), body: invocation.Prepared.Document().Bytes(), wire: invocation.Wire, candidates: candidates}
 	}
 	return nil
 }
@@ -268,6 +275,7 @@ func (x *execution) encodes(provider *runtime.Provider, cfg connectors.Config, m
 // takeEncoded hands the bodies planning kept to the attempt that is about to use
 // them, and keeps none.
 func (x *execution) takeEncoded() map[string]encodedRequest {
+	x.prepareSource()
 	kept := x.encoded
 	x.encoded = nil
 	return kept
@@ -276,15 +284,17 @@ func (x *execution) takeEncoded() map[string]encodedRequest {
 // encoding is the body of the caller's request for one of a provider's models, and
 // the dialect it is in: the one planning made, if it made one of the request as it
 // now is, and one made now if not.
-func (x *execution) encoding(kept map[string]encodedRequest, provider *runtime.Provider, cfg connectors.Config, model string) ([]byte, openai.Family, error) {
+func (x *execution) encoding(kept map[string]encodedRequest, provider *runtime.Provider, cfg connectors.Config, model string) ([]byte, openai.Family, int64, error) {
 	if request, ok := kept[encodedKey(provider, model)]; ok && request.source == x.parsed.OIF().Document() {
-		return request.body, request.wire, nil
+		return request.body, request.wire, request.candidates, nil
 	}
 	invocation, err := x.prepareTransformed(provider, cfg, model)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
-	return invocation.Prepared.Document().Bytes(), invocation.Wire, nil
+	native := openai.NewSourceEnvelope(invocation.Wire, x.parsed.Route, x.parsed.Stream, invocation.Prepared.Document())
+	_, candidates := estimate.OutputBounds(native, nil)
+	return invocation.Prepared.Document().Bytes(), invocation.Wire, candidates, nil
 }
 
 // attemptEstimate prices the request for an attempt on one of a provider's
@@ -294,13 +304,13 @@ func (x *execution) encoding(kept map[string]encodedRequest, provider *runtime.P
 // made at most once per family for the request.
 func (x *execution) attemptEstimate(provider *runtime.Provider, model string) (admittedEstimate, error) {
 	if x.unary != nil {
-		plan, err := x.unaryPlan(provider, model)
+		admission, err := x.unaryAdmission(provider, model)
 		if err != nil {
 			return admittedEstimate{}, err
 		}
 		// The native operations charge four bytes per token over their own
 		// documents, whatever model they are sent to.
-		tokens := plan.Estimate()
+		tokens := admission.estimate
 		return admittedEstimate{reserve: tokens, input: tokens, provenance: estimate.ProvenanceHeuristic, family: estimate.FamilyOf(model)}, nil
 	}
 	if x.automatic(provider) {
@@ -316,7 +326,7 @@ func (x *execution) attemptEstimate(provider *runtime.Provider, model string) (a
 		e.Output, e.Candidates = bounds.output, bounds.candidates
 		return admittedEstimate{reserve: e.Tokens(), input: e.Input, reply: e.Reply(), provenance: e.Provenance, family: e.Family}, nil
 	}
-	prepared, err := x.preparedProvider(provider, model)
+	prepared, err := x.providerAdmission(provider, model)
 	if err != nil {
 		return admittedEstimate{}, err
 	}

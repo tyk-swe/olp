@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiClient } from '$lib/api/client';
 import type { ProviderModelInventory } from '../api/models';
 import BulkRouteCreation from './BulkRouteCreation.svelte';
+import { authLifecycle } from '$lib/features/access/session/lifecycle';
 
 const model: ProviderModelInventory = {
   lifecycle: null,
@@ -58,6 +59,51 @@ afterEach(async () => {
   await unmount(component);
   host.remove();
   vi.restoreAllMocks();
+  await authLifecycle.principalInvalidated();
+});
+
+it('drops a created route after the same user changes authority', async () => {
+  const session = (access_scope: 'global' | 'assigned') =>
+    authLifecycle.establishSession({
+      user: {
+        id: 'bulk-owner',
+        email: 'bulk@example.com',
+        display_name: 'Bulk owner',
+        role: 'owner',
+        access_scope,
+        operations: ['read', 'configure']
+      },
+      csrf_token: 'csrf'
+    });
+  session('global');
+  let finish!: (value: never) => void;
+  const post = vi.spyOn(apiClient, 'POST').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click();
+  flushSync();
+  host
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+  session('assigned');
+  flushSync();
+  finish({
+    data: { id: 'old-private-draft', slug: 'old-authority', etag: 'etag' },
+    response: new Response(null, { status: 201 })
+  } as never);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(host.textContent).not.toContain('old-authority');
+  expect(host.textContent).not.toContain(
+    'Validate and publish reviewed routes'
+  );
+  expect(
+    host.querySelector<HTMLInputElement>('input[type=checkbox]')!.checked
+  ).toBe(false);
 });
 
 it.each([false, true])(

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
     listCodeAccounts,
@@ -30,17 +31,21 @@
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';
 
+  const publishIntent = useMutationIntent();
+
   let {
     projectId,
     kind,
     allowed,
     gatewayURL,
-    loadClientConfiguration
+    loadClientConfiguration,
+    onDraftChange
   }: {
     projectId: string;
     kind: 'accounts' | 'pools' | 'routes' | 'budgets';
     allowed: boolean;
     gatewayURL: string;
+    onDraftChange: (dirty: boolean) => void;
     loadClientConfiguration?: (
       route: CodeRoute,
       selection: CodeClientSelection,
@@ -111,11 +116,19 @@
   }));
   async function saved() {
     editing = null;
+    onDraftChange(false);
     notice =
       kind === 'routes'
         ? 'Draft saved. Publish to change serving configuration.'
         : 'Changes saved.';
-    await client.invalidateQueries({ queryKey: codeKeys.root });
+    try {
+      await client.invalidateQueries(
+        { queryKey: codeKeys.root },
+        { throwOnError: true }
+      );
+    } catch (e) {
+      error = `Changes saved, but refreshing failed. Use Refresh to reload. ${errorMessage(e)}`;
+    }
   }
   async function publish(route: CodeRoute) {
     if (
@@ -129,13 +142,25 @@
     busy = true;
     error = '';
     notice = '';
+    let committed = false;
     try {
-      await publishCodeRoute(route);
+      const submission = publishIntent.prepare({
+        id: route.id,
+        etag: route.etag
+      });
+      await publishCodeRoute(submission.input, submission.requestId);
+      publishIntent.reset();
+      committed = true;
       notice =
         'Route published without synthetic inference. Serving health and qualification remain separate.';
-      await client.invalidateQueries({ queryKey: codeKeys.root });
+      await client.invalidateQueries(
+        { queryKey: codeKeys.root },
+        { throwOnError: true }
+      );
     } catch (e) {
-      error = mutationError(e);
+      error = committed
+        ? `Route published, but refreshing failed. ${errorMessage(e)}`
+        : mutationError(e);
     } finally {
       busy = false;
     }
@@ -183,6 +208,7 @@
           {editing}
           {projectId}
           {allowed}
+          {onDraftChange}
           {...inventory.data}
           onSaved={saved}
           onCancel={() => (editing = null)}

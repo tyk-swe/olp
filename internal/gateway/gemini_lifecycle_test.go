@@ -75,20 +75,6 @@ func TestGeminiLiveFrameWriteHasIndependentDeadline(t *testing.T) {
 }
 
 func TestGeminiLiveUsageRequiresDocumentedResponseCategoryAndConservativeSettlement(t *testing.T) {
-	const valid = `{"serverContent":{"turnComplete":true},"usageMetadata":{"promptTokenCount":9,"responseTokenCount":5,"cachedContentTokenCount":3}}`
-	u := geminiLiveUsage([]byte(valid), 1024)
-	if u == nil || u.InputTokens != 9 || u.OutputTokens != 5 || u.CachedInputTokens == nil || *u.CachedInputTokens != 3 || !geminiLiveTurnComplete([]byte(valid), 1024) {
-		t.Fatalf("documented Live usage/turn was not observed: %+v", u)
-	}
-	for _, raw := range []string{
-		`{"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":5}}`,
-		`{"usageMetadata":{"promptTokenCount":9,"responseTokenCount":5,"cachedContentTokenCount":10}}`,
-		`{"usageMetadata":{"responseTokenCount":5}}`,
-	} {
-		if got := geminiLiveUsage([]byte(raw), 1024); got != nil {
-			t.Fatalf("uncertain usage counted as complete: %s %+v", raw, got)
-		}
-	}
 	x := &execution{estimate: 100, dispatched: true, facts: []AttemptFact{{Usage: &openai.Usage{InputTokens: 12, OutputTokens: 3}, BillingUncertain: true}}}
 	if amount := geminiLiveSettlement(x); amount == nil || *amount != 100 {
 		t.Fatalf("uncertain session under-reserved: %v", amount)

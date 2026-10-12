@@ -222,8 +222,11 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 			return nil, serverError(http.StatusInternalServerError, "continuation_unavailable", "The strict response contract could not be committed.")
 		}
 		if deferred {
+			if err := attachGenerationHTTP(x, res); err != nil {
+				return nil, serverError(http.StatusInternalServerError, "continuation_unavailable", "The original response accounting owner could not be attached.")
+			}
 			last := &x.facts[len(x.facts)-1]
-			last.ResponseUsageDeferred = true
+			last.GenerationUsageDeferred = true
 			last.recordEvidence(false)
 			if e := s.reconcileResponse(commitCtx, res.ID, body); e != nil {
 				return nil, e
@@ -245,7 +248,8 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 	}
 	deferred := s.pendingResponseUsage(x, &fact, metadata)
 	encoded, _ := json.Marshal(metadata)
-	res, err := s.Resources.GetByUpstream(ctx, resources.KindResponse, authority.ID, fact.ProviderID, upstreamID)
+	identity := responseNativeIdentity(x, &fact, upstreamID)
+	res, err := s.Resources.GetByUpstream(ctx, identity)
 	if errors.Is(err, resources.ErrNotFound) {
 		res, err = s.Resources.Put(ctx, &resources.Resource{
 			Kind:               resources.KindResponse,
@@ -254,6 +258,7 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 			ProviderID:         fact.ProviderID,
 			ProviderRevisionID: fact.ProviderRevisionID,
 			RouteRevisionID:    x.route.RevisionID,
+			TargetID:           fact.TargetID,
 			SlotID:             fact.SlotID,
 			CredentialID:       credential,
 			UpstreamID:         upstreamID,
@@ -266,8 +271,11 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 		return nil, serverError(http.StatusInternalServerError, "internal_error", "The stored response mapping could not be recorded.")
 	}
 	if deferred {
+		if err := attachGenerationHTTP(x, res); err != nil {
+			return nil, serverError(http.StatusInternalServerError, "internal_error", "The original response accounting owner could not be attached.")
+		}
 		last := &x.facts[len(x.facts)-1]
-		last.ResponseUsageDeferred = true
+		last.GenerationUsageDeferred = true
 		last.recordEvidence(false)
 		if e := s.reconcileResponse(ctx, res.ID, body); e != nil {
 			return nil, e
@@ -275,7 +283,7 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 	}
 	out, err := rewriteID(body, "id", res.ID)
 	if err == nil {
-		out, err = s.mapPreviousResponse(ctx, out, authority.ID, fact.ProviderID, x.pin)
+		out, err = s.mapPreviousResponse(ctx, out, identity, x.pin)
 	}
 	if err != nil {
 		return nil, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
@@ -286,14 +294,15 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *execution, authority 
 // previousResponseLocal resolves an upstream previous_response_id echoed by
 // a non-strict provider to the caller's local id. It returns "" when the
 // gateway holds no mapping, and the caller then withholds the upstream id.
-func (s *Server) previousResponseLocal(ctx context.Context, keyID, providerID string, pin *resources.Resource, upstream string) string {
+func (s *Server) previousResponseLocal(ctx context.Context, identity resources.NativeIdentity, pin *resources.Resource, upstream string) string {
 	if pin != nil && pin.UpstreamID == upstream {
 		return pin.ID
 	}
 	if s.Resources == nil {
 		return ""
 	}
-	res, err := s.Resources.GetByUpstream(ctx, resources.KindResponse, keyID, providerID, upstream)
+	identity.UpstreamID = upstream
+	res, err := s.Resources.GetByUpstream(ctx, identity)
 	if err != nil {
 		return ""
 	}
@@ -302,33 +311,12 @@ func (s *Server) previousResponseLocal(ctx context.Context, keyID, providerID st
 
 // mapPreviousResponse maps a non-strict response object's echoed
 // previous_response_id so callers only see gateway-owned response ids.
-func (s *Server) mapPreviousResponse(ctx context.Context, body []byte, keyID, providerID string, pin *resources.Resource) ([]byte, error) {
+func (s *Server) mapPreviousResponse(ctx context.Context, body []byte, identity resources.NativeIdentity, pin *resources.Resource) ([]byte, error) {
 	upstream, ok := upstreamString(body, "previous_response_id")
 	if !ok {
 		return body, nil
 	}
-	return rewritePrevious(body, s.previousResponseLocal(ctx, keyID, providerID, pin, upstream))
-}
-
-func responseUsage(body []byte) *openai.Usage {
-	var obj struct {
-		Usage *struct {
-			InputTokens        int64 `json:"input_tokens"`
-			OutputTokens       int64 `json:"output_tokens"`
-			InputTokensDetails *struct {
-				CachedTokens int64 `json:"cached_tokens"`
-			} `json:"input_tokens_details"`
-		} `json:"usage"`
-	}
-	if json.Unmarshal(body, &obj) != nil || obj.Usage == nil {
-		return nil
-	}
-	usage := &openai.Usage{InputTokens: obj.Usage.InputTokens, OutputTokens: obj.Usage.OutputTokens}
-	if obj.Usage.InputTokensDetails != nil && obj.Usage.InputTokensDetails.CachedTokens >= 0 {
-		cached := obj.Usage.InputTokensDetails.CachedTokens
-		usage.CachedInputTokens = &cached
-	}
-	return usage
+	return rewritePrevious(body, s.previousResponseLocal(ctx, identity, pin, upstream))
 }
 
 func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retainedUse, op func(context.Context, *execution, access.Authority, *resources.Resource, *pin, *runtime.Route) *Error) {
@@ -396,36 +384,54 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	if err != nil {
 		return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 	}
-	var strictResultDoc oif.Document
-	if res.Kind == resources.KindStrictResponse {
-		doc, parseErr := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)})
-		if parseErr != nil {
+	doc, parseErr := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)})
+	if parseErr != nil {
+		if res.Kind == resources.KindStrictResponse {
 			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider returned an invalid native response.")
 		}
+		return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed response object.")
+	}
+	var native nativeResponse
+	if res.Kind == resources.KindStrictResponse {
+		native, err = validateNativeResponse(doc, "", res.UpstreamID)
+		if err != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider returned an invalid native response identity or grammar.")
+		}
+	} else {
+		id, present := doc.Root().Lookup("id")
+		upstream, valid := id.Text()
+		if !present || !valid || upstream != res.UpstreamID {
+			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned an unbound response identity.")
+		}
+	}
+	observation, err := openai.ObserveResponseDocumentUsage(doc)
+	if err != nil {
+		return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned malformed response usage.")
+	}
+	if observation.Status == "completed" {
+		output, present := doc.Root().Lookup("output")
+		if !present || output.Kind() != oif.Array {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid completed response output.")
+		}
+	}
+	x.completePinned()
+	commitCtx, stopCommit := resourceCommitContext(ctx)
+	defer stopCommit()
+	if e := s.applyResponseObservation(commitCtx, res.ID, observation); e != nil {
+		return e
+	}
+	nativeStatus := observation.Status
+	var out []byte
+	if res.Kind == resources.KindStrictResponse {
 		projection := responseProjection{upstreamID: res.UpstreamID, localID: res.ID, route: res.RouteSlug}
 		projection.previousUpstream, projection.previousLocal, err = responseParentProjection(res, x.responseContract)
 		if err != nil {
 			return serverError(http.StatusConflict, "provider_resource_unavailable", "The retained parent response cannot be reconstructed.")
 		}
-		mapped, mapErr := projection.project(doc, "")
-		if mapErr != nil {
-			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider returned an unbound response identity.")
+		strictResultDoc, err := native.project(projection)
+		if err != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The retained provider response could not be projected to its local identities.")
 		}
-		strictResultDoc = mapped
-	}
-	commitCtx, stopCommit := resourceCommitContext(ctx)
-	defer stopCommit()
-	if e := s.reconcileResponse(commitCtx, res.ID, result); e != nil {
-		return e
-	}
-	nativeStatus, hasStatus := upstreamString(result, "status")
-	if hasStatus {
-		if err := s.Resources.Update(commitCtx, res.ID, nativeStatus, nil, nil); err != nil {
-			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The response status could not be committed.")
-		}
-	}
-	var out []byte
-	if res.Kind == resources.KindStrictResponse {
 		if nativeStatus == "failed" {
 			strictResultDoc, err = redactNativeFailureDocument(strictResultDoc, x.sensitive)
 			if err != nil {
@@ -436,7 +442,7 @@ func (s *Server) responseUpstream(ctx context.Context, x *execution, res *resour
 	} else {
 		out, err = rewriteID(result, "id", res.ID)
 		if err == nil {
-			out, err = s.mapPreviousResponse(commitCtx, out, res.APIKeyID, res.ProviderID, nil)
+			out, err = s.mapPreviousResponse(commitCtx, out, res.NativeIdentity(), nil)
 		}
 	}
 	if err != nil {
@@ -492,6 +498,7 @@ func (s *Server) deleteResponse(w http.ResponseWriter, r *http.Request) {
 		defer resp.Body.Close()
 		x.dispatched = true
 		result, _ := readBounded(resp.Body, s.cfg.MaxResponseBytes)
+		x.completePinned()
 		// The provider already deleted the response: the mapping must follow
 		// even when the client has gone.
 		commitCtx, stopCommit := resourceCommitContext(ctx)
@@ -536,14 +543,109 @@ func (s *Server) responseInputItems(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
+		if _, err := oif.ParseJSON(result, oif.Limits{MaxBytes: int(s.cfg.MaxResponseBytes)}); err != nil {
+			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned invalid input items.")
+		}
+		x.completePinned()
 		s.writeStateJSON(w, x, result)
 		return nil
 	})
 }
 
-var errResponseMapping = errors.New("stored response mapping failed")
+var errResponseMapping = &openai.ProtocolError{Detail: "stored response mapping failed"}
 
-func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact *AttemptFact, frame []byte) ([]byte, error) {
+type responseLocalRefusal struct{ cause error }
+
+func (e *responseLocalRefusal) Error() string {
+	return "stored response projection or persistence failed"
+}
+func (e *responseLocalRefusal) Unwrap() error { return e.cause }
+
+type responseStreamBinding struct {
+	attemptOrdinal int
+	upstreamID     string
+	localID        string
+}
+
+func (x *execution) responseStreamIdentity(ordinal int, upstreamID string) (*responseStreamBinding, error) {
+	if x.responseBinding == nil || x.responseBinding.attemptOrdinal != ordinal {
+		x.responseBinding = &responseStreamBinding{attemptOrdinal: ordinal, upstreamID: upstreamID}
+	}
+	if x.responseBinding.upstreamID != upstreamID {
+		return nil, errResponseMapping
+	}
+	return x.responseBinding, nil
+}
+
+func (binding *responseStreamBinding) mappedID(ordinal int, upstreamID string) (string, bool) {
+	if binding == nil || binding.attemptOrdinal != ordinal || binding.upstreamID != upstreamID || binding.localID == "" {
+		return "", false
+	}
+	return binding.localID, true
+}
+
+func (s *Server) observeStreamResponseEvent(ctx context.Context, x *execution, fact *AttemptFact, event oif.Event) error {
+	if s.Resources == nil || !responseStoreRequested(x.parsed) {
+		return nil
+	}
+	observation, lifecycle, err := openai.ObserveResponseEventUsage(event)
+	if err != nil {
+		return errResponseMapping
+	}
+	if !lifecycle {
+		return nil
+	}
+	response, present := event.Source().Root().Lookup("response")
+	if !present || response.Kind() == oif.Null {
+		if x.strict() {
+			return errResponseMapping
+		}
+		return nil
+	}
+	if response.Kind() != oif.Object {
+		return errResponseMapping
+	}
+	id, present := response.Lookup("id")
+	upstreamID, valid := id.Text()
+	if !present || !valid || upstreamID == "" || len(upstreamID) > 512 ||
+		strings.HasPrefix(upstreamID, resources.KindResponse+"_") || strings.HasPrefix(upstreamID, resources.KindStrictResponse+"_") {
+		return errResponseMapping
+	}
+	binding, err := x.responseStreamIdentity(fact.Ordinal, upstreamID)
+	if err != nil {
+		return err
+	}
+	local := binding.localID
+	if local == "" {
+		commitCtx, stopCommit := resourceCommitContext(ctx)
+		res, err := s.Resources.GetByUpstream(commitCtx, responseNativeIdentity(x, fact, upstreamID))
+		if errors.Is(err, resources.ErrNotFound) {
+			res, err = s.putStreamResponse(commitCtx, x, fact, upstreamID, observation.Status, response)
+		}
+		stopCommit()
+		if err != nil {
+			return &responseLocalRefusal{cause: err}
+		}
+		local = res.ID
+		if backgroundResponseRequested(x.parsed) {
+			if err := attachGenerationHTTP(x, res); err != nil {
+				return &responseLocalRefusal{cause: err}
+			}
+			fact.GenerationUsageDeferred = true
+		}
+		binding.localID = local
+	}
+	commitCtx, stopCommit := resourceCommitContext(ctx)
+	settleErr := s.applyResponseObservation(commitCtx, local, observation)
+	stopCommit()
+	if settleErr != nil {
+		s.log.Warn("retained response observation persistence failed", "error", settleErr)
+		return &responseLocalRefusal{cause: settleErr}
+	}
+	return nil
+}
+
+func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact *AttemptFact, frame []byte, observe bool) ([]byte, error) {
 	if s.Resources == nil || !responseStoreRequested(x.parsed) {
 		return frame, nil
 	}
@@ -558,6 +660,22 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: int(s.cfg.MaxEventBytes)})
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return nil, errResponseMapping
+	}
+	nativeEvent, err := oif.NewEvent(openai.Descriptor(openai.FamilyResponses, true), doc, "", 0)
+	if err != nil {
+		return nil, errResponseMapping
+	}
+	_, lifecycle, err := openai.ObserveResponseEventUsage(nativeEvent)
+	if err != nil {
+		return nil, errResponseMapping
+	}
+	if !lifecycle {
+		return frame, nil
+	}
+	if observe {
+		if err := s.observeStreamResponseEvent(ctx, x, fact, nativeEvent); err != nil {
+			return nil, err
+		}
 	}
 	response, present := doc.Root().Lookup("response")
 	if !present || response.Kind() == oif.Null {
@@ -579,50 +697,9 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 		strings.HasPrefix(upstreamID, resources.KindResponse+"_") || strings.HasPrefix(upstreamID, resources.KindStrictResponse+"_") {
 		return nil, errResponseMapping
 	}
-	if x.responseMap == nil {
-		x.responseMap = map[string]string{}
-	}
-	local, ok := x.responseMap[upstreamID]
+	local, ok := x.responseBinding.mappedID(fact.Ordinal, upstreamID)
 	if !ok {
-		if x.strict() && len(x.responseMap) != 0 {
-			return nil, errResponseMapping
-		}
-		commitCtx, stopCommit := resourceCommitContext(ctx)
-		res, err := s.Resources.GetByUpstream(commitCtx, responseResourceKind(x), x.keyID, fact.ProviderID, upstreamID)
-		if errors.Is(err, resources.ErrNotFound) {
-			res, err = s.putStreamResponse(commitCtx, x, fact, upstreamID, response)
-		}
-		stopCommit()
-		if err != nil {
-			return nil, errResponseMapping
-		}
-		local = res.ID
-		fact.ResponseUsageDeferred = backgroundResponseRequested(x.parsed)
-		x.responseMap[upstreamID] = local
-	}
-	if statusValue, present := response.Lookup("status"); present {
-		status, valid := statusValue.Text()
-		if !valid {
-			return nil, errResponseMapping
-		}
-		switch status {
-		case "completed", "failed", "incomplete", "cancelled":
-			commitCtx, stopCommit := resourceCommitContext(ctx)
-			var settleErr error
-			if fact.ResponseUsageDeferred {
-				if e := s.reconcileResponse(commitCtx, local, response.Bytes()); e != nil {
-					settleErr = e
-				}
-			}
-			if settleErr == nil {
-				settleErr = s.Resources.Update(commitCtx, local, status, nil, nil)
-			}
-			stopCommit()
-			if settleErr != nil {
-				s.log.Warn("retained response terminal persistence failed", "error", settleErr)
-				return nil, errResponseMapping
-			}
-		}
+		return nil, &responseLocalRefusal{cause: errResponseMapping}
 	}
 	encoded, err := json.Marshal(local)
 	if err != nil {
@@ -641,7 +718,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 			if upstream, valid := previous.Text(); valid && upstream != "" {
 				value := "null"
 				commitCtx, stopCommit := resourceCommitContext(ctx)
-				if local := s.previousResponseLocal(commitCtx, x.keyID, fact.ProviderID, x.pin, upstream); local != "" {
+				if local := s.previousResponseLocal(commitCtx, responseNativeIdentity(x, fact, ""), x.pin, upstream); local != "" {
 					value = quotedResponseID(local)
 				}
 				stopCommit()
@@ -649,8 +726,14 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 			}
 		}
 		mapped, err = oif.Apply(doc, changes)
+		if err != nil {
+			return nil, &responseLocalRefusal{cause: err}
+		}
 	}
 	if err != nil {
+		if _, local := errors.AsType[*responseLocalRefusal](err); local {
+			return nil, err
+		}
 		return nil, errResponseMapping
 	}
 	body := mapped.Bytes()
@@ -661,7 +744,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *execution, fact 
 	return out, nil
 }
 
-func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *AttemptFact, upstreamID string, response oif.Value) (*resources.Resource, error) {
+func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *AttemptFact, upstreamID, state string, response oif.Value) (*resources.Resource, error) {
 	metadata := map[string]json.RawMessage{}
 	for _, name := range []string{"object", "status", "status_details", "created_at", "expires_at"} {
 		if value, present := response.Lookup(name); present {
@@ -672,12 +755,8 @@ func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *Atte
 		encoded, _ := json.Marshal(fact.UpstreamModel)
 		metadata["upstream_model"] = encoded
 	}
-	state := "created"
-	if value, present := response.Lookup("status"); present {
-		var status string
-		if json.Unmarshal(value.Bytes(), &status) == nil && status != "" {
-			state = status
-		}
+	if state == "" {
+		state = "created"
 	}
 	var expires *time.Time
 	if value, present := response.Lookup("expires_at"); present {
@@ -703,6 +782,7 @@ func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *Atte
 		ProviderID:         fact.ProviderID,
 		ProviderRevisionID: fact.ProviderRevisionID,
 		RouteRevisionID:    x.route.RevisionID,
+		TargetID:           fact.TargetID,
 		SlotID:             fact.SlotID,
 		CredentialID:       credential,
 		UpstreamID:         upstreamID,
@@ -711,7 +791,7 @@ func (s *Server) putStreamResponse(ctx context.Context, x *execution, fact *Atte
 		ExpiresAt:          expires,
 	})
 	if err == nil && deferred {
-		fact.ResponseUsageDeferred = true
+		fact.GenerationUsageDeferred = true
 	}
 	return res, err
 }

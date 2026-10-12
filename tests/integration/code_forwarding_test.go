@@ -175,6 +175,8 @@ func TestCodeForwardingDurableTreeUsageRateAndRefusals(t *testing.T) {
 	}))
 	defer up.Close()
 	server, limiter, lookup := codeForwardServer(t, f, up.URL)
+	// All rate assertions below measure one fixed Valkey server minute.
+	limSettleInMinute(t, limClient(t), 15*time.Second)
 	for _, identity := range []struct{ conversation, parent string }{{"root", ""}, {"child", "root"}, {"grandchild", "child"}, {"root", ""}} {
 		status, body := codeForwardRequest(t, server, identity.conversation, identity.parent)
 		if status != 200 || !bytes.Equal(body, wire) {

@@ -5,6 +5,9 @@ import { ApiProblem } from '$lib/api/http';
 import { apiClient } from '$lib/api/client';
 import { providerKeys } from '$lib/features/providers/providerKeys';
 import { routeKeys } from '$lib/features/routes/routeKeys';
+import { authLifecycle } from '$lib/features/access/session/lifecycle';
+import { QueryPartition } from '$lib/features/access/session/queryPartition';
+import type { AuthenticatedUser } from '$lib/features/access/session/state';
 import {
   listProviderModelInventory,
   type ProviderModelInventory
@@ -278,6 +281,62 @@ async function settled() {
 }
 
 describe('route draft resource lifetime', () => {
+  it.each(['principal', 'authority'] as const)(
+    "does not place a disposed principal's committed draft in another principal cache after a %s change",
+    async (change) => {
+      let user: AuthenticatedUser = {
+        id: 'principal-a',
+        email: 'a@example.com',
+        display_name: 'A',
+        role: 'owner' as const,
+        access_scope: 'global' as const,
+        operations: []
+      };
+      vi.spyOn(authLifecycle, 'snapshot').mockImplementation(() => ({
+        phase: 'authenticated',
+        user,
+        lastValidatedAt: 0,
+        principalExitError: '',
+        error: ''
+      }));
+      const partition = new QueryPartition();
+      partition.use(authLifecycle.principalPartition(user));
+      client.clear();
+      client.setDefaultOptions({
+        queries: {
+          retry: false,
+          staleTime: Infinity,
+          queryKeyHashFn: (key) => partition.keyHash(key)
+        }
+      });
+      client.setQueryData(routeKeys.draft(draftA.id), draftA);
+      client.setQueryData(providerKeys.enabledModels(), [model]);
+      const pending = Promise.withResolvers<RouteDraft>();
+      vi.mocked(replaceRouteDraft).mockReturnValue(pending.promise);
+      render({});
+      await hydrated(draftA.slug);
+      edit('principal-a-private-draft');
+      save();
+      await vi.waitFor(() => expect(replaceRouteDraft).toHaveBeenCalledOnce());
+      button('Unmount editor').click();
+      flushSync();
+      user =
+        change === 'principal'
+          ? { ...user, id: 'principal-b', email: 'b@example.com' }
+          : { ...user, access_scope: 'assigned' };
+      partition.use(authLifecycle.principalPartition(user));
+      pending.resolve({
+        ...draftA,
+        slug: 'principal-a-private-draft',
+        etag: 'v2'
+      });
+      await pending.promise;
+      await Promise.resolve();
+      flushSync();
+      expect(client.getQueryData(routeKeys.draft(draftA.id))).toBeUndefined();
+    }
+  );
+
   it.each([false, true])(
     'hydrates the target draft cleanly after accepted navigation (keyed=%s)',
     async (keyed) => {

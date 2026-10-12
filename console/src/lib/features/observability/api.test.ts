@@ -54,15 +54,18 @@ describe('export sinks', () => {
     authLifecycle.establishSession(session);
     const requests = captureRequests(() => jsonResponse(sink));
 
-    await createExportSink({
-      name: 'collector',
-      type: 'https',
-      destination: 'https://collector.example.com/olp',
-      streams: ['requests', 'usage_rollups'],
-      format: 'json',
-      filter: { route: 'primary', outcome: 'success' },
-      credential: { token: 'write-only' }
-    });
+    await createExportSink(
+      {
+        name: 'collector',
+        type: 'https',
+        destination: 'https://collector.example.com/olp',
+        streams: ['requests', 'usage_rollups'],
+        format: 'json',
+        filter: { route: 'primary', outcome: 'success' },
+        credential: { token: 'write-only' }
+      },
+      '12345678-1234-4234-8234-123456789abc'
+    );
 
     const request = requests[0]!;
     expect(request.method).toBe('POST');
@@ -137,17 +140,20 @@ describe('capture policies', () => {
     authLifecycle.establishSession(session);
     const requests = captureRequests(() => jsonResponse(policy));
 
-    await createCapturePolicy({
-      project_id: '01980000-0000-7000-8000-000000000901',
-      route_slug: 'primary',
-      sink: sink.export_sink_id,
-      sample_ratio: '0.25',
-      include: ['input', 'output'],
-      key_ids: ['01980000-0000-7000-8000-000000000903'],
-      end_user_digests: ['digest-1'],
-      max_bytes: 65536,
-      enabled: true
-    });
+    await createCapturePolicy(
+      {
+        project_id: '01980000-0000-7000-8000-000000000901',
+        route_slug: 'primary',
+        sink: sink.export_sink_id,
+        sample_ratio: '0.25',
+        include: ['input', 'output'],
+        key_ids: ['01980000-0000-7000-8000-000000000903'],
+        end_user_digests: ['digest-1'],
+        max_bytes: 65536,
+        enabled: true
+      },
+      '12345678-1234-4234-8234-123456789abc'
+    );
 
     const request = requests[0]!;
     expect(request.method).toBe('POST');

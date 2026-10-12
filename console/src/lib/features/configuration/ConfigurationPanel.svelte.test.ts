@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { ApiProblem } from '$lib/api/http';
+import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import {
   applyConfiguration,
   exportConfiguration,
@@ -58,6 +60,7 @@ beforeEach(() => {
 afterEach(async () => {
   if (component) await unmount(component);
   component = undefined;
+  await authLifecycle.signOut(async () => {});
   host.remove();
   vi.unstubAllGlobals();
 });
@@ -167,9 +170,15 @@ it('applies with the collected bindings', async () => {
   await settle();
   click('Apply');
   await settle();
-  expect(applyConfiguration).toHaveBeenCalledWith(document, {
-    'acme/default': 'vendor-secret'
-  });
+  expect(applyConfiguration).toHaveBeenCalledWith(
+    document,
+    {
+      'acme/default': 'vendor-secret'
+    },
+    expect.any(String),
+    undefined,
+    undefined
+  );
   expect(host.textContent).toContain('Configuration staged.');
 });
 
@@ -313,6 +322,139 @@ it('forgets the secret bindings of an artifact once another replaces it', async 
   await settle();
   expect(planConfiguration).toHaveBeenLastCalledWith(pluginDocument, {});
 });
+
+async function planWithSecret() {
+  vi.mocked(planConfiguration).mockResolvedValue(blockedPlan);
+  click('Plan');
+  await settle();
+  const input = host.querySelector<HTMLInputElement>('#secret-acme\\/default')!;
+  input.value = 'vendor-secret';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  vi.mocked(planConfiguration).mockResolvedValue(cleanPlan);
+  click('Plan');
+  await settle();
+}
+
+it('does not replace a newer pasted artifact with an earlier file read', async () => {
+  let readFile!: (text: string) => void;
+  const pendingFile = new Promise<string>((resolve) => (readFile = resolve));
+  render();
+  pasteArtifact(JSON.stringify(document));
+  await planWithSecret();
+  const fileInput = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+  Object.defineProperty(fileInput, 'files', {
+    value: [{ text: () => pendingFile }]
+  });
+  fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  const current = JSON.stringify({
+    ...document,
+    projects: [{ name: 'Current' }]
+  });
+  pasteArtifact(current);
+  readFile(JSON.stringify(document));
+  await settle();
+  expect(
+    host.querySelector<HTMLTextAreaElement>('#promotion-artifact')!.value
+  ).toBe(current);
+  expect(host.querySelector('#secret-acme\\/default')).toBeNull();
+  click('Plan');
+  await settle();
+  expect(planConfiguration).toHaveBeenLastCalledWith(JSON.parse(current), {});
+});
+
+it.each(['unmount', 'principal replacement'])(
+  'does not re-send secret bindings after a delayed conflict and %s',
+  async (boundary) => {
+    let rejectApply!: (reason: unknown) => void;
+    vi.mocked(applyConfiguration).mockImplementationOnce(
+      () => new Promise((_, reject) => (rejectApply = reject))
+    );
+    render();
+    pasteArtifact(JSON.stringify(document));
+    await planWithSecret();
+    click('Apply');
+    await settle();
+    expect(applyConfiguration).toHaveBeenCalledTimes(1);
+    const plans = vi.mocked(planConfiguration).mock.calls.length;
+
+    if (boundary === 'unmount') {
+      await unmount(component!);
+      component = undefined;
+    } else {
+      authLifecycle.establishSession({
+        user: {
+          id: 'replacement-operator',
+          email: 'replacement@example.com',
+          display_name: 'Replacement',
+          role: 'operator',
+          access_scope: 'global',
+          operations: []
+        },
+        csrf_token: 'replacement-csrf'
+      });
+      await settle();
+    }
+    rejectApply(
+      new ApiProblem({ title: 'Stale configuration plan', status: 409 })
+    );
+    await settle();
+    expect(planConfiguration).toHaveBeenCalledTimes(plans);
+    expect(applyConfiguration).toHaveBeenCalledTimes(1);
+    if (boundary === 'principal replacement') {
+      expect(
+        host.querySelector<HTMLTextAreaElement>('#promotion-artifact')!.value
+      ).toBe('');
+      expect(host.querySelector('#secret-acme\\/default')).toBeNull();
+    }
+  }
+);
+
+it('keeps an unchanged ambiguous apply retry on its original submission', async () => {
+  vi.mocked(applyConfiguration)
+    .mockRejectedValueOnce(new Error('The response was lost.'))
+    .mockResolvedValueOnce(cleanPlan);
+  render();
+  pasteArtifact(JSON.stringify(document));
+  await planWithSecret();
+  click('Apply');
+  await settle();
+  click('Apply');
+  await settle();
+  const calls = vi.mocked(applyConfiguration).mock.calls;
+  expect(calls).toHaveLength(2);
+  expect(calls[1]).toEqual(calls[0]);
+  expect(host.textContent).toContain('Configuration staged.');
+});
+
+it.each([
+  { name: 'valid replacement', artifact: JSON.stringify(pluginDocument) },
+  { name: 'invalid replacement', artifact: '{not json' }
+])(
+  'retires an ambiguous secret-binding submission after $name',
+  async ({ artifact: replacement }) => {
+    vi.mocked(applyConfiguration)
+      .mockRejectedValueOnce(new Error('The response was lost.'))
+      .mockResolvedValueOnce(cleanPlan);
+    render();
+    pasteArtifact(JSON.stringify(document));
+    await planWithSecret();
+    click('Apply');
+    await settle();
+    const original = vi.mocked(applyConfiguration).mock.calls[0]!;
+
+    pasteArtifact(replacement);
+    pasteArtifact(JSON.stringify(document));
+    await planWithSecret();
+    click('Apply');
+    await settle();
+    const resumed = vi.mocked(applyConfiguration).mock.calls[1]!;
+    expect(resumed[0]).toEqual(original[0]);
+    expect(resumed[1]).toEqual(original[1]);
+    expect(resumed[2]).not.toBe(original[2]);
+    expect(host.textContent).toContain('Configuration staged.');
+  }
+);
 
 it('reports an invalid artifact', async () => {
   render();

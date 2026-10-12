@@ -100,8 +100,8 @@ func TestRequestRefusesPathTraversalMissingConditionsAndUnknownParameters(t *tes
 		t.Fatal("accepted missing usage range")
 	}
 	_, err := usage.Request(t.Context(), Arguments{Query: map[string]any{"start": []any{"2026-10-01"}, "end": "2026-10-09"}})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("accepted an array for a scalar query")
 	}
 }
 
@@ -214,8 +214,119 @@ func TestClientPreservesAtomicParentMutationMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	operation, _ := Lookup("delete_credential_slot")
-	result, err := client.Call(t.Context(), operation, Arguments{Path: map[string]string{"provider_id": "p", "slot_id": "s"}, IfMatch: "observed"})
+	result, err := client.Call(t.Context(), operation, Arguments{Path: map[string]string{"provider_id": "p", "slot_id": "s"}, IfMatch: "observed", IdempotencyKey: "same-intent"})
 	if err != nil || result.PreviousParentETag != `"previous"` || result.ParentETag != `"current"` {
 		t.Fatalf("parent metadata lost: %v", err)
+	}
+}
+
+func TestRequestSerializesDeclaredScalarQueriesLosslessly(t *testing.T) {
+	operation := Operation{Method: "GET", Path: "/api/v1/scalars", Parameters: []Parameter{
+		{Name: "count", In: "query", Type: "integer"},
+		{Name: "active", In: "query", Type: "boolean"},
+		{Name: "name", In: "query", Type: "string"},
+	}}
+	for _, value := range []any{int(0), int8(0), int16(0), int32(0), int64(0), uint(0), uint8(0), uint16(0), uint32(0), uint64(0), float64(0), json.Number("0")} {
+		request, err := operation.Request(t.Context(), Arguments{Query: map[string]any{"count": value, "active": false, "name": nil}})
+		if err != nil || request.URL.RawQuery != "active=false&count=0" {
+			t.Fatalf("%T: request=%v err=%v", value, request, err)
+		}
+	}
+	for _, input := range []struct {
+		value any
+		want  string
+	}{
+		{int64(-9223372036854775808), "-9223372036854775808"},
+		{uint64(18446744073709551615), "18446744073709551615"},
+		{json.Number("9007199254740993"), "9007199254740993"},
+		{float64(42), "42"},
+	} {
+		request, err := operation.Request(t.Context(), Arguments{Query: map[string]any{"count": input.value}})
+		if err != nil || request.URL.Query().Get("count") != input.want {
+			t.Fatalf("%T: request=%v err=%v", input.value, request, err)
+		}
+	}
+	for _, query := range []map[string]any{
+		{"count": "1"}, {"count": 1.5}, {"count": float64(1 << 53)}, {"count": []int{1}},
+		{"count": json.Number("01")}, {"count": json.Number("1.5")}, {"count": json.Number("NaN")},
+		{"active": "false"}, {"name": true},
+	} {
+		if _, err := operation.Request(t.Context(), Arguments{Query: query}); err == nil {
+			t.Fatalf("accepted %#v", query)
+		}
+	}
+	operation.Parameters[0].Required = true
+	for _, query := range []map[string]any{nil, {"count": nil}} {
+		if _, err := operation.Request(t.Context(), Arguments{Query: query}); err == nil {
+			t.Fatal("accepted missing required integer")
+		}
+	}
+}
+
+func TestResponseMetadataPreservesOnlyDeclaredSafeFacts(t *testing.T) {
+	operation, _ := Lookup("put_credential_slot")
+	header := http.Header{}
+	header.Set("ETag", `"child"`)
+	header.Set("OLP-Previous-Parent-ETag", `"previous"`)
+	header.Set("OLP-Parent-ETag", `"current"`)
+	header.Set("Authorization", "private-token")
+	metadata := operation.ResponseMetadata(header)
+	if metadata["etag"] != `"child"` || metadata["previous_parent_etag"] != `"previous"` || metadata["parent_etag"] != `"current"` || len(metadata) != 3 {
+		t.Fatalf("metadata=%v", metadata)
+	}
+	read, _ := Lookup("list_routes")
+	if facts := read.ResponseMetadata(header); len(facts) != 1 || facts["etag"] != `"child"` {
+		t.Fatal("exposed headers absent from this operation's response contract")
+	}
+}
+
+func TestClientRequiresCallerOwnedMutationIdentityBeforeDispatch(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer server.Close()
+	client, err := NewClient(server.URL, tokenFile(t, "private-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation, _ := Lookup("create_provider")
+	_, err = client.Call(t.Context(), operation, Arguments{Body: json.RawMessage(`{}`)})
+	if err == nil || called || !strings.Contains(err.Error(), "retain the same key") {
+		t.Fatalf("missing caller identity: called=%v err=%v", called, err)
+	}
+}
+
+func TestClientReplaysCallerIdentityAfterCommittedResponseLoss(t *testing.T) {
+	attempts := 0
+	var committedKey string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		key := r.Header.Get("Idempotency-Key")
+		if attempts == 1 {
+			committedKey = key
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Fatal(err)
+			}
+			connection.Close() // The write committed; its response never arrives.
+			return
+		}
+		if key != committedKey {
+			t.Errorf("new mutation identity %q after %q", key, committedKey)
+		}
+		w.Write([]byte(`{"id":"same-created-provider"}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, tokenFile(t, "private-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation, _ := Lookup("create_provider")
+	intent := Arguments{Body: json.RawMessage(`{"name":"same intent"}`), IdempotencyKey: "owned-intent"}
+	if _, err = client.Call(t.Context(), operation, intent); err == nil {
+		t.Fatal("lost response appeared successful")
+	}
+	response, err := client.Call(t.Context(), operation, intent)
+	if err != nil || string(response.Body) != `{"id":"same-created-provider"}` || attempts != 2 {
+		t.Fatalf("response=%v attempts=%d err=%v", response, attempts, err)
 	}
 }

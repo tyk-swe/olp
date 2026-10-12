@@ -116,7 +116,10 @@ let host: HTMLElement;
 let client: QueryClient;
 let component: ReturnType<typeof mount> | undefined;
 function session(
-  operations: Array<'read' | 'configure'> = ['read', 'configure'],
+  operations: Array<'read' | 'configure' | 'manage_projects'> = [
+    'read',
+    'configure'
+  ],
   scope: 'global' | 'assigned' = 'global'
 ) {
   authLifecycle.establishSession({
@@ -318,8 +321,8 @@ it('keeps provider allowance unknown, project data isolated and management autho
   session(['read'], 'assigned');
   flushSync();
   await settle();
-  expect(button('Save').disabled).toBe(true);
-  await submit();
+  expect(host.querySelector('#code-name')).toBeNull();
+  expect(host.textContent).toContain('Read only');
   expect(api.saveCodeAccount).not.toHaveBeenCalled();
 });
 
@@ -344,7 +347,10 @@ it('keeps native-model edits on stale ETag refusal and separates save from publi
   await click('Cancel');
   vi.mocked(api.publishCodeRoute).mockResolvedValue(route);
   await click('Publish route');
-  expect(api.publishCodeRoute).toHaveBeenCalledWith(route);
+  expect(api.publishCodeRoute).toHaveBeenCalledWith(
+    { id: route.id, etag: route.etag },
+    expect.any(String)
+  );
   expect(host.textContent).toContain('without synthetic inference');
 });
 
@@ -368,7 +374,8 @@ it('validates hard budget integers without inventing an operation bound', async 
       monthly_tokens: null,
       enabled: true
     },
-    undefined
+    undefined,
+    expect.any(String)
   );
   expect(host.textContent).toContain('Changes saved');
 });
@@ -426,7 +433,10 @@ it('retires a whole pinned tree only after confirmation and removes the retire a
     nextCursor: null
   });
   await click('Retire entire tree');
-  expect(api.retireCodeBinding).toHaveBeenCalledWith(binding.id);
+  expect(api.retireCodeBinding).toHaveBeenCalledWith(
+    binding.id,
+    expect.any(String)
+  );
   expect(host.textContent).toContain('fresh independent conversation');
   expect(host.textContent).toContain('Retired tree binding');
   expect(host.textContent).not.toContain('Retire entire tree');
@@ -1108,7 +1118,8 @@ it('reuses grant enrollment and associates the observed credential without reque
       models: ['native-model'],
       enabled: true
     },
-    undefined
+    undefined,
+    expect.any(String)
   );
 });
 
@@ -1307,7 +1318,8 @@ it('retains explicit pool memberships and makes ownership immutable', async () =
       account_ids: [account.id],
       api_key_ids: [keyId]
     },
-    pool
+    pool,
+    expect.any(String)
   );
 });
 
@@ -1334,7 +1346,8 @@ it('retains an immutable key budget scope even when its key cannot be listed', a
       monthly_tokens: null,
       enabled: true
     },
-    keyBudget
+    keyBudget,
+    expect.any(String)
   );
 });
 
@@ -1346,4 +1359,203 @@ it('does not load code-mode data without read authority', async () => {
   );
   expect(listProjectMemberships).not.toHaveBeenCalled();
   expect(api.listCodeAccounts).not.toHaveBeenCalled();
+});
+
+it('retries an ambiguous create with its captured input and identity', async () => {
+  vi.mocked(api.saveCodePool)
+    .mockRejectedValueOnce(new TypeError('response lost'))
+    .mockResolvedValue(pool);
+  await render();
+  await click('Pools');
+  await click('Create pool');
+  field('code-name', 'Uncertain pool');
+  await submit();
+  const first = vi.mocked(api.saveCodePool).mock.calls[0];
+  expect(
+    host.querySelector<HTMLInputElement>('#code-name')!.matches(':disabled')
+  ).toBe(true);
+  await click('Retry save');
+  expect(api.saveCodePool).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(api.saveCodePool).mock.calls[1]).toEqual(first);
+  expect(host.textContent).toContain('Changes saved.');
+  await click('Create pool');
+  field('code-name', 'Uncertain pool');
+  await submit();
+  expect(vi.mocked(api.saveCodePool).mock.calls[2][2]).not.toBe(first[2]);
+});
+
+it('uses a new identity when the operator changes a refused create input', async () => {
+  vi.mocked(api.saveCodePool).mockRejectedValue(
+    new ApiProblem({ type: 'about:blank', title: 'Invalid pool', status: 400 })
+  );
+  await render();
+  await click('Pools');
+  await click('Create pool');
+  field('code-name', 'First name');
+  await submit();
+  field('code-name', 'Changed name');
+  await submit();
+  expect(vi.mocked(api.saveCodePool).mock.calls[1][2]).not.toBe(
+    vi.mocked(api.saveCodePool).mock.calls[0][2]
+  );
+});
+
+it('guards dirty inputs across local project and tab changes', async () => {
+  await render();
+  await click('Pools');
+  await click('Create pool');
+  field('code-name', 'Keep this draft');
+  vi.mocked(confirm).mockReturnValue(false);
+  await click('Accounts');
+  expect(host.querySelector<HTMLInputElement>('#code-name')!.value).toBe(
+    'Keep this draft'
+  );
+  field('code-project', secondProjectId);
+  await settle();
+  expect(host.querySelector<HTMLSelectElement>('#code-project')!.value).toBe(
+    projectId
+  );
+  expect(host.querySelector<HTMLInputElement>('#code-name')!.value).toBe(
+    'Keep this draft'
+  );
+  expect(confirm).toHaveBeenCalledWith('Discard unsaved changes?');
+  vi.mocked(confirm).mockReturnValue(true);
+  await click('Accounts');
+  expect(host.querySelector('#code-name')).toBeNull();
+});
+
+it('reports a committed save independently of a failed refresh', async () => {
+  vi.mocked(api.saveCodePool).mockResolvedValue(pool);
+  await render();
+  await click('Pools');
+  await click('Create pool');
+  field('code-name', 'Saved pool');
+  vi.spyOn(client, 'invalidateQueries').mockRejectedValue(
+    new TypeError('refresh unavailable')
+  );
+  await submit();
+  expect(host.textContent).toContain('Changes saved, but refreshing failed.');
+  expect(host.querySelector('#code-name')).toBeNull();
+  await click('Refresh');
+  expect(api.saveCodePool).toHaveBeenCalledTimes(1);
+});
+
+it('gates administrative pool owner inventory but preserves the current owner', async () => {
+  session(['read', 'configure']);
+  await render();
+  await click('Pools');
+  await click('Edit pool');
+  expect(listAllProjectMembers).not.toHaveBeenCalled();
+  await click('Cancel');
+  session(['read', 'configure', 'manage_projects']);
+  await settle();
+  await click('Edit pool');
+  expect(listAllProjectMembers).toHaveBeenCalledWith(
+    projectId,
+    expect.any(AbortSignal)
+  );
+});
+
+it('clears one-use enrollment input on failure and never resubmits it', async () => {
+  vi.mocked(startGrantEnrollment).mockResolvedValue({
+    id: 'one-use-enrollment',
+    provider_id: provider.id,
+    slot_id: 'slot',
+    authorization_url: 'https://login.example/authorize',
+    expires_at: '2026-10-12T23:00:00Z',
+    input: 'secret'
+  });
+  vi.mocked(continueGrantEnrollment).mockRejectedValue(
+    new TypeError('response lost')
+  );
+  await render();
+  await click('Create account');
+  field('code-provider', provider.id);
+  await settle();
+  await click('Enroll subscription account');
+  field('grant-input', 'one-use-secret-material');
+  await click('Continue');
+  expect(host.querySelector('#grant-input')).toBeNull();
+  expect(host.textContent).not.toContain('one-use-secret-material');
+  expect(continueGrantEnrollment).toHaveBeenCalledTimes(1);
+  await click('Enroll subscription account');
+  expect(host.querySelector<HTMLInputElement>('#grant-input')!.value).toBe('');
+});
+
+it('drops enrollment completion after its editor has been destroyed', async () => {
+  vi.mocked(startGrantEnrollment).mockResolvedValue({
+    id: 'late-enrollment',
+    provider_id: provider.id,
+    slot_id: 'slot',
+    authorization_url: 'https://login.example/authorize',
+    expires_at: '2026-10-12T23:00:00Z'
+  });
+  let finish!: (
+    completion: Awaited<ReturnType<typeof continueGrantEnrollment>>
+  ) => void;
+  vi.mocked(continueGrantEnrollment).mockImplementation(
+    () => new Promise((resolve) => (finish = resolve))
+  );
+  await render();
+  await click('Create account');
+  field('code-provider', provider.id);
+  await settle();
+  await click('Enroll subscription account');
+  field('grant-input', 'https://localhost/callback?code=single-use');
+  await click('Continue');
+  await click('Pools');
+  const refresh = vi.spyOn(client, 'invalidateQueries');
+  finish({
+    provider_id: provider.id,
+    credential_id: account.credential_id,
+    credential_version: 1,
+    etag: account.etag,
+    principal: account.principal
+  });
+  await settle();
+  expect(refresh).not.toHaveBeenCalled();
+  expect(host.textContent).not.toContain('Grant enrolled.');
+});
+
+it('discards an enrollment across a same-user authority change', async () => {
+  vi.mocked(startGrantEnrollment).mockResolvedValue({
+    id: 'old-authority-enrollment',
+    provider_id: provider.id,
+    slot_id: 'slot',
+    authorization_url: 'https://login.example/authorize',
+    expires_at: '2026-10-12T23:00:00Z'
+  });
+  let finish!: (
+    completion: Awaited<ReturnType<typeof continueGrantEnrollment>>
+  ) => void;
+  vi.mocked(continueGrantEnrollment).mockImplementation(
+    () => new Promise((resolve) => (finish = resolve))
+  );
+  await render();
+  await click('Create account');
+  field('code-provider', provider.id);
+  await settle();
+  await click('Enroll subscription account');
+  field('grant-input', 'https://localhost/callback?code=old-authority');
+  await click('Continue');
+  session(['read', 'configure'], 'assigned');
+  await settle();
+  expect(host.querySelector('#grant-input')).toBeNull();
+  await click('Create account');
+  field('code-provider', provider.id);
+  await settle();
+  const refresh = vi.spyOn(client, 'invalidateQueries');
+  finish({
+    provider_id: provider.id,
+    credential_id: account.credential_id,
+    credential_version: 1,
+    etag: account.etag,
+    principal: account.principal
+  });
+  await settle();
+  expect(refresh).not.toHaveBeenCalled();
+  expect(host.querySelector<HTMLSelectElement>('#code-credential')!.value).toBe(
+    ''
+  );
+  expect(host.textContent).not.toContain('Grant enrolled.');
 });

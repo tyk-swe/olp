@@ -4,6 +4,7 @@ import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { operationsFor } from '$lib/features/access/session/test/grants';
 import {
+  createExportSink,
   createCapturePolicy,
   deleteExportSink,
   getCaptureConfiguration,
@@ -19,6 +20,21 @@ import type {
   ExportSink
 } from '$lib/features/observability/api';
 import ObservabilityProbe from './test/ObservabilityProbe.svelte';
+import type { MutationIntent } from '$lib/forms/mutationIntent';
+
+const receipts = vi.hoisted(() => [] as MutationIntent[]);
+vi.mock('$lib/forms/mutationIntent.svelte', async (original) => {
+  const helpers =
+    await original<typeof import('$lib/forms/mutationIntent.svelte')>();
+  return {
+    ...helpers,
+    useMutationIntent() {
+      const receipt = helpers.useMutationIntent();
+      receipts.push(receipt);
+      return receipt;
+    }
+  };
+});
 
 const role = vi.hoisted(() => ({
   current: 'owner' as 'owner' | 'operator' | 'developer' | 'viewer',
@@ -155,6 +171,8 @@ let component: ReturnType<typeof mount> | undefined;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  receipts.length = 0;
+  role.ops = null;
   role.current = 'owner';
   role.global = true;
   host = document.createElement('div');
@@ -521,3 +539,132 @@ it('surfaces an ETag conflict on save', async () => {
     expect(host.querySelector('[role="alert"]')).not.toBeNull()
   );
 });
+
+it('retires the pending credential receipt when replacing sink creation with an existing sink draft', async () => {
+  vi.mocked(createExportSink).mockRejectedValue(new TypeError('Response lost'));
+  await render();
+  choose('#sink-name', 'New collector');
+  choose('#sink-destination', 'https://collector.example/new');
+  choose('#sink-credential', '{"token":"ephemeral"}');
+  const form = host.querySelector('form')!;
+  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(host.textContent).toContain('Response lost'));
+  expect(receipts[0].unresolved).toBe(true);
+  clickButton('Edit');
+  expect(
+    host.querySelector<HTMLTextAreaElement>('#sink-credential')!.value
+  ).toBe('');
+  expect(receipts[0].unresolved).toBe(false);
+});
+
+it.each(['sink', 'policy'])(
+  'keeps the submitted %s draft frozen until delayed write completion',
+  async (kind) => {
+    let finish!: () => void;
+    if (kind === 'sink')
+      vi.mocked(updateExportSink).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve(httpsSink);
+          })
+      );
+    else
+      vi.mocked(updateCapturePolicy).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve(projectPolicy);
+          })
+      );
+    await render();
+    clickButton('Edit', kind === 'sink' ? 0 : 1);
+    const selector = kind === 'sink' ? '#sink-name' : '#policy-ratio';
+    const value = kind === 'sink' ? 'Submitted collector' : '0.125';
+    choose(selector, value);
+    host
+      .querySelectorAll('form')
+      .item(kind === 'sink' ? 0 : 1)
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    flushSync();
+    const activeField = host.querySelector<HTMLInputElement>(selector)!;
+    expect(activeField.matches(':disabled')).toBe(true);
+    const row = [...host.querySelectorAll('tbody tr')].find((candidate) =>
+      candidate.textContent?.includes(kind === 'sink' ? 'Collector' : '0.5')
+    )!;
+    const edit = [...row.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent === 'Edit'
+    )!;
+    expect(edit.disabled).toBe(true);
+    edit.click();
+    clickButton('Cancel');
+    expect(activeField.value).toBe(value);
+    finish();
+    await vi.waitFor(() =>
+      expect(host.textContent).toContain(
+        kind === 'sink' ? 'Sink updated.' : 'Capture policy updated.'
+      )
+    );
+  }
+);
+
+it('keeps a sink create retry stable but reports refresh failure after a known write', async () => {
+  vi.mocked(createExportSink)
+    .mockRejectedValueOnce(new TypeError('Response lost'))
+    .mockResolvedValueOnce(httpsSink);
+  await render();
+  choose('#sink-name', 'New collector');
+  choose('#sink-destination', 'https://collector.example/new');
+  const form = host.querySelector('form')!;
+  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(host.textContent).toContain('Response lost'));
+  vi.spyOn(client, 'invalidateQueries').mockRejectedValueOnce(
+    new Error('Refresh unavailable')
+  );
+  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Refresh unavailable')
+  );
+  expect(vi.mocked(createExportSink).mock.calls[1]).toEqual(
+    vi.mocked(createExportSink).mock.calls[0]
+  );
+  expect(host.textContent).toContain('Sink created.');
+  expect(host.querySelector<HTMLInputElement>('#sink-name')!.value).toBe('');
+  expect(receipts[0].unresolved).toBe(false);
+});
+
+it.each(['sink', 'policy'])(
+  'rejects delayed %s write callbacks after the form owner is destroyed',
+  async (kind) => {
+    let finish!: () => void;
+    if (kind === 'sink')
+      vi.mocked(createExportSink).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve(httpsSink);
+          })
+      );
+    else
+      vi.mocked(createCapturePolicy).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve(projectPolicy);
+          })
+      );
+    await render();
+    if (kind === 'sink') {
+      choose('#sink-name', 'Deferred collector');
+      choose('#sink-destination', 'https://collector.example/deferred');
+    } else choose('#policy-sink', sinkId);
+    host
+      .querySelectorAll('form')
+      .item(kind === 'sink' ? 0 : 1)
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    flushSync();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    await unmount(component!);
+    component = undefined;
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(receipts.every((receipt) => !receipt.unresolved)).toBe(true);
+  }
+);

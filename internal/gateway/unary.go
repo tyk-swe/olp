@@ -19,7 +19,6 @@ type unaryExecution struct {
 	source         oif.Request
 	dialect        operations.Dialect
 	route, surface string
-	plans          map[string]*operationplan.Plan
 }
 
 func (x *execution) operationName() string {
@@ -89,7 +88,7 @@ func (s *Server) selectUnary(x *execution, family openai.Family, dialect string,
 	}
 	// Classify before the body can fail to parse: a malformed request is still
 	// this dialect's operation on its native surface in the terminal envelope.
-	x.unary = &unaryExecution{dialect: codec, route: model, surface: surface, plans: map[string]*operationplan.Plan{}}
+	x.unary = &unaryExecution{dialect: codec, route: model, surface: surface}
 	x.mode = "unary"
 	source, err := operationplan.Parse(dialect, body, int(s.cfg.MaxBodyBytes))
 	if err != nil {
@@ -99,9 +98,10 @@ func (s *Server) selectUnary(x *execution, family openai.Family, dialect string,
 	return true, nil
 }
 func (x *execution) unaryPlan(p *runtime.Provider, model string) (*operationplan.Plan, error) {
-	key := p.ID + "/" + p.RevisionID + "/" + model
-	if plan := x.unary.plans[key]; plan != nil {
-		return plan, nil
+	x.prepareSource()
+	key := encodedKey(p, model)
+	if admission, ok := x.unaryAdmissions[key]; ok && admission.plan != nil {
+		return admission.plan, nil
 	}
 	var template *operationplan.Template
 	for _, target := range x.route.Targets {
@@ -132,7 +132,10 @@ func (x *execution) unaryPlan(p *runtime.Provider, model string) (*operationplan
 	if err != nil {
 		return nil, err
 	}
-	x.unary.plans[key] = plan
+	if x.unaryAdmissions == nil {
+		x.unaryAdmissions = map[string]unaryAdmission{}
+	}
+	x.unaryAdmissions[key] = unaryAdmission{plan: plan, estimate: plan.Estimate(), receipt: plan.Receipt(), parameters: runtime.Listed(plan.Parameters())}
 	return plan, nil
 }
 func (s *Server) prepareUnary(ctx context.Context, x *execution) *Error {
@@ -158,18 +161,18 @@ func (s *Server) planUnary(ctx context.Context, x *execution) *Error {
 	var incompatible error
 	options := s.selectionOptions(ctx, x)
 	options.Accept = func(p runtime.Provider, t runtime.Target) error {
-		_, err := x.unaryPlan(&p, t.ProviderModel)
+		_, err := x.unaryAdmission(&p, t.ProviderModel)
 		if err != nil {
 			incompatible = err
 		}
 		return err
 	}
 	options.Effective = func(p runtime.Provider, t runtime.Target) (runtime.Names, *runtime.TokenDemand) {
-		plan, err := x.unaryPlan(&p, t.ProviderModel)
+		admission, err := x.unaryAdmission(&p, t.ProviderModel)
 		if err != nil {
 			return nil, nil
 		}
-		return runtime.Listed(plan.Parameters()), nil
+		return admission.parameters, nil
 	}
 	plan, err := runtime.PlanRequest(x.request.release.Snapshot, x.route.Slug, x.operationName(), x.surfaceName(), "unary", x.affinity, options)
 	if err != nil {

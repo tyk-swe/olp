@@ -286,7 +286,7 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 				if hold := (&Server{}).costReservation(x, budgeted()); hold.amount != tc.cost {
 					t.Fatalf("cost reservation = %q, want %q", hold.amount, tc.cost)
 				}
-				body, wire, err := x.encoding(x.takeEncoded(), &provider, provider.Connector(), attempt.UpstreamModel)
+				body, wire, _, err := x.encoding(x.takeEncoded(), &provider, provider.Connector(), attempt.UpstreamModel)
 				if err != nil || wire != openai.FamilyGemini {
 					t.Fatalf("encoding wire = %s, error = %v", wire, err)
 				}
@@ -508,7 +508,7 @@ func TestSettledCostPricesWhatEachAttemptReported(t *testing.T) {
 		{"usage nobody observed is not billed here", "generation", []AttemptFact{
 			{Price: price, UsageComplete: true},
 			{Price: price, BillingUncertain: true},
-			{Price: price, ResponseUsageDeferred: true, UsageComplete: true},
+			{Price: price, GenerationUsageDeferred: true, UsageComplete: true},
 		}, "0"},
 		{"an attempt without a price list is not priced here", "generation", []AttemptFact{
 			{UsageObserved: true, UsageComplete: true, Usage: &openai.Usage{InputTokens: 5}},

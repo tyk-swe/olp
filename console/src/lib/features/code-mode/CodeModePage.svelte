@@ -8,6 +8,11 @@
   import { listProjectMemberships } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { authLifecycle } from '$lib/features/access/session/lifecycle';
+  import {
+    confirmDiscardChanges,
+    guardUnsavedChanges
+  } from '$lib/forms/unsavedChanges';
   import CodeManagement from './CodeManagement.svelte';
   import CodeDiagnostics from './CodeDiagnostics.svelte';
 
@@ -23,6 +28,9 @@
     ) => Promise<CodeClientConfiguration>;
   } = $props();
   const access = useRole();
+  const principal = $derived(
+    access.user ? authLifecycle.principalPartition(access.user) : ''
+  );
   const readable = $derived(access.allows('GET /api/v1/code/accounts'));
   const projects = createQuery(() => ({
     queryKey: projectKeys.memberships,
@@ -30,6 +38,16 @@
     enabled: readable
   }));
   let projectId = $state('');
+  let draftDirty = $state(false);
+  guardUnsavedChanges(() => draftDirty);
+  function changeProject(event: Event) {
+    const select = event.currentTarget as HTMLSelectElement;
+    if (select.value === projectId) return;
+    if (confirmDiscardChanges(draftDirty)) {
+      draftDirty = false;
+      projectId = select.value;
+    } else select.value = projectId;
+  }
   let tab = $state<
     | 'accounts'
     | 'pools'
@@ -94,7 +112,8 @@
     <div class="project form-field">
       <label for="code-project">Project</label><select
         id="code-project"
-        bind:value={projectId}
+        value={projectId}
+        onchange={changeProject}
         >{#each projects.data as project (project.id)}<option value={project.id}
             >{project.name}</option
           >{/each}</select
@@ -105,11 +124,16 @@
           type="button"
           class:active={tab === item.id}
           aria-pressed={tab === item.id}
-          onclick={() => (tab = item.id)}>{item.label}</button
+          onclick={() => {
+            if (tab !== item.id && confirmDiscardChanges(draftDirty)) {
+              draftDirty = false;
+              tab = item.id;
+            }
+          }}>{item.label}</button
         >{/each}
     </nav>
     {#if projectId}
-      {#key `${projectId}:${tab}`}
+      {#key `${principal}:${projectId}:${tab}`}
         {#if tab === 'accounts' || tab === 'pools' || tab === 'routes' || tab === 'budgets'}
           <CodeManagement
             {projectId}
@@ -117,6 +141,7 @@
             {allowed}
             {gatewayURL}
             {loadClientConfiguration}
+            onDraftChange={(dirty) => (draftDirty = dirty)}
           />
         {:else}<CodeDiagnostics {projectId} kind={tab} {allowed} />{/if}
       {/key}

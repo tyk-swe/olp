@@ -53,3 +53,18 @@ and session dimensions. Both usage and request exploration export the visible
 filters as CSV (usage exports under the current dimension); downloads run
 through the shared `downloadBlob` helper. Request detail shows the session
 attribution as a link back to the request list filtered on that session.
+
+Logical creates own a stable mutation identity within their form lifetime.
+Ambiguous responses retry the same identity and submitted input; changed intent
+uses a new identity. A successful write and a failed cache refresh are separate
+outcomes, so observation failure never repeats a confirmed write. Drafts and
+one-time receipts are partitioned by session and cleared on unmount/sign-out.
+Explicit cancellation or artifact/resource replacement retires the retry intent
+alongside visible secret fields; restoring identical input is a new submission.
+Local row editors refuse replacement while a save owns the draft, preventing an
+earlier reply from clearing another row's input.
+Code-mode project/tab transitions participate in unsaved-change handling as
+navigation does; stale asynchronous callbacks cannot complete a replaced draft.
+Grant enrollment polling/continuation is shared across onboarding, slot pools
+and code mode, with distinct completion hooks. Pasted one-use input is cleared
+when submitted, including failures, and never persisted.

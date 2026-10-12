@@ -26,9 +26,12 @@ func Stream(wire, target openai.Family, r io.Reader, maxEvent int, route string,
 // StreamWithEvents exposes immutable native events before projection. The
 // observer executes synchronously under the existing backpressure/cancellation
 // contract; ordinary native streams retain no event history.
-// It observes structurally valid JSON before dialect state-grammar validation.
+// Native accounting is interpreted before the observer can refuse projection;
+// structurally valid events remain observable on dialect grammar failures.
 // Actionability still requires the admitted projection and durable-state barrier.
-func StreamWithEvents(wire, target openai.Family, r io.Reader, maxEvent int, route string, includeUsage bool, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
+// expectedCandidates, when present, is the effective dispatched Gemini request's
+// candidate count. Without that request proof, Gemini totals await clean EOF.
+func StreamWithEvents(wire, target openai.Family, r io.Reader, maxEvent int, route string, includeUsage bool, emit openai.Emit, observe func(oif.Event) error, expectedCandidates ...int64) (*openai.Completion, error) {
 	native := wire == target || wire == openai.FamilyGemini && target == openai.FamilyGeminiStream
 	if wire.Surface() == "native" && !native {
 		return nil, protocolError("a native generation dialect is never translated")
@@ -71,7 +74,11 @@ func StreamWithEvents(wire, target openai.Family, r io.Reader, maxEvent int, rou
 	case openai.FamilyAnthropic:
 		c, err = streamAnthropicEvents(r, maxEvent, route, upstreamEmit, observe)
 	case openai.FamilyGemini:
-		c, err = streamGeminiEvents(r, maxEvent, route, upstreamEmit, observe)
+		expected := int64(0)
+		if len(expectedCandidates) != 0 {
+			expected = expectedCandidates[0]
+		}
+		c, err = streamGeminiEvents(r, maxEvent, route, upstreamEmit, observe, expected)
 	case "bedrock":
 		c, err = streamBedrockEvents(r, maxEvent, route, upstreamEmit, observe, native)
 	default:
@@ -102,6 +109,25 @@ func streamError(err error) error {
 	return err
 }
 
+// A native parser retains only its current rebound frame. The observer still
+// sees the immutable source before delivery and retains its refusal priority.
+func emitObservedEvent(event oif.Event, observe func(oif.Event) error, parsed error, frame []byte, emit openai.Emit) error {
+	if observe != nil {
+		if err := observe(event); err != nil {
+			return err
+		}
+	}
+	if parsed != nil && !errors.Is(parsed, streamDone) {
+		return parsed
+	}
+	if frame != nil {
+		if err := emit(frame); err != nil {
+			return err
+		}
+	}
+	return parsed
+}
+
 type contentBlock struct{ kind, args string }
 
 func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
@@ -112,17 +138,14 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 	usage := Object{}
 	retained := 0
 	sequence := uint64(0)
-	err := sse.Decode(r, limit, func(frame sse.Frame) error {
+	err := sse.Decode(r, limit, func(frame sse.Frame) (parsed error) {
 		event, e := openai.LiftSSE(openai.FamilyAnthropic, frame, sequence, limit)
 		if e != nil {
 			return e
 		}
 		sequence++
-		if observe != nil {
-			if e := observe(event); e != nil {
-				return e
-			}
-		}
+		var encoded []byte
+		defer func() { parsed = emitObservedEvent(event, observe, parsed, encoded, emit) }()
 		f := event.Source().Fields()
 		if f == nil {
 			return protocolError("invalid Anthropic event")
@@ -155,6 +178,10 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 				return e
 			} else {
 				maps.Copy(usage, u)
+			}
+			c.Usage, e = nativeUsage(usage, "anthropic")
+			if e != nil {
+				return e
 			}
 			m["model"] = raw(route)
 			f["message"] = raw(m)
@@ -267,14 +294,13 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 				return protocolError("message stopped before completion")
 			}
 			done = true
+			c.UsageComplete = c.Usage != nil
 		default:
 			if !started {
 				return protocolError("event before message start")
 			}
 		}
-		if e := emit(eventFrame(kind, f)); e != nil {
-			return e
-		}
+		encoded = eventFrame(kind, f)
 		if done {
 			return streamDone
 		}
@@ -289,23 +315,22 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit openai.Emi
 	return c, nil
 }
 
-func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error) (*openai.Completion, error) {
+func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, observe func(oif.Event) error, expectedCandidates int64) (*openai.Completion, error) {
 	c := &openai.Completion{}
 	finished := map[int64]bool{}
 	hasTools := false
 	seen := false
+	blocked := false
+	usageAtFinish := false
 	sequence := uint64(0)
-	err := sse.Decode(r, limit, func(frame sse.Frame) error {
+	err := sse.Decode(r, limit, func(frame sse.Frame) (parsed error) {
 		event, e := openai.LiftSSE(openai.FamilyGemini, frame, sequence, limit)
 		if e != nil {
 			return e
 		}
 		sequence++
-		if observe != nil {
-			if e := observe(event); e != nil {
-				return e
-			}
-		}
+		var encoded []byte
+		defer func() { parsed = emitObservedEvent(event, observe, parsed, encoded, emit) }()
 		part, e := decodeGemini(event.Source().Bytes(), route, true)
 		if e != nil {
 			return e
@@ -325,11 +350,16 @@ func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, 
 			if finished[index] {
 				return protocolError("candidate continued after finish")
 			}
+			if _, exists := finished[index]; !exists && expectedCandidates > 0 && int64(len(finished)) >= expectedCandidates {
+				return protocolError("more candidates than the dispatched request")
+			}
+			usageAtFinish, c.UsageComplete = false, false
 			finished[index] = str(candidate["finishReason"]) != ""
 			seen = true
 		}
 		if present(f["promptFeedback"]) && part.FinishReason == "content_filter" {
 			seen = true
+			blocked = true
 			finished[0] = true
 		}
 		if c.UpstreamID == "" {
@@ -345,8 +375,14 @@ func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, 
 		}
 		if present(f["usageMetadata"]) && part.Usage != nil {
 			c.Usage = part.Usage
+			usageAtFinish = seen
+			for _, done := range finished {
+				usageAtFinish = usageAtFinish && done
+			}
+			c.UsageComplete = usageAtFinish && (blocked || expectedCandidates > 0 && int64(len(finished)) == expectedCandidates)
 		}
-		return emit(eventFrame("", f))
+		encoded = eventFrame("", f)
+		return nil
 	})
 	if err != nil {
 		return c, streamError(err)
@@ -354,11 +390,15 @@ func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, 
 	if !seen {
 		return c, &openai.ProtocolError{Detail: "empty Gemini stream", Truncated: true}
 	}
+	if !blocked && expectedCandidates > 0 && int64(len(finished)) != expectedCandidates {
+		return c, &openai.ProtocolError{Detail: "stream ended before all requested candidates", Truncated: true}
+	}
 	for _, done := range finished {
 		if !done {
 			return c, &openai.ProtocolError{Detail: "stream ended before candidate finish", Truncated: true}
 		}
 	}
+	c.UsageComplete = c.Usage != nil && usageAtFinish
 	return c, nil
 }
 

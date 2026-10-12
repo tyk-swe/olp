@@ -31,6 +31,7 @@
   } from '$lib/features/providers/api/models';
   import { emptyCursorHistory, resetCursor } from '$lib/lists/pagination';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
   import {
     acceptRemote,
     conflictNotice,
@@ -83,6 +84,8 @@
   let validationIssues = $state<FieldIssue[]>([]);
   let notice = $state('');
   let reloadVersion = $state(0);
+  let explicitReloadEpoch = $state(0);
+  let savedDraftEpoch = $state(0);
   let editValues = $state<ProviderEditValues>({
     name: '',
     endpoint: '',
@@ -94,6 +97,21 @@
   });
   let sync = $state(initialConcurrentEdit());
   const concurrentNotice = $derived(conflictNotice(sync));
+  const captureActionOwner = usePrincipalLifetime(() => {
+    busy = '';
+    errorMessage = notice = saveRefreshError = '';
+    validationIssues = [];
+  });
+
+  function captureOwner() {
+    const principalCurrent = captureActionOwner();
+    const ownedProviderId = providerId;
+    const ownedReloadEpoch = explicitReloadEpoch;
+    return () =>
+      principalCurrent() &&
+      providerId === ownedProviderId &&
+      explicitReloadEpoch === ownedReloadEpoch;
+  }
 
   $effect(() => {
     const value = snapshot.data?.provider;
@@ -105,13 +123,15 @@
 
   const run: RunProviderAction = async (label, action) => {
     if (busy) return false;
+    const isCurrent = captureOwner();
     busy = label;
     errorMessage = notice = '';
     validationIssues = [];
     try {
-      await action();
-      return true;
+      await action(isCurrent);
+      return isCurrent();
     } catch (error) {
+      if (!isCurrent()) return false;
       if (isEtagMismatch(error)) sync = markConflict(sync);
       else {
         errorMessage = providerDetailError(error);
@@ -119,7 +139,7 @@
       }
       return false;
     } finally {
-      busy = '';
+      if (isCurrent()) busy = '';
     }
   };
 
@@ -134,12 +154,14 @@
     previousEtag: string;
     etag: string;
   }) {
+    const isCurrent = captureOwner();
     const acknowledged =
       mutation &&
       !sync.conflict &&
       sync.snapshotEtag === mutation.previousEtag &&
       sync.remoteEtag === mutation.previousEtag;
     const result = await snapshot.refetch();
+    if (!isCurrent()) return;
     if (result.error) throw result.error;
     if (!result.data) throw new Error('The provider snapshot is unavailable.');
     // A successful owned credential mutation advances the provider ETag. Query
@@ -152,6 +174,7 @@
     await queryClient.invalidateQueries({
       queryKey: providerKeys.modelCatalog
     });
+    if (!isCurrent()) return;
     await queryClient.invalidateQueries({ queryKey: overviewKeys.root });
   }
 
@@ -172,7 +195,9 @@
   }
 
   async function refetchProvider(): Promise<boolean> {
+    const isCurrent = captureOwner();
     const result = await snapshot.refetch();
+    if (!isCurrent()) return false;
     if (result.error || !result.data) return false;
     sync = acceptRemote(sync, result.data.provider.etag);
     return true;
@@ -180,11 +205,13 @@
 
   async function reload() {
     if (busy) return;
+    const isCurrent = captureOwner();
     busy = 'reload';
     errorMessage = notice = '';
     validationIssues = [];
     try {
       const result = await snapshot.refetch();
+      if (!isCurrent()) return;
       if (result.error) throw result.error;
       if (!result.data)
         throw new Error('The provider snapshot is unavailable.');
@@ -192,17 +219,19 @@
       sync = markSaved(result.data.provider.etag, false);
       if (providerSpec)
         editValues = providerEditValues(result.data.provider, providerSpec);
+      busy = '';
+      explicitReloadEpoch += 1;
       reloadVersion += 1;
     } catch (error) {
-      errorMessage = providerDetailError(error);
+      if (isCurrent()) errorMessage = providerDetailError(error);
     } finally {
-      busy = '';
+      if (isCurrent()) busy = '';
     }
   }
 
   async function saveProvider(current: Provider) {
     if (!providerSpec || !canManage || busy) return;
-    await run('save', async () => {
+    await run('save', async (isCurrent) => {
       if (!sync.snapshotEtag)
         throw new Error('Reload the provider before saving.');
       const submittedVersion = editVersion;
@@ -211,7 +240,11 @@
         sync.snapshotEtag,
         buildUpdateProviderInput(editValues, providerSpec)
       );
+      if (!isCurrent()) return;
       sync = markSaved(updated.etag, editVersion !== submittedVersion);
+      // A deliberate confirmed configuration write starts new state actions.
+      // Cache-only ETag changes must preserve an unresolved action receipt.
+      savedDraftEpoch += 1;
       queryClient.setQueriesData<ProviderModelPage>(
         { queryKey: providerKeys.modelsOf(current.id) },
         (page) => (page ? { ...page, provider: updated } : page)
@@ -222,16 +255,21 @@
   }
 
   async function refreshSavedProvider() {
+    const isCurrent = captureOwner();
     saveRefreshError = '';
     try {
       await providerChanged();
+      if (!isCurrent()) return;
       await queryClient.invalidateQueries({
         queryKey: providerKeys.summaries
       });
+      if (!isCurrent()) return;
       await queryClient.invalidateQueries({ queryKey: overviewKeys.root });
     } catch (error) {
+      if (!isCurrent()) return;
       saveRefreshError = providerDetailError(error);
     }
+    if (!isCurrent()) return;
     reportNotice(
       sync.dirty
         ? 'Draft saved. You have additional unsaved changes.'
@@ -322,38 +360,87 @@
   </div>
 {:else}
   {@const current = snapshot.data?.provider}
-  {#if !canManage}<ReadOnlyNote>
-      Your role can view this provider but not change, test, or activate it.
-    </ReadOnlyNote>{/if}
-  {#if current.pending_activation && current.active_revision != null}<div
-      class="pending-banner"
-      role="status"
-    >
-      <strong>Revision {current.active_revision} remains live.</strong><span
-        >Draft configuration and the draft-selected credential are not serving
-        traffic. Test, certify, and activate to replace the runtime revision
-        atomically.</span
+  {#key explicitReloadEpoch}
+    {#if !canManage}<ReadOnlyNote>
+        Your role can view this provider but not change, test, or activate it.
+      </ReadOnlyNote>{/if}
+    {#if current.pending_activation && current.active_revision != null}<div
+        class="pending-banner"
+        role="status"
       >
-    </div>{/if}
-  <div class="detail-grid">
-    <ProviderConfigurationSection
+        <strong>Revision {current.active_revision} remains live.</strong><span
+          >Draft configuration and the draft-selected credential are not serving
+          traffic. Test, certify, and activate to replace the runtime revision
+          atomically.</span
+        >
+      </div>{/if}
+    <div class="detail-grid">
+      <ProviderConfigurationSection
+        {current}
+        {providerSpec}
+        bind:editValues
+        {busy}
+        {savedDraftEpoch}
+        {canManage}
+        {run}
+        onTouch={touch}
+        dirty={sync.dirty}
+        issues={validationIssues}
+        onSave={() => saveProvider(current)}
+        onProviderChanged={providerChanged}
+        onRefetchProvider={refetchProvider}
+        onNotice={reportNotice}
+      />
+      <ProviderCredentialsSection
+        {current}
+        {providerSpec}
+        {busy}
+        {canManage}
+        {run}
+        onProviderChanged={providerChanged}
+        onResetModelPage={resetModelPage}
+        onNotice={reportNotice}
+      />
+    </div>
+    {#if canManage}<a
+        class="button button-secondary"
+        href={`${resolve('/providers/new')}?copy=${current.id}`}
+        >Duplicate connection</a
+      >{/if}
+    <ProviderCredentialPool
+      provider={current}
+      {canManage}
+      grant={Boolean(
+        providerSpec &&
+        requiresGrant(providerSpec, current.configuration.auth_mode)
+      )}
+      onChanged={providerChanged}
+    />
+    <ProviderBulkModels
+      provider={current}
+      {canManage}
+      onChanged={providerChanged}
+    />
+    <ProviderModelsSection
+      modelSnapshot={snapshot.data}
+      loading={snapshot.isPending}
+      error={snapshot.error}
+      reloadModels={providerChanged}
       {current}
-      {providerSpec}
-      bind:editValues
       {busy}
       {canManage}
       {run}
-      onTouch={touch}
-      dirty={sync.dirty}
-      issues={validationIssues}
-      onSave={() => saveProvider(current)}
+      {reloadVersion}
+      bind:pageState={modelPageState}
       onProviderChanged={providerChanged}
-      onRefetchProvider={refetchProvider}
+      onError={reportError}
+      onConflict={() => {
+        sync = markConflict(sync);
+      }}
       onNotice={reportNotice}
     />
-    <ProviderCredentialsSection
+    <ProviderRevisionsSection
       {current}
-      {providerSpec}
       {busy}
       {canManage}
       {run}
@@ -361,53 +448,7 @@
       onResetModelPage={resetModelPage}
       onNotice={reportNotice}
     />
-  </div>
-  {#if canManage}<a
-      class="button button-secondary"
-      href={`${resolve('/providers/new')}?copy=${current.id}`}
-      >Duplicate connection</a
-    >{/if}
-  <ProviderCredentialPool
-    provider={current}
-    {canManage}
-    grant={Boolean(
-      providerSpec &&
-      requiresGrant(providerSpec, current.configuration.auth_mode)
-    )}
-    onChanged={providerChanged}
-  />
-  <ProviderBulkModels
-    provider={current}
-    {canManage}
-    onChanged={providerChanged}
-  />
-  <ProviderModelsSection
-    modelSnapshot={snapshot.data}
-    loading={snapshot.isPending}
-    error={snapshot.error}
-    reloadModels={providerChanged}
-    {current}
-    {busy}
-    {canManage}
-    {run}
-    {reloadVersion}
-    bind:pageState={modelPageState}
-    onProviderChanged={providerChanged}
-    onError={reportError}
-    onConflict={() => {
-      sync = markConflict(sync);
-    }}
-    onNotice={reportNotice}
-  />
-  <ProviderRevisionsSection
-    {current}
-    {busy}
-    {canManage}
-    {run}
-    onProviderChanged={providerChanged}
-    onResetModelPage={resetModelPage}
-    onNotice={reportNotice}
-  />
+  {/key}
 {/if}
 
 <style>

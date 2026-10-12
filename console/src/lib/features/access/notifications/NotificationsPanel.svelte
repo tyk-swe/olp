@@ -24,6 +24,14 @@
   import { notificationKeys } from '$lib/features/access/notifications/notificationKeys';
   import { formatDate } from '$lib/format';
 
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
+
+  const destinationIntent = useMutationIntent();
+  const ruleIntent = useMutationIntent();
+
   const services = useServiceCapabilities();
   const queryClient = useQueryClient();
   const access = useRole();
@@ -166,22 +174,40 @@
     event.preventDefault();
     if (!canManage || destBusy || !destName.trim() || !destUrl.trim()) return;
     destBusy = true;
+    const isCurrent = captureOwner();
     error = notice = '';
+    let committed = false;
     try {
-      await createNotificationDestination(destinationCreateBody());
+      const submission = destinationIntent.prepare<
+        Parameters<typeof createNotificationDestination>[0]
+      >(destinationCreateBody());
+      await createNotificationDestination(
+        submission.input,
+        submission.requestId
+      );
+      if (!isCurrent()) return;
+      destinationIntent.reset();
+      committed = true;
       resetDestinationForm();
       notice = 'Destination created.';
-      await queryClient.invalidateQueries({
-        queryKey: notificationKeys.root
-      });
+      await queryClient.invalidateQueries(
+        {
+          queryKey: notificationKeys.root
+        },
+        { throwOnError: true }
+      );
     } catch (cause) {
-      error = errorMessage(cause, 'The destination could not be created.');
+      if (!isCurrent()) return;
+      error = committed
+        ? `Destination created, but refreshing failed. ${errorMessage(cause)}`
+        : errorMessage(cause, 'The destination could not be created.');
     } finally {
-      destBusy = false;
+      if (isCurrent()) destBusy = false;
     }
   }
 
   let editDestId = $state('');
+  let editDestination = $state.raw<NotificationDestination | null>(null);
   let editDestName = $state('');
   let editDestUrl = $state('');
   let editDestSecret = $state('');
@@ -194,6 +220,8 @@
   let editEmailCa = $state('');
 
   function startDestEdit(destination: NotificationDestination) {
+    if (editDestBusy) return;
+    editDestination = destination;
     editDestId = destination.id;
     editDestName = destination.name;
     editDestUrl = destination.url;
@@ -226,11 +254,15 @@
       !editDestUrl.trim()
     )
       return;
+    const current = editDestination;
+    if (!current || current.id !== destination.id) return;
     editDestBusy = true;
+    const isCurrent = captureOwner();
     error = notice = '';
+    let committed = false;
     try {
-      const isEmail = (destination.type ?? 'webhook') === 'email';
-      await updateNotificationDestination(destination, {
+      const isEmail = (current.type ?? 'webhook') === 'email';
+      await updateNotificationDestination(current, {
         name: editDestName.trim(),
         url: editDestUrl.trim(),
         ...(isEmail
@@ -253,33 +285,45 @@
         ...(editDestClear
           ? { secret: null }
           : editDestSecret.trim()
-            ? { secret: editSecretValue(destination) }
+            ? { secret: editSecretValue(current) }
             : {})
       });
+      committed = true;
+      if (!isCurrent()) return;
       editDestId = '';
+      editDestination = null;
       editDestSecret = '';
       notice = 'Destination updated.';
-      await queryClient.invalidateQueries({
-        queryKey: notificationKeys.root
-      });
+      await queryClient.invalidateQueries(
+        {
+          queryKey: notificationKeys.root
+        },
+        { throwOnError: true }
+      );
     } catch (cause) {
-      error = errorMessage(cause, 'The destination could not be updated.');
+      if (!isCurrent()) return;
+      error = committed
+        ? `Destination updated, but refreshing failed. ${errorMessage(cause)}`
+        : errorMessage(cause, 'The destination could not be updated.');
     } finally {
-      editDestBusy = false;
+      if (isCurrent()) editDestBusy = false;
     }
   }
 
   async function toggleDestination(destination: NotificationDestination) {
     if (!canManage) return;
+    const isCurrent = captureOwner();
     error = notice = '';
     try {
       await updateNotificationDestination(destination, {
         enabled: !destination.enabled
       });
+      if (!isCurrent()) return;
       await queryClient.invalidateQueries({
         queryKey: notificationKeys.root
       });
     } catch (cause) {
+      if (!isCurrent()) return;
       error = errorMessage(cause, 'The destination could not be updated.');
     }
   }
@@ -527,10 +571,14 @@
       return;
     }
     ruleBusy = true;
+    const isCurrent = captureOwner();
     error = notice = '';
     const configuration = ruleConfiguration();
+    let committed = false;
     try {
-      await createNotificationRule(
+      const submission = ruleIntent.prepare<
+        Parameters<typeof createNotificationRule>[0]
+      >(
         watchesBudget
           ? {
               name: ruleName.trim(),
@@ -562,22 +610,33 @@
                 ...(configuration ? { configuration } : {})
               }
       );
+      await createNotificationRule(submission.input, submission.requestId);
+      if (!isCurrent()) return;
+      ruleIntent.reset();
+      committed = true;
       ruleName = '';
       ruleSubjectId = '';
       ruleDestinationId = '';
       ruleConfig = {};
       notice = 'Rule created.';
-      await queryClient.invalidateQueries({
-        queryKey: notificationKeys.root
-      });
+      await queryClient.invalidateQueries(
+        {
+          queryKey: notificationKeys.root
+        },
+        { throwOnError: true }
+      );
     } catch (cause) {
-      error = errorMessage(cause, 'The rule could not be created.');
+      if (!isCurrent()) return;
+      error = committed
+        ? `Rule created, but refreshing failed. ${errorMessage(cause)}`
+        : errorMessage(cause, 'The rule could not be created.');
     } finally {
-      ruleBusy = false;
+      if (isCurrent()) ruleBusy = false;
     }
   }
 
   let editRuleId = $state('');
+  let editingRule = $state.raw<NotificationRule | null>(null);
   let editRuleName = $state('');
   let editRuleDestinationId = $state('');
   let editRuleConfig = $state<Record<string, string>>({});
@@ -585,7 +644,21 @@
   let editRulePeriod = $state<'daily' | 'weekly' | 'monthly'>('daily');
   let editRuleBusy = $state(false);
 
+  const captureOwner = usePrincipalLifetime(() => {
+    resetDestinationForm();
+    editDestId = editDestName = editDestUrl = editDestSecret = '';
+    editDestination = null;
+    ruleName = ruleSubjectId = ruleDestinationId = ruleProjectId = '';
+    editRuleId = editRuleName = editRuleDestinationId = '';
+    editingRule = null;
+    ruleConfig = editRuleConfig = {};
+    destBusy = editDestBusy = ruleBusy = editRuleBusy = false;
+    error = notice = '';
+  });
+
   function startRuleEdit(rule: NotificationRule) {
+    if (editRuleBusy) return;
+    editingRule = rule;
     editRuleId = rule.id;
     editRuleName = rule.name;
     editRuleDestinationId = rule.destination_id;
@@ -629,35 +702,51 @@
       !editRuleDestinationId
     )
       return;
+    const current = editingRule;
+    if (!current || current.id !== rule.id) return;
     editRuleBusy = true;
+    const isCurrent = captureOwner();
     error = notice = '';
+    let committed = false;
     try {
-      await updateNotificationRule(rule, {
+      await updateNotificationRule(current, {
         name: editRuleName.trim(),
         destination_id: editRuleDestinationId,
-        configuration: editRuleConfiguration(rule)
+        configuration: editRuleConfiguration(current)
       });
+      committed = true;
+      if (!isCurrent()) return;
       editRuleId = '';
+      editingRule = null;
       notice = 'Rule updated.';
-      await queryClient.invalidateQueries({
-        queryKey: notificationKeys.root
-      });
+      await queryClient.invalidateQueries(
+        {
+          queryKey: notificationKeys.root
+        },
+        { throwOnError: true }
+      );
     } catch (cause) {
-      error = errorMessage(cause, 'The rule could not be updated.');
+      if (!isCurrent()) return;
+      error = committed
+        ? `Rule updated, but refreshing failed. ${errorMessage(cause)}`
+        : errorMessage(cause, 'The rule could not be updated.');
     } finally {
-      editRuleBusy = false;
+      if (isCurrent()) editRuleBusy = false;
     }
   }
 
   async function toggleRule(rule: NotificationRule) {
     if (!canManage) return;
+    const isCurrent = captureOwner();
     error = notice = '';
     try {
       await updateNotificationRule(rule, { enabled: !rule.enabled });
+      if (!isCurrent()) return;
       await queryClient.invalidateQueries({
         queryKey: notificationKeys.root
       });
     } catch (cause) {
+      if (!isCurrent()) return;
       error = errorMessage(cause, 'The rule could not be updated.');
     }
   }
@@ -714,137 +803,140 @@
   <h3>Destinations</h3>
   {#if canManage}
     <form class="create-form" onsubmit={submitDestination}>
-      <div class="form-grid">
-        <div class="form-field">
-          <label for="dest-name">Name</label><input
-            id="dest-name"
-            bind:value={destName}
-            required
+      <fieldset class="submission-fields" disabled={destBusy}>
+        <div class="form-grid">
+          <div class="form-field">
+            <label for="dest-name">Name</label><input
+              id="dest-name"
+              bind:value={destName}
+              required
+            />
+          </div>
+          <div class="form-field">
+            <label for="dest-type">Type</label><select
+              id="dest-type"
+              bind:value={destType}
+              >{#each destinationTypes as option (option.value)}<option
+                  value={option.value}>{option.label}</option
+                >{/each}</select
+            >
+          </div>
+          <div class="form-field">
+            <label for="dest-url">
+              {#if isChat(destType)}Channel origin URL{:else if destType === 'pagerduty'}Events
+                API endpoint{:else if destType === 'email'}SMTP URL{:else}Webhook
+                URL{/if}</label
+            ><input
+              id="dest-url"
+              type="url"
+              bind:value={destUrl}
+              required
+              placeholder={isChat(destType)
+                ? 'https://hooks.slack.com'
+                : destType === 'pagerduty'
+                  ? 'https://events.pagerduty.com/v2/enqueue'
+                  : destType === 'email'
+                    ? 'smtps://smtp.example.com:465'
+                    : 'https://hooks.example.com/olp'}
+            />
+          </div>
+          <ProjectScopeField
+            id="dest-project"
+            bind:value={destProjectId}
+            unassigned={installationWide}
           />
+          {#if isChat(destType)}
+            <div class="form-field">
+              <label for="dest-webhook-url">Channel webhook URL</label><input
+                id="dest-webhook-url"
+                bind:value={destWebhookUrl}
+                autocomplete="off"
+                required
+                placeholder="Full tokenized webhook URL, sealed"
+              />
+              <p class="section-help">
+                Stored sealed; never shown again. Must share the origin URL
+                above.
+              </p>
+            </div>
+          {:else if destType === 'pagerduty'}
+            <div class="form-field">
+              <label for="dest-routing-key">Routing key</label><input
+                id="dest-routing-key"
+                bind:value={destRoutingKey}
+                autocomplete="off"
+                required
+                placeholder="PagerDuty Events API routing key, sealed"
+              />
+            </div>
+          {:else if destType === 'email'}
+            <div class="form-field">
+              <label for="dest-email-from">From address</label><input
+                id="dest-email-from"
+                bind:value={destEmailFrom}
+                required
+                placeholder="alerts@example.com"
+              />
+            </div>
+            <div class="form-field">
+              <label for="dest-email-to">To addresses</label><input
+                id="dest-email-to"
+                bind:value={destEmailTo}
+                required
+                placeholder="ops@example.com, dev@example.com"
+              />
+            </div>
+            <div class="form-field">
+              <label for="dest-email-prefix">Subject prefix</label><input
+                id="dest-email-prefix"
+                bind:value={destEmailSubjectPrefix}
+                placeholder="Optional [OLP] prefix"
+              />
+            </div>
+            <div class="form-field">
+              <label for="dest-email-ca">CA certificate (PEM)</label><textarea
+                id="dest-email-ca"
+                bind:value={destEmailCa}
+                rows="3"
+                placeholder="Optional pinned CA bundle"></textarea>
+            </div>
+            <div class="form-field">
+              <label for="dest-email-username">SMTP username</label><input
+                id="dest-email-username"
+                bind:value={destEmailUsername}
+                autocomplete="off"
+                placeholder="Optional"
+              />
+            </div>
+            <div class="form-field">
+              <label for="dest-email-password">SMTP password</label><input
+                id="dest-email-password"
+                type="password"
+                bind:value={destEmailPassword}
+                autocomplete="new-password"
+                placeholder="Optional, sealed"
+              />
+            </div>
+          {:else}
+            <div class="form-field">
+              <label for="dest-secret">Signing secret</label><input
+                id="dest-secret"
+                bind:value={destSecret}
+                autocomplete="off"
+                placeholder="Optional HMAC secret"
+              />
+            </div>
+          {/if}
         </div>
-        <div class="form-field">
-          <label for="dest-type">Type</label><select
-            id="dest-type"
-            bind:value={destType}
-            >{#each destinationTypes as option (option.value)}<option
-                value={option.value}>{option.label}</option
-              >{/each}</select
+        <div class="form-actions">
+          <button
+            class="button button-primary"
+            type="submit"
+            disabled={destBusy || !destName.trim() || !destUrl.trim()}
+            >{destBusy ? 'Creating…' : 'Create destination'}</button
           >
         </div>
-        <div class="form-field">
-          <label for="dest-url">
-            {#if isChat(destType)}Channel origin URL{:else if destType === 'pagerduty'}Events
-              API endpoint{:else if destType === 'email'}SMTP URL{:else}Webhook
-              URL{/if}</label
-          ><input
-            id="dest-url"
-            type="url"
-            bind:value={destUrl}
-            required
-            placeholder={isChat(destType)
-              ? 'https://hooks.slack.com'
-              : destType === 'pagerduty'
-                ? 'https://events.pagerduty.com/v2/enqueue'
-                : destType === 'email'
-                  ? 'smtps://smtp.example.com:465'
-                  : 'https://hooks.example.com/olp'}
-          />
-        </div>
-        <ProjectScopeField
-          id="dest-project"
-          bind:value={destProjectId}
-          unassigned={installationWide}
-        />
-        {#if isChat(destType)}
-          <div class="form-field">
-            <label for="dest-webhook-url">Channel webhook URL</label><input
-              id="dest-webhook-url"
-              bind:value={destWebhookUrl}
-              autocomplete="off"
-              required
-              placeholder="Full tokenized webhook URL, sealed"
-            />
-            <p class="section-help">
-              Stored sealed; never shown again. Must share the origin URL above.
-            </p>
-          </div>
-        {:else if destType === 'pagerduty'}
-          <div class="form-field">
-            <label for="dest-routing-key">Routing key</label><input
-              id="dest-routing-key"
-              bind:value={destRoutingKey}
-              autocomplete="off"
-              required
-              placeholder="PagerDuty Events API routing key, sealed"
-            />
-          </div>
-        {:else if destType === 'email'}
-          <div class="form-field">
-            <label for="dest-email-from">From address</label><input
-              id="dest-email-from"
-              bind:value={destEmailFrom}
-              required
-              placeholder="alerts@example.com"
-            />
-          </div>
-          <div class="form-field">
-            <label for="dest-email-to">To addresses</label><input
-              id="dest-email-to"
-              bind:value={destEmailTo}
-              required
-              placeholder="ops@example.com, dev@example.com"
-            />
-          </div>
-          <div class="form-field">
-            <label for="dest-email-prefix">Subject prefix</label><input
-              id="dest-email-prefix"
-              bind:value={destEmailSubjectPrefix}
-              placeholder="Optional [OLP] prefix"
-            />
-          </div>
-          <div class="form-field">
-            <label for="dest-email-ca">CA certificate (PEM)</label><textarea
-              id="dest-email-ca"
-              bind:value={destEmailCa}
-              rows="3"
-              placeholder="Optional pinned CA bundle"></textarea>
-          </div>
-          <div class="form-field">
-            <label for="dest-email-username">SMTP username</label><input
-              id="dest-email-username"
-              bind:value={destEmailUsername}
-              autocomplete="off"
-              placeholder="Optional"
-            />
-          </div>
-          <div class="form-field">
-            <label for="dest-email-password">SMTP password</label><input
-              id="dest-email-password"
-              type="password"
-              bind:value={destEmailPassword}
-              autocomplete="new-password"
-              placeholder="Optional, sealed"
-            />
-          </div>
-        {:else}
-          <div class="form-field">
-            <label for="dest-secret">Signing secret</label><input
-              id="dest-secret"
-              bind:value={destSecret}
-              autocomplete="off"
-              placeholder="Optional HMAC secret"
-            />
-          </div>
-        {/if}
-      </div>
-      <div class="form-actions">
-        <button
-          class="button button-primary"
-          type="submit"
-          disabled={destBusy || !destName.trim() || !destUrl.trim()}
-          >{destBusy ? 'Creating…' : 'Create destination'}</button
-        >
-      </div>
+      </fieldset>
     </form>
   {/if}
 
@@ -884,6 +976,7 @@
                   ><input
                     aria-label="Destination name"
                     bind:value={editDestName}
+                    disabled={editDestBusy}
                     required
                   /></td
                 ><td>{destination.type ?? 'webhook'}</td><td
@@ -891,12 +984,14 @@
                     aria-label="Destination URL"
                     type="url"
                     bind:value={editDestUrl}
+                    disabled={editDestBusy}
                     required
                   /></td
                 ><td>{destination.project_name ?? 'Installation-wide'}</td><td
                   ><input
                     aria-label="Replacement secret"
                     bind:value={editDestSecret}
+                    disabled={editDestBusy}
                     placeholder={isChat(destination.type ?? 'webhook')
                       ? 'New tokenized webhook URL'
                       : destination.type === 'pagerduty'
@@ -909,6 +1004,7 @@
                       ><input
                         type="checkbox"
                         bind:checked={editDestClear}
+                        disabled={editDestBusy}
                       />Clear credential</label
                     >{/if}
                   {#if (destination.type ?? 'webhook') === 'email'}<div
@@ -917,18 +1013,22 @@
                       <input
                         aria-label="From address"
                         bind:value={editEmailFrom}
+                        disabled={editDestBusy}
                         placeholder="From"
                       /><input
                         aria-label="To addresses"
                         bind:value={editEmailTo}
+                        disabled={editDestBusy}
                         placeholder="To, comma-separated"
                       /><input
                         aria-label="Subject prefix"
                         bind:value={editEmailPrefix}
+                        disabled={editDestBusy}
                         placeholder="Subject prefix"
                       /><input
                         aria-label="CA certificate"
                         bind:value={editEmailCa}
+                        disabled={editDestBusy}
                         placeholder="CA certificate (PEM)"
                       />
                     </div>{/if}</td
@@ -945,6 +1045,7 @@
                     disabled={editDestBusy}
                     onclick={() => {
                       editDestId = '';
+                      editDestination = null;
                       editDestSecret = '';
                     }}>Cancel</button
                   ></td
@@ -961,6 +1062,7 @@
                     ><button
                       class="text-button"
                       type="button"
+                      disabled={editDestBusy}
                       onclick={() => startDestEdit(destination)}>Edit</button
                     ><button
                       class="text-button"
@@ -980,143 +1082,146 @@
   <h3>Rules</h3>
   {#if canManage}
     <form class="create-form" onsubmit={submitRule}>
-      <div class="form-grid">
-        <div class="form-field">
-          <label for="rule-name">Rule name</label><input
-            id="rule-name"
-            bind:value={ruleName}
-            required
-          />
-        </div>
-        <div class="form-field">
-          <label for="rule-event">Event</label><select
-            id="rule-event"
-            bind:value={ruleEvent}
-            >{#each Object.entries(eventLabels) as [value, label] (value)}<option
-                {value}
-                disabled={!installationWide &&
-                  !projectScopedEvents.has(value as NotificationEvent)}
-                >{label}</option
-              >{/each}</select
-          >
-        </div>
-        {#if ruleProjectScoped}
-          <ProjectScopeField
-            id="rule-project"
-            bind:value={ruleProjectId}
-            unassigned={installationWide}
-          />
-        {/if}
-        {#if watchesBudget || watchesKey}
+      <fieldset class="submission-fields" disabled={ruleBusy}>
+        <div class="form-grid">
           <div class="form-field">
-            <label for="rule-subject-kind">Subject</label><select
-              id="rule-subject-kind"
-              disabled={watchesKey}
-              bind:value={ruleSubjectKind}
-              ><option value="api_key">API key</option><option
-                value="budget_group">Budget group</option
-              ></select
-            >
+            <label for="rule-name">Rule name</label><input
+              id="rule-name"
+              bind:value={ruleName}
+              required
+            />
           </div>
           <div class="form-field">
-            <label for="rule-subject">
-              {ruleSubjectKind === 'api_key'
-                ? 'API key'
-                : 'Budget group'}</label
-            ><select id="rule-subject" bind:value={ruleSubjectId} required
-              ><option value="" disabled>Choose a subject</option
-              >{#each subjectOptions as subject (subject.id)}<option
-                  value={subject.id}>{subject.name}</option
+            <label for="rule-event">Event</label><select
+              id="rule-event"
+              bind:value={ruleEvent}
+              >{#each Object.entries(eventLabels) as [value, label] (value)}<option
+                  {value}
+                  disabled={!installationWide &&
+                    !projectScopedEvents.has(value as NotificationEvent)}
+                  >{label}</option
                 >{/each}</select
             >
           </div>
-          {#if watchesBudget}
+          {#if ruleProjectScoped}
+            <ProjectScopeField
+              id="rule-project"
+              bind:value={ruleProjectId}
+              unassigned={installationWide}
+            />
+          {/if}
+          {#if watchesBudget || watchesKey}
             <div class="form-field">
-              <label for="rule-window">Window</label><select
-                id="rule-window"
-                bind:value={ruleWindow}
-                ><option value="day">Budget day</option><option value="week"
-                  >Budget week</option
-                ><option value="month">Budget month</option></select
+              <label for="rule-subject-kind">Subject</label><select
+                id="rule-subject-kind"
+                disabled={watchesKey}
+                bind:value={ruleSubjectKind}
+                ><option value="api_key">API key</option><option
+                  value="budget_group">Budget group</option
+                ></select
               >
             </div>
             <div class="form-field">
-              <label for="rule-threshold">Threshold %</label><input
-                id="rule-threshold"
-                inputmode="numeric"
-                bind:value={ruleThreshold}
-                required
+              <label for="rule-subject">
+                {ruleSubjectKind === 'api_key'
+                  ? 'API key'
+                  : 'Budget group'}</label
+              ><select id="rule-subject" bind:value={ruleSubjectId} required
+                ><option value="" disabled>Choose a subject</option
+                >{#each subjectOptions as subject (subject.id)}<option
+                    value={subject.id}>{subject.name}</option
+                  >{/each}</select
+              >
+            </div>
+            {#if watchesBudget}
+              <div class="form-field">
+                <label for="rule-window">Window</label><select
+                  id="rule-window"
+                  bind:value={ruleWindow}
+                  ><option value="day">Budget day</option><option value="week"
+                    >Budget week</option
+                  ><option value="month">Budget month</option></select
+                >
+              </div>
+              <div class="form-field">
+                <label for="rule-threshold">Threshold %</label><input
+                  id="rule-threshold"
+                  inputmode="numeric"
+                  bind:value={ruleThreshold}
+                  required
+                />
+              </div>
+            {/if}
+          {/if}
+          {#each eventConfigFields[ruleEvent] ?? [] as field (field.key)}
+            <div class="form-field">
+              <label for="rule-config-{field.key}">{field.label}</label><input
+                id="rule-config-{field.key}"
+                inputmode={field.inputmode}
+                value={ruleConfig[field.key] ?? ''}
+                oninput={(e) =>
+                  (ruleConfig = {
+                    ...ruleConfig,
+                    [field.key]: (e.target as HTMLInputElement).value
+                  })}
+                placeholder="Default"
               />
             </div>
+          {/each}
+          {#if ruleEvent === 'route.latency'}
+            <div class="form-field">
+              <label for="rule-metric">Metric</label><select
+                id="rule-metric"
+                bind:value={ruleMetric}
+                ><option value="ttft">Time to first token</option><option
+                  value="latency">Total latency</option
+                ></select
+              >
+            </div>
           {/if}
-        {/if}
-        {#each eventConfigFields[ruleEvent] ?? [] as field (field.key)}
+          {#if ruleEvent === 'report.spend'}
+            <div class="form-field">
+              <label for="rule-period">Period</label><select
+                id="rule-period"
+                bind:value={rulePeriod}
+                ><option value="daily">Daily</option><option value="weekly"
+                  >Weekly</option
+                ><option value="monthly">Monthly</option></select
+              >
+            </div>
+          {/if}
           <div class="form-field">
-            <label for="rule-config-{field.key}">{field.label}</label><input
-              id="rule-config-{field.key}"
-              inputmode={field.inputmode}
-              value={ruleConfig[field.key] ?? ''}
-              oninput={(e) =>
-                (ruleConfig = {
-                  ...ruleConfig,
-                  [field.key]: (e.target as HTMLInputElement).value
-                })}
-              placeholder="Default"
-            />
-          </div>
-        {/each}
-        {#if ruleEvent === 'route.latency'}
-          <div class="form-field">
-            <label for="rule-metric">Metric</label><select
-              id="rule-metric"
-              bind:value={ruleMetric}
-              ><option value="ttft">Time to first token</option><option
-                value="latency">Total latency</option
-              ></select
+            <label for="rule-destination">Destination</label><select
+              id="rule-destination"
+              bind:value={ruleDestinationId}
+              required
+              ><option value="" disabled>Choose a destination</option
+              >{#each destinationOptions as destination (destination.id)}<option
+                  value={destination.id}>{destination.name}</option
+                >{/each}</select
             >
           </div>
-        {/if}
-        {#if ruleEvent === 'report.spend'}
-          <div class="form-field">
-            <label for="rule-period">Period</label><select
-              id="rule-period"
-              bind:value={rulePeriod}
-              ><option value="daily">Daily</option><option value="weekly"
-                >Weekly</option
-              ><option value="monthly">Monthly</option></select
-            >
-          </div>
-        {/if}
-        <div class="form-field">
-          <label for="rule-destination">Destination</label><select
-            id="rule-destination"
-            bind:value={ruleDestinationId}
-            required
-            ><option value="" disabled>Choose a destination</option
-            >{#each destinationOptions as destination (destination.id)}<option
-                value={destination.id}>{destination.name}</option
-              >{/each}</select
+        </div>
+        <div class="form-actions">
+          <button
+            class="button button-primary"
+            type="submit"
+            disabled={ruleBusy ||
+              !ruleName.trim() ||
+              ((watchesBudget || watchesKey) && !ruleSubjectId) ||
+              !ruleDestinationId}
+            >{ruleBusy ? 'Creating…' : 'Create rule'}</button
           >
         </div>
-      </div>
-      <div class="form-actions">
-        <button
-          class="button button-primary"
-          type="submit"
-          disabled={ruleBusy ||
-            !ruleName.trim() ||
-            ((watchesBudget || watchesKey) && !ruleSubjectId) ||
-            !ruleDestinationId}>{ruleBusy ? 'Creating…' : 'Create rule'}</button
-        >
-      </div>
-      <p class="section-help">
-        {#if watchesBudget}A delivery is sent when a subject's accrued spend
-          crosses the threshold within the window.{:else if watchesKey}Sent once
-          when the key expires or reaches its rotation date within the lead
-          time.{:else if genericRule}Metadata-only trigger and recovery
-          deliveries; cooldown repeats share the incident key.{:else}A grant
-          lapses when its provider plugin can no longer refresh it.{/if}
-      </p>
+        <p class="section-help">
+          {#if watchesBudget}A delivery is sent when a subject's accrued spend
+            crosses the threshold within the window.{:else if watchesKey}Sent
+            once when the key expires or reaches its rotation date within the
+            lead time.{:else if genericRule}Metadata-only trigger and recovery
+            deliveries; cooldown repeats share the incident key.{:else}A grant
+            lapses when its provider plugin can no longer refresh it.{/if}
+        </p>
+      </fieldset>
     </form>
   {/if}
 
@@ -1152,6 +1257,7 @@
                   ><input
                     aria-label="Rule name"
                     bind:value={editRuleName}
+                    disabled={editRuleBusy}
                     required
                   /><br /><small
                     >{rule.project_name ?? 'Installation-wide'}</small
@@ -1164,6 +1270,7 @@
                         aria-label={field.label}
                         inputmode={field.inputmode}
                         value={editRuleConfig[field.key] ?? ''}
+                        disabled={editRuleBusy}
                         oninput={(e) =>
                           (editRuleConfig = {
                             ...editRuleConfig,
@@ -1175,12 +1282,14 @@
                     {#if rule.event === 'route.latency'}<select
                         aria-label="Metric"
                         bind:value={editRuleMetric}
+                        disabled={editRuleBusy}
                         ><option value="ttft">Time to first token</option
                         ><option value="latency">Total latency</option></select
                       >{/if}
                     {#if rule.event === 'report.spend'}<select
                         aria-label="Period"
                         bind:value={editRulePeriod}
+                        disabled={editRuleBusy}
                         ><option value="daily">Daily</option><option
                           value="weekly">Weekly</option
                         ><option value="monthly">Monthly</option></select
@@ -1190,6 +1299,7 @@
                   ><select
                     aria-label="Destination"
                     bind:value={editRuleDestinationId}
+                    disabled={editRuleBusy}
                     >{#each (destinations.data ?? []).filter((d) => (d.project_id ?? null) === (rule.project_id ?? null)) as destination (destination.id)}<option
                         value={destination.id}>{destination.name}</option
                       >{/each}</select
@@ -1205,7 +1315,10 @@
                     class="text-button"
                     type="button"
                     disabled={editRuleBusy}
-                    onclick={() => (editRuleId = '')}>Cancel</button
+                    onclick={() => {
+                      editRuleId = '';
+                      editingRule = null;
+                    }}>Cancel</button
                   ></td
                 ></tr
               >
@@ -1224,6 +1337,7 @@
                     ><button
                       class="text-button"
                       type="button"
+                      disabled={editRuleBusy}
                       onclick={() => startRuleEdit(rule)}>Edit</button
                     ><button
                       class="text-button"
@@ -1338,6 +1452,14 @@
     margin: 0;
     color: var(--foreground-muted);
     font-size: 0.8rem;
+  }
+  .submission-fields {
+    display: grid;
+    gap: inherit;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
   }
   .create-form {
     display: grid;

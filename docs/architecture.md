@@ -50,7 +50,23 @@ explicit audit provenance. `openapi/management.json` defines the management
 contract, including the security requirement of every operation. `make api`
 generates Go transport types, ignored TypeScript declarations, and the console's
 route requirements; `/api/v1/openapi.json` serves the embedded contract. Integration
-tests check handler/contract parity.
+tests check handler/contract parity. The same generator records the supported
+scalar parameter types, reviewed read-only effects and safe response metadata
+for the Go client, CLI and MCP. Unsupported serializer shapes fail generation.
+Logical write identities belong to callers, including console drafts; transport
+helpers never mint an invisible replacement identity for a retry.
+Console drafts retain their original payload and ETag through ambiguous retries.
+Abandonment, artifact replacement and principal/resource changes retire captured
+secrets and mutation identities; mounted asynchronous work is fenced by its
+principal and draft revision. Confirmed writes remain complete if refresh fails.
+
+Configuration promotion orchestrates portable intent and destination-owned
+bindings. Provider transaction operations own configuration validation,
+credential-boundary changes, certification invalidation and staged inventory
+mutation. Direct edits and promotion share those operations. Unchanged slots
+retain their enrollment lifetime; collection and parent ETags advance together.
+Installation serialization continues to protect reauthorization, publication,
+replay and atomic audit.
 
 ## Code-mode forwarding boundary
 
@@ -98,7 +114,10 @@ never request/response bodies, tool payloads or authorization headers.
 
 `internal/runtime/revision.go` reconstructs providers and routes from scanned
 revision metadata and stored JSON. Runtime publication and retained-resource
-resolution share these pure decoders. A plugin provider's revision decodes with
+resolution share these pure decoders. `runtime/release_pin.go` reconstructs
+only a selected historical release provider/route and verifies the exact
+slot/credential pair. Media reservation and reconciliation use this same pin;
+new-work eligibility and retained-work revocation checks stay feature-owned. A plugin provider's revision decodes with
 the plugin it pins (`PluginColumn`: its manifest and whether it is unconfined),
 so snapshots carry its plugin profile and gateways read no manifest; a
 profile's signing hook runs on the code `plugins.Host` loads by digest: a
@@ -108,6 +127,17 @@ unconfined tier. Their callers still own SQL, transactions, authorization,
 credential checks, and operation eligibility. Publication alone drops empty
 provider limits; retained resources preserve their connection identity, while new
 work also enforces current slot authorization and the tighter published quotas.
+
+`resources.NativeIdentity` scopes a native resource ID to its kind, caller key,
+provider and provider revision, route slug and revision, selected route-target
+UUID, slot and immutable credential-version row UUID. The selected target is a
+route target; the historical provider/route pair proves its exact model. All
+publication and native-ID lookup paths, including previous/output references,
+use this identity. Migration 0062 preserves local IDs and ciphertexts and
+backfills the target only from one proven historical match. Missing or ambiguous
+matches remain null and refuse dispatch. The immutable scalar avoids indexing
+mutable metadata or unrestricted model strings, preserving HOT eligibility for
+accounting updates; it stays internal to explicit management/native DTOs.
 
 The console usage feature owns `PricingRevisionsPanel`, including its queries,
 form, decimal validation, submission, and pagination. Settings keeps the panel
@@ -189,14 +219,101 @@ own their surfaces. The planner still owns policy coverage, profile compatibilit
 source requirements and client continuation; `internal/providerinvoke` owns the
 transformed admission path.
 
+Request preparation belongs to one immutable effective source on one route
+leg. A route/source transition replaces all derived caches together. Lightweight
+admission estimates and serving receipts survive document eviction. Planning
+keeps at most four candidate dispatch plans, then an admitted attempt drops
+unused plans before a slow stream begins; retries rebuild from the same source.
+The selected strict plan remains available to enforce its native obligations.
+
+Pinned exchanges reuse ordinary transport evidence and upstream classification.
+Transmission, upstream acceptance, validated completion, durable mapping and
+client visibility are separate facts. Each operation validates completion before
+persistence/delivery; the final emitter records one authoritative disposition,
+including observed usage even when local persistence or delivery fails. No
+cross-target failover is introduced for pinned work. Multipart writers and both
+application tasks of each duplex relay are joined before final observations.
+Native usage observation explicitly records completeness before projection or
+delivery. An intermediate counter is not a terminal fact; explicit zero is not
+absence. One attempt-fact owner carries that distinction through accounting and
+settlement, including parser, mapping, translation and downstream failures.
+Native Responses relay retains a validated terminal provider outcome when its
+client write fails, including a true native failure; the caller's cancellation
+is a separate observation. Transport or protocol failure cannot manufacture
+that terminal evidence. Accepted retained creation remains nonretryable even
+when its terminal payload is undelivered; declared safe stateless retries retain
+their existing policy. Local projection/persistence refusals are neutral to
+provider health unless validated native evidence establishes a provider fault.
+One native identity is pinned before attempt summary mutation; identity drift
+and malformed terminal frames cannot contaminate the attempt's usage counters.
+Retained reads validate the pinned native identity before effects. Valid terminal
+usage settles the original generation before local identity/route overlays, so
+projection refusal cannot erase consumption or charge another native resource.
+HTTP delivery applies the existing bounded frame deadline and checks Flush
+before declaring payload visibility.
+Gemini creation and retrieval classify downstream write/flush failure and
+original request cancellation separately from validated upstream phase and
+original generation accounting. A live caller's route timeout remains a failed
+exchange; an observed malformed frame retains its protocol fault even when
+the caller also cancels. Validated native failures in active generation retain
+their provider-fault classification through failed delivery. A retained read of
+a failed resource remains a successful retrieval. Native failure strings use
+the shared bounded OIF credential redactor before local projection. Accepted
+native POSTs set the existing no-retry signal before committing response
+headers; finalization restores independently observed native phase.
+
+Retained generation templates own the original content-free event until native
+terminal observation or conservative deletion/expiry settles it once.
+Resources own their locked transactions and cleanup; process composes separate
+bounded resource and usage maintenance turns. An indexed PostgreSQL projection
+of known pending subjects guards monetary admission, including budgets enabled
+after acceptance, without inventing provisional costs. Unsupported templates
+retain evidence; row savepoints and a pass-local expiry cursor preserve progress
+for unrelated owners. Native resource/generation lifetimes remain distinct from
+the original HTTP exchange timing.
+Their HTTP outcome remains explicitly unknown until the original gateway
+exchange finishes. A bounded, cancellation-independent finalizer locks the
+resource and fills the pending template's actual HTTP observation, or updates
+only receipt-qualified existing request/attempt observations if financial
+settlement came first. It preserves the original financial identities, counters, prices and
+receipt. No request-history row is created before settlement. A crash or failed
+two-second finalization can leave nullable HTTP metadata; it cannot invent a
+successful delivery or prevent validated native consumption from settling.
+Gemini lifecycle produces one bounded typed server-frame observation; sockets,
+backpressure, revocation and downstream commitment remain gateway-owned.
+
+Release constructors own their snapshot and credential inputs. Published
+snapshot/authority access and serving secret bytes are immutable borrows;
+mutable consumers copy. Serving does not copy a full snapshot per request.
+Refresh obligations have independent deadlines and monotonic publication guards;
+installation reads initial grant tokens and generations together and publishes
+them atomically with the release, retaining any newer cached generations.
+Ongoing grant refresh can advance while release installation is stalled.
+Preparation borrows unchanged immutable grant pairs and pins their installed
+base. An intervening membership publication discards that candidate; the next
+bounded refresh reconstructs it against current membership.
+Historical external references are authorized and read in a short transaction,
+then resolved remotely after commit and checked against live eligibility again.
+
 PostgreSQL owns durable state. Valkey coordinates limits, hints, and accounting
-events; retries and deduplication support recovery. Durable media jobs and
+events; retries and deduplication support recovery. Monetary subject ownership
+uses the key project, then the attempt provider project, then the route project.
+Admission, per-attempt event deltas, raw/hourly reconstruction and balances use
+that same precedence, exact decimal arithmetic and calendar authority. Durable media jobs and
 provider resources retain their admitted credential references through rotation
 and restart. Workers remain with the feature they maintain.
+Consumption completeness, deferred financial ownership and rate allowance are
+separate facts. Ordinary token-rate reconciliation only increases the reserved
+allowance; complete or zero native usage does not refund its initial estimate.
 
 Process startup composes gateway, control, worker, and all-in-one modes, owning
 resource lifetimes and listeners. Draining, metadata delivery, worker shutdown,
-and trace flushing share one deadline. Production serves static console assets;
+and trace flushing share one deadline, including partially started processes.
+Dependencies are acquired before tasks start; the registered cleanup first
+drains request/shadow/probe producers while runtime authority remains available,
+then closes metadata intake, flushes delivery, stops workers and closes
+dependencies. Deadline expiry explicitly unblocks resources and reports
+incomplete joins; dependency closure cannot extend the grace period. Production serves static console assets;
 development uses Vite with configured API proxies.
 
 See [security architecture](security.md) for how these modules divide the
@@ -205,3 +322,6 @@ security rules. See [gateway execution](gateway.md),
 [worker runbook](operations.md#replicated-worker-health) for their operational
 contracts. See [CONTRIBUTING.md](../CONTRIBUTING.md) for setup, checks,
 integration, and releases.
+
+See [the architecture review ledger](architecture-review.md) for evidence,
+retained distinctions, validation and measurement limits of the current repairs.

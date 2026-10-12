@@ -58,7 +58,7 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 		}
 	})
 	wg.Go(func() { usage.RunEpochDetection(ctx, pool, log) })
-	wg.Go(func() { usage.RunMaintenanceLoop(ctx, pool, log) })
+	wg.Go(func() { runMaintenance(ctx, pool, log) })
 	wg.Go(func() {
 		connect := func(context.Context) (*limits.Limiter, error) { return limiter, nil }
 		limits.RunRegionalCostReconciliation(ctx, pool, region, connect, costCheckpoint(pool), log)

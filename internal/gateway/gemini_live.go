@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -380,7 +379,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, client, upstream *websocket.Conn, token string, maxBytes int) (*openai.Usage, bool, error) {
+func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, client, upstream duplexPeer, token string, maxBytes int) (*openai.Usage, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var mu sync.Mutex
@@ -393,7 +392,7 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 		sourceClosed   bool
 		deliveryFailed bool
 	}
-	forward := func(dst, src *websocket.Conn, fromProvider bool) relayEnd {
+	forward := func(dst, src duplexPeer, fromProvider bool) relayEnd {
 		end := func(err error) relayEnd { return relayEnd{err: err, fromProvider: fromProvider} }
 		for {
 			kind, payload, err := src.Read(ctx)
@@ -408,21 +407,21 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 			}
 			providerError := false
 			if fromProvider {
-				if err := geminilifecycle.ValidateLiveServerFrame(payload, maxBytes); err != nil {
-					return end(fmt.Errorf("%w: %v", errGeminiLiveProtocol, err))
-				}
-				doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: maxBytes})
+				frame, err := geminilifecycle.ObserveLiveServerFrame(payload, maxBytes)
 				if err != nil {
 					return end(fmt.Errorf("%w: %v", errGeminiLiveProtocol, err))
 				}
-				if _, repeated := doc.Root().Lookup("setupComplete"); repeated {
+				if frame.Kind == "setupComplete" {
 					return end(fmt.Errorf("%w: repeated setup completion", errGeminiLiveProtocol))
 				}
-				usageValue := geminiLiveUsage(payload, maxBytes)
-				turnComplete := geminiLiveTurnComplete(payload, maxBytes)
-				_, serverContent := doc.Root().Lookup("serverContent")
-				_, toolCall := doc.Root().Lookup("toolCall")
-				_, providerError = doc.Root().Lookup("error")
+				doc := frame.Source
+				var usageValue *openai.Usage
+				if u := frame.Usage; u != nil {
+					usageValue = geminiExtendedUsage(*u.Input, *u.Output, u.Cached, u.Thoughts, u.ToolUse, u.Total)
+				}
+				turnComplete := frame.TurnComplete
+				serverContent, toolCall := frame.Kind == "serverContent", frame.Kind == "toolCall"
+				providerError = frame.Kind == "error"
 				if providerError {
 					// An in-band provider error can echo an applied credential;
 					// scrub it before the frame reaches the client.
@@ -489,6 +488,7 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 		}
 	}
 	done := make(chan relayEnd, 2)
+	remaining := 2
 	go func() { done <- forward(upstream, client, false) }()
 	go func() { done <- forward(client, upstream, true) }()
 	reauth := time.NewTicker(realtimeReauth)
@@ -500,6 +500,7 @@ loop:
 	for {
 		select {
 		case first = <-done:
+			remaining--
 			break loop
 		case <-reauth.C:
 			authority, err := s.Runtime.Authenticate(token)
@@ -554,11 +555,15 @@ loop:
 		upstream.CloseNow()
 		client.CloseNow()
 	}
-	second := <-done
+	deliveryFailed := first.deliveryFailed
+	for ; remaining > 0; remaining-- {
+		end := <-done
+		deliveryFailed = deliveryFailed || end.deliveryFailed
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if x.strict() && !errors.Is(first.err, context.DeadlineExceeded) {
-		if first.deliveryFailed || !first.fromProvider && first.sourceClosed && (inFlight || second.deliveryFailed) {
+		if first.deliveryFailed || !first.fromProvider && first.sourceClosed && (inFlight || deliveryFailed) {
 			return observed, false, fmt.Errorf("%w: %v", errGeminiLiveClientClosed, first.err)
 		}
 	}
@@ -566,42 +571,6 @@ loop:
 		return observed, turn == nil && observed != nil, nil
 	}
 	return observed, false, first.err
-}
-
-func geminiLiveTurnComplete(payload []byte, maxBytes int) bool {
-	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: maxBytes})
-	if err != nil {
-		return false
-	}
-	serverContent, ok := doc.Root().Lookup("serverContent")
-	if !ok {
-		return false
-	}
-	complete, ok := serverContent.Lookup("turnComplete")
-	return ok && complete.Kind() == oif.Boolean && complete.Raw() == "true"
-}
-
-func geminiLiveUsage(payload []byte, maxBytes int) *openai.Usage {
-	doc, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: maxBytes})
-	if err != nil {
-		return nil
-	}
-	metadata, ok := doc.Root().Lookup("usageMetadata")
-	if !ok || metadata.Kind() != oif.Object {
-		return nil
-	}
-	var native struct {
-		Input    *int64 `json:"promptTokenCount"`
-		Output   *int64 `json:"responseTokenCount"`
-		Cached   *int64 `json:"cachedContentTokenCount"`
-		Thoughts *int64 `json:"thoughtsTokenCount"`
-		ToolUse  *int64 `json:"toolUsePromptTokenCount"`
-		Total    *int64 `json:"totalTokenCount"`
-	}
-	if json.Unmarshal(metadata.Bytes(), &native) != nil || native.Input == nil || native.Output == nil || *native.Input < 0 || *native.Output < 0 || native.Cached != nil && (*native.Cached < 0 || *native.Cached > *native.Input) {
-		return nil
-	}
-	return geminiExtendedUsage(*native.Input, *native.Output, native.Cached, native.Thoughts, native.ToolUse, native.Total)
 }
 
 // geminiExtendedUsage folds the thinking and tool-use counts Gemini reports

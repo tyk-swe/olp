@@ -433,6 +433,20 @@ reconciliation are separate from these console controls.
 
 ## Limits and budgets
 
+Admission and dispatch share lightweight estimates from the effective native
+request. Full strict/profile/unary plans are bounded to four retained candidates
+after planning; an admitted attempt releases unused documents before streaming.
+An evicted target is rebuilt deterministically from its pinned source and release,
+without changing its estimate, output controls or serving identity.
+
+Pinned resource exchanges distinguish transmitted requests, accepted response
+headers, validated terminal results, durable mapping commit and downstream
+visibility. Headers alone establish neither completion nor client commitment.
+Observed generation usage is recorded before mapping or delivery that can fail;
+file/batch/retained lifecycle calls do not become new generation charges. Each
+multipart writer and both duplex forwarding tasks finish before terminal facts
+are emitted. Session cancellation cannot race an in-flight usage observation.
+
 Enforcement needs `OLP_VALKEY_URL`. Every counter lives in Valkey and is
 evaluated by a Lua script on the server's clock, so replicas share one decision
 rather than each keeping its own. Without it there is no admission backend at
@@ -660,7 +674,11 @@ four when it names none, and the others their input estimate plus the default
 4,096-token reply. A session holds only that first allowance; what its later turns
 spend counts when their usage arrives. A background response is reserved while its creating request runs and released when
 it returns; its spend counts when its final usage arrives. The reservation is
-therefore not an invoice cap. Overspend remains possible from token counts that
+therefore not an invoice cap. Its durable original accounting owner remains
+visible to applicable cost budgets until authoritative settlement: adding a
+budget while native work is pending cannot make its unknown spend disappear.
+Known pending work can return `503 cost_accounting_incomplete` even while the
+displayed accrued balance is zero. Overspend remains possible from token counts that
 are heuristic for a family without a public tokenizer, failover that bills more
 than once, accounting that lags beyond the lapse above, unpriced spend, and every
 request that reserves nothing.
@@ -696,6 +714,13 @@ jobs. The same envelope is the source of the durable request, attempt, and
 priced usage records described in
 [accounting delivery](operations.md#accounting-delivery-and-shutdown).
 
+Deferred retained generations are an exception to that timing correspondence:
+their durable financial event captures the accepted submission before downstream
+delivery completes. It leaves client delivery unobserved and preserves that
+capture when native usage arrives later. The immediate terminal log describes
+the actual HTTP delivery outcome; delayed usage observation does not rewrite it
+or claim that the client received the response.
+
 Readiness, worker checkpoints, metadata delivery, tracing, and shutdown are
 documented in the [operations runbook](operations.md). Keep health and metrics
 on the private listener. `olp health-probe` exits nonzero unless readiness
@@ -704,7 +729,7 @@ passes.
 See [tests/README.md](../tests/README.md) for deterministic protocol, SDK,
 service, and browser checks. Paid provider qualification is separate.
 
-## Stored response accounting
+## Retained generation accounting
 
 Retrieving, cancelling, deleting, or listing input items for a stored response
 does not generate new usage. Background responses retain a content-free
@@ -713,6 +738,69 @@ A terminal stream event, retrieval, or cancellation carrying final usage settles
 that record once, including when several replicas poll concurrently. Until final
 usage is observed, the record remains pending; clients must poll responses that
 finish after their creation connection closes.
+
+Observed counters remain in terminal request metadata while the durable mapping
+owns the accounting event. This observation does not emit another charge.
+Usage completeness describes billing evidence separately from validated
+transport completion: a failed non-generating file download records its protocol
+or delivery failure without creating unknown generation consumption.
+
+Nonterminal GET and stream observations retain one coherent provider snapshot
+under the original mapping's lock. A dominated replay or incomparable partial
+snapshot preserves the prior evidence; counters from different snapshots are
+never combined. Validated complete native terminal counters replace provisional
+evidence authoritatively, including zero or corrected cache classification.
+Response state and accounting change in the same transaction, so stale polling
+cannot reopen settled work. Stream effects require a recognized, validated
+lifecycle event and an exact retained identity before projection or delivery.
+Nonterminal stream events may carry a currently completed resource snapshot.
+The event kind keeps accounting pending until a validated terminal event; its
+phase also seeds stored state. The native snapshot's status remains unchanged
+on the client wire. Missing or null nonterminal status is unknown rather than
+completion evidence; terminal kind/status contradictions still refuse effects.
+
+Only Response, strict Response and Interaction mappings can own pending
+generation accounting. A native Batch extension named `pending_usage` remains
+opaque provider metadata; it cannot create financial ownership or inferred
+expiry and cannot block deletion.
+
+Stored Gemini Interactions use the same narrow original-event accounting
+transaction with their own native lifecycle. Pending, queued and in-progress
+statuses retain accepted work; `requires_action` ends that generation and hands
+control to the caller, whose continuation is a new generation. Supported native
+background requests require stored state and refuse applicable unbounded-work
+budgets before dispatch. Ordinary resource GET/cancel/delete does not reserve
+new monetary inference spend, so newly enabled budgets cannot block the
+observation needed to settle their original owner; authentication, revocation,
+rate, token and concurrency checks still apply.
+
+An active Gemini generation's validated native failure remains a provider fault
+when client delivery fails. A retained GET of a failed Interaction remains a
+successful retrieval. Both paths sanitize native failure strings before local
+projection while preserving native fields, member order and numeric lexemes.
+Unary and SSE writes use bounded deadlines and require successful Flush before
+first byte or completed client visibility. Original caller cancellation is
+separate from route timeout and observed malformed native frames. Accepted
+native POSTs set `X-Should-Retry: false` before response headers commit, including
+when response metadata is disabled.
+
+Provider-reported counters are observed before projection, durable attachment
+and client delivery. Intermediate stream counters remain incomplete and
+uncertain; native terminal proof distinguishes authoritative totals from merely
+having a usage object. Explicit zero and missing counts remain different.
+Observed partial counts survive interruption while uncertain token settlement
+retains each attempt's allowance. A validated terminal count survives a failed
+write or flush without becoming unknown again.
+
+Deleting or expiring an unresolved mapping conservatively persists its original
+event as billing-uncertain before removing owned secrets and mapping. The
+original captured HTTP submission timing remains unchanged; delayed usage has
+its own observation time and is not a fictional days-long HTTP request.
+Unsupported template versions stay retained for a compatible implementation.
+Expiry uses bounded batches, row savepoints and a pass-local cursor so an
+unsettleable owner does not prevent unrelated cleanup. Known accrued balances
+exclude unsettled work; resolving or conservatively retiring a mapping can
+leave explicit unpriced uncertainty that applicable cost budgets refuse.
 
 ## Caller-supplied provider credentials
 

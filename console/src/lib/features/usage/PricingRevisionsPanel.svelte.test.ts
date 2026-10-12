@@ -181,7 +181,8 @@ it('submits exact decimals, zero and null rates, then refreshes revisions', asyn
         unit_price: null,
         currency: 'EUR'
       }
-    ]
+    ],
+    expect.any(String)
   );
   expect(onFeedback).toHaveBeenLastCalledWith({
     status:

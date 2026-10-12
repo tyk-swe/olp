@@ -42,7 +42,7 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 	version := "chat-anthropic-tools-v1"
 	expires := time.Now().Add(time.Hour)
 	submission := resources.SubmissionID(time.Now(), uuid.New())
-	base := resources.Resource{Kind: resources.KindContinuation, APIKeyID: authority.ID, RouteSlug: slug, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, RouteRevisionID: route.RevisionID, SlotID: provider.Slots[0].ID, CredentialID: provider.Slots[0].CredentialID, ContractVersion: &version, ExpiresAt: &expires, SubmissionID: &submission}
+	base := resources.Resource{Kind: resources.KindContinuation, APIKeyID: authority.ID, RouteSlug: slug, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: route.Targets[0].ID, SlotID: provider.Slots[0].ID, CredentialID: provider.Slots[0].CredentialID, ContractVersion: &version, ExpiresAt: &expires, SubmissionID: &submission}
 	initial := []byte(`{"history":["private prompt"],"seed":9007199254740993,"zero":-0,"small":1e-100}`)
 	ready := []byte(`{"blocks":[{"type":"thinking","signature":"opaque-private-signature"},{"type":"tool_use","input":{"exact":0.1000000000000000000001}}],"delivery":"ready"}`)
 	var mu sync.Mutex
@@ -200,7 +200,7 @@ func TestContinuationResourceCommitRecoveryAndBranches(t *testing.T) {
 	if _, _, err := store.ReadContract(t.Context(), resources.KindContinuation, authority.ID, claimed.ID); !errors.Is(err, resources.ErrNotFound) {
 		t.Fatalf("synchronous expiry: %v", err)
 	}
-	if _, err := store.CleanupExpired(t.Context(), time.Now()); err != nil {
+	if _, err := store.Expire(t.Context(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE id=$1`, claimed.UUID).Scan(&count); err != nil || count != 0 {
@@ -230,7 +230,7 @@ func TestHistoricalPinChecksLiveRevocationAndSecretExpiry(t *testing.T) {
 	provider := h.Runtime.Release().Snapshot.Providers[f.providerID]
 	res := &resources.Resource{
 		RouteSlug: slug, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID,
-		RouteRevisionID: route.RevisionID, SlotID: provider.Slots[0].ID,
+		RouteRevisionID: route.RevisionID, TargetID: route.Targets[0].ID, SlotID: provider.Slots[0].ID,
 		CredentialID: provider.Slots[0].CredentialID,
 	}
 	resolve := func() error {
@@ -246,6 +246,13 @@ func TestHistoricalPinChecksLiveRevocationAndSecretExpiry(t *testing.T) {
 	if err := resolve(); err != nil {
 		t.Fatalf("live pin: %v", err)
 	}
+	for _, unproved := range []string{"", uuid.NewString()} {
+		res.TargetID = unproved
+		if err := resolve(); !errors.Is(err, resources.ErrNoRows) {
+			t.Fatalf("an unproved target escaped its historical pin: %v", err)
+		}
+	}
+	res.TargetID = route.Targets[0].ID
 	if secret, err := read(); err != nil || string(secret) != vendorSecret {
 		t.Fatalf("live credential: %v %q", err, secret)
 	}
@@ -289,7 +296,7 @@ func TestContinuationClaimForDispatchCommitsOneEncryptedJournal(t *testing.T) {
 	version := "chat-anthropic-tools-v1"
 	expires := time.Now().Add(time.Hour)
 	submission := resources.SubmissionID(time.Now(), uuid.New())
-	contract := &resources.Resource{Kind: resources.KindContinuation, APIKeyID: authority.ID, RouteSlug: slug, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, RouteRevisionID: route.RevisionID, SlotID: provider.Slots[0].ID, CredentialID: provider.Slots[0].CredentialID, ContractVersion: &version, ExpiresAt: &expires, SubmissionID: &submission}
+	contract := &resources.Resource{Kind: resources.KindContinuation, APIKeyID: authority.ID, RouteSlug: slug, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: route.Targets[0].ID, SlotID: provider.Slots[0].ID, CredentialID: provider.Slots[0].CredentialID, ContractVersion: &version, ExpiresAt: &expires, SubmissionID: &submission}
 	initial := []byte(`{"private":"complete initial dependency"}`)
 	ready := []byte(`{"private":"complete ready dependency"}`)
 	var mu sync.Mutex
@@ -389,7 +396,7 @@ func TestContinuationClaimWaitsForKeyRotationAndLeavesNoJournalOnStaleRing(t *te
 	version := "chat-anthropic-tools-v1"
 	expires := time.Now().Add(time.Hour)
 	submission := resources.SubmissionID(time.Now(), uuid.New())
-	contract := &resources.Resource{Kind: resources.KindContinuation, APIKeyID: authority.ID, RouteSlug: slug, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, RouteRevisionID: route.RevisionID, SlotID: provider.Slots[0].ID, CredentialID: provider.Slots[0].CredentialID, ContractVersion: &version, ExpiresAt: &expires, SubmissionID: &submission}
+	contract := &resources.Resource{Kind: resources.KindContinuation, APIKeyID: authority.ID, RouteSlug: slug, ProviderID: provider.ID, ProviderRevisionID: provider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: route.Targets[0].ID, SlotID: provider.Slots[0].ID, CredentialID: provider.Slots[0].CredentialID, ContractVersion: &version, ExpiresAt: &expires, SubmissionID: &submission}
 	var initialSecrets int
 	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.secrets WHERE purpose=$1`, "provider_continuation").Scan(&initialSecrets); err != nil {
 		t.Fatal(err)

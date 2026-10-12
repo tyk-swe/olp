@@ -330,7 +330,7 @@ func TestStrictBackgroundPostStreamFailedTerminalSettlesBeforeDelivery(t *testin
 		t.Fatalf("failed native POST terminal was not safely delivered: status=%d state=%q facts=%d stream=%s", status, state, facts, stream)
 	}
 	terminal := sink.last()
-	if terminal.Outcome != "failure" || terminal.Committed != true || len(terminal.Attempts) != 1 || !terminal.Attempts[0].ResponseUsageDeferred {
+	if terminal.Outcome != "failure" || terminal.Committed != true || len(terminal.Attempts) != 1 || !terminal.Attempts[0].GenerationUsageDeferred {
 		t.Fatalf("failed POST stream claimed success or duplicated metering: %+v", terminal)
 	}
 	var count, input, output int64

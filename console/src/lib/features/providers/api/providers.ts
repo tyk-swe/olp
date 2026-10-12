@@ -15,6 +15,8 @@ export type ProviderSummary = Schemas['ProviderSummaryResponse'];
 export type CreateProviderInput = Schemas['CreateProviderRequest'];
 export type UpdateProviderInput = Schemas['UpdateProviderRequest'];
 export type ProviderProbe = Schemas['ProbeResponse'];
+/** The operation body and its committed provider version remain separate. */
+export type ProviderProbeReceipt = { result: ProviderProbe; etag: string };
 /** Reviewed connection facts for one known vendor, independent of protocol. */
 export type ProviderVendor = Schemas['Vendor'];
 
@@ -57,10 +59,11 @@ export async function getProvider(
 }
 
 export async function createProvider(
-  input: CreateProviderInput
+  input: CreateProviderInput,
+  requestId: string
 ): Promise<string> {
   const response = await apiClient.POST('/api/v1/providers', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': requestId } },
     body: input
   });
   return unwrap(response).id;
@@ -80,7 +83,7 @@ export async function updateProvider(
 
 export async function probeProvider(
   provider: Provider
-): Promise<ProviderProbe> {
+): Promise<ProviderProbeReceipt> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/probe',
     {
@@ -90,12 +93,21 @@ export async function probeProvider(
       }
     }
   );
-  return unwrap(response);
+  const result = unwrap(response);
+  const etag = response.response.headers.get('ETag');
+  if (!etag?.trim())
+    throw new Error(
+      'The probe response has no provider version. Refresh before continuing.'
+    );
+  return { result, etag };
 }
 
 /** Manual inventory fallback for compatible endpoints without a model-list API. */
 
-export async function activateProvider(provider: Provider): Promise<number> {
+export async function activateProvider(
+  provider: Pick<Provider, 'id' | 'etag'>,
+  requestId: string
+): Promise<number> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/activate',
     {
@@ -103,7 +115,7 @@ export async function activateProvider(provider: Provider): Promise<number> {
         path: { provider_id: provider.id },
         header: {
           'If-Match': provider.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': requestId
         }
       }
     }
@@ -118,7 +130,8 @@ export async function activateProvider(provider: Provider): Promise<number> {
  * provider.
  */
 export async function disableProvider(
-  provider: Provider
+  provider: Pick<Provider, 'id' | 'etag'>,
+  requestId: string
 ): Promise<number | null> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/disable',
@@ -127,7 +140,7 @@ export async function disableProvider(
         path: { provider_id: provider.id },
         header: {
           'If-Match': provider.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': requestId
         }
       }
     }
@@ -137,7 +150,8 @@ export async function disableProvider(
 
 /** Moves a disabled provider back to an editable draft. */
 export async function restoreProviderAsDraft(
-  provider: Provider
+  provider: Pick<Provider, 'id' | 'etag'>,
+  requestId: string
 ): Promise<Provider> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/restore-as-draft',
@@ -146,7 +160,7 @@ export async function restoreProviderAsDraft(
         path: { provider_id: provider.id },
         header: {
           'If-Match': provider.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': requestId
         }
       }
     }

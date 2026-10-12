@@ -96,6 +96,9 @@ func (s *Store) claimContinuation(ctx context.Context, r *Resource, payload []by
 	if r.Kind != KindContinuation || r.SubmissionID == nil {
 		return nil, false, ErrSubmission
 	}
+	if r.TargetID == "" {
+		return nil, false, ErrContract
+	}
 	if err := ValidateSubmission(*r.SubmissionID, time.Now()); err != nil {
 		return nil, false, err
 	}
@@ -125,8 +128,8 @@ func (s *Store) claimContinuation(ctx context.Context, r *Resource, payload []by
  SELECT active_key_version FROM olp.installation WHERE singleton FOR SHARE
 ), inserted AS (
  INSERT INTO olp.provider_resources
- (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,submission_id)
- SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
+ (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,submission_id,target_id)
+ SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$21
  FROM owner CROSS JOIN active
  WHERE active.active_key_version=$17
    AND ($15::uuid IS NULL OR EXISTS(SELECT 1 FROM parent))
@@ -139,7 +142,7 @@ func (s *Store) claimContinuation(ctx context.Context, r *Resource, payload []by
    ciphertext=excluded.ciphertext,expires_at=excluded.expires_at RETURNING id
 )
 SELECT `+columns+` FROM inserted JOIN stored USING(id)`,
-		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID, copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID, copy.SubmissionID, s.keys.Active, ciphertext, StateReady, secrets.ProviderContinuation))
+		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID, copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID, copy.SubmissionID, s.keys.Active, ciphertext, StateReady, secrets.ProviderContinuation, copy.TargetID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return s.existingClaim(ctx, r)
 	}
@@ -317,7 +320,7 @@ func (s *Store) PutContract(ctx context.Context, r *Resource, payload []byte) (*
 	if err := s.validateContract(r, payload); err != nil {
 		return nil, err
 	}
-	if r.Kind != KindStrictResponse || r.SubmissionID != nil {
+	if r.Kind != KindStrictResponse || r.SubmissionID != nil || r.TargetID == "" {
 		return nil, ErrContract
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -334,9 +337,9 @@ func (s *Store) PutContract(ctx context.Context, r *Resource, payload []byte) (*
 		copy.Metadata = []byte(`{}`)
 	}
 	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp.provider_resources
- (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING `+columns,
-		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID, copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID))
+ (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,target_id)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING `+columns,
+		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID, copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID, copy.TargetID))
 	if err != nil {
 		return nil, err
 	}

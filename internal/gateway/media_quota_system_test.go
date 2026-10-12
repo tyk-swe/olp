@@ -59,6 +59,7 @@ func TestIntegrationVideoCreateReservesAndSettlesSupplyCaps(t *testing.T) {
 			t.Cleanup(func() { close(release) })
 			provider.Endpoint = blocked.URL + "/v1"
 			f.snapshot.Providers[provider.ID], f.snapshot.Routes[route.Slug] = provider, route
+			f.republish(t)
 			body := strings.Replace(videoCreateBody, "--video-boundary--", "--video-boundary\r\nContent-Disposition: form-data; name=\"seconds\"\r\n\r\n8\r\n--video-boundary--", 1)
 			finished := make(chan *http.Response, 1)
 			go func() {
@@ -126,6 +127,7 @@ func TestIntegrationVideoCreateReservesAndSettlesSharedQuotas(t *testing.T) {
 				request = slotRequest(&provider.Slots[0], 0, time.Minute, "")
 			}
 			f.snapshot.Providers[f.providerID] = provider
+			f.republish(t)
 			held, err := limiter.Reserve(t.Context(), request)
 			if err != nil {
 				t.Fatal(err)
@@ -216,6 +218,7 @@ func TestIntegrationVideoLifecycleReservesAndSettlesSharedQuotas(t *testing.T) {
 				}
 				f.rt.keys[f.bearer] = authority
 				f.snapshot.Providers[f.providerID] = provider
+				f.republish(t)
 				held, err := limiter.Reserve(t.Context(), request)
 				if err != nil {
 					t.Fatal(err)

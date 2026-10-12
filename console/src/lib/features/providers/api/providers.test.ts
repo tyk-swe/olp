@@ -61,7 +61,9 @@ describe('disableProvider', () => {
       })
     );
 
-    await expect(disableProvider(provider)).resolves.toBeNull();
+    await expect(
+      disableProvider(provider, '12345678-1234-4234-8234-123456789abc')
+    ).resolves.toBeNull();
 
     const request = requests[0]!;
     expect(request.method).toBe('POST');
@@ -84,7 +86,9 @@ describe('disableProvider', () => {
       })
     );
 
-    await expect(disableProvider(provider)).resolves.toBe(9);
+    await expect(
+      disableProvider(provider, '12345678-1234-4234-8234-123456789abc')
+    ).resolves.toBe(9);
     expect(requests[0]!.headers.get('if-match')).toBe(`"${providerEtag}"`);
     expect(requests[0]!.headers.get('idempotency-key')).toMatch(uuid);
   });
@@ -96,7 +100,9 @@ describe('restoreProviderAsDraft', () => {
     const restored = { ...provider, state: 'draft' };
     const requests = captureRequests(() => jsonResponse(restored));
 
-    await expect(restoreProviderAsDraft(provider)).resolves.toEqual(restored);
+    await expect(
+      restoreProviderAsDraft(provider, '12345678-1234-4234-8234-123456789abc')
+    ).resolves.toEqual(restored);
 
     const request = requests[0]!;
     expect(request.method).toBe('POST');
@@ -119,9 +125,10 @@ describe('isProviderInUse', () => {
       )
     );
 
-    const error = await disableProvider(provider).catch(
-      (value: unknown) => value
-    );
+    const error = await disableProvider(
+      provider,
+      '12345678-1234-4234-8234-123456789abc'
+    ).catch((value: unknown) => value);
 
     expect(isProviderInUse(error)).toBe(true);
   });
@@ -136,9 +143,10 @@ describe('isProviderInUse', () => {
       )
     );
 
-    const error = await disableProvider(provider).catch(
-      (value: unknown) => value
-    );
+    const error = await disableProvider(
+      provider,
+      '12345678-1234-4234-8234-123456789abc'
+    ).catch((value: unknown) => value);
 
     expect(error).toBeInstanceOf(ApiProblem);
     expect(isProviderInUse(error)).toBe(false);

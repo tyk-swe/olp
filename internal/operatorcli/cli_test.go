@@ -68,10 +68,15 @@ func TestSavedConfigurationPlanRefusesChangedDestinationAndOmitsSecrets(t *testi
 				w.Write([]byte(`{"digest":"desired","actions":[],"conflicts":[],"blockers":[]}`))
 			}
 		case "/api/v1/configuration/apply":
-			applied = true
 			if r.Header.Get("Idempotency-Key") != "apply-key" {
 				t.Error("apply key missing")
 			}
+			if changed {
+				w.WriteHeader(http.StatusConflict)
+				w.Write([]byte(`{"type":"https://openllmproxy.dev/problems/configuration_changed"}`))
+				return
+			}
+			applied = true
 			w.Write([]byte(`{"digest":"desired","actions":[],"conflicts":[],"blockers":[]}`))
 		default:
 			t.Errorf("unexpected request %s", r.URL.Path)
@@ -198,5 +203,32 @@ func TestSavedPlanBindsExternalReferencesBeforeApplying(t *testing.T) {
 	os.WriteFile(bindings, []byte(`{"provider": {"version":"1", "secret_id":"projects/one/secrets/private-reference", "store":"gcp"}}`), 0600)
 	if err := runner.Run(t.Context(), args); err != nil || applied != 1 {
 		t.Fatalf("equivalent references applied=%d err=%v", applied, err)
+	}
+}
+
+func TestCLIUsesDeclaredScalarQueryTypes(t *testing.T) {
+	called := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called++
+		if r.URL.Query().Get("count") != "0" {
+			t.Errorf("query=%v", r.URL.Query())
+		}
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	runner, _ := testRunner(t, server)
+	if err := runner.Run(t.Context(), []string{"api", "scim_users_list", "--query", "count=0"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"api", "scim_users_list", "--query", "count=1.5"},
+		{"api", "scim_users_list", "--query", "count=1", "--query", "count=2"},
+	} {
+		if err := runner.Run(t.Context(), args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+	if called != 1 {
+		t.Fatalf("dispatched %d calls", called)
 	}
 }

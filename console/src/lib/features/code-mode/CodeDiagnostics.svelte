@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
     listCodeBindings,
@@ -25,6 +26,8 @@
     tokenCount,
     utcWindowStart
   } from './presentation';
+
+  const retireIntent = useMutationIntent();
 
   let {
     projectId,
@@ -109,13 +112,22 @@
     busy = item.id;
     error = '';
     notice = '';
+    let committed = false;
     try {
-      await retireCodeBinding(item.id);
+      const submission = retireIntent.prepare(item.id);
+      await retireCodeBinding(submission.input, submission.requestId);
+      retireIntent.reset();
+      committed = true;
       notice =
         'Tree permanently retired. Start a fresh independent conversation to use another eligible account.';
-      await client.invalidateQueries({ queryKey: codeKeys.root });
+      await client.invalidateQueries(
+        { queryKey: codeKeys.root },
+        { throwOnError: true }
+      );
     } catch (e) {
-      error = mutationError(e);
+      error = committed
+        ? `Binding retired, but refreshing failed. ${errorMessage(e)}`
+        : mutationError(e);
     } finally {
       busy = '';
     }

@@ -30,14 +30,17 @@ export async function listPricingSourcePage(
   return unwrapPage(response);
 }
 
-export async function createPricingSource(input: {
-  name: string;
-  format?: PricingSourceFormat;
-  url?: string | null;
-  enabled?: boolean;
-}): Promise<PricingSource> {
+export async function createPricingSource(
+  input: {
+    name: string;
+    format?: PricingSourceFormat;
+    url?: string | null;
+    enabled?: boolean;
+  },
+  requestId: string
+): Promise<PricingSource> {
   const response = await apiClient.POST('/api/v1/pricing/sources', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': requestId } },
     body: input
   });
   return unwrap(response);
@@ -90,15 +93,16 @@ export async function listPricingSourceSnapshots(
 }
 
 export async function publishPricingSnapshot(
-  snapshot: PricingSourceSnapshot,
-  input: PublishPricingSourceInput
+  snapshot: Pick<PricingSourceSnapshot, 'id'>,
+  input: PublishPricingSourceInput,
+  requestId: string
 ): Promise<Schemas['PricingRevisionResponse']> {
   const response = await apiClient.POST(
     '/api/v1/pricing/source-snapshots/{pricing_source_snapshot_id}/publish',
     {
       params: {
         path: { pricing_source_snapshot_id: snapshot.id },
-        header: { 'Idempotency-Key': crypto.randomUUID() }
+        header: { 'Idempotency-Key': requestId }
       },
       body: input
     }

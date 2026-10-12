@@ -16,6 +16,7 @@ import {
   type NotificationRule
 } from '$lib/features/access/notifications/api';
 import NotificationsProbe from './test/NotificationsProbe.svelte';
+import { notificationKeys } from './notificationKeys';
 
 const role = vi.hoisted(
   (): { current: 'operator' | 'developer'; global: boolean } => ({
@@ -213,12 +214,142 @@ it('subscribes an installation-wide destination to grant lapses', async () => {
     );
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(createNotificationRule).toHaveBeenCalledWith({
-    name: 'Lapsed grants',
-    event: 'provider.grant.lapsed',
-    destination_id: installationHook.id
-  });
+  expect(createNotificationRule).toHaveBeenCalledWith(
+    {
+      name: 'Lapsed grants',
+      event: 'provider.grant.lapsed',
+      destination_id: installationHook.id
+    },
+    expect.any(String)
+  );
 });
+
+it.each(['destination', 'rule'])(
+  'keeps the submitted notification %s selected while its save is delayed',
+  async (kind) => {
+    let finish!: () => void;
+    if (kind === 'destination') {
+      vi.mocked(updateNotificationDestination).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve(installationHook);
+          })
+      );
+    } else {
+      vi.mocked(listNotificationRules).mockResolvedValue([
+        lapseRule,
+        { ...lapseRule, id: 'second-rule', name: 'Other lapses' }
+      ]);
+      vi.mocked(updateNotificationRule).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve(lapseRule);
+          })
+      );
+    }
+    await render();
+    const firstRow = [...host.querySelectorAll('tbody tr')].find((row) =>
+      row.textContent?.includes(
+        kind === 'destination' ? 'On-call hook' : 'Lapsed grants'
+      )
+    )!;
+    firstRow.querySelector<HTMLButtonElement>('button')!.click();
+    flushSync();
+    const label = kind === 'destination' ? 'Destination name' : 'Rule name';
+    choose(`[aria-label="${label}"]`, 'Submitted notification draft');
+    [...host.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent === 'Save')!
+      .click();
+    flushSync();
+    const secondRow = [...host.querySelectorAll('tbody tr')].find((row) =>
+      row.textContent?.includes(
+        kind === 'destination' ? 'Project hook' : 'Other lapses'
+      )
+    )!;
+    const otherEdit = [
+      ...secondRow.querySelectorAll<HTMLButtonElement>('button')
+    ].find((b) => b.textContent === 'Edit')!;
+    expect(otherEdit.disabled).toBe(true);
+    otherEdit.click();
+    flushSync();
+    expect(
+      host.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!.value
+    ).toBe('Submitted notification draft');
+    finish();
+    await vi.waitFor(() =>
+      expect(host.textContent).toContain(
+        kind === 'destination' ? 'Destination updated.' : 'Rule updated.'
+      )
+    );
+  }
+);
+
+it.each(['destination', 'rule'])(
+  'retains the original %s ETag after an ambiguous save and inventory refresh',
+  async (kind) => {
+    const write =
+      kind === 'destination'
+        ? vi.mocked(updateNotificationDestination)
+        : vi.mocked(updateNotificationRule);
+    write.mockReset();
+    if (kind === 'destination')
+      vi.mocked(updateNotificationDestination)
+        .mockRejectedValueOnce(new TypeError('Response lost'))
+        .mockResolvedValueOnce(installationHook);
+    else
+      vi.mocked(updateNotificationRule)
+        .mockRejectedValueOnce(new TypeError('Response lost'))
+        .mockResolvedValueOnce(lapseRule);
+    await render();
+    const row = [...host.querySelectorAll('tbody tr')].find((candidate) =>
+      candidate.textContent?.includes(
+        kind === 'destination' ? 'On-call hook' : 'Lapsed grants'
+      )
+    )!;
+    row.querySelector<HTMLButtonElement>('button')!.click();
+    flushSync();
+    choose(
+      `[aria-label="${kind === 'destination' ? 'Destination name' : 'Rule name'}"]`,
+      'Same draft input'
+    );
+    const save = () =>
+      [...host.querySelectorAll<HTMLButtonElement>('button')]
+        .find((b) => b.textContent === 'Save')!
+        .click();
+    save();
+    await vi.waitFor(() => expect(host.textContent).toContain('Response lost'));
+    if (kind === 'destination')
+      client.setQueryData(notificationKeys.destinations(), [
+        { ...installationHook, etag: 'new-inventory-etag' },
+        projectHook
+      ]);
+    else
+      client.setQueryData(notificationKeys.rules(), [
+        { ...lapseRule, etag: 'new-inventory-etag' }
+      ]);
+    vi.spyOn(client, 'invalidateQueries').mockRejectedValueOnce(
+      new Error('Refresh unavailable')
+    );
+    flushSync();
+    save();
+    await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(2));
+    expect(write.mock.calls[1]).toEqual(write.mock.calls[0]);
+    expect(write.mock.calls[1][0].etag).toBe(
+      kind === 'destination' ? installationHook.etag : lapseRule.etag
+    );
+    await vi.waitFor(() =>
+      expect(host.textContent).toContain('updated, but refreshing failed.')
+    );
+    expect(
+      host.querySelector(
+        `[aria-label="${kind === 'destination' ? 'Destination name' : 'Rule name'}"]`
+      )
+    ).toBeNull();
+    expect(host.textContent).toContain(
+      kind === 'destination' ? 'Destination updated.' : 'Rule updated.'
+    );
+  }
+);
 
 it('lists grant lapse rules and the lapses they delivered', async () => {
   await render();
@@ -300,13 +431,16 @@ it('creates a Slack destination with origin URL and sealed webhook URL', async (
     );
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(createNotificationDestination).toHaveBeenCalledWith({
-    name: 'Ops slack',
-    type: 'slack',
-    url: 'https://hooks.slack.com',
-    project_id: null,
-    secret: { webhook_url: 'https://hooks.slack.com/services/T/B/secret' }
-  });
+  expect(createNotificationDestination).toHaveBeenCalledWith(
+    {
+      name: 'Ops slack',
+      type: 'slack',
+      url: 'https://hooks.slack.com',
+      project_id: null,
+      secret: { webhook_url: 'https://hooks.slack.com/services/T/B/secret' }
+    },
+    expect.any(String)
+  );
 });
 
 it('creates a PagerDuty destination with endpoint and routing key', async () => {
@@ -329,13 +463,16 @@ it('creates a PagerDuty destination with endpoint and routing key', async () => 
     );
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(createNotificationDestination).toHaveBeenCalledWith({
-    name: 'PagerDuty',
-    type: 'pagerduty',
-    url: 'https://events.pagerduty.com/v2/enqueue',
-    project_id: null,
-    secret: { routing_key: 'pd-routing-key' }
-  });
+  expect(createNotificationDestination).toHaveBeenCalledWith(
+    {
+      name: 'PagerDuty',
+      type: 'pagerduty',
+      url: 'https://events.pagerduty.com/v2/enqueue',
+      project_id: null,
+      secret: { routing_key: 'pd-routing-key' }
+    },
+    expect.any(String)
+  );
 });
 
 it('creates an email destination with SMTP configuration and credentials', async () => {
@@ -361,17 +498,20 @@ it('creates an email destination with SMTP configuration and credentials', async
     );
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(createNotificationDestination).toHaveBeenCalledWith({
-    name: 'Mail',
-    type: 'email',
-    url: 'smtps://smtp.example.com:465',
-    project_id: null,
-    configuration: {
-      from: 'alerts@example.com',
-      to: ['ops@example.com', 'dev@example.com']
+  expect(createNotificationDestination).toHaveBeenCalledWith(
+    {
+      name: 'Mail',
+      type: 'email',
+      url: 'smtps://smtp.example.com:465',
+      project_id: null,
+      configuration: {
+        from: 'alerts@example.com',
+        to: ['ops@example.com', 'dev@example.com']
+      },
+      secret: { username: 'smtp-user', password: 'smtp-pass' }
     },
-    secret: { username: 'smtp-user', password: 'smtp-pass' }
-  });
+    expect.any(String)
+  );
 });
 
 it('creates a provider.error_rate rule with ratio configuration', async () => {
@@ -395,16 +535,19 @@ it('creates a provider.error_rate rule with ratio configuration', async () => {
     );
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(createNotificationRule).toHaveBeenCalledWith({
-    name: 'Error rate',
-    event: 'provider.error_rate',
-    destination_id: installationHook.id,
-    configuration: {
-      threshold: '0.5',
-      window_seconds: 300,
-      minimum_samples: 3
-    }
-  });
+  expect(createNotificationRule).toHaveBeenCalledWith(
+    {
+      name: 'Error rate',
+      event: 'provider.error_rate',
+      destination_id: installationHook.id,
+      configuration: {
+        threshold: '0.5',
+        window_seconds: 300,
+        minimum_samples: 3
+      }
+    },
+    expect.any(String)
+  );
 });
 
 it('omits empty configuration fields so backend defaults apply', async () => {
@@ -424,11 +567,14 @@ it('omits empty configuration fields so backend defaults apply', async () => {
     );
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(createNotificationRule).toHaveBeenCalledWith({
-    name: 'Stale workers',
-    event: 'worker.stale',
-    destination_id: installationHook.id
-  });
+  expect(createNotificationRule).toHaveBeenCalledWith(
+    {
+      name: 'Stale workers',
+      event: 'worker.stale',
+      destination_id: installationHook.id
+    },
+    expect.any(String)
+  );
 });
 
 it('creates a project-scoped report.spend rule with period', async () => {
@@ -450,13 +596,16 @@ it('creates a project-scoped report.spend rule with period', async () => {
     );
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(createNotificationRule).toHaveBeenCalledWith({
-    name: 'Weekly spend',
-    event: 'report.spend',
-    project_id: projectHook.project_id,
-    destination_id: projectHook.id,
-    configuration: { period: 'weekly' }
-  });
+  expect(createNotificationRule).toHaveBeenCalledWith(
+    {
+      name: 'Weekly spend',
+      event: 'report.spend',
+      project_id: projectHook.project_id,
+      destination_id: projectHook.id,
+      configuration: { period: 'weekly' }
+    },
+    expect.any(String)
+  );
 });
 
 it.each(['msteams', 'discord'] as const)(
@@ -481,13 +630,16 @@ it.each(['msteams', 'discord'] as const)(
       );
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(createNotificationDestination).toHaveBeenCalledWith({
-      name: `${type} hook`,
-      type,
-      url: 'https://chat.example.com',
-      project_id: null,
-      secret: { webhook_url: 'https://chat.example.com/webhook/secret' }
-    });
+    expect(createNotificationDestination).toHaveBeenCalledWith(
+      {
+        name: `${type} hook`,
+        type,
+        url: 'https://chat.example.com',
+        project_id: null,
+        secret: { webhook_url: 'https://chat.example.com/webhook/secret' }
+      },
+      expect.any(String)
+    );
   }
 );
 
@@ -667,13 +819,16 @@ it('sends a route.latency rule with the ttft metric', async () => {
     );
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(createNotificationRule).toHaveBeenCalledWith({
-    name: 'Latency',
-    event: 'route.latency',
-    project_id: null,
-    destination_id: installationHook.id,
-    configuration: { metric: 'ttft', threshold: '500' }
-  });
+  expect(createNotificationRule).toHaveBeenCalledWith(
+    {
+      name: 'Latency',
+      event: 'route.latency',
+      project_id: null,
+      destination_id: installationHook.id,
+      configuration: { metric: 'ttft', threshold: '500' }
+    },
+    expect.any(String)
+  );
 });
 
 it('never sends stale_after_seconds for worker.stale rules', async () => {
@@ -694,10 +849,13 @@ it('never sends stale_after_seconds for worker.stale rules', async () => {
     );
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(createNotificationRule).toHaveBeenCalledWith({
-    name: 'Stale',
-    event: 'worker.stale',
-    destination_id: installationHook.id,
-    configuration: { cooldown_seconds: 120 }
-  });
+  expect(createNotificationRule).toHaveBeenCalledWith(
+    {
+      name: 'Stale',
+      event: 'worker.stale',
+      destination_id: installationHook.id,
+      configuration: { cooldown_seconds: 120 }
+    },
+    expect.any(String)
+  );
 });

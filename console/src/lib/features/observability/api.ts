@@ -33,10 +33,11 @@ async function listExportSinkPage(
 }
 
 export async function createExportSink(
-  input: CreateExportSinkInput
+  input: CreateExportSinkInput,
+  requestId: string
 ): Promise<ExportSink> {
   const response = await apiClient.POST('/api/v1/observability/sinks', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': requestId } },
     body: input
   });
   return unwrap(response);
@@ -149,12 +150,13 @@ export async function listCaptureSinkOptions(
 }
 
 export async function createCapturePolicy(
-  input: CreateCapturePolicyInput
+  input: CreateCapturePolicyInput,
+  requestId: string
 ): Promise<CapturePolicy> {
   const response = await apiClient.POST(
     '/api/v1/observability/capture-policies',
     {
-      params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+      params: { header: { 'Idempotency-Key': requestId } },
       body: input
     }
   );

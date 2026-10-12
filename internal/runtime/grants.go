@@ -30,21 +30,13 @@ type servedGrant struct {
 // release without any reads nothing. It tells GrantRefreshed of each
 // refreshed grant, apart from the poll.
 func (m *Manager) refreshGrants(ctx context.Context) error {
+	m.grantRefresh.Lock()
+	defer m.grantRefresh.Unlock()
 	if m.keys == nil {
 		// Mounted gateways refuse credentials that have grants.
 		return nil
 	}
-	providers := map[string]string{}
-	for _, provider := range m.Release().Snapshot.Providers {
-		if provider.AuthMode != connectors.AuthGrant {
-			continue
-		}
-		for _, slot := range provider.Slots {
-			if slot.CredentialID != nil {
-				providers[*slot.CredentialID] = provider.ID
-			}
-		}
-	}
+	providers := grantProviders(m.Release().Snapshot)
 	if len(providers) == 0 {
 		m.serveGrants(nil)
 		return nil
@@ -54,36 +46,73 @@ func (m *Manager) refreshGrants(ctx context.Context) error {
 		return fmt.Errorf("grants: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	generations, err := ReadGrantGenerations(ctx, tx, slices.Collect(maps.Keys(providers)))
-	if err != nil {
-		return fmt.Errorf("grants: %w", err)
-	}
 	m.mu.RLock()
 	known := m.grants
 	m.mu.RUnlock()
-	served := make(map[string]servedGrant, len(generations))
-	refreshed := map[string]string{}
-	for credentialID, generation := range generations {
-		previous, ok := known[credentialID]
-		if ok && previous.generation == generation {
-			served[credentialID] = previous
-			continue
-		}
-		secret, err := m.keys.Read(ctx, tx, m.installation, credentialID, secrets.ProviderCredential)
-		if err != nil {
-			return fmt.Errorf("grant of credential %s: %w", credentialID, err)
-		}
-		served[credentialID] = servedGrant{generation: generation, secret: secret}
-		if ok {
-			refreshed[credentialID] = providers[credentialID]
-		}
+	served, err := m.readGrants(ctx, tx, providers, known)
+	if err != nil {
+		return err
 	}
+	refreshed := advancedGrants(providers, known, served)
 	m.serveGrants(served)
 	for credentialID, providerID := range refreshed {
 		m.log.Info("grant access token reloaded", "provider_id", providerID, "credential_id", credentialID, "generation", served[credentialID].generation)
 	}
 	m.grantsRefreshed(refreshed)
 	return nil
+}
+
+// grantProviders names exactly the grant membership of a serving snapshot.
+// Both installation and rotation polling use this set; historical credentials
+// outside it retain the database fallback in Secret.
+func grantProviders(snapshot *Snapshot) map[string]string {
+	providers := map[string]string{}
+	for _, provider := range snapshot.Providers {
+		if provider.AuthMode != connectors.AuthGrant {
+			continue
+		}
+		for _, slot := range provider.Slots {
+			if slot.CredentialID != nil {
+				providers[*slot.CredentialID] = provider.ID
+			}
+		}
+	}
+	return providers
+}
+
+// readGrants reads token bytes and their generations in the caller's coherent
+// database snapshot. Unchanged generations borrow the live cache's immutable
+// bytes. Installation borrows that cache too, and builds a complete seed for
+// its own membership without decrypting unchanged tokens.
+func (m *Manager) readGrants(ctx context.Context, q access.Queryer, providers map[string]string, known map[string]servedGrant) (map[string]servedGrant, error) {
+	generations, err := ReadGrantGenerations(ctx, q, slices.Collect(maps.Keys(providers)))
+	if err != nil {
+		return nil, fmt.Errorf("grants: %w", err)
+	}
+	served := make(map[string]servedGrant, len(generations))
+	for credentialID, generation := range generations {
+		previous, ok := known[credentialID]
+		if ok && previous.generation >= generation {
+			served[credentialID] = previous
+			continue
+		}
+		secret, err := m.keys.Read(ctx, q, m.installation, credentialID, secrets.ProviderCredential)
+		if err != nil {
+			return nil, fmt.Errorf("grant of credential %s: %w", credentialID, err)
+		}
+		served[credentialID] = servedGrant{generation: generation, secret: secret}
+	}
+	return served, nil
+}
+
+func advancedGrants(providers map[string]string, known, served map[string]servedGrant) map[string]string {
+	refreshed := map[string]string{}
+	for credentialID, grant := range served {
+		if previous, ok := known[credentialID]; ok && previous.generation < grant.generation {
+			refreshed[credentialID] = providers[credentialID]
+		}
+	}
+	return refreshed
 }
 
 // grantsRefreshed tells GrantRefreshed of the grants a poll found refreshed,
@@ -103,7 +132,7 @@ func (m *Manager) grantsRefreshed(refreshed map[string]string) {
 	maps.Copy(m.refreshedGrants, refreshed)
 	m.mu.Unlock()
 	if idle {
-		m.wg.Go(m.tellRefreshedGrants)
+		m.launch(func(context.Context) { m.tellRefreshedGrants() })
 	}
 }
 
@@ -131,6 +160,10 @@ func (m *Manager) tellRefreshedGrants() {
 func (m *Manager) serveGrants(served map[string]servedGrant) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.serveGrantsLocked(served)
+}
+
+func (m *Manager) serveGrantsLocked(served map[string]servedGrant) {
 	m.grants = served
 	maps.DeleteFunc(m.refreshRequested, func(credentialID string, generation int64) bool {
 		return served[credentialID].generation != generation
@@ -201,8 +234,8 @@ func (m *Manager) CredentialRefused(credentialID string, generation int64) {
 	if requested {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), PollInterval)
+	m.launch(func(ctx context.Context) {
+		ctx, cancel := context.WithTimeout(ctx, PollInterval)
 		defer cancel()
 		if err := RequestRefresh(ctx, m.pool, credentialID, generation); err != nil {
 			m.log.Warn("grant refresh not requested", "credential_id", credentialID, "error", err)
@@ -213,7 +246,7 @@ func (m *Manager) CredentialRefused(credentialID string, generation int64) {
 			}
 			m.mu.Unlock()
 		}
-	}()
+	})
 }
 
 // RequestRefresh asks workers to refresh the grant beneath a credential

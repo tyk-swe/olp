@@ -409,7 +409,12 @@ ref as an `enroll` action
 once a grant enrollment gives each slot it serves with a credential.
 
 `POST /api/v1/configuration/apply` requires an Idempotency-Key and stages the
-desired state in one installation-serialized transaction:
+desired state in one installation-serialized transaction. Destination credential
+and network bindings are assembled before the provider's ordinary draft
+configuration operation validates the boundary and invalidates old certification.
+Provider-owned staged inventory updates retain unchanged slots and pending
+enrollments, clean omitted enrollment secrets, and advance both collection and
+parent ETags. Active releases remain pinned until explicit activation:
 
 - Missing projects are created with the applying member (or the token's
   creator) as their manager; existing case-insensitive names are reused.

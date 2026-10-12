@@ -181,12 +181,15 @@ beforeEach(() => {
   }));
   vi.mocked(startGrantEnrollment).mockResolvedValue(enrollment);
   vi.mocked(listProviderCredentials).mockResolvedValue([grantVersion]);
-  vi.mocked(probeProvider).mockResolvedValue({
-    succeeded: true,
-    detail: 'Reached the upstream; 1 models listed.',
-    probe_type: 'models',
-    discovered_models: 1
-  } as ProviderProbe);
+  vi.mocked(probeProvider).mockImplementation(async (current) => ({
+    result: {
+      succeeded: true,
+      detail: 'Reached the upstream; 1 models listed.',
+      probe_type: 'models',
+      discovered_models: 1
+    } as ProviderProbe,
+    etag: current.etag
+  }));
 });
 
 afterEach(async () => {

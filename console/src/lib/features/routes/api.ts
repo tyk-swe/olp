@@ -57,10 +57,11 @@ export async function getRouteDraft(
 }
 
 export async function createRouteDraft(
-  input: CreateRouteDraftInput
+  input: CreateRouteDraftInput,
+  requestId: string
 ): Promise<RouteDraftValidation> {
   const response = await apiClient.POST('/api/v1/route-drafts', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': requestId } },
     body: input
   });
   return unwrap(response);
@@ -125,13 +126,14 @@ export async function replaceRoutingPolicy(
   scope: RoutingPolicyScope,
   id: string,
   etag: string,
-  body: RoutingPolicy
+  body: RoutingPolicy,
+  requestId: string
 ): Promise<RoutingPolicyResource> {
   return unwrap(
     await apiClient.PUT('/api/v1/routing-policies/{scope}/{id}', {
       params: {
         path: { scope, id },
-        header: { 'If-Match': etag, 'Idempotency-Key': crypto.randomUUID() }
+        header: { 'If-Match': etag, 'Idempotency-Key': requestId }
       },
       body
     })
@@ -209,7 +211,8 @@ export async function validateRoute(
 }
 
 export async function activateRoute(
-  draft: Pick<RouteDraft, 'id' | 'etag'>
+  draft: Pick<RouteDraft, 'id' | 'etag'>,
+  requestId: string
 ): Promise<RouteActivation> {
   const response = await apiClient.POST(
     '/api/v1/route-drafts/{draft_id}/activate',
@@ -218,7 +221,7 @@ export async function activateRoute(
         path: { draft_id: draft.id },
         header: {
           'If-Match': draft.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': requestId
         }
       }
     }
@@ -228,14 +231,15 @@ export async function activateRoute(
 
 export async function retireRoute(
   routeID: string,
-  etag: string
+  etag: string,
+  requestId: string
 ): Promise<RouteRetire> {
   const response = await apiClient.POST('/api/v1/routes/{route_id}/retire', {
     params: {
       path: { route_id: routeID },
       header: {
         'If-Match': etag,
-        'Idempotency-Key': crypto.randomUUID()
+        'Idempotency-Key': requestId
       }
     }
   });
@@ -284,14 +288,15 @@ export async function diffRouteRevisions(
 
 export async function restoreRouteRevision(
   routeId: string,
-  revisionId: string
+  revisionId: string,
+  requestId: string
 ): Promise<RouteDraft> {
   const response = await apiClient.POST(
     '/api/v1/routes/{route_id}/revisions/{revision_id}/restore-as-draft',
     {
       params: {
         path: { route_id: routeId, revision_id: revisionId },
-        header: { 'Idempotency-Key': crypto.randomUUID() }
+        header: { 'Idempotency-Key': requestId }
       }
     }
   );

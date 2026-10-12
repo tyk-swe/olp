@@ -42,7 +42,7 @@ func TestAnAttemptIsSentTheBodyPlanningMadeIfItIsStillTheRequest(t *testing.T) {
 	if len(kept) != 2 || x.encoded != nil || x.takeEncoded() != nil {
 		t.Fatalf("planning kept %d bodies and left %d behind", len(kept), len(x.encoded))
 	}
-	if body, got, err := x.encoding(kept, provider, cfg, "gpt-4o"); err != nil || got != wire || !bytes.Equal(body, want) {
+	if body, got, _, err := x.encoding(kept, provider, cfg, "gpt-4o"); err != nil || got != wire || !bytes.Equal(body, want) {
 		t.Fatalf("the attempt was sent %s in %s (%v), want %s in %s", body, got, err, want, wire)
 	}
 
@@ -50,7 +50,7 @@ func TestAnAttemptIsSentTheBodyPlanningMadeIfItIsStillTheRequest(t *testing.T) {
 	// make it again is a body that only planning could have made.
 	key := encodedKey(provider, "gpt-4o")
 	kept[key] = encodedRequest{source: kept[key].source, body: []byte("made by planning"), wire: wire}
-	if body, _, _ := x.encoding(kept, provider, cfg, "gpt-4o"); string(body) != "made by planning" {
+	if body, _, _, _ := x.encoding(kept, provider, cfg, "gpt-4o"); string(body) != "made by planning" {
 		t.Fatalf("the attempt made its own body, %s", body)
 	}
 	// A body is only the right one for the provider revision and model it was made
@@ -72,7 +72,7 @@ func TestAnAttemptIsSentTheBodyPlanningMadeIfItIsStillTheRequest(t *testing.T) {
 			tc.change()
 		}
 		cfg := tc.provider.Connector()
-		body, wire, err := x.encoding(kept, tc.provider, cfg, tc.model)
+		body, wire, _, err := x.encoding(kept, tc.provider, cfg, tc.model)
 		fresh, freshWire, freshErr := providerinvoke.Encode(parsed, cfg, tc.model, tc.provider.ParameterDefaults)
 		if err != nil || freshErr != nil || wire != freshWire || !bytes.Equal(body, fresh) {
 			t.Errorf("%s: the attempt was sent %s (%v), want %s", tc.name, body, err, fresh)
@@ -130,7 +130,7 @@ func TestRetentionPolicyAppliesToNativeDestinationAcrossEncodingPaths(t *testing
 			kept := x.takeEncoded()
 			// The first target reuses planning; later failover targets encode on demand.
 			for _, cache := range []map[string]encodedRequest{kept, nil} {
-				body, wire, err := x.encoding(cache, provider, provider.Connector(), "model")
+				body, wire, _, err := x.encoding(cache, provider, provider.Connector(), "model")
 				if err != nil {
 					t.Fatal(err)
 				}

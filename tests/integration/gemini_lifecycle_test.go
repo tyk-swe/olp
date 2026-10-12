@@ -64,7 +64,10 @@ type geminiLifecycleProvider struct {
 	replyGate       atomic.Pointer[geminiReplyGate]
 	// deleteMissing makes a delete answer that the Interaction does not exist, as
 	// it does for one an earlier delete whose response was lost already removed.
-	deleteMissing atomic.Bool
+	deleteMissing   atomic.Bool
+	terminalUsage   atomic.Bool
+	partialUsage    atomic.Bool
+	accountingReply atomic.Pointer[geminiAccountingReply]
 }
 
 func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
@@ -102,6 +105,12 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 				return
 			}
 		}
+		if reply := p.accountingReply.Load(); reply != nil && strings.HasPrefix(r.URL.Path, "/v1beta/interactions/") &&
+			(r.Method == http.MethodGet || r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/cancel")) {
+			id = strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1beta/interactions/"), "/cancel")
+			reply.write(w, id, r.URL.Query().Get("stream") == "true")
+			return
+		}
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1beta/interactions":
 			var input struct {
@@ -111,7 +120,11 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 			_ = json.Unmarshal(body, &input)
 			if input.Background {
 				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprintf(w, `{"id":%q,"model":%q,"status":"in_progress","object":"interaction"}`, id, vendorModel)
+				nativeUsage := ""
+				if p.partialUsage.Load() {
+					nativeUsage = `,"usage":{"total_input_tokens":3,"total_output_tokens":2}`
+				}
+				fmt.Fprintf(w, `{"id":%q,"model":%q,"status":"in_progress","object":"interaction"%s}`, id, vendorModel, nativeUsage)
 				return
 			}
 			if input.Stream {
@@ -143,7 +156,11 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 				}
 				fmt.Fprint(w, "id: cursor-delta\ndata: {\"event_type\":\"step.delta\",\"delta\":{\"type\":\"text\",\"text\":\"retrieved\"}}\n\n")
 				fmt.Fprint(w, "id: cursor-stop\ndata: {\"event_type\":\"step.stop\",\"step\":{\"type\":\"model_output\"}}\n\n")
-				fmt.Fprintf(w, "id: cursor-complete\ndata: {\"event_type\":\"interaction.completed\",\"interaction\":{\"id\":%q,\"status\":\"completed\"}}\n\n", id)
+				nativeUsage := ""
+				if p.terminalUsage.Load() {
+					nativeUsage = `,"usage":{"total_input_tokens":5,"total_output_tokens":4}`
+				}
+				fmt.Fprintf(w, "id: cursor-complete\ndata: {\"event_type\":\"interaction.completed\",\"interaction\":{\"id\":%q,\"status\":\"completed\"%s}}\n\n", id, nativeUsage)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -151,11 +168,19 @@ func newGeminiLifecycleProvider(t *testing.T) *geminiLifecycleProvider {
 				fmt.Fprintf(w, `{"id":%q,"model":%q,"status":"completed","steps":[],"native":{"resource":"%s"}}`, id, vendorModel, strings.ReplaceAll(id, "_", `\u005f`))
 				return
 			}
-			fmt.Fprintf(w, `{"id":%q,"model":%q,"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"retrieved"}]}]}`, id, vendorModel)
+			nativeUsage := ""
+			if p.terminalUsage.Load() {
+				nativeUsage = `,"usage":{"total_input_tokens":5,"total_output_tokens":4}`
+			}
+			fmt.Fprintf(w, `{"id":%q,"model":%q,"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"retrieved"}]}]%s}`, id, vendorModel, nativeUsage)
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/cancel"):
 			id = strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1beta/interactions/"), "/cancel")
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"id":%q,"model":%q,"status":"cancelled"}`, id, vendorModel)
+			nativeUsage := ""
+			if p.terminalUsage.Load() {
+				nativeUsage = `,"usage":{"total_input_tokens":5,"total_output_tokens":4}`
+			}
+			fmt.Fprintf(w, `{"id":%q,"model":%q,"status":"cancelled"%s}`, id, vendorModel, nativeUsage)
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1beta/interactions/"):
 			if p.deleteMissing.Load() {
 				http.Error(w, `{"error":{"code":404,"message":"Interaction not found","status":"NOT_FOUND"}}`, http.StatusNotFound)

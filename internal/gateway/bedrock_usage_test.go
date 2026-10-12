@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 )
 
@@ -31,12 +32,13 @@ func foldBedrockUsage(t *testing.T, messages ...*eventstream.Message) *openai.Us
 	t.Helper()
 	var usage *openai.Usage
 	for _, message := range messages {
-		if u, authoritative := bedrockStreamUsage(message); u != nil {
-			if authoritative {
-				usage = u
-			} else {
-				usage = mergeBedrockUsage(usage, u)
-			}
+		observation, err := protocols.ObserveBedrockEvent(message, 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		usage, err = observation.Usage.Merge(usage)
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 	return usage
@@ -62,19 +64,19 @@ func TestBedrockInvokeStreamUsage(t *testing.T) {
 	if cached == nil || cached.InputTokens != 53 || cached.OutputTokens != 5 || *cached.CachedInputTokens != 20 || *cached.CacheWriteInputTokens != 30 {
 		t.Fatalf("invoke stream cache usage: %+v", cached)
 	}
-	if u, _ := bedrockStreamUsage(bedrockChunk(t, `{"type":"message_delta","usage":{"output_tokens":-1}}`)); u != nil {
+	if u, _ := bedrockTestUsage(bedrockChunk(t, `{"type":"message_delta","usage":{"output_tokens":-1}}`)); u != nil {
 		t.Fatalf("accepted negative usage: %+v", u)
 	}
 }
 
 func TestBedrockConverseStreamCacheUsage(t *testing.T) {
-	u, authoritative := bedrockStreamUsage(bedrockEvent(t, "metadata", map[string]any{"usage": map[string]any{
+	u, authoritative := bedrockTestUsage(bedrockEvent(t, "metadata", map[string]any{"usage": map[string]any{
 		"inputTokens": 12, "outputTokens": 200, "totalTokens": 4212, "cacheReadInputTokens": 4000,
 	}}))
 	if u == nil || !authoritative || u.InputTokens != 4012 || *u.CachedInputTokens != 4000 || u.TotalTokens != 4212 {
 		t.Fatalf("cached Converse stream usage: %+v", u)
 	}
-	if u, _ := bedrockStreamUsage(bedrockEvent(t, "metadata", map[string]any{"usage": map[string]any{
+	if u, _ := bedrockTestUsage(bedrockEvent(t, "metadata", map[string]any{"usage": map[string]any{
 		"inputTokens": 12, "outputTokens": 2, "cacheReadInputTokens": -1,
 	}})); u != nil {
 		t.Fatalf("accepted negative cache usage: %+v", u)
@@ -97,4 +99,14 @@ func TestBedrockTitanImageSettlesEstimate(t *testing.T) {
 			t.Fatalf("%s: Titan image invoke settled %v tokens, want the 900-token estimate", name, got)
 		}
 	}
+}
+
+// bedrockTestUsage exercises the operation-owned projection, not a second
+// gateway parser.
+func bedrockTestUsage(message *eventstream.Message) (*openai.Usage, bool) {
+	observation, err := protocols.ObserveBedrockEvent(message, 1<<20)
+	if err != nil {
+		return nil, false
+	}
+	return observation.Usage.Value, observation.Usage.Authoritative
 }

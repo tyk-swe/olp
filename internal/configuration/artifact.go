@@ -54,24 +54,11 @@ type ProjectEntry struct {
 	EndUserDefaults      *access.AdmissionLimits   `json:"end_user_defaults,omitempty"`
 }
 
-type CapabilityEntry struct {
-	Operation string `json:"operation"`
-	Surface   string `json:"surface"`
-	Mode      string `json:"mode"`
-}
+type CapabilityEntry = providers.CapabilityInput
 
-type ModelEntry struct {
-	UpstreamModel string            `json:"upstream_model"`
-	DisplayName   string            `json:"display_name"`
-	Enabled       bool              `json:"enabled"`
-	Capabilities  []CapabilityEntry `json:"capabilities"`
-}
+type ModelEntry = providers.DraftModel
 
-type Restrictions struct {
-	AllowedAPIKeys []string `json:"allowed_api_keys"`
-	AllowedModels  []string `json:"allowed_models"`
-	AllowedRoutes  []string `json:"allowed_routes"`
-}
+type Restrictions = providers.SlotRestrictions
 
 type SlotEntry struct {
 	Name          string           `json:"name"`

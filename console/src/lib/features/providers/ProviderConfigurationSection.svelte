@@ -18,6 +18,7 @@
     providerSpec,
     editValues = $bindable(),
     busy,
+    savedDraftEpoch = 0,
     canManage,
     run,
     onTouch,
@@ -32,6 +33,7 @@
     providerSpec: ProviderKindCapability | undefined;
     editValues: ProviderEditValues;
     busy: string;
+    savedDraftEpoch?: number;
     canManage: boolean;
     run: RunProviderAction;
     onTouch: () => void;
@@ -90,18 +92,20 @@
     {onProviderChanged}
     onChange={onTouch}
   />
-  <ProviderActivationControls
-    {current}
-    {busy}
-    {canManage}
-    canSave={Boolean(providerSpec) && !editValues.document?.issue}
-    {dirty}
-    {run}
-    {onSave}
-    {onProviderChanged}
-    {onRefetchProvider}
-    {onNotice}
-  />
+  {#key savedDraftEpoch}
+    <ProviderActivationControls
+      {current}
+      {busy}
+      {canManage}
+      canSave={Boolean(providerSpec) && !editValues.document?.issue}
+      {dirty}
+      {run}
+      {onSave}
+      {onProviderChanged}
+      {onRefetchProvider}
+      {onNotice}
+    />
+  {/key}
 </section>
 
 <style>

@@ -4,6 +4,8 @@ package integration_test
 
 import (
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"slices"
 	"strings"
 	"testing"
@@ -333,6 +335,10 @@ func TestConfigurationPromotion(t *testing.T) {
 	if slotID == "" || modelID == "" {
 		t.Fatal("staged slot and model must exist", slotID, modelID)
 	}
+	// A pending enrollment belongs to the retained slot identity. Staging the
+	// same slot must preserve it and advance the collection's concurrency token.
+	poolBefore := destination.want(destinationOwner, "GET", "/api/v1/providers/"+providerID+"/credential-slots", nil, nil, 200)
+	pendingID := seedPromotionEnrollment(t, destination, providerID, slotID)
 	updated := map[string]any{}
 	if err = json.Unmarshal(encodedDoc, &updated); err != nil {
 		t.Fatal(err)
@@ -343,6 +349,18 @@ func TestConfigurationPromotion(t *testing.T) {
 		t.Fatal("applying a changed artifact to an active provider must stage cleanly", updatedApply)
 	}
 	destination.want(destinationOwner, "GET", "/api/v1/routes/"+stagedRouteID, nil, nil, 200)
+	poolAfter := destination.want(destinationOwner, "GET", "/api/v1/providers/"+providerID+"/credential-slots", nil, nil, 200)
+	if poolAfter["etag"] == poolBefore["etag"] {
+		t.Fatal("promotion kept a stale credential collection ETag")
+	}
+	var pending, secretPresent bool
+	if err = destination.Pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM olp.grant_enrollments WHERE id=$1),EXISTS(SELECT 1 FROM olp.secrets WHERE id=$1)", pendingID).Scan(&pending, &secretPresent); err != nil {
+		t.Fatal(err)
+	}
+	if !pending || !secretPresent {
+		t.Fatal("promotion destroyed enrollment state for a retained slot")
+	}
+	destination.want(destinationOwner, "DELETE", "/api/v1/providers/"+providerID+"/credential-slots/"+slotID, nil, withMatch(poolBefore, idem("stale-pool-delete")), 412)
 	var preservedSlot, preservedModel string
 	destination.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp.provider_slots WHERE provider_id=$1 AND name=$2", providerID, slotName).Scan(&preservedSlot)
 	destination.Pool.QueryRow(t.Context(), "SELECT id::text FROM olp.provider_models WHERE provider_id=$1 AND upstream_model=$2", providerID, vendorModel).Scan(&preservedModel)
@@ -461,4 +479,120 @@ func TestConfigurationPricingRequiresSettings(t *testing.T) {
 	// An unchanged pricing section does not require settings.
 	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"]
 	h.machineWant(configure, "POST", "/api/v1/configuration/apply", map[string]any{"document": exported}, idem("unchanged-pricing"), 200)
+}
+
+func seedPromotionEnrollment(t *testing.T, h *accessHarness, providerID, slotID string) string {
+	t.Helper()
+	pendingID := access.NewID()
+	tx, err := h.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	var actor string
+	if err = tx.QueryRow(t.Context(), "SELECT id::text FROM olp.users WHERE role='owner' LIMIT 1").Scan(&actor); err != nil {
+		t.Fatal(err)
+	}
+	expires := time.Now().Add(time.Hour)
+	if _, err = tx.Exec(t.Context(), `INSERT INTO olp.grant_enrollments(id,provider_id,slot_id,plugin_digest,profile_id,started_by,expires_at) VALUES($1,$2,$3,'retained-test-digest','test',$4,$5)`, pendingID, providerID, slotID, actor, expires); err != nil {
+		t.Fatal(err)
+	}
+	if err = h.Server.Keys.Store(t.Context(), tx, h.Server.Installation, pendingID, secrets.GrantEnrollment, []byte(`{"pending":"same slot"}`), &expires); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	return pendingID
+}
+
+func TestConfigurationStagedSlotLifetimes(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	up := newVendor(t)
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Promoted slot lifetimes", "credential": vendorSecret, "model": vendorModel,
+		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
+	}, idem("provider-slot-lifetimes"), 201)
+	providerID := created["id"].(string)
+	path := "/api/v1/providers/" + providerID + "/credential-slots"
+	pool := h.want(owner, "GET", path, nil, nil, 200)
+	defaultID := pool["items"].([]any)[0].(map[string]any)["id"].(string)
+	retainedID, removedID := access.NewID(), access.NewID()
+	for _, slot := range []struct{ id, name string }{{retainedID, "retained"}, {removedID, "removed"}} {
+		pool = h.want(owner, "PUT", path+"/"+slot.id, map[string]any{"slot": map[string]any{"name": slot.name}, "credential": vendorSecret}, withMatch(pool, idem("slot-"+slot.name)), 200)
+	}
+	retainedPending := seedPromotionEnrollment(t, h, providerID, retainedID)
+	removedPending := seedPromotionEnrollment(t, h, providerID, removedID)
+	document := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	entry := document["providers"].([]any)[0].(map[string]any)
+	selected := []any{}
+	for _, raw := range entry["slots"].([]any) {
+		slot := raw.(map[string]any)
+		if slot["name"] == "removed" {
+			continue
+		}
+		// Exercise the unique positions/default constraints without changing IDs.
+		if slot["name"] == "retained" {
+			slot["position"] = 0
+		} else {
+			slot["position"] = 1
+		}
+		selected = append(selected, slot)
+	}
+	entry["slots"] = selected
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("stage-slot-removal"), 200)
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	if len(current["items"].([]any)) != 2 || current["etag"] == pool["etag"] {
+		t.Fatalf("staged inventory=%v", current)
+	}
+	for _, expected := range []struct {
+		id        string
+		position  int
+		isDefault bool
+	}{{retainedID, 0, false}, {defaultID, 1, true}} {
+		var position int
+		var isDefault bool
+		if err := h.Pool.QueryRow(t.Context(), "SELECT position,is_default FROM olp.provider_slots WHERE provider_id=$1 AND id=$2", providerID, expected.id).Scan(&position, &isDefault); err != nil {
+			t.Fatal(err)
+		}
+		if position != expected.position || isDefault != expected.isDefault {
+			t.Fatal("staging lost reordered slot/default identity")
+		}
+	}
+	for _, state := range []struct {
+		id      string
+		present bool
+	}{{retainedPending, true}, {removedPending, false}} {
+		var enrollment, secret bool
+		if err := h.Pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM olp.grant_enrollments WHERE id=$1),EXISTS(SELECT 1 FROM olp.secrets WHERE id=$1)", state.id).Scan(&enrollment, &secret); err != nil {
+			t.Fatal(err)
+		}
+		if enrollment != state.present || secret != state.present {
+			t.Fatalf("enrollment lifetime mismatch present=%v enrollment=%v secret=%v", state.present, enrollment, secret)
+		}
+	}
+}
+
+func TestConfigurationCredentialBindingAdvancesParentPrecondition(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	up := newVendor(t)
+	created := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Staged credential authority", "credential": vendorSecret, "model": vendorModel,
+		"configuration": map[string]any{"kind": "openai_compatible", "auth_mode": "api_key", "endpoint": up.URL + "/v1"},
+	}, idem("staged-binding-provider"), 201)
+	path := "/api/v1/providers/" + created["id"].(string)
+	before := h.want(owner, "GET", path, nil, nil, 200)
+	pool := h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)
+	document := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	entry := document["providers"].([]any)[0].(map[string]any)
+	binding := entry["slots"].([]any)[0].(map[string]any)["credential_ref"].(string)
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document, "secret_bindings": map[string]any{binding: "new destination private key"}}, idem("stage-new-key"), 200)
+	after := h.want(owner, "GET", path, nil, nil, 200)
+	currentPool := h.want(owner, "GET", path+"/credential-slots", nil, nil, 200)
+	if before["etag"] == after["etag"] || pool["etag"] == currentPool["etag"] {
+		t.Fatal("new credential binding retained stale parent/collection mutation precondition")
+	}
+	h.want(owner, "PATCH", path, map[string]any{"name": before["name"], "configuration": before["configuration"]}, etagHeader(before), 412)
 }

@@ -47,10 +47,13 @@ describe('pricing sources', () => {
       jsonResponse({ ...source, name: 'vendor list' })
     );
 
-    await createPricingSource({
-      name: 'vendor list',
-      url: 'https://prices.example.com/list.json'
-    });
+    await createPricingSource(
+      {
+        name: 'vendor list',
+        url: 'https://prices.example.com/list.json'
+      },
+      '12345678-1234-4234-8234-123456789abc'
+    );
 
     const request = requests[0]!;
     expect(request.method).toBe('POST');
@@ -105,18 +108,22 @@ describe('pricing sources', () => {
       jsonResponse({ id: '01980000-0000-7000-8000-000000000504', revision: 3 })
     );
 
-    await publishPricingSnapshot(snapshot, {
-      effective_at: '2026-07-13T00:00:00Z',
-      overrides: [
-        {
-          provider_kind: 'openai',
-          model: 'gpt-5',
-          operation: 'generation',
-          output_per_million: '9.50',
-          currency: 'USD'
-        }
-      ]
-    });
+    await publishPricingSnapshot(
+      snapshot,
+      {
+        effective_at: '2026-07-13T00:00:00Z',
+        overrides: [
+          {
+            provider_kind: 'openai',
+            model: 'gpt-5',
+            operation: 'generation',
+            output_per_million: '9.50',
+            currency: 'USD'
+          }
+        ]
+      },
+      '12345678-1234-4234-8234-123456789abc'
+    );
 
     const request = requests[0]!;
     expect(request.method).toBe('POST');

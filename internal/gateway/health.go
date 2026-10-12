@@ -138,6 +138,9 @@ func (h *healthTracker) record(providerID string, fact AttemptFact) {
 	}
 	b.attempts++
 	b.latency += fact.Duration
+	if fact.localRefusal && fact.Class != classSuccess {
+		return
+	}
 	switch fact.Class {
 	case "success":
 		b.successes++

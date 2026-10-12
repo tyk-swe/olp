@@ -221,7 +221,7 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	if status, _, _ := h.gatewayRaw(http.MethodGet, "/v1/batches/"+batchID, key, nil, nil); status != http.StatusNotFound {
 		t.Fatalf("expired batch remained retrievable: %d", status)
 	}
-	if _, err := h.Gateway.Resources.CleanupExpired(t.Context(), time.Now()); err != nil {
+	if _, err := h.Gateway.Resources.Expire(t.Context(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var retained int
@@ -506,8 +506,11 @@ func TestStrictFileEarlyProviderAcceptanceNeverLooksComplete(t *testing.T) {
 		t.Fatalf("partial upload published file mapping: count=%d err=%v", mapped, err)
 	}
 	fact := sink.last().Attempts[0]
-	if fact.Interaction == nil || fact.Interaction.UpstreamState != usage.UpstreamUnknown || fact.Interaction.ClientState != usage.ClientUnobserved || !fact.BillingUncertain {
-		t.Fatalf("partial accepted upload was not recorded as ambiguous: %+v", fact)
+	if fact.Status != http.StatusOK || fact.Class != "ambiguous" || fact.Committed || fact.Interaction == nil || fact.Interaction.UpstreamState != usage.UpstreamAccepted || fact.Interaction.ClientState != usage.ClientUnobserved {
+		t.Fatalf("partial accepted upload lost its independent transport evidence: %+v", fact)
+	}
+	if fact.Usage != nil || fact.UsageObserved || !fact.UsageComplete || fact.BillingUncertain {
+		t.Fatalf("non-generating upload acquired generation billing uncertainty: %+v", fact)
 	}
 }
 

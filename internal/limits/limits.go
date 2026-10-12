@@ -872,6 +872,18 @@ type Lease struct {
 	costRequest  *Request
 }
 
+// CostOwnerIDs identifies the monetary boundaries this lease can grow. Rate
+// and concurrency-only reservations have no cost owner in this projection.
+func (le *Lease) CostOwnerIDs() []string {
+	var owners []string
+	for current := le; current != nil; current = current.group {
+		if current.costRequest != nil {
+			owners = append(owners, current.costRequest.CostOwnerID)
+		}
+	}
+	return owners
+}
+
 // GrowCost reserves the new total cost of a request without taking its rate or
 // concurrency allowance again. Earlier holds survive a refused increase and
 // settle with the original lease, including its budget group.

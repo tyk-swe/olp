@@ -132,7 +132,7 @@ func (s *Server) revokeNetworkCredential(r *http.Request, _ access.Principal) (a
 	})
 }
 
-func (s *Server) validateNetworkReference(ctx context.Context, q access.Queryer, providerID string, cfg *Configuration) error {
+func validateNetworkReference(ctx context.Context, q access.Queryer, providerID string, cfg *Configuration) error {
 	if cfg.Options.Network == nil || cfg.Options.Network.CredentialID == "" {
 		return nil
 	}
@@ -153,7 +153,7 @@ func (s *Server) networkSecret(ctx context.Context, cfg *Configuration) ([]byte,
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	if err := s.validateNetworkReference(ctx, tx, cfg.ProviderID, cfg); err != nil {
+	if err := validateNetworkReference(ctx, tx, cfg.ProviderID, cfg); err != nil {
 		return nil, err
 	}
 	return s.Access.Keys.Read(ctx, tx, s.Access.Installation, cfg.Options.Network.CredentialID, secrets.ProviderCredential)

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
@@ -25,6 +26,8 @@
   } from './api/pricing';
   import { pricingKeys } from './pricingKeys';
   import { optionalDecimal } from './pricingValidation';
+
+  const createIntent = useMutationIntent();
 
   let {
     blocked,
@@ -112,6 +115,7 @@
     };
     savingPrice = true;
     onBusyChange(true);
+    let committed = false;
     try {
       const price: PriceDraft = {
         provider_kind: submitted.providerKind,
@@ -140,10 +144,17 @@
         !price.unit_price
       )
         throw new Error('Enter at least one price.');
+      const submission = createIntent.prepare({
+        effectiveAt: new Date(submitted.effectiveAt).toISOString(),
+        prices: [price]
+      });
       await createPricingRevision(
-        new Date(submitted.effectiveAt).toISOString(),
-        [price]
+        submission.input.effectiveAt,
+        submission.input.prices,
+        submission.requestId
       );
+      createIntent.reset();
+      committed = true;
       onFeedback({
         status:
           'Pricing revision created. New usage will use the effective revision.',
@@ -169,8 +180,10 @@
       await queryClient.invalidateQueries({ queryKey: pricingKeys.pages() });
     } catch (cause) {
       onFeedback({
-        status: '',
-        error: errorMessage(cause, 'The pricing revision could not be created.')
+        status: committed ? 'Pricing revision created.' : '',
+        error: committed
+          ? `Pricing revision created, but refreshing failed. ${errorMessage(cause)}`
+          : errorMessage(cause, 'The pricing revision could not be created.')
       });
     } finally {
       savingPrice = false;
