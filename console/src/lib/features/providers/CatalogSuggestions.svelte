@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+
   import { createQuery } from '@tanstack/svelte-query';
   import {
     acceptCatalogSuggestions,
@@ -15,6 +17,8 @@
   import { metadataFacts } from '$lib/features/providers/models/modelMetadata';
   import { formatDate, stateLabel } from '$lib/format';
   import type { RunProviderAction } from './providerEditor';
+
+  const acceptCatalogSuggestionsIntent = useMutationIntent();
 
   let {
     current,
@@ -47,14 +51,31 @@
   async function accept() {
     const catalog = suggestions.data?.catalog;
     if (!canManage || locked || !catalog || !selected.length) return;
-    await run('catalog-accept', async () => {
-      await acceptCatalogSuggestions(current, catalog.sha256, selected);
-      const count = selected.length;
+    await run('catalog-accept', async (isCurrent) => {
+      const submission = acceptCatalogSuggestionsIntent.prepare(
+        { providerId: current.id, digest: catalog.sha256, models: selected },
+        () =>
+          [
+            { id: current.id, etag: current.etag },
+            catalog.sha256,
+            selected
+          ] as const
+      );
+      await acceptCatalogSuggestions(...submission.input, submission.requestId);
+      if (!isCurrent()) return;
+      acceptCatalogSuggestionsIntent.reset();
+      const count = submission.input[2].length;
       selected = [];
-      await onProviderChanged();
       onNotice(
         `Catalog facts stored for ${count} model${count === 1 ? '' : 's'}. Certify the provider's capabilities again before activation.`
       );
+      try {
+        await onProviderChanged();
+      } catch (cause) {
+        throw new Error('Catalog facts stored, but refreshing failed.', {
+          cause
+        });
+      }
     });
   }
 </script>

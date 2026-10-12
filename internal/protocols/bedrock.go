@@ -432,12 +432,24 @@ func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit,
 			return c, e
 		}
 		sequence++
+		f := event.Source().Fields()
+		var accountingErr error
+		if kind == "metadata" && stopped && f != nil {
+			var observed *openai.Usage
+			observed, accountingErr = bedrockUsage(f["usage"])
+			if accountingErr == nil {
+				c.Usage = observed
+				c.UsageComplete = observed != nil
+			}
+		}
 		if observe != nil {
 			if e := observe(event); e != nil {
 				return c, e
 			}
 		}
-		f := event.Source().Fields()
+		if accountingErr != nil {
+			return c, accountingErr
+		}
 		if f == nil {
 			return c, protocolError("invalid AWS event payload")
 		}
@@ -499,10 +511,6 @@ func streamBedrockEvents(r io.Reader, limit int, route string, emit openai.Emit,
 		case "metadata":
 			if !stopped {
 				return c, protocolError("Converse metadata before stop")
-			}
-			c.Usage, e = bedrockUsage(f["usage"])
-			if e != nil {
-				return c, e
 			}
 		default:
 			if strings.HasSuffix(kind, "Exception") {

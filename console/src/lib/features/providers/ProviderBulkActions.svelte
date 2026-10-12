@@ -1,15 +1,22 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
+  import {
+    useMutationIntents,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
+
   import { createQuery } from '@tanstack/svelte-query';
   import { listRoutes } from '$lib/features/routes/api';
   import { providerKeys } from './providerKeys';
   import {
-    getProvider,
     activateProvider,
     disableProvider,
     restoreProviderAsDraft,
     type ProviderSummary
   } from './api/providers';
-  import { errorMessage } from '$lib/api/http';
+  import { ApiProblem, errorMessage } from '$lib/api/http';
+
+  const intents = useMutationIntents();
   let {
     selected,
     onChanged
@@ -18,6 +25,79 @@
   let preview = $state<'disable' | 'activate' | 'restore' | null>(null);
   let busy = $state(false);
   let outcomes = $state<string[]>([]);
+  let refreshPending = $state(false);
+  type Action = NonNullable<typeof preview>;
+  type Review = {
+    action: Action;
+    scope: string;
+    targets: ProviderSummary[];
+    confirmed: Set<string>;
+    outcomes: Map<string, string>;
+    ambiguous: Set<string>;
+    refused: Set<string>;
+  };
+  let review: Review | undefined;
+  let generation = 0;
+  const selectionScope = $derived(
+    JSON.stringify(selected.map((provider) => provider.id).sort())
+  );
+  function retire(principalChanged: boolean) {
+    const stopped =
+      busy &&
+      review?.targets.some((target) => !review?.confirmed.has(target.id));
+    generation += 1;
+    review = undefined;
+    intents.reset();
+    busy = false;
+    preview = null;
+    refreshPending = false;
+    if (principalChanged) outcomes = [];
+    else if (stopped)
+      outcomes = [...outcomes, 'Selection changed; stopped this bulk action.'];
+  }
+  const capturePrincipal = usePrincipalLifetime(() => retire(true));
+  let previousSelection = untrack(() => selectionScope);
+  $effect(() => {
+    const next = selectionScope;
+    if (next !== previousSelection) {
+      previousSelection = next;
+      untrack(() => retire(false));
+    }
+  });
+  function beginReview(action: Action) {
+    if (busy) return;
+    if (
+      !review ||
+      review.action !== action ||
+      review.scope !== selectionScope
+    ) {
+      generation += 1;
+      intents.reset();
+      refreshPending = false;
+      review = {
+        action,
+        scope: selectionScope,
+        targets: selected.map((provider) => ({ ...provider })),
+        confirmed: new Set(),
+        outcomes: new Map(),
+        ambiguous: new Set(),
+        refused: new Set()
+      };
+    } else {
+      // Re-review can adopt a changed precondition only where the previous
+      // request was definitely rejected and no earlier response was lost.
+      review.targets = review.targets.map((target) => {
+        if (!review?.refused.has(target.id) || review.ambiguous.has(target.id))
+          return target;
+        const current = selected.find((provider) => provider.id === target.id);
+        if (!current || current.etag === target.etag) return target;
+        review.refused.delete(target.id);
+        return { ...current };
+      });
+    }
+    preview = action;
+    outcomes = [...review.outcomes.values()];
+  }
   const routes = createQuery(() => ({
     queryKey: providerKeys.bulkRoutePreview(),
     enabled: Boolean(preview),
@@ -30,28 +110,125 @@
       )
     ) ?? []
   );
-  async function apply() {
-    if (!preview || routes.isPending || routes.isError) return;
-    busy = true;
-    outcomes = [];
-    for (const selectedProvider of selected) {
-      try {
-        const provider = await getProvider(selectedProvider.id);
-        if (provider.etag !== selectedProvider.etag)
-          throw new Error('Connection changed; reload and review it again.');
-        if (preview === 'disable') await disableProvider(provider);
-        else if (preview === 'restore') await restoreProviderAsDraft(provider);
-        else await activateProvider(provider);
-        outcomes.push(
-          `${provider.name}: ${preview === 'activate' ? 'activated' : preview === 'disable' ? 'disabled' : 'restored as draft'}.`
-        );
-      } catch (error) {
-        outcomes.push(`${selectedProvider.name}: ${errorMessage(error)}`);
-      }
-    }
-    busy = false;
-    preview = null;
+  async function refresh(isCurrent: () => boolean) {
+    if (!isCurrent()) return;
+    refreshPending = true;
     await onChanged();
+    if (!isCurrent()) return;
+    refreshPending = false;
+    outcomes = [...(review?.outcomes.values() ?? [])];
+    if (review?.targets.every((target) => review?.confirmed.has(target.id))) {
+      review = undefined;
+      preview = null;
+    }
+  }
+  async function retryRefresh() {
+    if (busy || !refreshPending || !review) return;
+    const principalCurrent = capturePrincipal();
+    const submittedReview = review;
+    const submittedGeneration = generation;
+    const isCurrent = () =>
+      principalCurrent() &&
+      generation === submittedGeneration &&
+      review === submittedReview &&
+      selectionScope === submittedReview.scope;
+    busy = true;
+    try {
+      await refresh(isCurrent);
+    } catch (error) {
+      if (isCurrent())
+        outcomes = [
+          ...submittedReview.outcomes.values(),
+          `Refreshing failed: ${errorMessage(error)}`
+        ];
+    } finally {
+      if (generation === submittedGeneration && principalCurrent())
+        busy = false;
+    }
+  }
+  async function apply() {
+    if (
+      busy ||
+      refreshPending ||
+      !preview ||
+      !review ||
+      routes.isPending ||
+      routes.isError
+    )
+      return;
+    const submittedReview = review;
+    const submittedGeneration = generation;
+    const principalCurrent = capturePrincipal();
+    const isCurrent = () =>
+      principalCurrent() &&
+      generation === submittedGeneration &&
+      review === submittedReview &&
+      preview === submittedReview.action &&
+      selectionScope === submittedReview.scope;
+    busy = true;
+    for (const provider of submittedReview.targets) {
+      if (!isCurrent()) break;
+      if (submittedReview.confirmed.has(provider.id)) continue;
+      try {
+        // The API enforces the reviewed selection's ETag. A fresh GET here
+        // would refuse a committed request's replay before its key reaches
+        // the idempotency boundary.
+        if (submittedReview.action === 'disable')
+          await intents.submit(
+            'disableProvider' + ':' + provider.id,
+            { id: provider.id, etag: provider.etag },
+            (input, requestId) => disableProvider(input, requestId)
+          );
+        else if (submittedReview.action === 'restore')
+          await intents.submit(
+            'restoreProviderAsDraft' + ':' + provider.id,
+            { id: provider.id, etag: provider.etag },
+            (input, requestId) => restoreProviderAsDraft(input, requestId)
+          );
+        else
+          await intents.submit(
+            'activateProvider' + ':' + provider.id,
+            { id: provider.id, etag: provider.etag },
+            (input, requestId) => activateProvider(input, requestId)
+          );
+        submittedReview.confirmed.add(provider.id);
+        submittedReview.outcomes.set(
+          provider.id,
+          `${provider.name}: ${submittedReview.action === 'activate' ? 'activated' : submittedReview.action === 'disable' ? 'disabled' : 'restored as draft'}.`
+        );
+        if (!isCurrent()) break;
+        refreshPending = true;
+      } catch (error) {
+        if (!isCurrent()) break;
+        const refused =
+          error instanceof ApiProblem &&
+          error.problem.status >= 400 &&
+          error.problem.status < 500 &&
+          ![408, 429].includes(error.problem.status) &&
+          !error.problem.type?.endsWith('/idempotency_conflict');
+        if (refused && !submittedReview.ambiguous.has(provider.id))
+          submittedReview.refused.add(provider.id);
+        else submittedReview.ambiguous.add(provider.id);
+        submittedReview.outcomes.set(
+          provider.id,
+          `${provider.name}: ${errorMessage(error)}`
+        );
+      }
+      outcomes = [...submittedReview.outcomes.values()];
+    }
+    if (!isCurrent()) return;
+    try {
+      await refresh(isCurrent);
+    } catch (error) {
+      if (isCurrent())
+        outcomes = [
+          ...submittedReview.outcomes.values(),
+          `Refreshing failed: ${errorMessage(error)}`
+        ];
+    } finally {
+      if (generation === submittedGeneration && principalCurrent())
+        busy = false;
+    }
   }
 </script>
 
@@ -63,10 +240,8 @@
           type="button"
           class="button button-secondary"
           disabled={busy}
-          onclick={() => {
-            preview = item.action as typeof preview;
-            outcomes = [];
-          }}>{item.label}</button
+          onclick={() => beginReview(item.action as Action)}
+          >{item.label}</button
         >{/each}
     </div>
     {#if preview}<p>
@@ -91,7 +266,10 @@
               ? 'Each connection must have valid credentials and certified models. Changes apply to the listed routes.'
               : 'Connections return as drafts; review and validate them before activation.'}
         </p>
-        <button class="button button-primary" disabled={busy} onclick={apply}
+        <button
+          class="button button-primary"
+          disabled={busy || refreshPending}
+          onclick={apply}
           >{busy
             ? 'Applying…'
             : `Apply ${preview} to reviewed connections`}</button
@@ -99,6 +277,11 @@
     {/if}
   </section>
 {/if}
+{#if refreshPending && !busy}<button
+    class="button button-secondary"
+    type="button"
+    onclick={retryRefresh}>Retry refresh</button
+  >{/if}
 {#if outcomes.length}<ul role="status">
     {#each outcomes as outcome (outcome)}<li>{outcome}</li>{/each}
   </ul>{/if}

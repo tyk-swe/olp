@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { useMutationIntents } from '$lib/forms/mutationIntent.svelte';
+
+  import { authLifecycle } from '$lib/features/access/session/lifecycle';
   import { resolve } from '$app/paths';
   import { onDestroy } from 'svelte';
   import {
@@ -12,6 +15,9 @@
   } from '$lib/features/routes/routeFidelity';
   import type { ProviderModelInventory } from '../api/models';
   import { errorMessage, isEtagMismatch } from '$lib/api/http';
+
+  const activateRouteIntent = useMutationIntents();
+  const createIntents = useMutationIntents();
   let {
     models,
     canManage,
@@ -37,12 +43,25 @@
   let fidelity = $state<FidelityMode>('strict');
   let busy = $state(false);
   let cancelled = $state(false);
+  let lifetime = 0;
   onDestroy(() => {
+    lifetime++;
     cancelled = true;
+    createIntents.reset();
   });
   let published = $state<string[]>([]);
   let errors = $state<string[]>([]);
   let created = $state<RouteDraftValidation[]>([]);
+  const unsubscribe = authLifecycle.onPrincipalChange(() => {
+    lifetime++;
+    cancelled = true;
+    busy = false;
+    chosen = [];
+    created = [];
+    published = [];
+    errors = [];
+  });
+  onDestroy(unsubscribe);
   function choose(entry: ProviderModelInventory, checked: boolean) {
     if (!checked) {
       chosen = chosen.filter((item) => item.entry.model.id !== entry.model.id);
@@ -61,13 +80,16 @@
   }
   async function create(event: SubmitEvent) {
     event.preventDefault();
+    if (busy || !canManage || outdated) return;
+    const epoch = lifetime;
+    const isCurrent = () => epoch === lifetime && !cancelled;
     busy = true;
     cancelled = false;
     errors = [];
     try {
       const groups = Map.groupBy(chosen, (item) => item.slug);
       for (const [slug, items] of groups) {
-        if (cancelled) break;
+        if (!isCurrent()) break;
         if (created.some((item) => item.slug === slug)) continue;
         const operations = [
           ...new Set(
@@ -89,7 +111,7 @@
           continue;
         }
         try {
-          const draft = await createRouteDraft({
+          const input: Parameters<typeof createRouteDraft>[0] = {
             slug,
             operations,
             overall_timeout_ms: 120000,
@@ -102,27 +124,40 @@
               weight: 1,
               timeout_ms: 60000
             }))
-          });
-          created = [...created, draft];
+          };
+          const draft = await createIntents.submit(
+            slug,
+            input,
+            (input, requestId) => createRouteDraft(input, requestId)
+          );
+          if (isCurrent()) created = [...created, draft];
         } catch (e) {
-          errors.push(`${slug}: ${errorMessage(e)}`);
+          if (isCurrent()) errors.push(`${slug}: ${errorMessage(e)}`);
         }
       }
     } finally {
-      busy = false;
+      if (epoch === lifetime) busy = false;
     }
   }
   async function publish() {
+    if (busy || !canManage || outdated) return;
+    const epoch = lifetime;
+    const isCurrent = () => epoch === lifetime && !cancelled;
     busy = true;
     cancelled = false;
     errors = [];
     for (const route of created) {
-      if (cancelled) break;
+      if (!isCurrent()) break;
       if (published.includes(route.id)) continue;
       try {
-        await activateRoute(route);
-        published = [...published, route.id];
+        await activateRouteIntent.submit(
+          'activateRoute' + ':' + route.id,
+          { id: route.id, etag: route.etag },
+          (input, requestId) => activateRoute(input, requestId)
+        );
+        if (isCurrent()) published = [...published, route.id];
       } catch (error) {
+        if (!isCurrent()) break;
         errors.push(
           `${route.slug}: ${
             isEtagMismatch(error)
@@ -132,7 +167,7 @@
         );
       }
     }
-    busy = false;
+    if (epoch === lifetime) busy = false;
   }
 </script>
 

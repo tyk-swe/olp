@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
   import {
     listIssuers,
     saveIssuer,
@@ -34,6 +35,23 @@
   let busy = $state(false);
   let error = $state('');
   let notice = $state('');
+  const captureOwner = usePrincipalLifetime(() => {
+    editing = pending = undefined;
+    opened = busy = false;
+    name =
+      issuer =
+      jwks =
+      audiences =
+      disabledKeys =
+      requestId =
+      error =
+      notice =
+        '';
+    enabled = true;
+    algorithms = ['RS256'];
+    lifetime = '3600';
+    mappings = '[]';
+  });
   const words = (text: string) => text.split(/[\s,]+/).filter(Boolean);
 
   function open(value?: Issuer) {
@@ -71,7 +89,10 @@
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (busy || !editable) return;
+    const isCurrent = captureOwner();
+    let committed = false;
     error = '';
+    notice = '';
     try {
       if (!pending) {
         const parsed: unknown = JSON.parse(mappings);
@@ -101,39 +122,49 @@
       }
       busy = true;
       const saved = await saveIssuer(pending, requestId, editing);
+      if (!isCurrent()) return;
+      committed = true;
       open(saved);
       notice = 'Workload issuer saved.';
-      await client.invalidateQueries({ queryKey });
+      await client.invalidateQueries({ queryKey }, { throwOnError: true });
     } catch (cause) {
+      if (!isCurrent()) return;
       error =
-        cause instanceof Error
+        (committed ? 'Issuer saved, but refreshing the view failed: ' : '') +
+        (cause instanceof Error
           ? cause.message
-          : 'Unable to save the workload issuer.';
+          : 'Unable to save the workload issuer.');
     } finally {
-      busy = false;
+      if (isCurrent()) busy = false;
     }
   }
   async function disable(value: Issuer) {
     if (busy) return;
+    const isCurrent = captureOwner();
+    let committed = false;
     busy = true;
-    error = '';
+    error = notice = '';
     try {
       const saved = await saveIssuer(
         { ...issuerInput(value), enabled: false },
         crypto.randomUUID(),
         value
       );
+      if (!isCurrent()) return;
+      committed = true;
       if (editing?.id === value.id) open(saved);
       notice =
         'Issuer disabled. Gateways apply the change at their next authority refresh.';
-      await client.invalidateQueries({ queryKey });
+      await client.invalidateQueries({ queryKey }, { throwOnError: true });
     } catch (cause) {
+      if (!isCurrent()) return;
       error =
-        cause instanceof Error
+        (committed ? 'Issuer disabled, but refreshing the view failed: ' : '') +
+        (cause instanceof Error
           ? cause.message
-          : 'Unable to disable the issuer.';
+          : 'Unable to disable the issuer.');
     } finally {
-      busy = false;
+      if (isCurrent()) busy = false;
     }
   }
 </script>

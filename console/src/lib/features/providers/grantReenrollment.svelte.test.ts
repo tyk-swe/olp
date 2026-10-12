@@ -18,6 +18,21 @@ import {
 import { listProviderModelPage } from './api/models';
 import PluginProviderProbe from './test/PluginProviderProbe.svelte';
 import { pluginSpec } from './test/pluginFixtures';
+import { page } from '$app/state';
+
+vi.mock('$app/state', async () => {
+  const { SvelteURL } = await import('svelte/reactivity');
+  const url = new SvelteURL('http://localhost/providers/provider-account');
+  return {
+    page: {
+      url,
+      get params() {
+        return { providerId: url.pathname.split('/').at(-1) };
+      }
+    }
+  };
+});
+vi.mock('$app/navigation', () => ({ beforeNavigate: vi.fn() }));
 
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ can: () => true })
@@ -174,6 +189,7 @@ let component: ReturnType<typeof mount> | undefined;
 
 beforeEach(() => {
   vi.resetAllMocks();
+  page.url.pathname = '/providers/provider-account';
   pooled = slots;
   vi.stubGlobal(
     'fetch',
@@ -266,6 +282,44 @@ async function reenrollDefaultSlot() {
 }
 
 describe('grant re-enrollment in the credential pool', () => {
+  it('drops an old provider enrollment after navigating to a cached provider', async () => {
+    const other = { ...provider, id: 'provider-other', name: 'Other provider' };
+    for (const value of [provider, other]) {
+      client.setQueryData(providerKeys.models(value.id), {
+        provider: value,
+        items: [],
+        nextCursor: null
+      });
+      client.setQueryData(providerKeys.credentials(value.id), [firstVersion]);
+    }
+    let finish!: (value: GrantEnrollment) => void;
+    vi.mocked(startGrantEnrollment).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    component = mount(PluginProviderProbe, {
+      target: host,
+      props: { client, providerRoute: true }
+    });
+    await vi.waitFor(() => {
+      flushSync();
+      expect(button(pool(), 'Re-enroll grant')).toBeDefined();
+    });
+    button(pool(), 'Re-enroll grant')!.click();
+    await vi.waitFor(() =>
+      expect(startGrantEnrollment).toHaveBeenCalledTimes(1)
+    );
+    page.url.pathname = '/providers/provider-other';
+    flushSync();
+    expect(host.textContent).toContain('Other provider');
+    finish(enrollment);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    expect(panel()).toBeNull();
+    expect(host.textContent).not.toContain(enrollment.authorization_url);
+  });
   it('stages a new credential version and shows the observed principal on credential versions', async () => {
     vi.mocked(continueGrantEnrollment).mockImplementation(async () => {
       vi.mocked(listProviderCredentials).mockResolvedValue([

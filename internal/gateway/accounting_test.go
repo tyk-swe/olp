@@ -510,12 +510,45 @@ func TestAccountingEventFromServedRequests(t *testing.T) {
 func TestDeferredResponseAccountingDoesNotEmitOrSettleGenerationUsage(t *testing.T) {
 	env := accountingEnvelope(t)
 	fact := &env.Attempts[len(env.Attempts)-1]
-	fact.ResponseUsageDeferred = true
+	fact.GenerationUsageDeferred = true
+	fact.observeUsage(fact.Usage, false)
 	fact.recordEvidence(true)
-	if fact.Usage != nil || fact.UsageObserved || fact.BillingUncertain {
-		t.Fatal("deferred generation retained inline billing evidence")
+	if !fact.UsageObserved || fact.Usage == nil {
+		t.Fatal("durable accounting ownership discarded observed provider counters")
+	}
+	if fact.UsageComplete || !fact.BillingUncertain {
+		t.Fatal("deferred generation was reported as settled")
 	}
 	if accountingEvent(env) != nil {
 		t.Fatal("pending resource emitted duplicate generation accounting")
+	}
+}
+
+func TestDeferredResponseNativeConsumptionSettlesRateWithoutDuplicateMoney(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		input    int64
+		output   int64
+		complete bool
+		settled  int64
+	}{
+		{name: "partial", input: 10, output: 4, settled: 100},
+		{name: "terminal", input: 17, output: 9, complete: true, settled: 26},
+		{name: "terminal zero", complete: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := accountingEnvelope(t)
+			fact := &env.Attempts[len(env.Attempts)-1]
+			fact.GenerationUsageDeferred = true
+			fact.observeUsage(&openai.Usage{InputTokens: tc.input, OutputTokens: tc.output, TotalTokens: tc.input + tc.output}, tc.complete)
+			fact.recordEvidence(true)
+			actual := settledAttemptTokens(fact, 100)
+			if actual == nil || *actual != tc.settled || !fact.UsageObserved || fact.UsageComplete != tc.complete || fact.BillingUncertain == tc.complete {
+				t.Fatalf("native consumption proof lost under delegated money ownership: actual=%v fact=%+v", actual, fact)
+			}
+			if accountingEvent(env) != nil {
+				t.Fatal("delegated generation emitted duplicate money accounting")
+			}
+		})
 	}
 }

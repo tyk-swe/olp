@@ -3,7 +3,12 @@ import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { expect, it, vi } from 'vitest';
 import OrganizationProbe from './test/OrganizationProbe.svelte';
-import { createOrganizationProject } from './api';
+import {
+  createOrganizationProject,
+  organizationProjects,
+  projectMembers
+} from './api';
+import { projectKeys } from '../projects/projectKeys';
 const state = vi.hoisted(() => ({
   role: 'viewer',
   owner: false,
@@ -145,3 +150,120 @@ it('selects the organization it just created', async () => {
     state.owner = false;
   }
 });
+
+it.each([
+  { description: 'while it is still selected', switchOrganization: false },
+  { description: 'after switching organizations', switchOrganization: true }
+])(
+  'caches a created project under its submitted organization $description',
+  async ({ switchOrganization }) => {
+    state.role = 'manager';
+    state.created = true;
+    const createdProject = {
+      id: 'project',
+      name: 'Team',
+      etag: 'project-etag',
+      created_at: '2026-01-01T00:00:00Z',
+      created_by: 'user',
+      created_by_email: 'manager@example.com',
+      member_count: 0,
+      updated_at: '2026-01-01T00:00:00Z',
+      organization_id: 'org'
+    };
+    const otherProject = {
+      ...createdProject,
+      id: 'other-project',
+      name: 'Branch project',
+      organization_id: 'new-org'
+    };
+    const response =
+      Promise.withResolvers<
+        Awaited<ReturnType<typeof createOrganizationProject>>
+      >();
+    vi.mocked(createOrganizationProject).mockReturnValueOnce(response.promise);
+    vi.mocked(organizationProjects).mockImplementation(async (id) =>
+      id === 'org' ? [] : [otherProject]
+    );
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    });
+    // Inspect the mutation's cache updates before a refresh can replace them.
+    vi.spyOn(client, 'invalidateQueries').mockResolvedValue();
+    const root = [...projectKeys.root, 'organizations'];
+    const target = document.createElement('div');
+    document.body.append(target);
+    const component = mount(OrganizationProbe, { target, props: { client } });
+    try {
+      flushSync();
+      await vi.waitFor(() =>
+        expect(target.textContent).toContain(
+          'You can manage this organization.'
+        )
+      );
+      const input = Array.from(target.querySelectorAll('label'))
+        .find((label) => label.textContent?.includes('New project name'))!
+        .querySelector('input')!;
+      input.value = 'Team';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+      input
+        .closest('form')!
+        .dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true })
+        );
+      await vi.waitFor(() =>
+        expect(createOrganizationProject).toHaveBeenCalledWith(
+          'org',
+          'Team',
+          expect.any(String)
+        )
+      );
+      if (switchOrganization) {
+        const select = Array.from(target.querySelectorAll('label'))
+          .find((label) => label.textContent?.startsWith('Organization'))!
+          .querySelector('select')!;
+        expect(select.disabled).toBe(false);
+        select.value = 'new-org';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        flushSync();
+        await vi.waitFor(() =>
+          expect(target.textContent).toContain('Branch project')
+        );
+      }
+      response.resolve(createdProject);
+      await vi.waitFor(() =>
+        expect(target.querySelector('[role="status"]')?.textContent).toBe(
+          'Saved.'
+        )
+      );
+      flushSync();
+      expect(client.getQueryData([...root, 'org', 'projects'])).toEqual([
+        createdProject
+      ]);
+      const select = Array.from(target.querySelectorAll('label'))
+        .find((label) => label.textContent?.startsWith('Organization project'))!
+        .querySelector('select')!;
+      expect(select.value).toBe(
+        switchOrganization ? otherProject.id : createdProject.id
+      );
+      if (switchOrganization) {
+        expect(client.getQueryData([...root, 'new-org', 'projects'])).toEqual([
+          otherProject
+        ]);
+        expect(projectMembers).not.toHaveBeenCalledWith(
+          'new-org',
+          createdProject.id,
+          expect.anything()
+        );
+      }
+    } finally {
+      response.resolve(createdProject);
+      await unmount(component);
+      client.clear();
+      target.remove();
+      vi.mocked(organizationProjects).mockReset().mockResolvedValue([]);
+      state.role = 'viewer';
+      state.created = false;
+    }
+  }
+);

@@ -180,23 +180,23 @@ it('sends safe management mutations through CSRF, idempotency and ETag middlewar
     monthly_tokens: null,
     enabled: true
   };
-  await saveCodeAccount(accountWrite);
-  await saveCodeAccount(accountWrite, account);
-  await saveCodePool(poolWrite);
-  await saveCodePool(poolWrite, pool);
-  await saveCodeRoute(routeWrite);
-  await saveCodeRoute(routeWrite, route);
-  await saveCodeBudget(budgetWrite);
-  await saveCodeBudget(budgetWrite, budget);
-  await publishCodeRoute(route);
-  await retireCodeBinding(binding.id);
+  await saveCodeAccount(accountWrite, undefined, 'stable-create-request');
+  await saveCodeAccount(accountWrite, account, 'stable-request');
+  await saveCodePool(poolWrite, undefined, 'stable-create-request');
+  await saveCodePool(poolWrite, pool, 'stable-request');
+  await saveCodeRoute(routeWrite, undefined, 'stable-create-request');
+  await saveCodeRoute(routeWrite, route, 'stable-request');
+  await saveCodeBudget(budgetWrite, undefined, 'stable-create-request');
+  await saveCodeBudget(budgetWrite, budget, 'stable-request');
+  await publishCodeRoute(route, 'stable-request');
+  await retireCodeBinding(binding.id, 'stable-request');
   for (const request of requests) {
     expect(request.headers.get('X-CSRF-Token')).toBe('fixture-csrf');
     expect(request.credentials).toBe('same-origin');
     if (request.method === 'PUT' || request.url.endsWith('/publish'))
       expect(request.headers.get('If-Match')).toBe(`"${account.etag}"`);
     if (request.method === 'POST')
-      expect(request.headers.get('Idempotency-Key')).toMatch(/^[0-9a-f-]{36}$/);
+      expect(request.headers.get('Idempotency-Key')).toBeTruthy();
   }
   expect(await requests[0].json()).toEqual(accountWrite);
   expect(await requests[2].json()).toEqual(poolWrite);
@@ -222,6 +222,8 @@ it('keeps typed conflicts and never retries mutations or invents a config endpoi
       { status: 412 }
     )
   );
-  await expect(publishCodeRoute(route)).rejects.toBeInstanceOf(ApiProblem);
+  await expect(
+    publishCodeRoute(route, 'stable-request')
+  ).rejects.toBeInstanceOf(ApiProblem);
   expect(requests).toHaveLength(1);
 });

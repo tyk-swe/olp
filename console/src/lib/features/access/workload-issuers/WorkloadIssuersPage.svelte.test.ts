@@ -72,6 +72,26 @@ it('keeps the submitted configuration and replay identity on a lost create respo
     expect(vi.mocked(saveIssuer).mock.calls[1]).toEqual(
       vi.mocked(saveIssuer).mock.calls[0]
     );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    vi.mocked(saveIssuer).mockResolvedValueOnce({
+      ...vi.mocked(saveIssuer).mock.calls[0][0],
+      id: 'saved-issuer',
+      etag: 'saved-etag',
+      created_by: 'owner',
+      created_at: '2026-10-11T00:00:00Z',
+      updated_at: '2026-10-11T00:00:00Z'
+    });
+    vi.spyOn(client, 'invalidateQueries').mockRejectedValueOnce(
+      new Error('Refresh unavailable')
+    );
+    target
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(target.textContent).toContain('refreshing the view failed')
+    );
+    expect(target.textContent).toContain('Workload issuer saved.');
+    expect(target.querySelector('fieldset')?.disabled).toBe(false);
   } finally {
     await unmount(view);
     client.clear();

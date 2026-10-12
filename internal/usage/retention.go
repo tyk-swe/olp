@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strconv"
 	"time"
 
@@ -47,7 +46,6 @@ type MaintenanceReport struct {
 	InvitationRows int64
 	ReplayRows     int64
 	OIDCFlowRows   int64
-	ResourceRows   int64
 	// GrantEnrollmentRows counts grant enrollments purged an hour after they
 	// expired; their session state expires with them, among the secrets.
 	GrantEnrollmentRows int64
@@ -92,9 +90,6 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time) (Mai
 		return MaintenanceReport{}, err
 	}
 	if err = purgeExpiringRecords(ctx, conn, now, windows, &report); err != nil {
-		return MaintenanceReport{}, err
-	}
-	if report.ResourceRows, err = drainInBatches(ctx, conn, purgeExpiredResourcesSQL, now, int64(retentionBatch)); err != nil {
 		return MaintenanceReport{}, err
 	}
 	return report, nil
@@ -179,12 +174,6 @@ const purgeRequestsSQL = `WITH expired AS (
     )
     DELETE FROM olp.requests request USING expired
      WHERE request.id = expired.id AND request.started_at = expired.started_at`
-
-const purgeExpiredResourcesSQL = `WITH expired AS (
-      SELECT id FROM olp.provider_resources WHERE expires_at IS NOT NULL AND expires_at < $1
-      LIMIT $2 FOR UPDATE SKIP LOCKED
-    )
-    DELETE FROM olp.provider_resources WHERE id IN (SELECT id FROM expired)`
 
 func purgeExpiredRequests(ctx context.Context, conn *pgx.Conn, cutoff time.Time) (int64, error) {
 	return drainInBatches(ctx, conn, purgeRequestsSQL, cutoff, int64(retentionBatch))
@@ -457,34 +446,3 @@ func purgeExpiringRecords(ctx context.Context, conn *pgx.Conn, now time.Time, wi
 // MaintenanceInterval paces the maintenance worker. Frequent bounded passes
 // keep receipt expiry from becoming one hourly delete spike.
 const MaintenanceInterval = 60 * time.Second
-
-// RunMaintenanceLoop runs maintenance until the context is done, checkpointing
-// each pass so readiness can tell a working worker from a stalled one. A pass
-// that could not take the lock is a skip: another replica is doing the work.
-func RunMaintenanceLoop(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) {
-	ticker := time.NewTicker(MaintenanceInterval)
-	defer ticker.Stop()
-	for {
-		// The first pass runs at startup rather than a minute later: a process
-		// that has just restarted may be the only one left to reclaim a backlog.
-		report, err := RunMaintenance(ctx, pool, time.Now())
-		if ctx.Err() != nil {
-			return
-		}
-		outcome, progress := OutcomeSuccess, report.LockAcquired
-		if err != nil {
-			outcome, progress = OutcomeFailure, false
-			log.Error("maintenance pass failed", "error_type", fmt.Sprintf("%T", err))
-		} else if !report.LockAcquired {
-			outcome = OutcomeSkipped
-		}
-		if err = CheckpointTask(ctx, pool, TaskMaintenance, outcome, progress); err != nil {
-			log.Warn("maintenance health checkpoint failed", "error_type", fmt.Sprintf("%T", err))
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-}

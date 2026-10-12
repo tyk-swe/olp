@@ -15,6 +15,13 @@
   import { formatBudget, formatDate, formatInteger } from '$lib/format';
   import { limitsError } from '../budgets/limitForm';
 
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
+
+  const createIntent = useMutationIntent();
+
   const services = useServiceCapabilities();
   const queryClient = useQueryClient();
   const access = useRole();
@@ -47,6 +54,7 @@
   let notice = $state('');
 
   let editingId = $state('');
+  let editingGroup = $state.raw<BudgetGroup | null>(null);
   let editName = $state('');
   let editDaily = $state('');
   let editMonthly = $state('');
@@ -63,7 +71,30 @@
     return value.trim() || null;
   }
 
+  const captureOwner = usePrincipalLifetime(() => {
+    createName =
+      createProjectId =
+      createDaily =
+      createMonthly =
+      createWeekly =
+      createTemplate =
+        '';
+    editingId =
+      editName =
+      editDaily =
+      editMonthly =
+      editWeekly =
+      editTemplate =
+        '';
+    for (const field of rateFields) createRates[field] = editRates[field] = '';
+    createBusy = editBusy = false;
+    editingGroup = null;
+    error = notice = '';
+  });
+
   function startEdit(group: BudgetGroup) {
+    if (editBusy) return;
+    editingGroup = group;
     editingId = group.id;
     editName = group.name;
     editDaily = group.daily_cost_limit ?? '';
@@ -104,9 +135,13 @@
       return;
     }
     createBusy = true;
+    const isCurrent = captureOwner();
     error = notice = '';
+    let committed = false;
     try {
-      await createBudgetGroup({
+      const submission = createIntent.prepare<
+        Parameters<typeof createBudgetGroup>[0]
+      >({
         name: createName.trim(),
         project_id: createProjectId || null,
         daily_cost_limit: optionalDecimal(createDaily),
@@ -123,6 +158,10 @@
           ? Number(createRates.max_concurrency)
           : null
       });
+      await createBudgetGroup(submission.input, submission.requestId);
+      if (!isCurrent()) return;
+      createIntent.reset();
+      committed = true;
       createName = '';
       createTemplate = '';
       for (const f of rateFields) createRates[f] = '';
@@ -130,16 +169,24 @@
       createMonthly = '';
       createWeekly = '';
       notice = 'Budget group created.';
-      await queryClient.invalidateQueries({ queryKey: budgetGroupKeys.root });
+      await queryClient.invalidateQueries(
+        { queryKey: budgetGroupKeys.root },
+        { throwOnError: true }
+      );
     } catch (cause) {
-      error = errorMessage(cause, 'The budget group could not be created.');
+      if (!isCurrent()) return;
+      error = committed
+        ? `Budget group created, but refreshing failed. ${errorMessage(cause)}`
+        : errorMessage(cause, 'The budget group could not be created.');
     } finally {
-      createBusy = false;
+      if (isCurrent()) createBusy = false;
     }
   }
 
   async function submitEdit(group: BudgetGroup) {
     if (!canManage || editBusy || !editName.trim()) return;
+    const current = editingGroup;
+    if (!current || current.id !== group.id) return;
     if (
       !editTemplate.trim() &&
       !Object.values(editRates).some(Boolean) &&
@@ -167,9 +214,11 @@
       return;
     }
     editBusy = true;
+    const isCurrent = captureOwner();
     error = notice = '';
+    let committed = false;
     try {
-      await updateBudgetGroup(group, {
+      await updateBudgetGroup(current, {
         name: editName.trim(),
         daily_cost_limit: optionalDecimal(editDaily),
         weekly_cost_limit: optionalDecimal(editWeekly),
@@ -185,13 +234,22 @@
           ? Number(editRates.max_concurrency)
           : null
       });
+      committed = true;
+      if (!isCurrent()) return;
       editingId = '';
+      editingGroup = null;
       notice = 'Budget group updated.';
-      await queryClient.invalidateQueries({ queryKey: budgetGroupKeys.root });
+      await queryClient.invalidateQueries(
+        { queryKey: budgetGroupKeys.root },
+        { throwOnError: true }
+      );
     } catch (cause) {
-      error = errorMessage(cause, 'The budget group could not be updated.');
+      if (!isCurrent()) return;
+      error = committed
+        ? `Budget group updated, but refreshing failed. ${errorMessage(cause)}`
+        : errorMessage(cause, 'The budget group could not be updated.');
     } finally {
-      editBusy = false;
+      if (isCurrent()) editBusy = false;
     }
   }
 </script>
@@ -203,8 +261,10 @@
     {#if services.limitsEnforced}Keys assigned to a group share its cost budget,
       which counts the spend so far and the estimated cost of members' requests
       still running, while keeping their own limits and history. Windows reset
-      at midnight UTC; unpriced attempts accrue 0.{:else}Groups save shared
-      budget policy for future enforcement. Spending is not restricted yet.{/if}
+      in the installation budget timezone; unpriced attempts accrue no known
+      USD. Unsettled retained generations can block cost admission before their
+      spend is recorded.{:else}Groups save shared budget policy for future
+      enforcement. Spending is not restricted yet.{/if}
   </p>
 
   {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
@@ -212,63 +272,65 @@
 
   {#if canManage}
     <form class="create-form" onsubmit={submitCreate}>
-      <div class="form-grid">
-        <div class="form-field">
-          <label for="group-name">Group name</label><input
-            id="group-name"
-            bind:value={createName}
-            required
-          />
-        </div>
-        <ProjectScopeField id="group-project" bind:value={createProjectId} />
-        <div class="form-field">
-          <label for="group-template">Limit template</label><input
-            id="group-template"
-            bind:value={createTemplate}
-            maxlength="100"
-          />
-        </div>
-        {#each rateFields as field (field)}<div class="form-field">
-            <label for={`group-${field}`}>{field.replaceAll('_', ' ')}</label
-            ><input
-              id={`group-${field}`}
-              bind:value={createRates[field]}
-              inputmode="numeric"
+      <fieldset class="submission-fields" disabled={createBusy}>
+        <div class="form-grid">
+          <div class="form-field">
+            <label for="group-name">Group name</label><input
+              id="group-name"
+              bind:value={createName}
+              required
             />
-          </div>{/each}
-        <div class="form-field">
-          <label for="group-daily">Daily cost limit</label><input
-            id="group-daily"
-            inputmode="decimal"
-            placeholder="10.00"
-            bind:value={createDaily}
-          />
+          </div>
+          <ProjectScopeField id="group-project" bind:value={createProjectId} />
+          <div class="form-field">
+            <label for="group-template">Limit template</label><input
+              id="group-template"
+              bind:value={createTemplate}
+              maxlength="100"
+            />
+          </div>
+          {#each rateFields as field (field)}<div class="form-field">
+              <label for={`group-${field}`}>{field.replaceAll('_', ' ')}</label
+              ><input
+                id={`group-${field}`}
+                bind:value={createRates[field]}
+                inputmode="numeric"
+              />
+            </div>{/each}
+          <div class="form-field">
+            <label for="group-daily">Daily cost limit</label><input
+              id="group-daily"
+              inputmode="decimal"
+              placeholder="10.00"
+              bind:value={createDaily}
+            />
+          </div>
+          <div class="form-field">
+            <label for="group-weekly">Weekly cost limit</label><input
+              id="group-weekly"
+              inputmode="decimal"
+              placeholder="100.00"
+              bind:value={createWeekly}
+            />
+          </div>
+          <div class="form-field">
+            <label for="group-monthly">Monthly cost limit</label><input
+              id="group-monthly"
+              inputmode="decimal"
+              placeholder="100.00"
+              bind:value={createMonthly}
+            />
+          </div>
         </div>
-        <div class="form-field">
-          <label for="group-weekly">Weekly cost limit</label><input
-            id="group-weekly"
-            inputmode="decimal"
-            placeholder="100.00"
-            bind:value={createWeekly}
-          />
+        <div class="form-actions">
+          <button
+            class="button button-primary"
+            type="submit"
+            disabled={createBusy || !createName.trim()}
+            >{createBusy ? 'Creating…' : 'Create group'}</button
+          >
         </div>
-        <div class="form-field">
-          <label for="group-monthly">Monthly cost limit</label><input
-            id="group-monthly"
-            inputmode="decimal"
-            placeholder="100.00"
-            bind:value={createMonthly}
-          />
-        </div>
-      </div>
-      <div class="form-actions">
-        <button
-          class="button button-primary"
-          type="submit"
-          disabled={createBusy || !createName.trim()}
-          >{createBusy ? 'Creating…' : 'Create group'}</button
-        >
-      </div>
+      </fieldset>
     </form>
   {/if}
 
@@ -306,6 +368,7 @@
                   ><input
                     aria-label="Group name"
                     bind:value={editName}
+                    disabled={editBusy}
                     required
                   /></td
                 ><td>{group.project_name ?? 'Installation-wide'}</td><td
@@ -313,18 +376,21 @@
                     aria-label="Daily cost limit"
                     inputmode="decimal"
                     bind:value={editDaily}
+                    disabled={editBusy}
                   /></td
                 ><td
                   ><input
                     aria-label="Weekly cost limit"
                     inputmode="decimal"
                     bind:value={editWeekly}
+                    disabled={editBusy}
                   /></td
                 ><td
                   ><input
                     aria-label="Monthly cost limit"
                     inputmode="decimal"
                     bind:value={editMonthly}
+                    disabled={editBusy}
                   /></td
                 ><td>{formatInteger(group.budget.unpriced_attempts)}</td><td
                   ><button
@@ -338,7 +404,10 @@
                     class="text-button"
                     type="button"
                     disabled={editBusy}
-                    onclick={() => (editingId = '')}>Cancel</button
+                    onclick={() => {
+                      editingId = '';
+                      editingGroup = null;
+                    }}>Cancel</button
                   ></td
                 ></tr
               >
@@ -385,6 +454,7 @@
                     ><button
                       class="text-button"
                       type="button"
+                      disabled={editBusy}
                       onclick={() => startEdit(group)}>Edit</button
                     ></td
                   >{/if}</tr
@@ -420,6 +490,14 @@
     margin: 0;
     color: var(--foreground-muted);
     font-size: 0.8rem;
+  }
+  .submission-fields {
+    display: grid;
+    gap: inherit;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
   }
   .create-form {
     display: grid;

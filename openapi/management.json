@@ -22822,6 +22822,7 @@
     "/api/v1/configuration/plan": {
       "post": {
         "operationId": "plan_configuration",
+        "x-olp-read-only": true,
         "requestBody": {
           "content": {
             "application/json": {
@@ -33130,6 +33131,7 @@
     "/api/v1/route-drafts/{draft_id}/simulate": {
       "post": {
         "operationId": "simulate_route_draft",
+        "x-olp-read-only": true,
         "parameters": [
           {
             "in": "path",
@@ -34291,6 +34293,7 @@
     "/api/v1/routing/simulate": {
       "post": {
         "operationId": "simulate_routing",
+        "x-olp-read-only": true,
         "requestBody": {
           "content": {
             "application/json": {
@@ -40112,6 +40115,7 @@
     "/api/v1/api-keys/{api_key_id}/end-user": {
       "post": {
         "operationId": "lookup_end_user",
+        "x-olp-read-only": true,
         "tags": [
           "api-keys"
         ],
@@ -44669,6 +44673,7 @@
     "/scim/v2/Users/.search": {
       "post": {
         "operationId": "scim_users_search",
+        "x-olp-read-only": true,
         "tags": [
           "scim"
         ],
@@ -45701,6 +45706,7 @@
     "/scim/v2/Groups/.search": {
       "post": {
         "operationId": "scim_groups_search",
+        "x-olp-read-only": true,
         "tags": [
           "scim"
         ],

@@ -71,7 +71,8 @@ export async function listNetworkCredentials(
 export async function createNetworkCredential(
   providerId: string,
   etag: string,
-  credential: string
+  credential: string,
+  requestId: string
 ) {
   return unwrap(
     await apiClient.POST(
@@ -79,7 +80,7 @@ export async function createNetworkCredential(
       {
         params: {
           path: { provider_id: providerId },
-          header: { 'If-Match': etag, 'Idempotency-Key': crypto.randomUUID() }
+          header: { 'If-Match': etag, 'Idempotency-Key': requestId }
         },
         body: { credential }
       }
@@ -90,7 +91,8 @@ export async function createNetworkCredential(
 export async function revokeNetworkCredential(
   providerId: string,
   etag: string,
-  credentialId: string
+  credentialId: string,
+  requestId: string
 ) {
   return unwrap(
     await apiClient.POST(
@@ -98,7 +100,7 @@ export async function revokeNetworkCredential(
       {
         params: {
           path: { provider_id: providerId, credential_id: credentialId },
-          header: { 'If-Match': etag, 'Idempotency-Key': crypto.randomUUID() }
+          header: { 'If-Match': etag, 'Idempotency-Key': requestId }
         }
       }
     )

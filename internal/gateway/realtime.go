@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"slices"
 	"strconv"
@@ -655,7 +656,6 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	client.SetReadLimit(bodylimit.Lower(limit, route.MaxBodyBytes))
 	conn.SetReadLimit(limit)
 	x.dispatched = true
-	x.delivered(s.now())
 	observedUsage, observed, relayErr := s.relayRealtime(ctx, x, p, client, conn, token, authority.ID)
 	class := classProtocol
 	cancelled := false
@@ -770,13 +770,16 @@ func realtimeURL(p *pin) (string, *Error) {
 func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint string) (*websocket.Conn, *Error) {
 	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
 	fact.Mode = "realtime"
+	state := attemptState{parent: ctx, classifier: upstream.Classifier{Declared: p.provider.Connector().Classification()}}
+	ctx = httptrace.WithClientTrace(ctx, state.trace())
 	if p.hold != nil {
 		fact.Budgets = p.hold.budgets
 	}
 	finish := func(class string, e *Error) *Error {
 		fact.Class = class
 		fact.Duration = s.now().Sub(fact.StartedAt)
-		fact.recordEvidence(true)
+		x.dispatched = x.dispatched || state.dispatched.Load()
+		fact.recordEvidence(state.evidence().Acceptance().Unresolved())
 		x.facts = append(x.facts, fact)
 		return e
 	}
@@ -796,7 +799,11 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 		return nil, finish(classCredential, serverError(http.StatusBadGateway, "upstream_error", "The provider network credential is unavailable."))
 	}
 	conn, resp, err := websocket.Dial(ctx, probe.URL.String(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: headers})
-	if p.hold != nil {
+	if resp != nil {
+		state.dispatched.Store(true)
+	}
+	x.dispatched = x.dispatched || state.dispatched.Load()
+	if state.dispatched.Load() && p.hold != nil {
 		x.spendCaps(p.hold.budgets, p.attempt)
 	}
 	if err != nil {
@@ -805,11 +812,15 @@ func realtimeDial(ctx context.Context, s *Server, x *execution, p *pin, endpoint
 			status = resp.StatusCode
 		}
 		fact.Status = status
-		outcome := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: status, Interrupted: ctx.Err(), Err: err})
+		state.status = status
+		nativeError := x.redacted(upstreamResponseError(resp))
+		evidence := state.evidence()
+		evidence.Error, evidence.Interrupted, evidence.Err = nativeError, ctx.Err(), err
+		outcome := state.classifier.Classify(evidence)
 		if fact.Interaction != nil {
 			fact.Interaction.UpstreamState = string(outcome.Acceptance)
 		}
-		return nil, finish(string(outcome.Class), upstreamError(&attemptFailure{status: status, upstream: x.redacted(upstreamResponseError(resp))}))
+		return nil, finish(string(outcome.Class), upstreamError(&attemptFailure{status: status, upstream: nativeError}))
 	}
 	fact.Class = "success"
 	if fact.Interaction != nil {
@@ -916,7 +927,7 @@ func (w *realtimeBoundedWriter) write(typ websocket.MessageType, data []byte) er
 	return err
 }
 
-func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client, conn *websocket.Conn, token, keyID string) (*openai.Usage, bool, error) {
+func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client, conn duplexPeer, token, keyID string) (*openai.Usage, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var usageMu sync.Mutex
@@ -929,7 +940,7 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 		client         bool
 		deliveryFailed bool
 	}
-	forward := func(dst, src *websocket.Conn, inspect bool) relayEnd {
+	forward := func(dst, src duplexPeer, inspect bool) relayEnd {
 		writer := newRealtimeBoundedWriter(ctx, dst, responseWriteTimeout)
 		defer writer.close()
 		for {
@@ -974,11 +985,13 @@ func (s *Server) relayRealtime(ctx context.Context, x *execution, p *pin, client
 				return relayEnd{err: err, client: inspect, deliveryFailed: inspect}
 			}
 			if inspect {
+				x.delivered(s.now())
 				observed = true
 			}
 		}
 	}
 	done := make(chan relayEnd, 2)
+	remaining := 2
 	go func() { done <- forward(conn, client, false) }()
 	go func() { done <- forward(client, conn, true) }()
 	reauth := time.NewTicker(realtimeReauth)
@@ -993,6 +1006,7 @@ loop:
 	for {
 		select {
 		case end := <-done:
+			remaining--
 			first, clientClosed, clientDeliveryFailed = end.err, end.client, end.deliveryFailed
 			break loop
 		case <-reauth.C:
@@ -1044,8 +1058,12 @@ loop:
 	}
 	conn.Close(code, "")
 	client.Close(code, "")
-	second := <-done
-	clientDeliveryFailed = clientDeliveryFailed || second.deliveryFailed
+	// A control event has consumed neither result; a forwarding result has
+	// consumed one. Join every remaining task before final usage/delivery state.
+	for ; remaining > 0; remaining-- {
+		end := <-done
+		clientDeliveryFailed = clientDeliveryFailed || end.deliveryFailed
+	}
 	usageMu.Lock()
 	defer usageMu.Unlock()
 	var observedUsage *openai.Usage

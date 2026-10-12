@@ -428,6 +428,23 @@ func verifyProfileNetworkPromotion(t *testing.T, source *accessHarness, owner *b
 	if current := destination.want(destinationOwner, "GET", path, nil, nil, 200); current["etag"] != detail["etag"] {
 		t.Fatal("applying identical bindings rotated the provider or network credential")
 	}
+	// A fresh destination-owned mTLS binding changes transport identity even
+	// when portable configuration is otherwise identical. Existing certification
+	// must become declared before probing/activating that identity.
+	certifyProfileNetworkProvider(t, destination, destinationOwner, providers[0].(map[string]any)["id"].(string))
+	before = len(f.captured()) // Explicit certification is the only remote work.
+	f2 := newProfileNetworkFixture(t, true)
+	rotatedBindings := map[string]any{networkRef: f2.credential}
+	rotated := map[string]any{"document": document, "secret_bindings": rotatedBindings}
+	destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", rotated, idem("rotate-promoted-mtls"), 200)
+	rotatedModels := destination.want(destinationOwner, "GET", path+"/models", nil, nil, 200)["items"].([]any)
+	for _, raw := range rotatedModels {
+		for _, capability := range raw.(map[string]any)["capabilities"].([]any) {
+			if capability.(map[string]any)["source"] == "certified" || capability.(map[string]any)["certified_at"] != nil {
+				t.Fatal("network binding rotation retained certification from the old transport")
+			}
+		}
+	}
 	if len(f.captured()) != before {
 		t.Fatal("export, plan or apply made an upstream call")
 	}

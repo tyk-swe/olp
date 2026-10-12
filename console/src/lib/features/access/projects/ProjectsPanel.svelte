@@ -30,6 +30,10 @@
     resetCursor
   } from '$lib/lists/pagination';
 
+  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+
+  const createIntent = useMutationIntent();
+
   const queryClient = useQueryClient();
 
   const pagination = $state(emptyCursorHistory());
@@ -53,13 +57,26 @@
     if (createBusy || !createName.trim()) return;
     createBusy = true;
     createError = '';
+    let committed = false;
     try {
-      const project = await createProject(createName);
+      const submission =
+        createIntent.prepare<Parameters<typeof createProject>[0]>(createName);
+      const project = await createProject(
+        submission.input,
+        submission.requestId
+      );
+      createIntent.reset();
+      committed = true;
       createName = '';
-      await queryClient.invalidateQueries({ queryKey: projectKeys.root });
       open(project);
+      await queryClient.invalidateQueries(
+        { queryKey: projectKeys.root },
+        { throwOnError: true }
+      );
     } catch (error) {
-      createError = errorMessage(error);
+      createError = committed
+        ? `Project created, but refreshing failed. ${errorMessage(error)}`
+        : errorMessage(error);
     } finally {
       createBusy = false;
     }

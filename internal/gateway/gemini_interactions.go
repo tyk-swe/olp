@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime"
 	"net/http"
 	"net/url"
@@ -73,7 +74,11 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	defer func() {
 		s.finish(x, out, status)
 		if p != nil {
-			s.settlePinHold(r.Context(), x, p.hold, totalTokens(x.usage()))
+			var actual *int64
+			if len(x.facts) > 0 {
+				actual = settledAttemptTokens(&x.facts[len(x.facts)-1], x.estimate)
+			}
+			s.settlePinHold(r.Context(), x, p.hold, actual)
 		}
 		s.settleCaps(r.Context(), x)
 		x.recordCost()
@@ -81,15 +86,6 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 	}()
 	fail := func(e *Error) {
 		x.failure, status = e, e.Status
-		if x.dispatched && len(x.facts) > 0 {
-			fact := &x.facts[len(x.facts)-1]
-			if fact.Class == classSuccess {
-				fact.Class, fact.BillingUncertain, fact.UsageComplete = classProtocol, true, false
-				if fact.Interaction != nil {
-					fact.Interaction.UpstreamState = usage.UpstreamTerminal
-				}
-			}
-		}
 		if x.dispatched && x.strict() && e.Status >= 500 {
 			copy := *e
 			copy.NoRetry = true
@@ -155,6 +151,12 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		fail(e)
 		return
 	}
+	if input.Background {
+		if e := unboundedWorkLimits(x.admissionAuthority(authority), nil, nil, &route); e != nil {
+			fail(e)
+			return
+		}
+	}
 	ctx, cancel := s.stateDeadline(r.Context(), &route)
 	defer cancel()
 	sized := int64(len(body)) / 4
@@ -201,6 +203,12 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	if input.Background {
+		if e := unboundedWorkLimits(x.admissionAuthority(x.authority), &p.provider, &p.slot, &route); e != nil {
+			fail(e)
+			return
+		}
+	}
 	// Admission ran before the target was known, so the cost hold follows the
 	// target's selection, before anything is dispatched.
 	if e = s.reserveFallbackCost(ctx, x); e != nil {
@@ -234,6 +242,15 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		var streamErr error
 		committed, streamErr = s.streamGeminiInteraction(ctx, w, x, p, response, authority, input.Store, parent, nil, "", false)
 		if streamErr != nil {
+			if errors.Is(streamErr, errClientWrite) || r.Context().Err() != nil {
+				if x.facts[len(x.facts)-1].Class != classUpstreamServer && errors.Is(streamErr, r.Context().Err()) {
+					x.facts[len(x.facts)-1].Class = classCancelled
+				}
+				x.failure = (&attemptFailure{class: classCancelled}).toError()
+				x.failure.NoRetry = true
+				status, out = 0, &outcome{err: x.failure, committed: committed, cancelled: true}
+				return
+			}
 			x.failure = serverError(http.StatusBadGateway, "interaction_incomplete", "The Interaction stream ended before its terminal contract.")
 			status = x.failure.Status
 			if !committed {
@@ -242,7 +259,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			out = &outcome{err: x.failure, committed: committed}
 			return
 		}
-		status, out = http.StatusOK, &outcome{committed: true}
+		status, out = http.StatusOK, &outcome{err: x.failure, committed: true}
 		return
 	}
 	limit := s.cfg.MaxResponseBytes
@@ -259,14 +276,35 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		fail(serverError(http.StatusBadGateway, "provider_protocol_error", "The provider returned an invalid Interaction resource."))
 		return
 	}
+	terminal := geminilifecycle.InteractionTurnFinished(result.Status)
+	s.recordGeminiInteractionUsage(x, result.Source.Root())
+	if terminal {
+		x.completePinned()
+	} else {
+		fact := &x.facts[len(x.facts)-1]
+		fact.Class = classSuccess
+		fact.observeUsage(fact.Usage, false)
+	}
+	nativeFailure := result.Status == "failed"
+	if nativeFailure {
+		x.facts[len(x.facts)-1].Class = classUpstreamServer
+		x.failure = geminiGenerationFailure()
+	}
 	localID := result.ID
 	if input.Store {
-		stored, storeErr := s.storeGeminiInteraction(ctx, x, p, authority.ID, result.ID, result.Status, parent)
+		stored, storeErr := s.storeGeminiInteraction(ctx, x, p, authority.ID, result.ID, result.Status, parent, !terminal)
 		if storeErr != nil {
 			fail(serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Interaction mapping could not be committed."))
 			return
 		}
 		localID = stored.ID
+	}
+	if nativeFailure {
+		result.Source, err = redactNativeFailureDocument(result.Source, x.sensitive)
+		if err != nil {
+			fail(serverError(http.StatusBadGateway, "provider_protocol_error", "The Interaction failure could not be safely delivered."))
+			return
+		}
 	}
 	projection, err := result.WithProjection(localID, input.Previous, input.Model)
 	if err != nil {
@@ -281,53 +319,70 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		fail(serverError(http.StatusBadGateway, "upstream_response_too_large", "The projected Interaction exceeded its configured limit."))
 		return
 	}
-	s.recordGeminiInteractionUsage(x, result.Source.Root())
 	w.Header().Set("Content-Type", "application/json")
 	x.responseHeaders(w.Header(), false)
+	w.Header().Set("X-Should-Retry", "false")
+	controller := http.NewResponseController(w)
+	_ = controller.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 	w.WriteHeader(response.StatusCode)
 	n, writeErr := w.Write(projection)
-	if n > 0 {
-		x.delivered(s.now())
+	if writeErr == nil && n == len(projection) {
+		writeErr = controller.Flush()
 	}
 	if writeErr != nil || n != len(projection) {
 		x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The Interaction result could not be delivered.")
+		x.failure.NoRetry = true
 		status, out = 0, &outcome{err: x.failure, committed: true, cancelled: true}
 		if len(x.facts) > 0 {
 			fact := &x.facts[len(x.facts)-1]
-			fact.Class, fact.Committed = classCancelled, true
-			if fact.Interaction != nil {
-				fact.Interaction.UpstreamState = usage.UpstreamTerminal
-				if n > 0 {
-					fact.Interaction.ClientState = usage.ClientPartial
-				}
+			if !nativeFailure {
+				fact.Class = classCancelled
 			}
+			fact.Committed = true
 		}
 		return
 	}
-	status, out = response.StatusCode, &outcome{committed: true}
+	x.delivered(s.now())
+	status, out = response.StatusCode, &outcome{err: x.failure, committed: true}
 	if len(x.facts) > 0 {
 		x.facts[len(x.facts)-1].Committed = true
 		if x.facts[len(x.facts)-1].Interaction != nil {
-			x.facts[len(x.facts)-1].Interaction.UpstreamState = usage.UpstreamTerminal
 			x.facts[len(x.facts)-1].Interaction.ClientState = usage.ClientTerminal
 		}
 	}
 }
 
-func (s *Server) storeGeminiInteraction(ctx context.Context, x *execution, p *pin, owner, upstreamID, state string, parent *resources.Resource) (*resources.Resource, error) {
+func (s *Server) storeGeminiInteraction(ctx context.Context, x *execution, p *pin, owner, upstreamID, state string, parent *resources.Resource, deferUsage bool) (*resources.Resource, error) {
 	version := resources.InteractionContract
 	expiry := s.now().Add(resources.ContinuationLifetime - time.Minute)
-	metadata, _ := json.Marshal(map[string]string{"upstream_model": p.model})
+	model, _ := json.Marshal(p.model)
+	metadataFields := map[string]json.RawMessage{"upstream_model": model}
+	if deferUsage && (len(x.facts) == 0 || !s.pendingGenerationUsage(x, &x.facts[len(x.facts)-1], metadataFields)) {
+		return nil, errors.New("Interaction generation accounting template unavailable")
+	}
+	metadata, err := json.Marshal(metadataFields)
+	if err != nil {
+		return nil, err
+	}
 	r := &resources.Resource{Kind: resources.KindInteraction, APIKeyID: owner, RouteSlug: x.route.Slug,
 		ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, RouteRevisionID: x.route.RevisionID,
-		SlotID: p.slot.ID, CredentialID: p.slot.CredentialID, State: state, Metadata: metadata,
+		TargetID: p.target.ID, SlotID: p.slot.ID, CredentialID: p.slot.CredentialID, State: state, Metadata: metadata,
 		ContractVersion: &version, ExpiresAt: &expiry}
 	if parent != nil {
 		r.ParentID = &parent.UUID
 	}
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
-	return s.Resources.PutInteractionContract(commitCtx, r, upstreamID)
+	stored, err := s.Resources.PutInteractionContract(commitCtx, r, upstreamID)
+	if err == nil && deferUsage {
+		if err = attachGenerationHTTP(x, stored); err != nil {
+			return nil, err
+		}
+		fact := &x.facts[len(x.facts)-1]
+		fact.GenerationUsageDeferred = true
+		fact.recordEvidence(true)
+	}
+	return stored, err
 }
 
 // Untouched OIF strings keep their source escape spelling. Inspect decoded
@@ -388,15 +443,6 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 	}()
 	fail := func(e *Error) {
 		x.failure, status = e, e.Status
-		if x.dispatched && len(x.facts) > 0 {
-			fact := &x.facts[len(x.facts)-1]
-			if fact.Class == classSuccess {
-				fact.Class = classProtocol
-				if fact.Interaction != nil {
-					fact.Interaction.UpstreamState = usage.UpstreamTerminal
-				}
-			}
-		}
 		writeSurfaceError(w, e, "gemini")
 	}
 	if s.Resources == nil || !s.Resources.Encrypted() || s.Resolver == nil || !authority.Policy.AllowProviderState {
@@ -530,6 +576,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if method == http.MethodDelete {
+		x.completePinned()
 		commitCtx, stopCommit := resourceCommitContext(ctx)
 		err := s.Resources.DeleteInteractionContract(commitCtx, authority.ID, localID)
 		stopCommit()
@@ -548,6 +595,14 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 	if stream {
 		committed, streamErr := s.streamGeminiInteraction(ctx, w, x, p, response, authority, true, nil, res, upstreamID, len(query["last_event_id"]) > 0)
 		if streamErr != nil {
+			if errors.Is(streamErr, errClientWrite) || r.Context().Err() != nil {
+				if x.facts[len(x.facts)-1].Class != classUpstreamServer && errors.Is(streamErr, r.Context().Err()) {
+					x.facts[len(x.facts)-1].Class = classCancelled
+				}
+				x.failure = (&attemptFailure{class: classCancelled}).toError()
+				status, out = 0, &outcome{err: x.failure, committed: committed, cancelled: true}
+				return
+			}
 			x.failure = serverError(http.StatusBadGateway, "interaction_incomplete", "The Interaction retrieval stream ended before its terminal contract.")
 			status = x.failure.Status
 			if !committed {
@@ -573,9 +628,26 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		fail(serverError(http.StatusBadGateway, "provider_protocol_error", "The provider returned an invalid or different Interaction."))
 		return
 	}
+	// A matching native result belongs to the original generation even when
+	// its owner-scoped projection cannot be delivered.
+	x.completePinned()
+	commitCtx, stopCommit := resourceCommitContext(ctx)
+	_, err = s.observeGeminiInteraction(commitCtx, authority.ID, localID, result.Status, result.Source.Root())
+	stopCommit()
+	if err != nil {
+		fail(serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Interaction state could not be updated."))
+		return
+	}
 	parentID := ""
 	if res.ParentID != nil {
 		parentID = resources.LocalID(resources.KindInteraction, *res.ParentID)
+	}
+	if result.Status == "failed" {
+		result.Source, err = redactNativeFailureDocument(result.Source, x.sensitive)
+		if err != nil {
+			fail(serverError(http.StatusBadGateway, "provider_protocol_error", "The Interaction failure could not be safely delivered."))
+			return
+		}
 	}
 	projection, err := result.WithProjection(localID, parentID, res.RouteSlug)
 	if err != nil {
@@ -590,22 +662,17 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		fail(serverError(http.StatusBadGateway, "upstream_response_too_large", "The projected Interaction exceeded its configured limit."))
 		return
 	}
-	commitCtx, stopCommit := resourceCommitContext(ctx)
-	err = s.Resources.MarkInteractionStatus(commitCtx, authority.ID, localID, result.Status)
-	stopCommit()
-	if err != nil {
-		fail(serverError(http.StatusServiceUnavailable, "provider_state_unavailable", "The Interaction state could not be updated."))
-		return
-	}
 	w.Header().Set("Content-Type", "application/json")
 	x.responseHeaders(w.Header(), false)
+	controller := http.NewResponseController(w)
+	_ = controller.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 	w.WriteHeader(response.StatusCode)
 	if len(x.facts) > 0 {
 		x.facts[len(x.facts)-1].Committed = true
 	}
 	n, writeErr := w.Write(projection)
-	if n > 0 {
-		x.delivered(s.now())
+	if writeErr == nil && n == len(projection) {
+		writeErr = controller.Flush()
 	}
 	if writeErr != nil || n != len(projection) {
 		x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The Interaction resource could not be delivered.")
@@ -615,12 +682,13 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 			fact.Class = classCancelled
 			if fact.Interaction != nil {
 				fact.Interaction.UpstreamState = usage.UpstreamTerminal
-				if n > 0 {
-					fact.Interaction.ClientState = usage.ClientPartial
-				}
 			}
 		}
 		return
+	}
+	x.delivered(s.now())
+	if fact := &x.facts[len(x.facts)-1]; fact.Interaction != nil {
+		fact.Interaction.ClientState = usage.ClientTerminal
 	}
 	status, out = response.StatusCode, &outcome{committed: true}
 }
@@ -647,6 +715,7 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 		previous = resources.LocalID(resources.KindInteraction, *existing.ParentID)
 	}
 	committed := false
+	nativeFailure := false
 	err = sse.Decode(response.Body, limit, func(frame sse.Frame) error {
 		event, err := geminilifecycle.ParseInteractionEvent([]byte(frame.Data), limit)
 		if err != nil {
@@ -661,21 +730,45 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 		if !store && local == nil {
 			localID = state.ID
 		}
+		if object, ok := event.Source.Root().Lookup("interaction"); ok {
+			s.recordGeminiInteractionUsage(x, object)
+		}
+		if state.Done {
+			x.completePinned()
+			if x.actor != "api_key_resource" && (event.Type == "error" || event.Status == "failed") {
+				nativeFailure = true
+				x.facts[len(x.facts)-1].Class = classUpstreamServer
+				x.failure = geminiGenerationFailure()
+			}
+		} else if len(x.facts) > 0 {
+			x.facts[len(x.facts)-1].Class = classSuccess
+		}
 		if store && local == nil {
 			initial := event.Status
 			if initial == "" {
 				initial = "created"
 			}
-			local, err = s.storeGeminiInteraction(ctx, x, p, authority.ID, state.ID, initial, parent)
+			local, err = s.storeGeminiInteraction(ctx, x, p, authority.ID, state.ID, initial, parent, true)
 			if err != nil {
 				return err
 			}
 			localID = local.ID
 		}
-		if local != nil && event.Status != "" {
+		observedStatus := event.Status
+		if event.Type == "error" {
+			observedStatus = "failed"
+		}
+		if local != nil && observedStatus != "" {
+			object, _ := event.Source.Root().Lookup("interaction")
 			commitCtx, stopCommit := resourceCommitContext(ctx)
-			err := s.Resources.MarkInteractionStatus(commitCtx, authority.ID, local.ID, event.Status)
+			_, err := s.observeGeminiInteraction(commitCtx, authority.ID, local.ID, observedStatus, object)
 			stopCommit()
+			if err != nil {
+				return err
+			}
+		}
+		if event.Type == "error" || event.Status == "failed" {
+			event.Source, err = redactNativeFailureDocument(event.Source, x.sensitive)
 			if err != nil {
 				return err
 			}
@@ -712,18 +805,26 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 		if output.Len() > limit {
 			return errors.New("projected Interaction event exceeds byte limit")
 		}
+		controller := http.NewResponseController(w)
+		_ = controller.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 		if !committed {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-store")
 			x.responseHeaders(w.Header(), true)
+			if x.actor != "api_key_resource" {
+				w.Header().Set("X-Should-Retry", "false")
+			}
 			w.WriteHeader(http.StatusOK)
 			committed = true
 			if len(x.facts) > 0 {
 				x.facts[len(x.facts)-1].Committed = true
 			}
 		}
-		if _, err := w.Write(output.Bytes()); err != nil {
-			return err
+		if n, err := w.Write(output.Bytes()); err != nil || n != output.Len() {
+			return fmt.Errorf("%w: %v", errClientWrite, err)
+		}
+		if err := controller.Flush(); err != nil {
+			return fmt.Errorf("%w: %v", errClientWrite, err)
 		}
 		x.delivered(s.now())
 		if f := &x.facts[len(x.facts)-1]; f.Interaction != nil {
@@ -736,17 +837,17 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 				f.Interaction.UpstreamState, f.Interaction.ClientState = usage.UpstreamTerminal, usage.ClientTerminal
 			}
 		}
-		if event.Type == "interaction.completed" {
-			if object, ok := event.Source.Root().Lookup("interaction"); ok {
-				s.recordGeminiInteractionUsage(x, object)
-			}
-		}
-		return http.NewResponseController(w).Flush()
+		return nil
 	})
 	if err != nil || !state.Done {
 		if len(x.facts) > 0 {
 			fact := &x.facts[len(x.facts)-1]
-			fact.Class, fact.BillingUncertain = classProtocol, true
+			if errors.Is(err, errClientWrite) && !nativeFailure {
+				fact.Class = classCancelled
+			} else if x.exchange == nil || !x.exchange.state.settled {
+				fact.Class = classProtocol
+			}
+			fact.BillingUncertain = fact.Usage == nil
 			if fact.Interaction != nil {
 				fact.Interaction.UpstreamState = usage.UpstreamUnknown
 			}
@@ -759,13 +860,33 @@ func (s *Server) streamGeminiInteraction(ctx context.Context, w http.ResponseWri
 	return committed, nil
 }
 
+func geminiGenerationFailure() *Error {
+	failure := serverError(http.StatusBadGateway, "upstream_response_failed", "The provider reported a failed Interaction generation.")
+	failure.NoRetry = true
+	return failure
+}
+
 func (s *Server) recordGeminiInteractionUsage(x *execution, object oif.Value) {
 	if len(x.facts) == 0 || x.actor == "api_key_resource" {
 		return
 	}
+	observed := geminiInteractionUsage(object)
+	if observed == nil {
+		return
+	}
+	fact := &x.facts[len(x.facts)-1]
+	statusValue, _ := object.Lookup("status")
+	status, _ := statusValue.Text()
+	complete := geminilifecycle.InteractionTurnFinished(status)
+	fact.observeUsage(observed, complete)
+	fact.recordEvidence(!complete)
+	fact.UsageComplete, fact.BillingUncertain = complete, !complete
+}
+
+func geminiInteractionUsage(object oif.Value) *openai.Usage {
 	usageValue, ok := object.Lookup("usage")
 	if !ok || usageValue.Kind() != oif.Object {
-		return
+		return nil
 	}
 	var native struct {
 		Input    *int64 `json:"total_input_tokens"`
@@ -776,13 +897,11 @@ func (s *Server) recordGeminiInteractionUsage(x *execution, object oif.Value) {
 		Total    *int64 `json:"total_tokens"`
 	}
 	if json.Unmarshal(usageValue.Bytes(), &native) != nil || native.Input == nil || native.Output == nil || *native.Input < 0 || *native.Output < 0 || native.Cached != nil && (*native.Cached < 0 || *native.Cached > *native.Input) {
-		return
+		return nil
 	}
 	usage := geminiExtendedUsage(*native.Input, *native.Output, native.Cached, native.Thoughts, native.ToolUse, native.Total)
 	if usage == nil {
-		return
+		return nil
 	}
-	fact := &x.facts[len(x.facts)-1]
-	fact.Usage = usage
-	fact.recordEvidence(false)
+	return usage
 }

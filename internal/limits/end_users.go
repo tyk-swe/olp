@@ -24,9 +24,7 @@ func EndUserProjectID(projectID, digest string) string {
 func EndUserLookup(accountID string) string { return "eu_" + strings.ReplaceAll(accountID, "-", "") }
 
 // The same decimal delta and window rules apply to all cost owners.
-var addEndUserCostDeltaSQL = strings.NewReplacer(
-	"api_key_cost_windows", "end_user_cost_windows", "api_key_id", "account_id",
-).Replace(addCostDeltaSQL)
+var addEndUserCostDeltaSQL = costDeltaSQL(costOwnerEndUser)
 
 // AddEndUserCostDelta registers the digest at its key and project boundaries.
 // A new account reconstructs history, including this event, instead of

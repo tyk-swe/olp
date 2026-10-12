@@ -13,16 +13,15 @@ import (
 // The reservation transaction already holds the provider row lock. Revisions
 // are immutable, so the source documents checked here remain the INSERT's
 // authority. Limits are the existing explicitly compatible live adjustment.
-func compatibleReservationConfiguration(ctx context.Context, q Querier, generationID, providerID string) (bool, error) {
+func compatibleReservationConfiguration(ctx context.Context, q Querier, revisionID, providerID string) (bool, error) {
 	var pinned, current []byte
 	err := q.QueryRow(ctx, `SELECT pinned.configuration, current.configuration
-		FROM olp.runtime_releases release
-		JOIN olp.providers provider ON provider.id=$2::uuid
+		FROM olp.providers provider
 		JOIN olp.provider_revisions pinned
-		  ON pinned.id=(release.snapshot#>>ARRAY['providers',$2::text,'revision_id'])::uuid
+		  ON pinned.id=$1::uuid
 		 AND pinned.provider_id=provider.id
 		JOIN olp.provider_revisions current ON current.id=provider.active_revision_id
-		WHERE release.id=$1::uuid`, generationID, providerID).Scan(&pinned, &current)
+		WHERE provider.id=$2::uuid`, revisionID, providerID).Scan(&pinned, &current)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

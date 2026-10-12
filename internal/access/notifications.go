@@ -522,7 +522,7 @@ func (s *Server) validateNotificationSubject(r *http.Request, tx pgx.Tx, input *
 			"SELECT project_id::text FROM olp.api_keys WHERE id=$1", subjectID).Scan(&subjectProject)
 	case "budget_group":
 		err = tx.QueryRow(r.Context(),
-			"SELECT project_id::text FROM olp.budget_groups WHERE id=$1", subjectID).Scan(&subjectProject)
+			"SELECT project_id::text FROM olp.budget_groups WHERE id=$1 AND retired_at IS NULL", subjectID).Scan(&subjectProject)
 	}
 	if err != nil {
 		if err == pgx.ErrNoRows {

@@ -156,10 +156,13 @@ it('creates a catalog source without a URL to read the bundled catalog', async (
   );
   button('Create pricing source').click();
   await vi.waitFor(() =>
-    expect(createPricingSource).toHaveBeenCalledWith({
-      name: 'Release catalog',
-      format: 'catalog',
-      url: null
-    })
+    expect(createPricingSource).toHaveBeenCalledWith(
+      {
+        name: 'Release catalog',
+        format: 'catalog',
+        url: null
+      },
+      expect.any(String)
+    )
   );
 });

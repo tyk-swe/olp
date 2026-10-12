@@ -5,4 +5,6 @@
 
 <svelte:head><title>Providers · OpenLLMProxy</title></svelte:head>
 
-<ProviderDetail providerId={page.params.providerId ?? ''} />
+{#key page.params.providerId}
+  <ProviderDetail providerId={page.params.providerId ?? ''} />
+{/key}

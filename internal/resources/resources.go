@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // Strict and transformed resources keep separate kinds because their storage
@@ -31,6 +32,12 @@ const (
 
 const StateDeleted = "deleted"
 
+// Only retained generation owners carry gateway-authored deferred usage.
+// Other resource metadata may contain opaque native fields with the same name.
+func ownsPendingUsage(kind string) bool {
+	return kind == KindResponse || kind == KindStrictResponse || kind == KindInteraction
+}
+
 var ErrNotFound = errors.New("provider resource not found")
 
 var ErrMetadataTooLarge = errors.New("provider resource metadata exceeds 16 KiB")
@@ -47,6 +54,7 @@ type Resource struct {
 	ProviderID         string          `json:"provider_id"`
 	ProviderRevisionID string          `json:"provider_revision_id"`
 	RouteRevisionID    string          `json:"route_revision_id"`
+	TargetID           string          `json:"target_id,omitempty"`
 	SlotID             string          `json:"slot_id"`
 	CredentialID       *string         `json:"credential_id,omitempty"`
 	UpstreamID         string          `json:"upstream_id"`
@@ -97,23 +105,30 @@ func (s *Store) Begin(ctx context.Context) (pgx.Tx, error) {
 	return s.pool.Begin(ctx)
 }
 
-const columns = `id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,created_at,updated_at,contract_version,parent_id,submission_id`
+const columns = `id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,created_at,updated_at,contract_version,parent_id,submission_id,target_id`
 
 func scan(row pgx.Row) (*Resource, error) {
 	var r Resource
 	var metadata []byte
+	var targetID *string
 	err := row.Scan(&r.UUID, &r.Kind, &r.APIKeyID, &r.RouteSlug, &r.ProviderID,
 		&r.ProviderRevisionID, &r.RouteRevisionID, &r.SlotID, &r.CredentialID, &r.UpstreamID,
-		&r.State, &metadata, &r.ExpiresAt, &r.CreatedAt, &r.UpdatedAt, &r.ContractVersion, &r.ParentID, &r.SubmissionID)
+		&r.State, &metadata, &r.ExpiresAt, &r.CreatedAt, &r.UpdatedAt, &r.ContractVersion, &r.ParentID, &r.SubmissionID, &targetID)
 	if err != nil {
 		return nil, err
 	}
 	r.ID = LocalID(r.Kind, r.UUID)
 	r.Metadata = metadata
+	if targetID != nil {
+		r.TargetID = *targetID
+	}
 	return &r, nil
 }
 
 func (s *Store) Put(ctx context.Context, r *Resource) (*Resource, error) {
+	if r.TargetID == "" {
+		return nil, ErrContract
+	}
 	if r.Kind == KindContinuation || r.Kind == KindStrictResponse || r.Kind == KindStrictFile || r.Kind == KindStrictBatch {
 		return nil, ErrContract
 	}
@@ -123,13 +138,24 @@ func (s *Store) Put(ctx context.Context, r *Resource) (*Resource, error) {
 	if len(r.Metadata) > metadataLimit {
 		return nil, ErrMetadataTooLarge
 	}
+
+	if r.ExpiresAt == nil && ownsPendingUsage(r.Kind) {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(r.Metadata, &fields); err != nil {
+			return nil, err
+		}
+		if pending := fields["pending_usage"]; len(pending) > 0 && string(pending) != "null" {
+			expires := time.Now().Add(ContinuationLifetime)
+			r.ExpiresAt = &expires
+		}
+	}
 	r.UUID = uuid.Must(uuid.NewV7())
 	out, err := scan(s.pool.QueryRow(ctx, `INSERT INTO olp.provider_resources
-		(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,target_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		RETURNING `+columns,
 		r.UUID, r.Kind, r.APIKeyID, r.RouteSlug, r.ProviderID, r.ProviderRevisionID,
-		r.RouteRevisionID, r.SlotID, r.CredentialID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt))
+		r.RouteRevisionID, r.SlotID, r.CredentialID, r.UpstreamID, r.State, r.Metadata, r.ExpiresAt, r.TargetID))
 	if err != nil {
 		return nil, fmt.Errorf("provider resource put: %w", err)
 	}
@@ -153,10 +179,33 @@ func (s *Store) Get(ctx context.Context, kind, apiKeyID, localID string) (*Resou
 	return r, nil
 }
 
-func (s *Store) GetByUpstream(ctx context.Context, kind, apiKeyID, providerID, upstreamID string) (*Resource, error) {
+// NativeIdentity names one resource within the immutable serving source and
+// caller that accepted it. CredentialID is the credential-version row identity.
+// TargetID identifies the selected model in the exact historical route revision.
+type NativeIdentity struct {
+	Kind, APIKeyID, RouteSlug, ProviderID, ProviderRevisionID, RouteRevisionID, TargetID, SlotID, UpstreamID string
+	CredentialID                                                                                             *string
+}
+
+func (r *Resource) NativeIdentity() NativeIdentity {
+	return NativeIdentity{Kind: r.Kind, APIKeyID: r.APIKeyID, RouteSlug: r.RouteSlug,
+		ProviderID: r.ProviderID, ProviderRevisionID: r.ProviderRevisionID,
+		RouteRevisionID: r.RouteRevisionID, TargetID: r.TargetID, SlotID: r.SlotID,
+		CredentialID: r.CredentialID, UpstreamID: r.UpstreamID}
+}
+
+func (s *Store) GetByUpstream(ctx context.Context, identity NativeIdentity) (*Resource, error) {
+	if identity.TargetID == "" {
+		return nil, ErrContract
+	}
 	r, err := scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM olp.provider_resources
-		WHERE kind=$1 AND api_key_id=$2 AND provider_id=$3 AND upstream_id=$4 AND state<>$5 AND (expires_at IS NULL OR expires_at>now())`,
-		kind, apiKeyID, providerID, upstreamID, StateDeleted))
+		WHERE kind=$1 AND api_key_id=$2 AND provider_id=$3 AND provider_revision_id=$4
+		AND route_slug=$5 AND route_revision_id=$6 AND target_id=$7 AND slot_id=$8
+		AND credential_id IS NOT DISTINCT FROM $9::uuid AND upstream_id=$10
+		AND state<>$11 AND (expires_at IS NULL OR expires_at>now())`,
+		identity.Kind, identity.APIKeyID, identity.ProviderID, identity.ProviderRevisionID,
+		identity.RouteSlug, identity.RouteRevisionID, identity.TargetID, identity.SlotID,
+		identity.CredentialID, identity.UpstreamID, StateDeleted))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -240,7 +289,22 @@ func (s *Store) Tombstone(ctx context.Context, localID string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$2,updated_at=now() WHERE id=$1 AND state<>$2`, id, StateDeleted)
+	var kind string
+	var pending []byte
+	if err = tx.QueryRow(ctx, `SELECT kind,metadata->'pending_usage' FROM olp.provider_resources WHERE id=$1 AND state<>$2 FOR UPDATE`, id, StateDeleted).Scan(&kind, &pending); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if ownsPendingUsage(kind) {
+		if _, err = persistPendingUsage(ctx, tx, pending, usage.AttemptUsage{BillingUncertain: true}, time.Now(), false); err != nil {
+			return err
+		}
+	}
+	tag, err := tx.Exec(ctx, `UPDATE olp.provider_resources SET state=$2,
+ metadata=CASE WHEN olp.resource_owns_pending_usage(kind) THEN metadata-'pending_usage' ELSE metadata END,
+ updated_at=now() WHERE id=$1 AND state<>$2`, id, StateDeleted)
 	if err != nil {
 		return fmt.Errorf("provider resource tombstone: %w", err)
 	}
@@ -251,25 +315,6 @@ func (s *Store) Tombstone(ctx context.Context, localID string) error {
 		return err
 	}
 	return tx.Commit(ctx)
-}
-
-func (s *Store) CleanupExpired(ctx context.Context, now time.Time) (int64, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `DELETE FROM olp.secrets s USING olp.provider_resources r WHERE s.id=r.id AND s.purpose=$2 AND r.expires_at<=$1`, now, secrets.ProviderContinuation); err != nil {
-		return 0, err
-	}
-	tag, err := tx.Exec(ctx, `DELETE FROM olp.provider_resources WHERE expires_at IS NOT NULL AND expires_at<=$1`, now)
-	if err != nil {
-		return 0, fmt.Errorf("provider resource cleanup: %w", err)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
 }
 
 func nilIfEmpty(s string) any {

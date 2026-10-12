@@ -95,7 +95,7 @@ const insertRequestSQL = `INSERT INTO olp.requests
         (id, runtime_generation_id, api_key_id, budget_group_id, route_slug, operation, surface,
          started_at, completed_at, status_code, error_class, total_latency_ms, first_byte_ms,
          attempt_count, created_at, attribution, policy_decisions, origin, parent_request_id, end_user_digest, budget_boundary, payload_captured)
-    VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, $14::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $8,
+    VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, $14::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($8, now()),
             $15::jsonb, $16::jsonb, $17, $18::uuid, $19, $20, $21)
     ON CONFLICT (id, started_at) DO NOTHING`
 
@@ -355,24 +355,32 @@ func markReceiptPersisted(ctx context.Context, tx pgx.Tx, ev *Event) error {
 }
 
 func insertRequestRows(ctx context.Context, tx pgx.Tx, ev *Event, validated *Validated) error {
+	var completedAt, latency any = ev.RequestCompletedAt, validated.LatencyMS
+	if ev.HTTPOutcomePending {
+		completedAt, latency = nil, nil
+	}
 	if _, err := tx.Exec(ctx, insertRequestSQL, ev.RequestID, ev.RuntimeGenerationID, ev.APIKeyID,
-		ev.RouteSlug, ev.Operation, ev.Surface, ev.RequestStartedAt, ev.RequestCompletedAt,
-		validated.StatusCode, ev.ErrorClass, validated.LatencyMS, validated.FirstByteMS,
+		ev.RouteSlug, ev.Operation, ev.Surface, ev.RequestStartedAt, completedAt,
+		validated.StatusCode, ev.ErrorClass, latency, validated.FirstByteMS,
 		validated.AttemptCount, ev.BudgetGroupID, string(AttributionJSON(ev.Attribution)),
 		string(contentpolicy.DecisionsJSON(ev.PolicyDecisions)), cmp.Or(ev.Origin, OriginCaller),
 		ev.ParentRequestID, ev.EndUserDigest, ev.BudgetBoundary, ev.PayloadCaptured); err != nil {
 		return fmt.Errorf("persist request metadata request: %w", err)
 	}
 	for _, attempt := range validated.Attempts {
+		var attemptCompletedAt, attemptLatency any = attempt.Attempt.CompletedAt, attempt.LatencyMS
+		if ev.HTTPOutcomePending && attempt.Ordinal == validated.AttemptCount {
+			attemptCompletedAt, attemptLatency = nil, nil
+		}
 		var routing any
 		if attempt.Attempt.Routing != nil {
 			routing = attempt.Attempt.Routing
 		}
 		if _, err := tx.Exec(ctx, insertAttemptSQL, attempt.Attempt.ID, ev.RequestID,
 			ev.RequestStartedAt, attempt.Ordinal, attempt.Attempt.ProviderID,
-			attempt.Attempt.UpstreamModel, attempt.Attempt.StartedAt, attempt.Attempt.CompletedAt,
+			attempt.Attempt.UpstreamModel, attempt.Attempt.StartedAt, attemptCompletedAt,
 			attempt.StatusCode, attempt.Attempt.ErrorClass, attempt.Attempt.Committed,
-			attempt.LatencyMS, attempt.FirstByteMS, routing); err != nil {
+			attemptLatency, attempt.FirstByteMS, routing); err != nil {
 			return fmt.Errorf("persist request metadata attempt: %w", err)
 		}
 	}
@@ -527,7 +535,7 @@ func applyIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost stri
 	if err != nil {
 		return nil, err
 	}
-	aggregates, err := limits.AddAggregateCostDelta(ctx, tx, ev.APIKeyID, ev.ProviderID, ev.RouteSlug, ev.Attribution, ev.ObservedAt, cost, unpriced)
+	aggregates, err := limits.AddAggregateCostDelta(ctx, tx, ev.EventID, ev.APIKeyID, ev.ProviderID, ev.RouteSlug, ev.Attribution, ev.ObservedAt)
 	if err != nil {
 		return nil, fmt.Errorf("apply aggregate cost delta: %w", err)
 	}

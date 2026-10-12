@@ -66,21 +66,11 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 		return nil, nil, nil, err
 	}
 
-	var slot *runtime.Slot
-	for i := range provider.Slots {
-		if provider.Slots[i].ID == res.SlotID {
-			copied := provider.Slots[i]
-			slot = &copied
-			break
-		}
+	selected, ok := runtime.PinnedSlot(&provider, res.SlotID, res.CredentialID)
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("slot %s or credential absent from provider revision %s: %w", res.SlotID, res.ProviderRevisionID, ErrNoRows)
 	}
-	if slot == nil {
-		return nil, nil, nil, fmt.Errorf("slot %s absent from provider revision %s: %w", res.SlotID, res.ProviderRevisionID, ErrNoRows)
-	}
-	if (slot.CredentialID == nil) != (res.CredentialID == nil) ||
-		(slot.CredentialID != nil && *slot.CredentialID != *res.CredentialID) {
-		return nil, nil, nil, fmt.Errorf("slot %s credential drifted: %w", res.SlotID, ErrNoRows)
-	}
+	slot := &selected
 
 	routeRevision := runtime.RouteRevision{RevisionID: res.RouteRevisionID}
 	err = query.QueryRow(ctx,
@@ -104,6 +94,15 @@ func (r *Resolver) resolve(ctx context.Context, query secrets.RowQuerier, res *R
 	}
 	if !slices.Contains(route.Operations, operation) {
 		return nil, nil, nil, fmt.Errorf("route %s revision does not allow %s: %w", route.Slug, operation, ErrNoRows)
+	}
+	matched := 0
+	for _, target := range route.Targets {
+		if res.TargetID != "" && target.ID == res.TargetID && target.ProviderID == provider.ID && target.ProviderModel != "" {
+			matched++
+		}
+	}
+	if matched != 1 {
+		return nil, nil, nil, fmt.Errorf("target %s is not proved by route revision %s: %w", res.TargetID, res.RouteRevisionID, ErrNoRows)
 	}
 
 	if res.CredentialID != nil {

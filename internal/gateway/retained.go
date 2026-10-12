@@ -108,7 +108,7 @@ func (s *Server) resolveResource(ctx context.Context, x *execution, authority ac
 	}
 	var target *runtime.Target
 	for i := range route.Targets {
-		if route.Targets[i].ProviderID != provider.ID || route.Targets[i].ProviderModel != resourceModel(res) {
+		if res.TargetID == "" || route.Targets[i].ID != res.TargetID || route.Targets[i].ProviderID != provider.ID || route.Targets[i].ProviderModel != resourceModel(res) {
 			continue
 		}
 		if target != nil {

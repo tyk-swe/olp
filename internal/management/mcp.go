@@ -88,7 +88,7 @@ func (server *MCP) serveMCP(r *http.Request, principal access.Principal) (access
 			if requirements[operation.Method+" "+operation.Path].Admits(principal) != nil {
 				continue
 			}
-			readOnly := operation.Method == "GET" || operation.Name == "plan_configuration" || strings.HasPrefix(operation.Name, "simulate_") || operation.Name == "lookup_end_user"
+			readOnly := operation.ReadOnly
 			tools = append(tools, map[string]any{"name": operation.Name, "description": operation.Description, "inputSchema": operation.InputSchema, "annotations": map[string]any{"readOnlyHint": readOnly, "destructiveHint": !readOnly, "openWorldHint": true}})
 		}
 		return rpcResult(request.ID, map[string]any{"tools": tools}), nil
@@ -136,8 +136,8 @@ func (server *MCP) serveMCP(r *http.Request, principal access.Principal) (access
 		}
 		redactMCP(body)
 		result := map[string]any{"status": reply.status, "body": body}
-		if etag := reply.header.Get("ETag"); etag != "" {
-			result["etag"] = etag
+		for field, value := range operation.ResponseMetadata(reply.header) {
+			result[field] = value
 		}
 		encoded, err := json.Marshal(result)
 		if err != nil {

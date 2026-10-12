@@ -68,7 +68,8 @@ export async function listCodeAccounts(
 
 export async function saveCodeAccount(
   body: CodeAccountWrite,
-  current?: Pick<CodeAccount, 'id' | 'etag'>
+  current: Pick<CodeAccount, 'id' | 'etag'> | undefined,
+  requestId: string
 ) {
   if (current)
     return unwrap(
@@ -80,9 +81,11 @@ export async function saveCodeAccount(
         body
       })
     );
+  if (!requestId)
+    throw new Error('A create submission requires a stable request ID.');
   return unwrap(
     await apiClient.POST('/api/v1/code/accounts', {
-      params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+      params: { header: { 'Idempotency-Key': requestId } },
       body
     })
   );
@@ -102,7 +105,8 @@ export async function listCodePools(
 
 export async function saveCodePool(
   body: CodePoolWrite,
-  current?: Pick<CodePool, 'id' | 'etag'>
+  current: Pick<CodePool, 'id' | 'etag'> | undefined,
+  requestId: string
 ) {
   if (current)
     return unwrap(
@@ -114,9 +118,11 @@ export async function saveCodePool(
         body
       })
     );
+  if (!requestId)
+    throw new Error('A create submission requires a stable request ID.');
   return unwrap(
     await apiClient.POST('/api/v1/code/pools', {
-      params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+      params: { header: { 'Idempotency-Key': requestId } },
       body
     })
   );
@@ -136,7 +142,8 @@ export async function listCodeRoutes(
 
 export async function saveCodeRoute(
   body: CodeRouteWrite,
-  current?: Pick<CodeRoute, 'id' | 'etag'>
+  current: Pick<CodeRoute, 'id' | 'etag'> | undefined,
+  requestId: string
 ) {
   if (current)
     return unwrap(
@@ -148,9 +155,11 @@ export async function saveCodeRoute(
         body
       })
     );
+  if (!requestId)
+    throw new Error('A create submission requires a stable request ID.');
   return unwrap(
     await apiClient.POST('/api/v1/code/routes', {
-      params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+      params: { header: { 'Idempotency-Key': requestId } },
       body
     })
   );
@@ -170,7 +179,8 @@ export async function listCodeBudgets(
 
 export async function saveCodeBudget(
   body: CodeBudgetWrite,
-  current?: Pick<CodeBudget, 'id' | 'etag'>
+  current: Pick<CodeBudget, 'id' | 'etag'> | undefined,
+  requestId: string
 ) {
   if (current)
     return unwrap(
@@ -182,9 +192,11 @@ export async function saveCodeBudget(
         body
       })
     );
+  if (!requestId)
+    throw new Error('A create submission requires a stable request ID.');
   return unwrap(
     await apiClient.POST('/api/v1/code/budgets', {
-      params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+      params: { header: { 'Idempotency-Key': requestId } },
       body
     })
   );
@@ -238,14 +250,17 @@ export async function listCodeTokenWindows(
   );
 }
 
-export async function publishCodeRoute(route: Pick<CodeRoute, 'id' | 'etag'>) {
+export async function publishCodeRoute(
+  route: Pick<CodeRoute, 'id' | 'etag'>,
+  requestId: string
+) {
   return unwrap(
     await apiClient.POST('/api/v1/code/routes/{id}/publish', {
       params: {
         path: { id: route.id },
         header: {
           'If-Match': route.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': requestId
         }
       }
     })
@@ -265,12 +280,12 @@ export async function listCodeRevisions(
   );
 }
 
-export async function retireCodeBinding(id: string) {
+export async function retireCodeBinding(id: string, requestId: string) {
   ensureOk(
     await apiClient.POST('/api/v1/code/bindings/{id}/retire', {
       params: {
         path: { id },
-        header: { 'Idempotency-Key': crypto.randomUUID() }
+        header: { 'Idempotency-Key': requestId }
       }
     })
   );

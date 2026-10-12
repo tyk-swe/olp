@@ -178,6 +178,9 @@ settings cannot weaken it.
 recorded for that request, and every provider-derived error message, type, and
 code is scrubbed of those values, including their JSON-escaped forms, before a
 client, log, or request record sees it.
+This includes native failed Response/Interaction documents and Bedrock error
+payloads. A native error whose object member name contains an applied credential
+is refused before delivery.
 
 Consumer catalog reads admit a `models_read` inference key only on the declared
 `GET /api/v1/catalog` surface. The gateway’s ordinary authority, revocation,
@@ -248,3 +251,10 @@ request/recipient checks and a browser-bound two-stage callback. Only declared
 metadata URLs use identity egress; assertion-controlled URLs are never fetched.
 Signing material and short-lived verified flow facts use distinct `saml_key` and
 `saml_flow` seal purposes. See [SAML console sign-in](access.md#saml-console-sign-in).
+
+Historical credential resolution reads and authorizes an immutable reference in
+a short primary-database transaction, releases that connection before remote
+secret I/O, and rechecks live eligibility after resolution. Rotation does not
+change the pinned reference; revocation observed during the remote call refuses
+its eventual secret. Static/grant serving bytes are immutable borrowed buffers;
+callers requiring mutable bytes must copy rather than clear runtime-owned state.

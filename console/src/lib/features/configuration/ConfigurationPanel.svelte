@@ -1,4 +1,8 @@
 <script lang="ts">
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
   import { parseExternalReference } from '$lib/features/providers/externalReference';
   import { resolve } from '$app/paths';
   import { parseNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
@@ -17,6 +21,8 @@
     type ConfigurationPlanItem
   } from '$lib/features/configuration/api';
 
+  const applyIntent = useMutationIntent();
+
   let exportBusy = $state(false);
   let exportDigest = $state('');
   let exportedJSON = $state('');
@@ -29,19 +35,32 @@
   let applyResult = $state<'staged' | ''>('');
   let busy = $state(false);
   let error = $state('');
+  let artifactRevision = 0;
+  const captureOwner = usePrincipalLifetime(() => {
+    retireArtifact();
+    artifact = '';
+    exportedJSON = exportDigest = '';
+    copied = false;
+    applyResult = '';
+    busy = exportBusy = false;
+    error = '';
+  });
 
   async function loadExport() {
     if (exportBusy) return;
+    const isCurrent = captureOwner();
     exportBusy = true;
     error = '';
     try {
       const result = await exportConfiguration();
+      if (!isCurrent()) return;
       exportDigest = result.digest;
       exportedJSON = stringifyNativeJSON(result.document, 2);
     } catch (problem) {
+      if (!isCurrent()) return;
       error = errorMessage(problem);
     } finally {
-      exportBusy = false;
+      if (isCurrent()) exportBusy = false;
     }
   }
 
@@ -53,17 +72,26 @@
 
   async function copyExport() {
     if (!exportedJSON) return;
-    copied = await copyText(exportedJSON);
+    const isCurrent = captureOwner();
+    const result = await copyText(exportedJSON);
+    if (isCurrent()) copied = result;
   }
 
-  function parseArtifact() {
+  function retireArtifact() {
+    artifactRevision += 1;
     error = '';
     applyResult = '';
     plan = null;
     // Secret bindings answer the artifact they were entered for. OLP refuses
     // one this artifact doesn't take, such as for a slot a grant now backs.
+    applyIntent.reset();
     secrets = {};
     externalBindingsJSON = '';
+    artifactDocument = null;
+  }
+
+  function parseArtifact() {
+    retireArtifact();
     try {
       artifactDocument = parseNativeJSON(artifact) as ConfigurationDocument;
     } catch {
@@ -76,8 +104,19 @@
   async function upload(event: Event) {
     const file = (event.currentTarget as HTMLInputElement).files?.[0];
     if (!file) return;
-    artifact = await file.text();
-    parseArtifact();
+    const isCurrent = captureOwner();
+    retireArtifact();
+    artifact = '';
+    const revision = artifactRevision;
+    try {
+      const text = await file.text();
+      if (!isCurrent() || artifactRevision !== revision) return;
+      artifact = text;
+      parseArtifact();
+    } catch (problem) {
+      if (isCurrent() && artifactRevision === revision)
+        error = errorMessage(problem);
+    }
   }
 
   function bindings(): Record<string, string> {
@@ -110,43 +149,63 @@
     // A plan answers the document it reviewed; one that arrives after the
     // artifact changed must not enable Apply for the new document.
     const planned = artifactDocument;
+    const isCurrent = captureOwner();
     busy = true;
     error = '';
     applyResult = '';
     try {
       const result = await withBindings(planConfiguration, planned);
-      if (artifactDocument === planned) plan = result;
+      if (isCurrent() && artifactDocument === planned) plan = result;
     } catch (problem) {
-      if (artifactDocument !== planned) return;
+      if (!isCurrent() || artifactDocument !== planned) return;
       plan = null;
       error = errorMessage(problem);
     } finally {
-      busy = false;
+      if (isCurrent()) busy = false;
     }
   }
 
   async function apply() {
     if (busy || !artifactDocument) return;
     const applied = artifactDocument;
+    const isCurrent = captureOwner();
     busy = true;
     error = '';
     applyResult = '';
     try {
-      const result = await withBindings(applyConfiguration, applied);
-      if (artifactDocument !== applied) return;
+      const result = await withBindings(
+        (document, secretBindings, signal, externalBindings) => {
+          const submission = applyIntent.prepare({
+            document,
+            secretBindings,
+            externalBindings
+          });
+          return applyConfiguration(
+            submission.input.document,
+            submission.input.secretBindings,
+            submission.requestId,
+            signal,
+            submission.input.externalBindings
+          );
+        },
+        applied
+      );
+      if (!isCurrent() || artifactDocument !== applied) return;
       plan = result;
+      applyIntent.reset();
       applyResult = 'staged';
     } catch (problem) {
-      if (artifactDocument !== applied) return;
+      if (!isCurrent() || artifactDocument !== applied) return;
       if (problem instanceof ApiProblem && problem.problem.status === 409) {
         const replanned = await withBindings(planConfiguration, applied).catch(
           () => plan
         );
-        if (artifactDocument === applied) plan = replanned;
+        if (!isCurrent() || artifactDocument !== applied) return;
+        plan = replanned;
       }
       error = errorMessage(problem);
     } finally {
-      busy = false;
+      if (isCurrent()) busy = false;
     }
   }
 

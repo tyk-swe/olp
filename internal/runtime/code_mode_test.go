@@ -44,6 +44,7 @@ func TestCodeAdaptersAndProvidersDeriveFromTheRevisionsFrozenConnections(t *test
 			if release.Digest != digest {
 				t.Fatal("derived adapters changed the snapshot digest")
 			}
+			snapshot = release.Snapshot
 			for revision, want := range map[string][]codemode.Adapter{
 				"codex": {codemode.AdapterCodex}, "zai": {codemode.AdapterZAICoding},
 				"mixed": {codemode.AdapterCodex, codemode.AdapterOpenCodeGo, codemode.AdapterZAICoding}, "other": nil, "absent": nil,

@@ -28,7 +28,8 @@ export async function listCredentialSlots(
 export async function putCredentialSlot(
   providerId: string,
   etag: string,
-  slot: Schemas['SlotWrite']
+  slot: Schemas['SlotWrite'],
+  requestId: string
 ): Promise<void> {
   unwrap(
     await apiClient.PUT(
@@ -36,7 +37,7 @@ export async function putCredentialSlot(
       {
         params: {
           path: { provider_id: providerId, slot_id: slot.slot.id! },
-          header: { 'If-Match': etag, 'Idempotency-Key': crypto.randomUUID() }
+          header: { 'If-Match': etag, 'Idempotency-Key': requestId }
         },
         body: slot
       }
@@ -88,8 +89,9 @@ async function listProviderCredentialPage(
 }
 
 export async function rotateProviderCredential(
-  provider: Provider,
-  secret: string | ExternalCredentialReference
+  provider: Pick<Provider, 'id' | 'etag'>,
+  secret: string | ExternalCredentialReference,
+  requestId: string
 ): Promise<void> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/credentials',
@@ -98,7 +100,7 @@ export async function rotateProviderCredential(
         path: { provider_id: provider.id },
         header: {
           'If-Match': provider.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': requestId
         }
       },
       body:
@@ -111,8 +113,9 @@ export async function rotateProviderCredential(
 }
 
 export async function revokeProviderCredential(
-  provider: Provider,
-  credentialId: string
+  provider: Pick<Provider, 'id' | 'etag'>,
+  credentialId: string,
+  requestId: string
 ): Promise<void> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/credentials/{credential_id}/revoke',
@@ -121,7 +124,7 @@ export async function revokeProviderCredential(
         path: { provider_id: provider.id, credential_id: credentialId },
         header: {
           'If-Match': provider.etag,
-          'Idempotency-Key': crypto.randomUUID()
+          'Idempotency-Key': requestId
         }
       }
     }

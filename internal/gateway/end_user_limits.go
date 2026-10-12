@@ -47,6 +47,12 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *access.Autho
 			}
 			owner = limits.EndUserProjectID(*authority.ProjectID, authority.EndUserDigest)
 		}
+		if policy.CostBudgeted() {
+			if e := a.checkPendingCostAccounting(ctx, owner); e != nil {
+				settleKey(ctx, chain, false, nil, a.logger())
+				return nil, e
+			}
+		}
 		if !a.ready() {
 			settleKey(ctx, chain, false, nil, a.logger())
 			return nil, limitsUnavailable()

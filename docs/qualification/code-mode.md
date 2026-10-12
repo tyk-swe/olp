@@ -49,7 +49,7 @@ prove neither entitlement nor real consumption nor a maximum token bound.
 | Payload/header fidelity | Raw HTTP/SSE/WebSocket tests, repeated headers/trailers, gzip/zstd observation, raw queries and upstream-first handshake rejection | Controlled only |
 | Live continuation authority | WebSocket pool/account/key/project-membership revocation and tree retirement; HTTP revocation across replicas | Controlled only |
 | Optional hard budgets | Unbounded operation succeeds without matching budget and returns 422 with one; durable ledger overlap/reservation/uncertainty tests | No proven native operation bound |
-| Console | Typed API loader, role/project gating and component/unit/type checks | Browser execution remains parent-owned |
+| Console | Typed API loader, role/project gating, component/unit/type checks and Chromium lifecycle journeys | Controlled only; run the browser suite separately from shell qualification |
 | Real subscription account | No credential supplied or used | Unqualified |
 | Client retries and transport recovery | Default retries, interrupted SSE/WS, WS→HTTP after 426, 503 account quarantine; pool/account/key/project/retirement refusal across alternating gateways | Controlled only |
 | Local files/search | Official `exec_command` writes a file, enumerates files, searches and reads it; tool outputs continue over both transports | Controlled only; no hosted search claim |

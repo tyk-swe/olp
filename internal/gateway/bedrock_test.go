@@ -14,7 +14,7 @@ func bedrockMetadata(payload string) *eventstream.Message {
 }
 
 func TestBedrockStreamUsageAddsCacheTokensToInput(t *testing.T) {
-	u, _ := bedrockStreamUsage(bedrockMetadata(`{"usage":{"inputTokens":4,"outputTokens":1,"cacheReadInputTokens":1000,"cacheWriteInputTokens":20}}`))
+	u, _ := bedrockTestUsage(bedrockMetadata(`{"usage":{"inputTokens":4,"outputTokens":1,"cacheReadInputTokens":1000,"cacheWriteInputTokens":20}}`))
 	if u == nil {
 		t.Fatal("cache reads beyond uncached input lost the usage")
 	}
@@ -23,7 +23,7 @@ func TestBedrockStreamUsageAddsCacheTokensToInput(t *testing.T) {
 		u.CacheWriteInputTokens == nil || *u.CacheWriteInputTokens != 20 {
 		t.Fatalf("usage = %+v", u)
 	}
-	if u, _ := bedrockStreamUsage(bedrockMetadata(`{"usage":{"inputTokens":4,"outputTokens":1,"cacheReadInputTokens":-1}}`)); u != nil {
+	if u, _ := bedrockTestUsage(bedrockMetadata(`{"usage":{"inputTokens":4,"outputTokens":1,"cacheReadInputTokens":-1}}`)); u != nil {
 		t.Fatalf("accepted negative cache read: %+v", u)
 	}
 }

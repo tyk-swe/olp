@@ -6,10 +6,20 @@
   import ProviderBulkModels from '../ProviderBulkModels.svelte';
   import type { Provider } from '../api/providers';
 
-  let { client, provider }: { client: QueryClient; provider: Provider } =
-    $props();
+  let {
+    client,
+    provider,
+    onChanged = () => {}
+  }: {
+    client: QueryClient;
+    provider: Provider;
+    onChanged?: () => void | Promise<void>;
+  } = $props();
+  export function replaceProvider(next: Provider) {
+    provider = next;
+  }
 </script>
 
 <QueryClientProvider {client}>
-  <ProviderBulkModels {provider} canManage onChanged={() => {}} />
+  <ProviderBulkModels {provider} canManage {onChanged} />
 </QueryClientProvider>

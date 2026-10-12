@@ -42,10 +42,11 @@ export async function getApiKey(
 }
 
 export async function createApiKey(
-  input: CreateApiKeyInput
+  input: CreateApiKeyInput,
+  requestId: string
 ): Promise<ApiKeySecret> {
   const response = await apiClient.POST('/api/v1/api-keys', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': requestId } },
     body: input
   });
   return unwrap(response);
@@ -53,8 +54,8 @@ export async function createApiKey(
 
 export async function rotateApiKey(
   key: ApiKey,
-  overlapSeconds = 0,
-  idempotencyKey: string = crypto.randomUUID()
+  overlapSeconds: number,
+  idempotencyKey: string
 ): Promise<ApiKeySecret> {
   const response = await apiClient.POST(
     '/api/v1/api-keys/{api_key_id}/rotate',
@@ -83,13 +84,16 @@ export async function updateApiKey(
   return unwrap(response);
 }
 
-export async function revokeApiKey(key: ApiKey): Promise<void> {
+export async function revokeApiKey(
+  key: Pick<ApiKey, 'id' | 'etag'>,
+  requestId: string
+): Promise<void> {
   const response = await apiClient.POST(
     '/api/v1/api-keys/{api_key_id}/revoke',
     {
       params: {
         path: { api_key_id: key.id },
-        header: { 'If-Match': key.etag, 'Idempotency-Key': crypto.randomUUID() }
+        header: { 'If-Match': key.etag, 'Idempotency-Key': requestId }
       }
     }
   );

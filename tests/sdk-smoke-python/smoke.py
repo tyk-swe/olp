@@ -4,6 +4,7 @@ import http.client
 import json
 import os
 import sys
+import subprocess
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -370,7 +371,35 @@ def error_contract_google() -> None:
     assert unauthorized.code == 401
 
 
+def console_snippet() -> None:
+    # Node renders the exact production Python example; execute it with this
+    # harness's pinned official SDK against the ordinary gateway fixture.
+    renderer = Path(__file__).resolve().parent.parent / "sdk-smoke" / "render-console-snippet.mjs"
+    for invalid in (False, True):
+        command = ["node", str(renderer)]
+        if invalid:
+            command.append("--invalid-key")
+        source = subprocess.check_output(command, text=True)
+        namespace: dict = {}
+        try:
+            if invalid:
+                try:
+                    exec(compile(source, "console_snippet.py", "exec"), namespace)
+                except openai.AuthenticationError as error:
+                    assert error.status_code == 401
+                else:
+                    raise AssertionError("console snippet accepted an invalid key")
+            else:
+                exec(compile(source, "console_snippet.py", "exec"), namespace)
+                assert namespace["response"].output_text == f"official openai sdk reached {route_slug}"
+            assert namespace["client"].max_retries == 0
+        finally:
+            if "client" in namespace:
+                namespace["client"].close()
+
+
 def main() -> None:
+    console_snippet()
     for label, base_url in openai_base_urls:
         smoke_openai(base_url, label)
     smoke_anthropic()

@@ -157,6 +157,18 @@ func Cancel(ctx context.Context, tx pgx.Tx, providerID, id, principal string) er
 	return err
 }
 
+// CancelProviderPending discards unclaimed challenges when their provider's
+// credential boundary changes. Claimed exchanges retain their one-use record;
+// the provider rechecks that boundary before staging their remote result.
+func CancelProviderPending(ctx context.Context, tx pgx.Tx, providerID string) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM olp.secrets WHERE purpose=$2 AND id IN (
+  SELECT id FROM olp.grant_enrollments WHERE provider_id=$1 AND continued_at IS NULL AND outcome IS NULL)`, providerID, secrets.GrantEnrollment); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, "DELETE FROM olp.grant_enrollments WHERE provider_id=$1 AND continued_at IS NULL AND outcome IS NULL", providerID)
+	return err
+}
+
 // unavailable explains why an enrollment can no longer be continued or
 // cancelled. Another principal's enrollment is not found, like one purged
 // after it expired, and so is a device authorization still pending, which is

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -169,7 +171,7 @@ func (s *Server) claimToolWork(ctx context.Context, x *execution, plan *interact
 	expires := s.now().Add(resources.ContinuationLifetime - time.Second)
 	version := interaction.ContinuationV1
 	metadata, _ := json.Marshal(map[string]string{"upstream_model": a.UpstreamModel})
-	r := &resources.Resource{Kind: resources.KindContinuation, APIKeyID: x.keyID, RouteSlug: x.route.Slug, ProviderID: a.ProviderID, ProviderRevisionID: a.ProviderRevisionID, RouteRevisionID: x.route.RevisionID, SlotID: slot.ID, CredentialID: slot.CredentialID, Metadata: metadata, ExpiresAt: &expires, ContractVersion: &version, SubmissionID: &c.submission}
+	r := &resources.Resource{Kind: resources.KindContinuation, APIKeyID: x.keyID, RouteSlug: x.route.Slug, ProviderID: a.ProviderID, ProviderRevisionID: a.ProviderRevisionID, RouteRevisionID: x.route.RevisionID, TargetID: a.TargetID, SlotID: slot.ID, CredentialID: slot.CredentialID, Metadata: metadata, ExpiresAt: &expires, ContractVersion: &version, SubmissionID: &c.submission}
 	if c.parent != nil {
 		r.ParentID = &c.parent.UUID
 	}
@@ -214,20 +216,47 @@ func (s *Server) replayContinuation(w http.ResponseWriter, x *execution) (int, e
 	w.Header().Set("X-Should-Retry", "false")
 	if delivery.Stream {
 		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
 		for _, frame := range delivery.Frames {
-			if _, err := w.Write(interaction.ContinuationFrame(frame)); err != nil {
-				return http.StatusOK, err
-			}
-			if err := http.NewResponseController(w).Flush(); err != nil {
+			if err := s.writeContinuationPayload(w, x, interaction.ContinuationFrame(frame)); err != nil {
 				return http.StatusOK, err
 			}
 		}
-		_, err := w.Write([]byte("data: [DONE]\n\n"))
-		return http.StatusOK, err
+		return http.StatusOK, s.writeContinuationPayload(w, x, []byte("data: [DONE]\n\n"))
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_, err := w.Write(delivery.Body)
-	return http.StatusOK, err
+	w.WriteHeader(http.StatusOK)
+	return http.StatusOK, s.writeContinuationPayload(w, x, delivery.Body)
+}
+
+// Cached correspondence has the same bounded delivery obligation as its
+// original response. It never enters provider dispatch or owns new usage.
+func (s *Server) writeContinuationPayload(w http.ResponseWriter, x *execution, data []byte) error {
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	n, err := w.Write(data)
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	if err == nil {
+		err = rc.Flush()
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %v", errClientWrite, err)
+	}
+	if len(data) != 0 {
+		x.delivered(s.now())
+	}
+	return nil
+}
+
+func continuationDeliveryOutcome(err error) *outcome {
+	out := &outcome{committed: true}
+	if err != nil {
+		out.err = (&attemptFailure{class: classCancelled}).toError()
+		out.cancelled = true
+	}
+	return out
 }
 
 func (s *Server) validateToolDelivery(delivery interaction.Delivery) error {
@@ -291,11 +320,17 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, continuationError("continuation_outcome_unknown", "This submission reserved provider work but has no committed ready delivery; fresh inference will not run."), x.family)
 		return
 	}
+	body, err := json.Marshal(map[string]any{"version": state.Version, "handle": res.ID, "state": "ready", "assistant": state.Interaction.Assistant, "delivery": state.Delivery})
+	if err != nil {
+		s.stateFail(x, w, continuationError("continuation_unavailable", "The stored delivery could not be encoded."), x.family)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Should-Retry", "false")
-	_ = json.NewEncoder(w).Encode(map[string]any{"version": state.Version, "handle": res.ID, "state": "ready", "assistant": state.Interaction.Assistant, "delivery": state.Delivery})
-	s.finish(x, nil, http.StatusOK)
+	w.WriteHeader(http.StatusOK)
+	deliveryErr := s.writeContinuationPayload(w, x, append(body, '\n'))
+	s.finish(x, continuationDeliveryOutcome(deliveryErr), http.StatusOK)
 }
 
 // Only semantic controls enter encrypted correspondence, never authentication,

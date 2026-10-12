@@ -113,6 +113,13 @@ func (s *Server) growCost(ctx context.Context, lease *limits.Lease, amount, requ
 	if e := s.Admission.checkCostAccounting(ctx); e != nil {
 		return e
 	}
+	if s.Admission != nil && s.Admission.PendingCostAccountingReady != nil {
+		for _, owner := range lease.CostOwnerIDs() {
+			if e := s.Admission.checkPendingCostAccounting(ctx, owner); e != nil {
+				return e
+			}
+		}
+	}
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
 	err := lease.GrowCost(decision, amount, requestID, ttl)

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
   import { routeKeys } from '$lib/features/routes/routeKeys';
 
   import { goto } from '$app/navigation';
@@ -15,6 +16,8 @@
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { fidelityLabel } from '$lib/features/routes/routeEditor';
   import { formatDate, formatInteger } from '$lib/format';
+
+  const restoreIntent = useMutationIntent();
 
   let { routeId }: { routeId: string } = $props();
 
@@ -73,8 +76,24 @@
     )
       return;
     await run(`restore-${revision.id}`, async () => {
-      const restored = await restoreRouteRevision(routeId, revision.id);
-      await queryClient.invalidateQueries({ queryKey: routeKeys.lists });
+      const submission = restoreIntent.prepare({
+        routeId,
+        revisionId: revision.id
+      });
+      const restored = await restoreRouteRevision(
+        submission.input.routeId,
+        submission.input.revisionId,
+        submission.requestId
+      );
+      restoreIntent.reset();
+      try {
+        await queryClient.invalidateQueries(
+          { queryKey: routeKeys.lists },
+          { throwOnError: true }
+        );
+      } catch (cause) {
+        errorMessage = `Draft restored, but refreshing failed. ${message(cause)}`;
+      }
       await goto(resolve(`/routes/${restored.id}`));
     });
   }

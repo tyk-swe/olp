@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // PollGateSeconds is the interval a client poll holds the reconciler off a
@@ -482,10 +483,18 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 	if _, err = tx.Exec(ctx, "SELECT id FROM olp.providers WHERE id = $1 FOR SHARE", input.ProviderID); err != nil {
 		return JobRecord{}, dbError(err)
 	}
+	var snapshot []byte
+	if err = tx.QueryRow(ctx, "SELECT snapshot FROM olp.runtime_releases WHERE id=$1", input.RuntimeGenerationID).Scan(&snapshot); err != nil {
+		return JobRecord{}, dbError(err)
+	}
+	pin, pinErr := runtime.DecodeReleasePin(snapshot, runtime.ReleasePinIdentity{ProviderID: input.ProviderID, ProviderRevisionID: input.ProviderRevisionID, RouteSlug: input.RouteSlug, Model: input.UpstreamModel, SlotID: input.SlotID, CredentialID: input.CredentialVersionID})
+	if pinErr != nil {
+		return JobRecord{}, &JobError{Kind: JobErrorInvalid, Message: "the selected historical serving identity is unavailable"}
+	}
 	// Compare the exact feature-owned configuration before inserting, under
 	// the same provider lock. jsonb equality would equate distinct native
 	// defaults such as -0 and 0; only quota changes may be ignored here.
-	compatible, err := compatibleReservationConfiguration(ctx, tx, input.RuntimeGenerationID, input.ProviderID)
+	compatible, err := compatibleReservationConfiguration(ctx, tx, input.ProviderRevisionID, input.ProviderID)
 	if err != nil {
 		return JobRecord{}, dbError(err)
 	}
@@ -497,50 +506,14 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 	if !input.StaleAfter.IsZero() {
 		staleAfter = &input.StaleAfter
 	}
-	tag, err := tx.Exec(ctx, `WITH authority AS (
-			SELECT r.id AS runtime_generation_id, r.snapshot->'providers'->>$3::text AS provider_key,
-			       r.snapshot#>'{providers}' -> $3::text AS provider_entry
-			FROM olp.runtime_releases r
-			WHERE r.id = $8::uuid
-		), pinned AS (
-			SELECT authority.runtime_generation_id,
-			       (authority.provider_entry->>'revision_id')::uuid AS provider_revision_id,
-			       authority.provider_entry
-			FROM authority
-			WHERE authority.provider_entry IS NOT NULL
-		), compatible AS (
-			SELECT pinned.runtime_generation_id, pinned.provider_revision_id
-			FROM pinned
-			JOIN olp.providers provider ON provider.id = $3::uuid
-			JOIN olp.provider_revisions current ON current.id = provider.active_revision_id
-			JOIN olp.provider_revisions pinned_revision ON pinned_revision.id = pinned.provider_revision_id
-			WHERE provider.state <> 'disabled'
-			  AND pinned_revision.provider_id = $3::uuid
-			  AND pinned_revision.configuration->>'kind'
-			      IS NOT DISTINCT FROM current.configuration->>'kind'
-			  AND pinned_revision.configuration->>'endpoint'
-			      IS NOT DISTINCT FROM current.configuration->>'endpoint'
-			  AND pinned_revision.configuration->>'cloud_region'
-			      IS NOT DISTINCT FROM current.configuration->>'cloud_region'
-			  AND pinned_revision.configuration->>'cloud_project'
-			      IS NOT DISTINCT FROM current.configuration->>'cloud_project'
-			  AND pinned_revision.configuration->>'deployment'
-			      IS NOT DISTINCT FROM current.configuration->>'deployment'
-			  AND pinned_revision.configuration->>'api_version'
-			      IS NOT DISTINCT FROM current.configuration->>'api_version'
-			  AND pinned_revision.configuration->>'auth_mode'
-			      IS NOT DISTINCT FROM current.configuration->>'auth_mode'
-			  AND EXISTS (
-			       SELECT 1 FROM json_array_elements(pinned.provider_entry->'slots') slot
-			       WHERE slot->>'id' = $11::uuid::text
-			         AND slot->>'credential_id' IS NOT DISTINCT FROM $9::text)
-			  AND ($9::uuid IS NULL OR EXISTS (
-			       SELECT 1 FROM json_array_elements(pinned.provider_entry->'slots') slot
-			       WHERE slot->>'credential_id' = $9::text))
-			  AND (SELECT cred.version FROM olp.provider_credentials cred
-			       WHERE cred.id = (pinned.provider_entry->>'active_credential')::uuid)
-			      IS NOT DISTINCT FROM current.credential_version
-			  AND EXISTS (
+	tag, err := tx.Exec(ctx, `WITH compatible AS (
+   SELECT $8::uuid AS runtime_generation_id,$14::uuid AS provider_revision_id
+   FROM olp.providers provider
+   JOIN olp.provider_revisions current ON current.id=provider.active_revision_id
+   WHERE provider.id=$3::uuid AND provider.state<>'disabled'
+   AND (SELECT credential.version FROM olp.provider_credentials credential
+        WHERE credential.id=$15::uuid) IS NOT DISTINCT FROM current.credential_version
+   AND EXISTS (
 			       SELECT 1 FROM jsonb_array_elements(current.models) model
 			       WHERE model->>'upstream_model' = $4
 			         AND NOT EXISTS (
@@ -566,7 +539,7 @@ func ReserveJob(ctx context.Context, pool *pgxpool.Pool, input Reservation) (Job
 		input.ID, input.APIKeyID, input.ProviderID, input.UpstreamModel,
 		input.RouteSlug, input.Operation, input.Surface,
 		input.RuntimeGenerationID, input.CredentialVersionID, uuid.Must(uuid.NewV7()), input.SlotID,
-		input.StrictContract, staleAfter)
+		input.StrictContract, staleAfter, input.ProviderRevisionID, pin.Provider.ActiveCredential)
 	if err != nil {
 		return JobRecord{}, dbError(err)
 	}

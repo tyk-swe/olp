@@ -16,6 +16,17 @@ function stubGateway(response: Response) {
 }
 
 describe('sdkSnippet', () => {
+  it('quotes values as data and normalizes the gateway origin', () => {
+    const secret = 'key"\\\nnext';
+    const model = 'model"\\\nnext';
+    for (const sdk of SDK_OPTIONS) {
+      const snippet = sdkSnippet(sdk, secret, 'https://proxy.example/', model);
+      expect(snippet).toContain(JSON.stringify(secret));
+      expect(snippet).toContain(JSON.stringify(model));
+      expect(snippet).not.toContain('https://proxy.example//');
+    }
+  });
+
   it.each(SDK_OPTIONS)(
     'uses the proxy endpoint, key, and public route for %s',
     (sdk) => {

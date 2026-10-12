@@ -167,6 +167,8 @@ export function createProviderDraft(
       deployment: '',
       authMode: spec.default_auth_mode,
       credential: '',
+      useExternalCredential: false,
+      externalCredentialReference: '',
       model: '',
       projectId: '',
       presetId: ''
@@ -693,6 +695,6 @@ export function providerStatusTone(
 
 export type RunProviderAction = (
   label: string,
-  action: () => Promise<void>
+  action: (isCurrent: () => boolean) => Promise<void>
 ) => Promise<boolean>;
 import { parseExternalReference } from './externalReference';

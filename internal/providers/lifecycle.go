@@ -15,6 +15,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -159,7 +160,7 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	id, etag := access.NewID(), access.NewID()
-	if err := s.validateNetworkReference(r.Context(), tx, id, &input.Configuration); err != nil {
+	if err := validateNetworkReference(r.Context(), tx, id, &input.Configuration); err != nil {
 		return access.Reply{}, err
 	}
 	configuration, err := json.Marshal(input.Configuration)
@@ -278,7 +279,7 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = input.Configuration.Pin(r.Context(), tx, s.Unconfined); err != nil {
 		return access.Reply{}, err
 	}
-	if err = s.storeDraft(r.Context(), tx, id, input.Name, &current.Configuration, &input.Configuration); err != nil {
+	if err = StoreDraftConfiguration(r.Context(), tx, id, input.Name, &input.Configuration, s.Egress); err != nil {
 		return access.Reply{}, err
 	}
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.update", "provider", id, "success"); err != nil {
@@ -289,33 +290,6 @@ func (s *Server) updateProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	return access.Commit(r, tx, result)
-}
-
-// storeDraft saves next as the provider's draft configuration. A change to
-// anything the transport fingerprint covers returns every certified
-// capability to declared, so certification evidence never outlives the
-// configuration it was gathered under.
-func (s *Server) storeDraft(ctx context.Context, tx pgx.Tx, id, name string, previous, next *Configuration) error {
-	if err := next.Validate(s.Egress); err != nil {
-		return err
-	}
-	if err := PreserveCredentialBoundary(ctx, tx, id, previous, next); err != nil {
-		return err
-	}
-	if next.transportFingerprint() != previous.transportFingerprint() {
-		if err := invalidateEvidence(ctx, tx, id); err != nil {
-			return err
-		}
-	}
-	if err := s.validateNetworkReference(ctx, tx, id, next); err != nil {
-		return err
-	}
-	configuration, err := json.Marshal(next)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, "UPDATE olp.providers SET name=$2,kind=$3,configuration=$4,etag=$5,draft_dirty=true,updated_at=now() WHERE id=$1", id, name, next.Kind, configuration, access.NewID())
-	return err
 }
 
 // mutation runs a locked, replay-protected provider mutation that needs
@@ -437,13 +411,13 @@ type slotRow struct {
 	// CredentialFacts are the grant facts the credential version reported at
 	// enrollment — what it serves as beyond its principal.
 	CredentialFacts      map[string]string
-	Restrictions         slotRestrictions
+	Restrictions         SlotRestrictions
 	Limits               Limits
 	ValidatedAt          *time.Time
 	ValidatedFingerprint *string
 }
 
-type slotRestrictions struct {
+type SlotRestrictions struct {
 	AllowedAPIKeys []string `json:"allowed_api_keys"`
 	AllowedModels  []string `json:"allowed_models"`
 	AllowedRoutes  []string `json:"allowed_routes"`
@@ -567,7 +541,7 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 		if err := current.Configuration.Validate(s.Egress); err != nil {
 			return access.Reply{}, err
 		}
-		if err := s.validateNetworkReference(ctx, tx, current.ID, &current.Configuration); err != nil {
+		if err := validateNetworkReference(ctx, tx, current.ID, &current.Configuration); err != nil {
 			return access.Reply{}, err
 		}
 		if _, _, err := s.credentialFor(ctx, tx, current); err != nil {
@@ -916,6 +890,11 @@ func deref[T comparable](v *T) T {
 func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v *revisionRow) (string, error) {
 	if err := PreserveCredentialBoundary(ctx, tx, current.ID, &current.Configuration, &v.Configuration); err != nil {
 		return "", err
+	}
+	if current.Configuration.enrollmentBoundary() != v.Configuration.enrollmentBoundary() {
+		if err := grants.CancelProviderPending(ctx, tx, current.ID); err != nil {
+			return "", err
+		}
 	}
 	// A revision only ever records evidence gathered against its own
 	// transport, so restoring it restores that evidence unchanged; slot

@@ -39,6 +39,9 @@ func (s *Store) PutDurableContract(ctx context.Context, r *Resource, payload []b
 	if err := s.validateDurable(r, payload); err != nil {
 		return nil, err
 	}
+	if r.TargetID == "" {
+		return nil, ErrContract
+	}
 	if r.Kind == KindStrictBatch && batchStateRank(r.State) == 0 {
 		return nil, ErrContract
 	}
@@ -56,10 +59,10 @@ func (s *Store) PutDurableContract(ctx context.Context, r *Resource, payload []b
 		copy.Metadata = []byte(`{}`)
 	}
 	out, err := scan(tx.QueryRow(ctx, `INSERT INTO olp.provider_resources
- (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING `+columns,
+ (id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata,expires_at,contract_version,parent_id,target_id)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING `+columns,
 		copy.UUID, copy.Kind, copy.APIKeyID, copy.RouteSlug, copy.ProviderID, copy.ProviderRevisionID, copy.RouteRevisionID, copy.SlotID,
-		copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID))
+		copy.CredentialID, copy.UpstreamID, copy.State, copy.Metadata, copy.ExpiresAt, copy.ContractVersion, copy.ParentID, copy.TargetID))
 	if err != nil {
 		return nil, err
 	}

@@ -99,16 +99,25 @@ func (runner Runner) Run(ctx context.Context, args []string) error {
 		if !ok || name == "" {
 			return errors.New("--query requires NAME=VALUE")
 		}
-		if previous, exists := input.Query[name]; exists {
-			switch values := previous.(type) {
-			case string:
-				input.Query[name] = []string{values, value}
-			case []string:
-				input.Query[name] = append(values, value)
-			}
-		} else {
-			input.Query[name] = value
+		if _, exists := input.Query[name]; exists {
+			return errors.New("duplicate scalar query parameter")
 		}
+		var scalar any = value
+		for _, parameter := range op.Parameters {
+			if parameter.In != "query" || parameter.Name != name {
+				continue
+			}
+			switch parameter.Type {
+			case "integer":
+				scalar = json.Number(value)
+			case "boolean":
+				if value != "true" && value != "false" {
+					return fmt.Errorf("--query %s requires true or false", name)
+				}
+				scalar = value == "true"
+			}
+		}
+		input.Query[name] = scalar
 	}
 	if path := options.one("body-file"); path != "" {
 		input.Body, err = readJSON(path)
@@ -126,6 +135,12 @@ func (runner Runner) Run(ctx context.Context, args []string) error {
 	}
 	if result.ETag != "" {
 		fmt.Fprintln(runner.Err, "ETag:", result.ETag)
+	}
+	if result.PreviousParentETag != "" {
+		fmt.Fprintln(runner.Err, "OLP-Previous-Parent-ETag:", result.PreviousParentETag)
+	}
+	if result.ParentETag != "" {
+		fmt.Fprintln(runner.Err, "OLP-Parent-ETag:", result.ParentETag)
 	}
 	data := []byte(result.Body)
 	if format == "csv" {
@@ -176,6 +191,7 @@ func (runner Runner) help(group string) error {
 	}
 	fmt.Fprintln(runner.Out, "usage: olp GROUP COMMAND [PATH_VALUES...] [--path NAME=VALUE] [--query NAME=VALUE]")
 	fmt.Fprintln(runner.Out, "       [--body-file FILE] [--if-match ETAG] [--idempotency-key KEY] [--output FILE]")
+	fmt.Fprintln(runner.Out, "Contract-required mutation keys must be explicit; retry an uncertain write with the same key and payload.")
 	if group == "configuration" {
 		fmt.Fprintln(runner.Out, "config export [--output FILE]\nconfig plan --file DOCUMENT [--bindings-file FILE] [--output PLAN]\nconfig apply --plan-file PLAN [--bindings-file FILE] [--idempotency-key KEY]")
 	}

@@ -7,7 +7,6 @@
 
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { onDestroy } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
@@ -25,6 +24,13 @@
   import type { ApiKeyListState } from '$lib/features/access/api-keys/apiKeyListState';
   import type { ApiKeyPolicyInput } from '$lib/features/access/api-keys/apiKeyPolicy';
   import { isApiKeyUsable } from './apiKeyLifecycle';
+
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
+
+  const createIntent = useMutationIntent();
 
   let {
     isNew = false,
@@ -51,8 +57,12 @@
     canManage && (!editing || isApiKeyUsable(editing))
   );
 
-  onDestroy(() => {
+  const captureOwner = usePrincipalLifetime(() => {
     secret = null;
+    preferredRoute = undefined;
+    editing = null;
+    policyDirty = policyBusy = false;
+    submitError = notice = busy = '';
   });
 
   function edit(key: ApiKey) {
@@ -70,31 +80,52 @@
 
   async function submit(input: ApiKeyPolicyInput, route?: string) {
     if (!canManage || busy || policyDirty || policyBusy) return false;
+    const isCurrent = captureOwner();
     busy = editing ? 'update' : 'create';
     submitError = notice = '';
     try {
       if (editing) {
         const keyName = editing.name;
         await updateApiKey(editing, input);
+        if (!isCurrent()) return false;
         editing = null;
         notice = services.gatewayAvailable
           ? `${keyName} policy updated. Gateways will converge on the new runtime generation.`
           : `${keyName} policy saved.`;
       } else {
-        secret = await createApiKey(input);
+        const submission =
+          createIntent.prepare<Parameters<typeof createApiKey>[0]>(input);
+        const result = await createApiKey(
+          submission.input,
+          submission.requestId
+        );
+        if (!isCurrent()) return false;
+        secret = result;
+        createIntent.reset();
         secretContext = 'created';
         preferredRoute = route;
       }
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: apiKeyKeys.root }),
-        queryClient.invalidateQueries({ queryKey: overviewKeys.root })
-      ]);
-      return true;
+      try {
+        await Promise.all([
+          queryClient.invalidateQueries(
+            { queryKey: apiKeyKeys.root },
+            { throwOnError: true }
+          ),
+          queryClient.invalidateQueries(
+            { queryKey: overviewKeys.root },
+            { throwOnError: true }
+          )
+        ]);
+      } catch (cause) {
+        if (isCurrent())
+          submitError = `API key saved, but refreshing failed. ${errorMessage(cause)}`;
+      }
+      return isCurrent();
     } catch (error) {
-      submitError = errorMessage(error);
+      if (isCurrent()) submitError = errorMessage(error);
       return false;
     } finally {
-      busy = '';
+      if (isCurrent()) busy = '';
     }
   }
 

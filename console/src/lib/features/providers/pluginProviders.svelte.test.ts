@@ -229,11 +229,14 @@ function mockCreatedProvider(discovered: number) {
     nextCursor: null
   });
   vi.mocked(probeProvider).mockResolvedValue({
-    succeeded: true,
-    detail: `Reached the upstream; ${discovered} models listed.`,
-    probe_type: 'models',
-    discovered_models: discovered
-  } as ProviderProbe);
+    result: {
+      succeeded: true,
+      detail: `Reached the upstream; ${discovered} models listed.`,
+      probe_type: 'models',
+      discovered_models: discovered
+    } as ProviderProbe,
+    etag: saved.etag
+  });
 }
 
 describe('provider wizard with a plugin profile', () => {

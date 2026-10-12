@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+
   import { onDestroy, untrack } from 'svelte';
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
   import { parseJsonObject } from '$lib/forms/json';
@@ -12,6 +14,8 @@
     type RoutingPolicyScope
   } from './api';
   import { routeKeys } from './routeKeys';
+
+  const replaceRoutingPolicyIntent = useMutationIntent();
   type Policy = RoutingPolicy;
   type Scope = RoutingPolicyScope;
   let {
@@ -159,11 +163,9 @@
     try {
       const body: Policy = JSON.parse(text);
       const previousEtag = policy.data.etag;
-      const saved = await replaceRoutingPolicy(
-        actionScope,
-        actionId,
-        previousEtag,
-        body
+      const saved = await replaceRoutingPolicyIntent.submit(
+        [actionScope, actionId, previousEtag, body] as const,
+        (input, requestId) => replaceRoutingPolicy(...input, requestId)
       );
       // The mutation may have committed on the server even when this editor
       // has moved on; never replay it, but also never apply its outcome to a

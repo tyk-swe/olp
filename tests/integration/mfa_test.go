@@ -13,7 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 )
 
-func mfaEnrollTOTP(t *testing.T, h *accessHarness, owner *browser) (map[string]any, []any, string) {
+func mfaEnrollTOTP(t *testing.T, h *accessHarness, owner *browser) (map[string]any, []any, string, string) {
 	t.Helper()
 	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "mfa_manage"}, nil, 204)
 	enroll := h.want(owner, "POST", "/api/v1/profile/mfa/enroll", map[string]any{"kind": "totp", "name": "Phone"}, nil, 200)
@@ -23,7 +23,7 @@ func mfaEnrollTOTP(t *testing.T, h *accessHarness, owner *browser) (map[string]a
 		t.Fatal(err)
 	}
 	verified := h.want(owner, "POST", "/api/v1/auth/mfa/verify", map[string]any{"challenge": enroll["challenge"], "method": "totp", "code": code}, nil, 200)
-	return enroll, verified["recovery_codes"].([]any), secret
+	return enroll, verified["recovery_codes"].([]any), secret, code
 }
 func mfaLogin(h *accessHarness, b *browser) map[string]any {
 	h.t.Helper()
@@ -32,7 +32,7 @@ func mfaLogin(h *accessHarness, b *browser) map[string]any {
 func TestLocalMFAProtectsSessionsAndOneUseRecovery(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
-	enroll, codes, secret := mfaEnrollTOTP(t, h, owner)
+	enroll, codes, secret, code := mfaEnrollTOTP(t, h, owner)
 	status := h.want(owner, "GET", "/api/v1/profile/mfa", nil, nil, 200)
 	if len(status["factors"].([]any)) != 1 || len(codes) != 10 {
 		t.Fatal(status)
@@ -48,7 +48,6 @@ func TestLocalMFAProtectsSessionsAndOneUseRecovery(t *testing.T) {
 	flow := mfaLogin(h, guest)
 	h.want(guest, "GET", "/api/v1/profile", nil, nil, 401)
 	// The consumed enrollment counter cannot also create a session.
-	code, _ := totp.GenerateCode(secret, time.Now())
 	h.want(guest, "POST", "/api/v1/auth/mfa/verify", map[string]any{"challenge": flow["challenge"], "method": "totp", "code": code}, nil, 401)
 	result := h.want(guest, "POST", "/api/v1/auth/mfa/verify", map[string]any{"challenge": flow["challenge"], "method": "recovery", "code": codes[0]}, nil, 201)
 	if result["user"] == nil {
@@ -66,7 +65,7 @@ func TestLocalMFAProtectsSessionsAndOneUseRecovery(t *testing.T) {
 func TestMFAManagementNeedsFreshProofAndRequiredPolicyProtectsLastFactor(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
-	_, codes, _ := mfaEnrollTOTP(t, h, owner)
+	_, codes, _, _ := mfaEnrollTOTP(t, h, owner)
 	status := h.want(owner, "GET", "/api/v1/profile/mfa", nil, nil, 200)
 	factor := status["factors"].([]any)[0].(map[string]any)["id"].(string)
 	h.want(owner, "DELETE", "/api/v1/profile/mfa/factors/"+factor, nil, etagHeader(status), 428)
@@ -122,7 +121,7 @@ func TestRequiredMFAEnrollmentNeverCreatesAPasswordOnlySession(t *testing.T) {
 func TestMFAPolicyPromotionAndExplicitOfflineRecovery(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
-	_, _, _ = mfaEnrollTOTP(t, h, owner)
+	_, _, _, _ = mfaEnrollTOTP(t, h, owner)
 	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
 	if exported["require_local_mfa"] != false {
 		t.Fatal(exported)
@@ -164,7 +163,7 @@ func TestMFAPolicyPromotionAndExplicitOfflineRecovery(t *testing.T) {
 func TestPendingMFAFollowsCurrentLocalSignInPolicy(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
-	_, codes, _ := mfaEnrollTOTP(t, h, owner)
+	_, codes, _, _ := mfaEnrollTOTP(t, h, owner)
 	guest := &browser{}
 	flow := mfaLogin(h, guest)
 	if _, err := h.Pool.Exec(context.Background(), "UPDATE olp.settings SET value='false' WHERE key='auth.local_login_enabled'"); err != nil {
@@ -181,7 +180,7 @@ func TestPendingMFAFollowsCurrentLocalSignInPolicy(t *testing.T) {
 func TestMFAProofsAreSingleUseAcrossControlReplicas(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
-	_, codes, secret := mfaEnrollTOTP(t, h, owner)
+	_, codes, secret, _ := mfaEnrollTOTP(t, h, owner)
 	replica := newAccessHarnessOn(t, h.Pool, h.DBURL)
 	code, err := totp.GenerateCode(secret, time.Now().Add(30*time.Second))
 	if err != nil {

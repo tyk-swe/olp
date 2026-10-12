@@ -23,14 +23,15 @@ import (
 // targets that bound nothing and fails everything else closed.
 type Admission struct {
 	// CostAccountingReady checks shared loss evidence before cost admission.
-	CostAccountingReady     func(context.Context) error
-	limiter                 *limits.Limiter
-	policy                  func() limits.OutagePolicy
-	log                     *slog.Logger
-	failOpen                atomic.Int64
-	dailyBudgetRejections   atomic.Int64
-	monthlyBudgetRejections atomic.Int64
-	weeklyBudgetRejections  atomic.Int64
+	CostAccountingReady        func(context.Context) error
+	PendingCostAccountingReady func(context.Context, string) error
+	limiter                    *limits.Limiter
+	policy                     func() limits.OutagePolicy
+	log                        *slog.Logger
+	failOpen                   atomic.Int64
+	dailyBudgetRejections      atomic.Int64
+	monthlyBudgetRejections    atomic.Int64
+	weeklyBudgetRejections     atomic.Int64
 }
 
 // NewAdmission binds a limiter to the outage policy of the installation. The
@@ -271,6 +272,20 @@ func (a *Admission) checkCostAccounting(ctx context.Context) *Error {
 	return nil
 }
 
+// Known accepted generations have a durable owner even when their final usage
+// has not arrived. A newly enabled cost budget cannot assume that work cost zero.
+func (a *Admission) checkPendingCostAccounting(ctx context.Context, owner string) *Error {
+	if a == nil || a.PendingCostAccountingReady == nil {
+		return nil
+	}
+	check, cancel := context.WithTimeout(ctx, reserveTimeout)
+	defer cancel()
+	if err := a.PendingCostAccountingReady(check, owner); err != nil {
+		return serverError(http.StatusServiceUnavailable, "cost_accounting_incomplete", "Cost budgets cannot admit work while accounting is incomplete.")
+	}
+	return nil
+}
+
 // keyBoundariesOnly reports whether an authority configures no aggregate,
 // end-user or route boundary, as most keys do, so that admission skips
 // straight to the key and its group.
@@ -284,6 +299,9 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Au
 	if request := groupRequest(authority, ttl); request != nil {
 		if request.DailyCostLimit != nil || request.MonthlyCostLimit != nil || request.WeeklyCostLimit != nil {
 			if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
+				return nil, e
+			}
+			if e := a.checkPendingCostAccounting(ctx, request.CostOwnerID); e != nil {
 				return nil, e
 			}
 			request.CostEstimate, request.RequestID = hold.amount, hold.requestID
@@ -326,6 +344,10 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Au
 	request.ReportRate = rateHeadersOf(surface) != nil
 	if request.HasCostBudget() {
 		if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
+			settleKey(ctx, group, false, nil, a.logger())
+			return nil, e
+		}
+		if e := a.checkPendingCostAccounting(ctx, request.CostOwnerID); e != nil {
 			settleKey(ctx, group, false, nil, a.logger())
 			return nil, e
 		}
@@ -599,8 +621,9 @@ func keyReservationEstimate(perAttempt int64, attempts int) int64 {
 // Uncertain attempts retain an estimate rather than refunding unknown work.
 func (x *execution) settledTokens() *int64 {
 	var total int64
-	for _, fact := range x.facts {
-		actual := totalTokens(fact.Usage)
+	for index := range x.facts {
+		fact := &x.facts[index]
+		actual := settledAttemptTokens(fact, x.estimate)
 		switch {
 		case actual != nil:
 			total = addBounded(total, *actual)
@@ -609,6 +632,19 @@ func (x *execution) settledTokens() *int64 {
 		}
 	}
 	return &total
+}
+
+// settledAttemptTokens preserves a reservation's estimate when native counters
+// are partial. nil leaves an undisclosed target's existing estimate standing.
+func settledAttemptTokens(fact *AttemptFact, estimate int64) *int64 {
+	if fact == nil {
+		return nil
+	}
+	actual := totalTokens(fact.Usage)
+	if actual != nil && fact.BillingUncertain {
+		*actual = max(*actual, estimate)
+	}
+	return actual
 }
 
 // multiplyBounded and addBounded saturate at the largest integer the limiter

@@ -17,6 +17,21 @@ var ErrEventTooLarge = errors.New("upstream event exceeds the configured size li
 
 var errStreamComplete = errors.New("terminal stream event delivered")
 
+// responseProjectionError carries a refusal after native Responses grammar and
+// accounting have been validated. Native observers still own that evidence;
+// client projection cannot undo provider work.
+type responseProjectionError struct{ cause error }
+
+func (e *responseProjectionError) Error() string { return e.cause.Error() }
+func (e *responseProjectionError) Unwrap() error { return e.cause }
+
+// IsResponseProjectionError reports a local overlay refusal after native
+// Responses grammar and accounting have already been validated.
+func IsResponseProjectionError(err error) bool {
+	_, found := errors.AsType[*responseProjectionError](err)
+	return found
+}
+
 // Emit receives one encoded client frame. The first call marks the point of
 // no return: callers commit the response to the client there.
 type Emit func(frame []byte) error
@@ -42,13 +57,15 @@ func StreamMetadataEvents(family Family, r io.Reader, maxEventBytes int, route s
 
 func stream(family Family, r io.Reader, maxEventBytes int, route string, includeUsage, collect bool, emit Emit, observe func(oif.Event) error) (*Completion, error) {
 	var s streamer
+	var encoded []byte
+	retain := func(frame []byte) error { encoded = frame; return nil }
 	switch family {
 	case FamilyChat, FamilyMistralFIM:
 		// Fill-in-the-middle streams chat completion chunks.
 		// Bound distinct-choice bookkeeping as well as individual wire events.
-		s = &chatStream{route: route, includeUsage: includeUsage, collect: collect, maxChoices: max(1, maxEventBytes/16), emit: emit}
+		s = &chatStream{route: route, includeUsage: includeUsage, collect: collect, maxChoices: max(1, maxEventBytes/16), emit: retain}
 	case FamilyResponses:
-		s = &responsesStream{route: route, collect: collect, emit: emit}
+		s = &responsesStream{route: route, collect: collect, emit: retain}
 	default:
 		return nil, errors.New("unknown request family")
 	}
@@ -59,17 +76,31 @@ func stream(family Family, r io.Reader, maxEventBytes int, route string, include
 			return err
 		}
 		sequence++
-		if observe != nil {
-			if err := observe(event); err != nil {
-				return err
-			}
-		}
+		encoded = nil
 		if event.Source().Valid() {
 			frame.Data = event.Source().Raw()
 		} else {
 			frame.Data = event.Control()
 		}
-		return s.frame(frame, event)
+		parsed := s.frame(frame, event)
+		projection, projectionFailed := errors.AsType[*responseProjectionError](parsed)
+		if parsed != nil && !errors.Is(parsed, errStreamComplete) && !projectionFailed {
+			return parsed
+		}
+		if observe != nil {
+			if err := observe(event); err != nil {
+				return err
+			}
+		}
+		if projectionFailed {
+			return projection
+		}
+		if encoded != nil {
+			if err := emit(encoded); err != nil {
+				return err
+			}
+		}
+		return parsed
 	})
 	completion, finishErr := s.finish()
 	if err != nil && !errors.Is(err, errStreamComplete) {
@@ -153,6 +184,7 @@ func (s *chatStream) frame(f sse.Frame, event oif.Event) error {
 	}
 	if usage != nil {
 		s.c.Usage = usage
+		s.c.UsageComplete = true
 	}
 	if !s.includeUsage {
 		if usage != nil && len(choices) == 0 {
@@ -257,6 +289,7 @@ type responsesStream struct {
 	done        bool
 	terminalErr error
 	c           *Completion
+	upstreamID  string
 }
 
 func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
@@ -272,10 +305,6 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 	if f.Event != nil && *f.Event != kind {
 		return &ProtocolError{Detail: "event name disagrees with type"}
 	}
-	terminal := kind == "response.completed" || kind == "response.incomplete" || kind == "response.failed"
-	if raw := fields["response"]; terminal && (len(raw) == 0 || isNull(raw)) {
-		return &ProtocolError{Detail: "terminal event has no response"}
-	}
 	if kind == "error" {
 		upstream := errorObject(fields["error"])
 		if upstream == nil {
@@ -283,31 +312,59 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 		}
 		s.terminalErr, s.done = upstream, true
 	}
-	if raw, present := fields["response"]; present && !isNull(raw) {
-		response, err := object(raw)
-		if err != nil {
-			return &ProtocolError{Detail: "response is not an object"}
+	observed, err := observeResponseEventUsage(event, fields, kind)
+	if err != nil {
+		return err
+	}
+	if observed.lifecycle {
+		response := observed.response
+		id, present := event.Source().Lookup("/response/id")
+		upstreamID, valid := id.Text()
+		if s.upstreamID != "" && (!present || !valid || upstreamID != s.upstreamID) {
+			return &ProtocolError{Detail: "response identity changed during the stream"}
+		}
+		if present && valid && upstreamID != "" {
+			s.upstreamID = upstreamID
 		}
 		switch kind {
 		case "response.completed", "response.incomplete", "response.failed":
-			if s.c, err = responseSummary(response); err != nil {
+			completion, err := responseSummaryWithUsage(response, observed.usage.Usage)
+			if err != nil {
 				return err
 			}
 			if !s.collect {
-				s.c.OutputText, s.c.Refusal, s.c.ToolCalls = "", "", nil
+				completion.OutputText, completion.Refusal, completion.ToolCalls = "", "", nil
 			}
 			terminalErr := terminalResponseError(response)
 			if terminalErr != nil && kind != "response.failed" {
 				return terminalErr
 			}
+			if _, invalid := errors.AsType[*ProtocolError](terminalErr); invalid {
+				return terminalErr
+			}
 			if kind == "response.failed" && terminalErr == nil {
 				terminalErr = &UpstreamError{Message: "upstream reported a failed response"}
 			}
-			if status, present := stringField(response, "status"); present && status != strings.TrimPrefix(kind, "response.") {
-				return &ProtocolError{Detail: "terminal event disagrees with response status"}
+			completion.UsageComplete = observed.usage.Complete
+			completion.responseTerminal = true
+			completion.responseFailure, _ = errors.AsType[*UpstreamError](terminalErr)
+			if completion.Usage == nil && s.c != nil {
+				completion.Usage = s.c.Usage
 			}
+			s.c = completion
 			s.terminalErr = terminalErr
 			s.done = true
+		default:
+			if observed.usage.Usage != nil {
+				if s.c == nil {
+					s.c = &Completion{}
+				}
+				if !s.c.UsageComplete {
+					s.c.Usage = observed.usage.Usage
+					s.c.UpstreamID, _ = stringField(response, "id")
+					s.c.ProviderModel, _ = stringField(response, "model")
+				}
+			}
 		}
 		if _, present := source.Lookup("/response/model"); present {
 			bound, marshalErr := json.Marshal(s.route)
@@ -316,7 +373,7 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 			}
 			source, err = oif.Apply(source, []oif.Change{{Pointer: "/response/model", Value: string(bound), Origin: oif.IdentityBinding, Reason: "published response model"}})
 			if err != nil {
-				return err
+				return &responseProjectionError{cause: err}
 			}
 		}
 	}

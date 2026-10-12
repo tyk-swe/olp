@@ -11,6 +11,7 @@
     type IncreaseInput
   } from './api';
   import { limitsError, limitForm } from '../budgets/limitForm';
+  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
   const access = useRole();
   const client = useQueryClient();
   const key = ['budget-increases'];
@@ -42,6 +43,23 @@
   let notice = $state('');
   let submitted = $state<IncreaseInput | null>(null);
   let requestId = crypto.randomUUID();
+  const captureOwner = usePrincipalLifetime(() => {
+    reset();
+    resourceId =
+      route =
+      digest =
+      label =
+      value =
+      amount =
+      reason =
+      expires =
+      notice =
+        '';
+    kind = 'api_key';
+    window = 'day';
+    before = undefined;
+    busy = false;
+  });
   function reset() {
     submitted = null;
     requestId = crypto.randomUUID();
@@ -50,6 +68,8 @@
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (busy || !canCreate) return;
+    const isCurrent = captureOwner();
+    let committed = false;
     problem = '';
     notice = '';
     if (!submitted) {
@@ -79,28 +99,42 @@
     busy = true;
     try {
       const result = await createIncrease(submitted, requestId);
+      if (!isCurrent()) return;
+      committed = true;
       notice = `Increase recorded until ${formatDate(result.expires_at)}.`;
       reset();
-      await client.invalidateQueries({ queryKey: key });
+      await client.invalidateQueries({ queryKey: key }, { throwOnError: true });
     } catch (error) {
-      problem = errorMessage(error);
+      if (isCurrent())
+        problem =
+          (committed
+            ? 'Increase recorded, but refreshing the view failed: '
+            : '') + errorMessage(error);
     } finally {
-      busy = false;
+      if (isCurrent()) busy = false;
     }
   }
   async function revoke(item: BudgetIncrease) {
     if (busy) return;
+    const isCurrent = captureOwner();
+    let committed = false;
     busy = true;
     problem = '';
     notice = '';
     try {
       await revokeIncrease(item);
+      if (!isCurrent()) return;
+      committed = true;
       notice = 'Increase revoked.';
-      await client.invalidateQueries({ queryKey: key });
+      await client.invalidateQueries({ queryKey: key }, { throwOnError: true });
     } catch (error) {
-      problem = errorMessage(error);
+      if (isCurrent())
+        problem =
+          (committed
+            ? 'Increase revoked, but refreshing the view failed: '
+            : '') + errorMessage(error);
     } finally {
-      busy = false;
+      if (isCurrent()) busy = false;
     }
   }
   const kinds: { value: IncreaseInput['target']['kind']; label: string }[] = [

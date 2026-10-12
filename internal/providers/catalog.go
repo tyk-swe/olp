@@ -217,7 +217,7 @@ func (s *Server) acceptCatalogSuggestions(r *http.Request, _ access.Principal) (
 			}
 			next.Options.Models[name] = merged
 		}
-		if err = s.storeDraft(ctx, tx, current.ID, current.Name, &current.Configuration, &next); err != nil {
+		if err = StoreDraftConfiguration(ctx, tx, current.ID, current.Name, &next, s.Egress); err != nil {
 			return access.Reply{}, err
 		}
 		return s.detailReply(ctx, tx, current.ID)

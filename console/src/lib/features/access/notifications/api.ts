@@ -38,10 +38,11 @@ export async function listNotificationDestinationPage(
 }
 
 export async function createNotificationDestination(
-  input: CreateNotificationDestinationInput
+  input: CreateNotificationDestinationInput,
+  requestId: string
 ): Promise<NotificationDestination> {
   const response = await apiClient.POST('/api/v1/notifications/destinations', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': requestId } },
     body: input
   });
   return unwrap(response);
@@ -84,10 +85,11 @@ export async function listNotificationRulePage(
 }
 
 export async function createNotificationRule(
-  input: CreateNotificationRuleInput
+  input: CreateNotificationRuleInput,
+  requestId: string
 ): Promise<NotificationRule> {
   const response = await apiClient.POST('/api/v1/notifications/rules', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': requestId } },
     body: input
   });
   return unwrap(response);

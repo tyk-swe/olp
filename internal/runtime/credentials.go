@@ -49,6 +49,9 @@ type Credentials interface {
 	// Secret returns a credential slot's usable secret and the generation
 	// of the grant that supplied it, or zero for a static credential. The
 	// generation is read together with the secret and travels with an attempt.
+	// Returned bytes are read-only: cached static and grant bytes are borrowed
+	// from immutable runtime storage. Callers must never mutate or clear them;
+	// callers requiring mutable bytes must make their own copy.
 	Secret(ctx context.Context, release *Release, credentialID string) ([]byte, int64, error)
 	// NetworkSecret returns the usable secret of a provider's network
 	// credential.
@@ -112,14 +115,14 @@ func (m *Manager) Secret(ctx context.Context, release *Release, credentialID str
 	}
 	if release != nil {
 		if reference, ok := release.references[credentialID]; ok {
-			value, err := m.external.read(ctx, m.ExternalSecrets, credentialID, reference)
+			value, err := m.externalSecret(ctx, credentialID, reference)
 			return value, 0, err
 		}
 	}
 	if grant, ok := m.grantSecret(credentialID); ok {
 		return grant.secret, grant.generation, nil
 	}
-	if secret, ok := release.Credential(credentialID); ok {
+	if secret, ok := release.credential(credentialID); ok {
 		return secret, 0, nil
 	}
 	if m.keys == nil {
@@ -146,7 +149,13 @@ func (m *Manager) Secret(ctx context.Context, release *Release, credentialID str
 		return nil, 0, err
 	}
 	if reference, ok := references[credentialID]; ok {
-		value, err := m.external.read(ctx, m.ExternalSecrets, credentialID, reference)
+		// Pin the authorized reference, then return the database connection
+		// before remote I/O. Revocation observed while resolution runs still
+		// wins; the historical reference itself never changes underneath us.
+		if err := tx.Commit(ctx); err != nil {
+			return nil, 0, err
+		}
+		value, err := m.externalSecret(ctx, credentialID, reference)
 		return value, 0, err
 	}
 	generations, err := ReadGrantGenerations(ctx, tx, []string{credentialID})
@@ -167,7 +176,7 @@ func (m *Manager) NetworkSecret(ctx context.Context, release *Release, providerI
 	if err := m.eligible(credentialID); err != nil {
 		return nil, err
 	}
-	if secret, ok := release.Credential(credentialID); ok {
+	if secret, ok := release.credential(credentialID); ok {
 		return secret, nil
 	}
 	if m.keys == nil {

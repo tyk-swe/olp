@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -52,22 +51,52 @@ type Release struct {
 	references  map[string]secretstore.Reference
 }
 
-// NewRelease builds an installed release directly from a snapshot and its
-// credentials for fixtures and tests that bypass the database.
+// releaseCandidate owns the state prepared before publication. Rotating grant
+// seeds move into the manager's live credential cache, never the pinned release.
+type releaseCandidate struct {
+	release      *Release
+	baseSequence int64
+	grants       map[string]servedGrant
+}
+
+// NewRelease freezes an independent serving snapshot and credentials. The
+// caller retains its mutable inputs; serving consumers borrow the resulting
+// release and must not mutate it. Database installation already decodes into
+// exclusively owned storage and does not pay for this construction copy.
 func NewRelease(id string, sequence int64, snapshot *Snapshot, credentials map[string][]byte) (*Release, error) {
-	if err := snapshot.Validate(); err != nil {
-		return nil, err
+	if snapshot == nil {
+		return nil, errors.New("snapshot is required")
 	}
-	digest, err := snapshot.Digest()
+	raw, err := json.Marshal(snapshot)
 	if err != nil {
 		return nil, err
 	}
-	return &Release{ID: id, Sequence: sequence, Digest: digest, Snapshot: snapshot, InstalledAt: time.Now(), credentials: maps.Clone(credentials)}, nil
+	frozen := &Snapshot{}
+	if err := json.Unmarshal(raw, frozen); err != nil {
+		return nil, err
+	}
+	if err := frozen.Validate(); err != nil {
+		return nil, err
+	}
+	digest, err := frozen.Digest()
+	if err != nil {
+		return nil, err
+	}
+	owned := make(map[string][]byte, len(credentials))
+	for id, secret := range credentials {
+		owned[id] = append([]byte(nil), secret...)
+	}
+	return &Release{ID: id, Sequence: sequence, Digest: digest, Snapshot: frozen, InstalledAt: time.Now(), credentials: owned}, nil
 }
 
-// Credential returns a plaintext credential the release installed; a nil
-// release installed none. Serving paths ask the credential source instead.
+// Credential returns an independent plaintext credential for fixture setup.
+// Serving paths ask the credential source, which borrows immutable bytes.
 func (r *Release) Credential(id string) ([]byte, bool) {
+	secret, ok := r.credential(id)
+	return append([]byte(nil), secret...), ok
+}
+
+func (r *Release) credential(id string) ([]byte, bool) {
 	if r == nil {
 		return nil, false
 	}
@@ -123,6 +152,7 @@ type Manager struct {
 	ExternalSecrets  ExternalSecrets
 	external         externalCredentials
 	authorityRefresh sync.Mutex
+	grantRefresh     sync.Mutex
 	replica          replicaProgress
 	installation     string
 	auth             *secrets.AuthKey
@@ -152,13 +182,20 @@ type Manager struct {
 	// it is non-nil while the notifier runs.
 	refreshedGrants map[string]string
 
-	stop chan struct{}
-	wg   sync.WaitGroup
+	stop       chan struct{}
+	wg         sync.WaitGroup
+	tasksMu    sync.Mutex
+	taskCtx    context.Context
+	cancelTask context.CancelFunc
+	stopping   bool
+	waitStop   sync.Once
+	stopped    chan struct{}
 }
 
 // NewManager prepares a manager that serves the empty snapshot until the
 // first release installs and rejects admissions until authority loads.
 func NewManager(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, keys *secrets.KeyRing, log *slog.Logger) *Manager {
+	tasks, cancel := context.WithCancel(context.Background())
 	return &Manager{workloadKeys: workload.NewCache(access.IdentityHTTPClient()),
 		pool:         pool,
 		installation: installation,
@@ -167,6 +204,9 @@ func NewManager(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, 
 		log:          log,
 		release:      emptyRelease(),
 		stop:         make(chan struct{}),
+		taskCtx:      tasks,
+		cancelTask:   cancel,
+		stopped:      make(chan struct{}),
 		InstanceID:   usage.GatewayInstance(),
 
 		refreshRequested: map[string]int64{},
@@ -181,10 +221,21 @@ func emptyRelease() *Release {
 // Stop is called. Refresh failures are logged; the gateway keeps serving its
 // last installed state and fails closed once authority goes stale.
 func (m *Manager) Start(ctx context.Context) {
-	if err := m.Refresh(ctx); err != nil {
+	m.tasksMu.Lock()
+	if m.stopping {
+		m.tasksMu.Unlock()
+		return
+	}
+	m.wg.Add(1)
+	m.tasksMu.Unlock()
+	defer m.wg.Done()
+	// Stop cancels in-flight refresh I/O as well as the polling select.
+	stopParent := context.AfterFunc(ctx, m.cancelTask)
+	if err := m.Refresh(m.taskCtx); err != nil {
 		m.log.Warn("runtime refresh failed", "error", err.Error())
 	}
-	m.wg.Go(func() {
+	if !m.launch(func(ctx context.Context) {
+		defer stopParent()
 		ticker := time.NewTicker(PollInterval)
 		defer ticker.Stop()
 		for {
@@ -199,25 +250,70 @@ func (m *Manager) Start(ctx context.Context) {
 				}
 			}
 		}
-	})
+	}) {
+		stopParent()
+	}
 }
 
 // Stop ends polling and waits for the loop to exit.
 func (m *Manager) Stop() {
-	select {
-	case <-m.stop:
-	default:
-		close(m.stop)
-	}
-	m.wg.Wait()
+	_ = m.StopContext(context.Background())
 }
 
-// Refresh reloads authority, installs any newer release and reloads the
-// access tokens of refreshed grants.
+// StopContext cancels all manager-owned tasks, refuses new tasks, and joins
+// them within the caller's drain budget. A timed-out callback remains explicit
+// uncertainty; this method never extends the process shutdown deadline.
+func (m *Manager) StopContext(ctx context.Context) error {
+	m.tasksMu.Lock()
+	if !m.stopping {
+		m.stopping = true
+		close(m.stop)
+		m.cancelTask()
+	}
+	m.tasksMu.Unlock()
+	m.waitStop.Do(func() { go func() { m.wg.Wait(); close(m.stopped) }() })
+	select {
+	case <-m.stopped:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// launch registers ownership before a task starts, including grant refresh
+// requests initiated by serving handlers during drain.
+func (m *Manager) launch(task func(context.Context)) bool {
+	m.tasksMu.Lock()
+	defer m.tasksMu.Unlock()
+	if m.stopping {
+		return false
+	}
+	m.wg.Go(func() { task(m.taskCtx) })
+	return true
+}
+
+// Refresh gives each independent freshness obligation its own polling budget.
+// A slow release installation or remote secret cannot consume authority,
+// grant, or measurement refresh time. Each state publisher rejects regressions.
 func (m *Manager) Refresh(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, PollInterval)
+	err := refreshObligations(ctx, PollInterval, m.refreshAuthority, m.refreshRelease, m.refreshGrants, m.refreshInputs, m.refreshExternalCredentials)
+	status, cancel := context.WithTimeout(ctx, PollInterval)
 	defer cancel()
-	return errors.Join(m.refreshAuthority(ctx), m.refreshRelease(ctx), m.refreshGrants(ctx), m.refreshInputs(ctx), m.refreshExternalCredentials(ctx), m.RecordInstallStatus(ctx, m.InstanceID))
+	return errors.Join(err, m.RecordInstallStatus(status, m.InstanceID))
+}
+
+func refreshObligations(ctx context.Context, budget time.Duration, obligations ...func(context.Context) error) error {
+	errs := make([]error, len(obligations))
+	var wg sync.WaitGroup
+	for i, obligation := range obligations {
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(ctx, budget)
+			defer cancel()
+			errs[i] = obligation(ctx)
+		})
+	}
+	wg.Wait()
+	return errors.Join(errs...)
 }
 
 func (m *Manager) refreshAuthority(ctx context.Context) error {
@@ -430,25 +526,29 @@ func (m *Manager) refreshRelease(ctx context.Context) error {
 	if sequence <= current {
 		return nil
 	}
-	release, err := m.install(ctx, id, sequence, digest, raw)
+	candidate, err := m.install(ctx, id, sequence, digest, raw)
 	if err != nil {
 		m.mu.Lock()
 		repeat := m.failed == sequence
-		m.failed = sequence
+		m.failed = max(m.failed, sequence)
 		m.mu.Unlock()
 		if repeat {
 			return nil
 		}
 		return fmt.Errorf("release %d not installed: %w", sequence, err)
 	}
-	m.mu.Lock()
-	m.release = release
-	m.mu.Unlock()
-	m.log.Info("release installed", "sequence", sequence, "sha256", digest, "providers", len(release.Snapshot.Providers), "routes", len(release.Snapshot.Routes))
+	installed, err := m.publishRelease(ctx, candidate)
+	if err != nil {
+		return err
+	}
+	if installed {
+		release := candidate.release
+		m.log.Info("release installed", "sequence", sequence, "sha256", digest, "providers", len(release.Snapshot.Providers), "routes", len(release.Snapshot.Routes))
+	}
 	return nil
 }
 
-func (m *Manager) install(ctx context.Context, id string, sequence int64, digest string, raw []byte) (*Release, error) {
+func (m *Manager) install(ctx context.Context, id string, sequence int64, digest string, raw []byte) (*releaseCandidate, error) {
 	snapshot := &Snapshot{}
 	if err := json.Unmarshal(raw, snapshot); err != nil {
 		return nil, err
@@ -470,15 +570,19 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 		return nil, errors.New("snapshot digest mismatch")
 	}
 	release := &Release{ID: id, Sequence: sequence, Digest: digest, Snapshot: snapshot, InstalledAt: time.Now(), credentials: map[string][]byte{}}
+	m.mu.RLock()
+	candidate := &releaseCandidate{release: release, baseSequence: m.release.Sequence}
+	knownGrants := m.grants
+	m.mu.RUnlock()
 	if m.keys == nil {
 		credentials, err := installMounted(snapshot, m.Mounted)
 		if err != nil {
 			return nil, err
 		}
 		release.credentials = credentials
-		return release, nil
+		return candidate, nil
 	}
-	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
 	}
@@ -531,6 +635,13 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 			release.credentials[*slot.CredentialID] = secret
 		}
 	}
+	// A newly published grant credential must already have a coherent token
+	// and generation. Requests can then gate and dispatch against the same
+	// generation, and later polls can observe its advancement.
+	candidate.grants, err = m.readGrants(ctx, tx, grantProviders(snapshot), knownGrants)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -540,10 +651,50 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 		value, _ := m.external.read(ctx, m.ExternalSecrets, id, reference)
 		clear(value)
 	}
-	return release, nil
+	return candidate, nil
 }
 
-// Release returns the currently installed release for pinning.
+// publishRelease advances release identity and its initial grant membership
+// together. Grant polls keep making progress while installation performs remote
+// I/O, but cannot publish old membership after this transition. A seed read
+// before a concurrent rotation never replaces a newer cached token.
+func (m *Manager) publishRelease(ctx context.Context, candidate *releaseCandidate) (bool, error) {
+	m.grantRefresh.Lock()
+	defer m.grantRefresh.Unlock()
+	m.mu.Lock()
+	// Waiting for a poll must not let cancelled or expired installation work
+	// publish afterward. The last-good release remains owned by the manager.
+	if err := ctx.Err(); err != nil {
+		m.mu.Unlock()
+		return false, err
+	}
+	if candidate.release.Sequence <= m.release.Sequence {
+		m.mu.Unlock()
+		return false, nil
+	}
+	// An intervening release may have pruned a newer observed generation of
+	// a credential this candidate brings back. Retry preparation against that
+	// release instead of resurrecting an older token or retaining old secrets.
+	if len(candidate.grants) > 0 && candidate.baseSequence != m.release.Sequence {
+		m.mu.Unlock()
+		return false, nil
+	}
+	for credentialID, previous := range m.grants {
+		if seeded, ok := candidate.grants[credentialID]; ok && previous.generation >= seeded.generation {
+			candidate.grants[credentialID] = previous
+		}
+	}
+	refreshed := advancedGrants(grantProviders(candidate.release.Snapshot), m.grants, candidate.grants)
+	m.serveGrantsLocked(candidate.grants)
+	m.release = candidate.release
+	m.mu.Unlock()
+	m.grantsRefreshed(refreshed)
+	return true, nil
+}
+
+// Release borrows the currently installed immutable release for pinning. Its
+// snapshot, maps, slices, nested pointers, and secret storage must not be mutated.
+// Mutable planning/request state belongs in the consumer, outside the release.
 func (m *Manager) Release() *Release {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -657,7 +808,9 @@ func (m *Manager) refreshInputs(ctx context.Context) error {
 		return fmt.Errorf("routing measurements: %w", err)
 	}
 	m.mu.Lock()
-	m.inputs = inputs
+	if m.inputs == nil || inputs.RefreshedAt.After(m.inputs.RefreshedAt) {
+		m.inputs = inputs
+	}
 	m.mu.Unlock()
 	return nil
 }

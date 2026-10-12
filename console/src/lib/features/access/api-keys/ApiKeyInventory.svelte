@@ -1,4 +1,9 @@
 <script lang="ts">
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
+
   import { currentBudgetLimit } from './budgetPresentation';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   const services = useServiceCapabilities();
@@ -30,6 +35,8 @@
   import type { ApiKeyListState } from '$lib/features/access/api-keys/apiKeyListState';
   import { isApiKeyExpired, isApiKeyUsable } from './apiKeyLifecycle';
 
+  const revokeApiKeyIntent = useMutationIntent();
+
   let {
     listState = $bindable(),
     notice,
@@ -54,6 +61,12 @@
   let rotationId = $state('');
   let rotationAttempted = $state(false);
   let mutationError = $state('');
+  const captureOwner = usePrincipalLifetime(() => {
+    rotating = null;
+    overlapSeconds = '0';
+    rotationAttempted = false;
+    rotationId = rotationError = mutationError = busy = '';
+  });
   const createdBy = $derived(
     page.url.searchParams.get('created_by')?.trim().toLowerCase() || undefined
   );
@@ -99,6 +112,7 @@
   }
 
   async function rotate(key: ApiKey) {
+    const isCurrent = captureOwner();
     if (!/^\d+$/.test(overlapSeconds) || Number(overlapSeconds) > 86400) {
       rotationError =
         'Overlap must be a whole number of seconds from 0 to 86400.';
@@ -113,29 +127,37 @@
         Number(overlapSeconds),
         rotationId
       );
+      if (!isCurrent()) return;
       rotating = null;
       onSecret(replacement, key.allowed_routes[0]);
       await queryClient.invalidateQueries({ queryKey: apiKeyKeys.root });
     } catch (error) {
-      rotationError = errorMessage(error);
-      mutationError = rotationError;
+      if (isCurrent()) {
+        rotationError = errorMessage(error);
+        mutationError = rotationError;
+      }
     } finally {
-      busy = '';
+      if (isCurrent()) busy = '';
     }
   }
 
   async function revoke(key: ApiKey) {
     if (!confirm(`Revoke “${key.name}”? This cannot be undone.`)) return;
+    const isCurrent = captureOwner();
     busy = `revoke-${key.id}`;
     mutationError = '';
     try {
-      await revokeApiKey(key);
+      await revokeApiKeyIntent.submit(
+        { id: key.id, etag: key.etag },
+        (input, requestId) => revokeApiKey(input, requestId)
+      );
+      if (!isCurrent()) return;
       await queryClient.invalidateQueries({ queryKey: apiKeyKeys.root });
       await queryClient.invalidateQueries({ queryKey: overviewKeys.root });
     } catch (error) {
-      mutationError = errorMessage(error);
+      if (isCurrent()) mutationError = errorMessage(error);
     } finally {
-      busy = '';
+      if (isCurrent()) busy = '';
     }
   }
 </script>

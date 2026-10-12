@@ -255,6 +255,7 @@ func TestValidateAcceptsTheAttemptUsageStates(t *testing.T) {
 		{"billing uncertain", AttemptUsage{BillingUncertain: true}},
 		{"observed and settled", AttemptUsage{Observed: true, Complete: true}},
 		{"observed but not settled", AttemptUsage{Observed: true}},
+		{"observed incomplete uncertainty", AttemptUsage{Observed: true, BillingUncertain: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

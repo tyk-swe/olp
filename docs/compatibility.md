@@ -80,11 +80,11 @@ Use a base URL ending in `/v1` for native OpenAI SDK requests.
 | `POST /v1/responses/{id}/cancel` | generation | qualified | — | — | — | — | qualified | — |
 | `GET /v1/responses/{id}/input_items` | generation | qualified | — | — | — | — | qualified | — |
 | `GET /v1/realtime` | realtime | qualified | — | — | — | — | qualified | — |
-| `POST /v1/images/generations` | image_generation | native | — | — | qualified | qualified | — | — |
+| `POST /v1/images/generations` | image_generation | native | — | — | qualified | qualified | qualified | — |
 | `POST /v1/images/edits` | image_edit | native | — | — | — | — | — | — |
 | `POST /v1/images/variations` | image_variation | native | — | — | — | — | — | — |
-| `POST /v1/audio/speech` | speech | native | — | — | — | — | — | — |
-| `POST /v1/audio/transcriptions` | transcription | native | — | — | — | — | — | — |
+| `POST /v1/audio/speech` | speech | native | — | — | — | — | qualified | — |
+| `POST /v1/audio/transcriptions` | transcription | native | — | — | — | — | qualified | — |
 | `POST /v1/audio/translations` | translation | native | — | — | — | — | — | — |
 | `POST /v1/videos` | video_create | native | — | — | — | — | — | — |
 | `GET /v1/videos` | video_list | native | — | — | — | — | — | — |
@@ -371,9 +371,11 @@ plus `/rerank`, and refuse `truncation` except at Voyage. Jina receives the
 OpenAI `encoding_format` as its `embedding_type`. Azure OpenAI supports generation and token
 counting on OpenAI, Anthropic, and Gemini surfaces, plus OpenAI-surface
 embeddings, moderation, and unary image generation, speech and transcription
-through deployments; see [Azure media](providers/azure.md#media). It also supports the qualified file, batch, realtime,
-and stored-response paths above; image, audio, and video operations remain
-uncertifiable. See [certification eligibility](../internal/providers/kinds.go).
+through deployment profiles; the Azure v1 profiles do not serve media. See
+[Azure media](providers/azure.md#media). It also supports the qualified file,
+batch, realtime, and stored-response paths above; image edits and variations,
+audio translation, and video operations remain uncertifiable. See
+[certification eligibility](../internal/providers/kinds.go).
 
 See the [Azure connector guide](providers/azure.md) for API-key and Microsoft
 Entra authentication, token caching, and identity egress.
@@ -397,3 +399,9 @@ turn an upstream identifier into a gateway-owned resource. The native/translated
 tables above and the endpoint registry are the maintained support records;
 update them with the conformance fixtures when semantics change, rather than
 introducing a second independently maintained matrix.
+
+The ordinary console SDK examples are executed verbatim by the pinned official
+JavaScript and Python SDK smoke harness, including typed authentication refusal
+and disabled automatic retries. This qualifies controlled gateway fixture
+behavior; the browser's separate connection check and these fixtures do not
+establish live-provider or production-performance qualification.

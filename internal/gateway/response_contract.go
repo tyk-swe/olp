@@ -27,37 +27,55 @@ type responseProjection struct {
 	previousUpstream, previousLocal string
 }
 
-func (p responseProjection) project(source oif.Document, pointer string) (oif.Document, error) {
+// nativeResponse owns the validated provider result independently of the local
+// identity overlays. Native completion and accounting survive a later binding
+// or projection refusal; the immutable source stays available for both.
+type nativeResponse struct {
+	source     oif.Document
+	value      oif.Value
+	pointer    string
+	upstreamID string
+}
+
+func validateNativeResponse(source oif.Document, pointer, expectedID string) (nativeResponse, error) {
 	value, present := source.Lookup(pointer)
 	if !present || value.Kind() != oif.Object {
-		return oif.Document{}, resources.ErrContract
+		return nativeResponse{}, resources.ErrContract
 	}
 	id, present := value.Lookup("id")
 	upstream, valid := id.Text()
-	if !present || !valid || upstream == "" || upstream != p.upstreamID {
-		return oif.Document{}, resources.ErrContract
+	if !present || !valid || upstream == "" || upstream != expectedID {
+		return nativeResponse{}, resources.ErrContract
 	}
 	if object, present := value.Lookup("object"); present {
 		kind, valid := object.Text()
 		if !valid || kind != "response" {
-			return oif.Document{}, resources.ErrContract
+			return nativeResponse{}, resources.ErrContract
 		}
 	}
 	if state, present := value.Lookup("status"); present {
 		status, valid := state.Text()
 		if !valid || !slices.Contains([]string{"queued", "in_progress", "completed", "failed", "incomplete", "cancelled", "cancelling"}, status) {
-			return oif.Document{}, resources.ErrContract
+			return nativeResponse{}, resources.ErrContract
 		}
 		if status == "completed" {
 			output, present := value.Lookup("output")
 			if !present || output.Kind() != oif.Array {
-				return oif.Document{}, resources.ErrContract
+				return nativeResponse{}, resources.ErrContract
 			}
 		}
 	}
 	if output, present := value.Lookup("output"); present && output.Kind() != oif.Array {
+		return nativeResponse{}, resources.ErrContract
+	}
+	return nativeResponse{source: source, value: value, pointer: pointer, upstreamID: upstream}, nil
+}
+
+func (r nativeResponse) project(p responseProjection) (oif.Document, error) {
+	if p.upstreamID != r.upstreamID {
 		return oif.Document{}, resources.ErrContract
 	}
+	value, pointer := r.value, r.pointer
 	changes := []oif.Change{{Pointer: pointer + "/id", Value: quotedResponseID(p.localID), Origin: oif.ResourceBinding, Reason: "owner-scoped retained response"}}
 	if _, present := value.Lookup("model"); present {
 		changes = append(changes, oif.Change{Pointer: pointer + "/model", Value: quotedResponseID(p.route), Origin: oif.IdentityBinding, Reason: "published response model"})
@@ -69,7 +87,19 @@ func (p responseProjection) project(source oif.Document, pointer string) (oif.Do
 		}
 		changes = append(changes, oif.Change{Pointer: pointer + "/previous_response_id", Value: quotedResponseID(p.previousLocal), Origin: oif.ResourceBinding, Reason: "owner-scoped prior response"})
 	}
-	return oif.Apply(source, changes)
+	projected, err := oif.Apply(r.source, changes)
+	if err != nil {
+		return oif.Document{}, &responseLocalRefusal{cause: err}
+	}
+	return projected, nil
+}
+
+func (p responseProjection) project(source oif.Document, pointer string) (oif.Document, error) {
+	native, err := validateNativeResponse(source, pointer, p.upstreamID)
+	if err != nil {
+		return oif.Document{}, err
+	}
+	return native.project(p)
 }
 
 func quotedResponseID(value string) string {
@@ -92,6 +122,17 @@ func responseResourceKind(x *execution) string {
 		return resources.KindStrictResponse
 	}
 	return resources.KindResponse
+}
+
+func responseNativeIdentity(x *execution, fact *AttemptFact, upstream string) resources.NativeIdentity {
+	var credential *string
+	if fact.CredentialID != "" {
+		credential = &fact.CredentialID
+	}
+	return resources.NativeIdentity{Kind: responseResourceKind(x), APIKeyID: x.keyID,
+		RouteSlug: x.route.Slug, ProviderID: fact.ProviderID, ProviderRevisionID: fact.ProviderRevisionID,
+		RouteRevisionID: x.route.RevisionID, TargetID: fact.TargetID, SlotID: fact.SlotID,
+		CredentialID: credential, UpstreamID: upstream}
 }
 func (s *Server) readResponseResource(ctx context.Context, owner, id string) (*resources.Resource, *storedResponseContract, error) {
 	if !strings.HasPrefix(id, resources.KindStrictResponse+"_") {
@@ -117,11 +158,8 @@ func (s *Server) putStrictResponse(ctx context.Context, x *execution, fact *Atte
 	if err != nil || prepared.plan == nil || prepared.plan.Obligations().Continuation != "native_response_resource" {
 		return nil, resources.ErrContract
 	}
-	existing, err := s.Resources.GetByUpstream(ctx, resources.KindStrictResponse, x.keyID, fact.ProviderID, upstream)
+	existing, err := s.Resources.GetByUpstream(ctx, responseNativeIdentity(x, fact, upstream))
 	if err == nil {
-		if existing.ProviderRevisionID != fact.ProviderRevisionID || existing.RouteRevisionID != x.route.RevisionID || existing.SlotID != fact.SlotID {
-			return nil, resources.ErrContract
-		}
 		return existing, nil
 	}
 	if !errors.Is(err, resources.ErrNotFound) {
@@ -157,7 +195,7 @@ func (s *Server) putStrictResponse(ctx context.Context, x *execution, fact *Atte
 		return nil, resources.ErrContract
 	}
 	metadata, _ = json.Marshal(billing)
-	r := &resources.Resource{Kind: resources.KindStrictResponse, APIKeyID: x.keyID, RouteSlug: x.route.Slug, ProviderID: fact.ProviderID, ProviderRevisionID: fact.ProviderRevisionID, RouteRevisionID: x.route.RevisionID, SlotID: fact.SlotID, CredentialID: credential, UpstreamID: upstream, State: state, Metadata: metadata, ExpiresAt: &expires, ContractVersion: &version}
+	r := &resources.Resource{Kind: resources.KindStrictResponse, APIKeyID: x.keyID, RouteSlug: x.route.Slug, ProviderID: fact.ProviderID, ProviderRevisionID: fact.ProviderRevisionID, RouteRevisionID: x.route.RevisionID, TargetID: fact.TargetID, SlotID: fact.SlotID, CredentialID: credential, UpstreamID: upstream, State: state, Metadata: metadata, ExpiresAt: &expires, ContractVersion: &version}
 	if x.pin != nil {
 		r.ParentID = &x.pin.UUID
 	}

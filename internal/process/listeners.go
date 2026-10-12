@@ -22,6 +22,7 @@ type boundListener struct {
 	name   string
 	socket net.Listener
 	server *listenerServer
+	served <-chan struct{}
 }
 
 // bindListeners opens every socket before serving traffic and closes earlier
@@ -53,8 +54,14 @@ func bindListeners(startup context.Context, configs []listenerConfig, c config.C
 
 func serveListeners(ctx context.Context, listeners []boundListener, mode config.Mode, log *slog.Logger) error {
 	errorsCh := make(chan error, len(listeners))
-	for _, listener := range listeners {
-		go func() { errorsCh <- listener.server.Serve(listener.socket) }()
+	for i := range listeners {
+		listener := &listeners[i]
+		done := make(chan struct{})
+		listener.served = done
+		go func() {
+			defer close(done)
+			errorsCh <- listener.server.Serve(listener.socket)
+		}()
 		log.Info("listener started", "mode", mode, "listener", listener.name, "address", listener.socket.Addr().String())
 	}
 	select {
@@ -74,6 +81,15 @@ func drainListeners(ctx context.Context, listeners []boundListener, emitter *usa
 			if err := listener.server.Shutdown(ctx); err != nil {
 				if emitter != nil && listener.name == "public" {
 					emitter.MarkUnclean()
+				}
+			}
+			// A bound socket also belongs to this cleanup if serving never
+			// started. Once serving did start, join its accept loop explicitly.
+			listener.socket.Close()
+			if listener.served != nil {
+				select {
+				case <-listener.served:
+				case <-ctx.Done():
 				}
 			}
 		})

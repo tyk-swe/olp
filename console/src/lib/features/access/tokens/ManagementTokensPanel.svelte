@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { managementTokenKeys } from '$lib/features/access/tokens/tokenKeys';
   import {
@@ -24,6 +27,10 @@
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import SecretDialog from '$lib/components/SecretDialog.svelte';
   import { formatDate } from '$lib/format';
+
+  const revokeManagementTokenIntent = useMutationIntent();
+
+  const createIntent = useMutationIntent();
 
   const expiryChoices = [
     { days: 7, label: '7 days' },
@@ -82,8 +89,15 @@
     new Map((projects.data ?? []).map((item) => [item.id, item.name]))
   );
 
-  onDestroy(() => {
+  const captureOwner = usePrincipalLifetime(() => {
     tokenSecret = null;
+    name = '';
+    scopes = ['read'];
+    allProjects = true;
+    projectIds = [];
+    expiresInDays = 30;
+    copied = false;
+    copyError = error = notice = busy = '';
   });
 
   function toggle(scope: ManagementTokenScope) {
@@ -106,15 +120,19 @@
     return names || 'No projects';
   }
 
-  async function run(label: string, action: () => Promise<void>) {
+  async function run(
+    label: string,
+    action: (isCurrent: () => boolean) => Promise<void>
+  ) {
+    const isCurrent = captureOwner();
     busy = label;
     error = notice = '';
     try {
-      await action();
+      await action(isCurrent);
     } catch (cause) {
-      error = errorMessage(cause);
+      if (isCurrent()) error = errorMessage(cause);
     } finally {
-      busy = '';
+      if (isCurrent()) busy = '';
     }
   }
 
@@ -133,36 +151,67 @@
       error = 'Select at least one project, or choose all projects.';
       return;
     }
-    await run('create', async () => {
-      const expiresAt = new Date(
-        Date.now() + expiresInDays * 24 * 60 * 60 * 1000
-      ).toISOString();
-      tokenSecret = await createManagementToken(
-        name.trim(),
-        scopes,
-        expiresAt,
-        allProjects ? undefined : projectIds
+    await run('create', async (isCurrent) => {
+      const submission = createIntent.prepare(
+        {
+          name: name.trim(),
+          scopes,
+          expiresInDays,
+          projectIds: allProjects ? undefined : projectIds
+        },
+        () => ({
+          name: name.trim(),
+          scopes,
+          expiresAt: new Date(
+            Date.now() + expiresInDays * 24 * 60 * 60 * 1000
+          ).toISOString(),
+          projectIds: allProjects ? undefined : projectIds
+        })
       );
+      const result = await createManagementToken(
+        submission.input.name,
+        submission.input.scopes,
+        submission.input.expiresAt,
+        submission.input.projectIds,
+        submission.requestId
+      );
+      if (!isCurrent()) return;
+      tokenSecret = result;
+      createIntent.reset();
       name = '';
       scopes = ['read'];
       allProjects = true;
       projectIds = [];
-      await tokens.refetch();
+      notice = 'Management token created.';
+      try {
+        const observation = await tokens.refetch();
+        if (observation?.isError) throw observation.error;
+      } catch (cause) {
+        if (isCurrent())
+          error = `Management token created, but refreshing failed. ${errorMessage(cause)}`;
+      }
     });
   }
 
   async function revoke(token: ManagementToken) {
     if (!confirm(`Revoke the management token "${token.name}"?`)) return;
-    await run(`revoke-${token.id}`, async () => {
-      await revokeManagementToken(token.id, token.etag);
+    await run(`revoke-${token.id}`, async (isCurrent) => {
+      await revokeManagementTokenIntent.submit(
+        [token.id, token.etag] as const,
+        (input, requestId) => revokeManagementToken(...input, requestId)
+      );
+      if (!isCurrent()) return;
       await tokens.refetch();
-      notice = 'Management token revoked.';
+      if (isCurrent()) notice = 'Management token revoked.';
     });
   }
 
   async function copySecret() {
     if (!tokenSecret) return;
-    if (!(await copyText(tokenSecret.secret))) {
+    const isCurrent = captureOwner();
+    const didCopy = await copyText(tokenSecret.secret);
+    if (!isCurrent()) return;
+    if (!didCopy) {
       copied = false;
       copyError = 'Clipboard access is unavailable. Copy this token manually.';
       return;

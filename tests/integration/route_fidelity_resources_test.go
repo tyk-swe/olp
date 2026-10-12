@@ -176,7 +176,12 @@ func TestRetainedResponsesFollowTheirRouteFidelity(t *testing.T) {
 	}
 
 	fixture.respID.Store("resp-up-2")
-	fixture.resps["resp-up-2"] = fixture.resps["resp-up-1"]
+	secondResponse := map[string]any{}
+	for field, value := range fixture.resps["resp-up-1"] {
+		secondResponse[field] = value
+	}
+	secondResponse["id"] = "resp-up-2"
+	fixture.resps["resp-up-2"] = secondResponse
 	status, raw = create("")
 	plain, _ := jsonStringField(raw, "id")
 	if status != http.StatusOK || !strings.HasPrefix(plain, "response_") {

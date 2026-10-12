@@ -1,12 +1,12 @@
 package operatorcli
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"reflect"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/sdk/management"
@@ -19,6 +19,7 @@ type SavedPlan struct {
 	Destination            string                             `json:"destination"`
 	DestinationDigest      string                             `json:"destination_digest"`
 	ExternalBindingsDigest string                             `json:"external_bindings_digest"`
+	IntentDigest           string                             `json:"intent_digest"`
 	Document               json.RawMessage                    `json:"document"`
 	Plan                   contract.ConfigurationPlanResponse `json:"plan"`
 }
@@ -96,7 +97,7 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 		if err = json.Unmarshal(exported.Body, &destination); err != nil || destination.Digest == "" {
 			return errors.New("destination export has no digest")
 		}
-		saved = SavedPlan{Version: 1, Destination: runner.Getenv("OLP_MANAGEMENT_URL"), DestinationDigest: destination.Digest, Document: data}
+		saved = SavedPlan{Version: 2, Destination: runner.Getenv("OLP_MANAGEMENT_URL"), DestinationDigest: destination.Digest, Document: data}
 	case "apply":
 		if opts.one("plan-file") == "" {
 			return errors.New("config apply requires --plan-file PLAN")
@@ -105,8 +106,12 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err = json.Unmarshal(data, &saved); err != nil || saved.Version != 1 || saved.DestinationDigest == "" || saved.Plan.Digest == "" || len(saved.Document) == 0 {
-			return errors.New("invalid saved configuration plan")
+		if err = json.Unmarshal(data, &saved); err != nil || saved.Version != 2 || saved.DestinationDigest == "" || saved.Plan.Digest == "" || len(saved.Document) == 0 || saved.IntentDigest == "" {
+			return errors.New("invalid saved configuration plan; compute a new plan")
+		}
+		intentDigest, err := savedIntentDigest(saved)
+		if err != nil || intentDigest != saved.IntentDigest {
+			return errors.New("saved configuration intent changed; compute a new plan")
 		}
 		if saved.Destination != runner.Getenv("OLP_MANAGEMENT_URL") {
 			return errors.New("saved plan was computed for a different destination")
@@ -123,7 +128,9 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		if json.Unmarshal(data, &externalBindings) != nil {
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.UseNumber()
+		if decoder.Decode(&externalBindings) != nil {
 			return errors.New("external bindings file must be an object of pinned references")
 		}
 	}
@@ -139,6 +146,16 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 		return errors.New("external credential bindings changed since planning; compute a new plan")
 	}
 	request := map[string]any{"document": saved.Document, "expected_digest": saved.DestinationDigest, "secret_bindings": bindings, "external_credential_bindings": externalBindings}
+	if args[0] == "apply" {
+		// The server checks current authority, exact replay and destination
+		// preconditions in that order. Replanning here would block recovery of
+		// our own committed mutation after its response was lost.
+		result, err := call("apply_configuration", request)
+		if err != nil {
+			return err
+		}
+		return runner.output(opts.one("output"), append(result.Body, '\n'))
+	}
 	result, err := call("plan_configuration", request)
 	if err != nil {
 		return err
@@ -149,6 +166,10 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 	}
 	if args[0] == "plan" {
 		saved.Plan = plan
+		saved.IntentDigest, err = savedIntentDigest(saved)
+		if err != nil {
+			return err
+		}
 		data, err := json.MarshalIndent(saved, "", "  ")
 		if err != nil {
 			return err
@@ -161,12 +182,23 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 		}
 		return nil
 	}
-	if !reflect.DeepEqual(plan, saved.Plan) {
-		return errors.New("destination or desired state changed since planning; compute a new plan")
+	return errors.New("unknown config command")
+}
+
+// savedIntentDigest checks local consistency, not authorization or authenticity.
+// Compact removes formatting but retains native object order and exact scalar
+// lexemes inside the raw desired document.
+func savedIntentDigest(saved SavedPlan) (string, error) {
+	saved.IntentDigest = ""
+	var document bytes.Buffer
+	if err := json.Compact(&document, saved.Document); err != nil {
+		return "", err
 	}
-	result, err = call("apply_configuration", request)
+	saved.Document = document.Bytes()
+	encoded, err := json.Marshal(saved)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return runner.output(opts.one("output"), append(result.Body, '\n'))
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
 }

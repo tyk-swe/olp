@@ -74,6 +74,30 @@ export function nativeEntries(value: object): [string, NativeValue][] {
   return keys.map((key) => [key, (value as NativeObject)[key]!]);
 }
 
+/** Own a JSON submission without coercing native number spellings or losing
+ * remembered object-member order. Immutable number wrappers are safe to share. */
+export function snapshotNativeJSON<T>(value: T): T {
+  const copy = (node: unknown): unknown => {
+    if (node === null || typeof node !== 'object') return node;
+    if (node instanceof NativeNumber || node instanceof IncompleteJSON)
+      return node;
+    if (Array.isArray(node)) return Object.freeze(node.map(copy));
+    const prototype = Object.getPrototypeOf(node);
+    if (prototype !== Object.prototype && prototype !== null)
+      throw new Error('A JSON submission must contain JSON values.');
+    const entries = nativeEntries(node);
+    const result = Object.fromEntries(
+      entries.map(([key, entry]) => [key, copy(entry)])
+    );
+    rememberOrder(
+      result,
+      entries.map(([key]) => key)
+    );
+    return Object.freeze(result);
+  };
+  return copy(value) as T;
+}
+
 function checkUnambiguous(source: string): SourceOrder | undefined {
   if (
     source.length > maxCharacters ||

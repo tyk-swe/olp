@@ -35,22 +35,30 @@ olp keys update KEY_ID --body-file key.json --if-match OBSERVED_ETAG
 olp providers activate PROVIDER_ID --if-match OBSERVED_ETAG \
   --idempotency-key DEPLOYMENT_KEY
 olp api put_credential_slot PROVIDER_ID SLOT_ID \
-  --body-file slot.json --if-match OBSERVED_ETAG
+  --body-file slot.json --if-match OBSERVED_ETAG \
+  --idempotency-key SLOT_EDIT_KEY
 olp api simulate_route_draft ROUTE_ID --body-file request.json
 ```
 
 Path values are positional in contract order, or `--path NAME=VALUE`. Queries
-use repeatable `--query NAME=VALUE`. JSON requests use `--body-file FILE`;
+use repeatable `--query NAME=VALUE` for distinct names. Current generated query
+parameters are scalar strings, integers or booleans; repeated values for one
+name are refused. Optional null values are omitted by the Go client; zero and
+false remain explicit values. JSON requests use `--body-file FILE`;
 output goes to stdout or `--output FILE`. Output files are replaced atomically
 with owner-only permissions. The server validates schemas and project access
 just as it does for the console.
 
-Reads print an `ETag:` line to stderr when the API supplies one. Conditional
+Reads print an `ETag:` line to stderr when the API supplies one. Atomic child
+mutations also expose the previous and resulting parent ETags; MCP returns
+`previous_parent_etag` and `parent_etag` from the declared response contract. Conditional
 writes require that observed ETag with `--if-match`; the CLI never fetches a
 new ETag to force a stale write through. When the contract requires an
-idempotency key, the client generates one unless `--idempotency-key` supplies
-it. **For retries after an uncertain response, supply the same explicit key.**
-There are no automatic mutation retries.
+idempotency key, supply `--idempotency-key` before the first write; omission
+fails before dispatch. Retain that key and the exact payload after an uncertain
+response, and reuse both for the same logical write. A deliberate new write
+requires a new identity.
+The CLI implements no application-level mutation retry loop. The standard HTTP transport may replay the original request and idempotency key on a recoverable reused-connection failure.
 
 Key creation and rotation return their one-time secret, matching the API.
 Keep that output out of CI logs, or use `--output` and store the file securely.
@@ -65,8 +73,9 @@ they retain the current routing policy and preserve independent drafts.
 
 ### Provider and credential-slot lifecycle
 
-`olp api delete_provider PROVIDER_ID --if-match ETAG` removes an unused draft
-provider. Published revisions, route drafts, provider-specific price history,
+`olp api delete_provider PROVIDER_ID --if-match ETAG --idempotency-key PROVIDER_DELETE_KEY`
+removes an unused draft provider. Published revisions, route drafts,
+provider-specific price history,
 notification evidence and other retained dependencies produce a conflict.
 Disable published providers through `disable_provider`. Successful deletion
 removes the draft's owned sealed credentials, advances authority and records
@@ -114,14 +123,28 @@ JSON object mapping artifact credential references to secret strings. They are
 sent only to the destination and **never saved in the plan**. Supply them
 separately at both stages.
 
-The saved plan records the destination origin and its current export digest,
-a digest of the external-reference bindings, the secret-free desired document,
-and actions, conflicts and blockers. Planning
-saves it even when blockers or conflicts cause a nonzero exit. Apply refuses
-such plans, a different destination, or a changed plan. The API checks the
-original destination digest again in its apply transaction, so a change
-between re-planning and applying also refuses the write. Resolve the change
-and compute a new plan instead of silently replacing the destination.
+Saved plans use CLI format version 2. They record the destination origin and
+export digest, an external-reference binding digest, the secret-free desired
+document, actions, conflicts and blockers, and a local intent consistency
+checksum. Indentation changes preserve that checksum; changing native object
+member order or numeric representations does not. The checksum is a local
+consistency check; the server decides authorization and whether to mutate.
+Regenerate existing version 1 plan files with `config plan`. This CLI artifact
+format change does not change the configuration document or management API.
+
+Planning saves the artifact even when blockers or conflicts cause a nonzero
+exit. Apply refuses such plans, a different destination, changed external
+references, or inconsistent saved intent. It sends the original document and
+destination digest directly to the apply API. The server checks current
+authority and exact completed replay before evaluating a new write against
+the destination digest. An intervening destination change refuses a new write;
+resolve it and compute a new plan.
+
+After an uncertain apply response, retry the same saved plan with its original
+`--idempotency-key` and unchanged binding files. A completed replay returns the
+original result even if the destination changed afterward. The CLI does not
+re-plan that retry or replace its original precondition; revoked authority
+still prevents replay.
 
 ## Configure qualified clients
 

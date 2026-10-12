@@ -2,7 +2,6 @@ package media
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync"
@@ -159,30 +158,13 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 	if err != nil {
 		return nil, 0, "media_job_runtime_unavailable"
 	}
-	var snapshot runtime.Snapshot
-	if err := json.Unmarshal(raw, &snapshot); err != nil {
+	pin, err := runtime.DecodeReleasePin(raw, runtime.ReleasePinIdentity{ProviderID: record.ProviderID, ProviderRevisionID: record.ProviderRevisionID, RouteSlug: record.RouteSlug, Model: record.UpstreamModel, SlotID: record.SlotID, CredentialID: record.CredentialVersionID})
+	if err != nil {
 		return nil, 0, "media_job_runtime_unavailable"
 	}
-	provider, ok := snapshot.Providers[record.ProviderID]
-	if !ok || provider.RevisionID != record.ProviderRevisionID {
-		return nil, 0, "media_job_runtime_unavailable"
-	}
-	route, ok := snapshot.Routes[record.RouteSlug]
-	if !ok {
-		return nil, 0, "media_job_route_invalid"
-	}
+	provider, route, selected := pin.Provider, pin.Route, &pin.Slot
 	routeTimeout := time.Duration(route.OverallTimeout) * time.Millisecond
 
-	var selected *runtime.Slot
-	for i := range provider.Slots {
-		if provider.Slots[i].ID == record.SlotID {
-			selected = &provider.Slots[i]
-			break
-		}
-	}
-	if selected == nil {
-		return nil, 0, "media_job_slot_unavailable"
-	}
 	config := provider.Connector()
 	var secret []byte
 	if config.CredentialSource == "caller" {
@@ -196,9 +178,6 @@ func (s *Service) JobTarget(ctx context.Context, record *JobRecord) (*JobTarget,
 		// The pinned release must still reference this exact credential
 		// version, and a current explicit revocation always wins over a
 		// retained historical reference.
-		if !credentialReferenced(&provider, credentialID) {
-			return nil, 0, "media_job_runtime_unavailable"
-		}
 		if eligibility := s.eligibility(credentialID); eligibility != runtime.Eligible {
 			return nil, 0, "media_job_credential_" + string(eligibility)
 		}
@@ -238,20 +217,6 @@ func (s *Service) eligibility(credentialID string) runtime.Eligibility {
 		return runtime.StaleAuthority
 	}
 	return s.Credentials.Eligibility(credentialID)
-}
-
-// credentialReferenced reports whether the pinned provider entry still names
-// this credential among its slots or as the active credential.
-func credentialReferenced(provider *runtime.Provider, credentialID string) bool {
-	if provider.ActiveCredential != nil && *provider.ActiveCredential == credentialID {
-		return true
-	}
-	for i := range provider.Slots {
-		if provider.Slots[i].CredentialID != nil && *provider.Slots[i].CredentialID == credentialID {
-			return true
-		}
-	}
-	return false
 }
 
 // ReconcileOnce claims a bounded batch of restart-safe jobs and processes

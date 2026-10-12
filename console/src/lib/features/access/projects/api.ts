@@ -38,10 +38,13 @@ export async function listProjectMemberships(
   ).items;
 }
 
-export async function createProject(name: string): Promise<Project> {
+export async function createProject(
+  name: string,
+  requestId: string
+): Promise<Project> {
   return unwrap(
     await apiClient.POST('/api/v1/projects', {
-      params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+      params: { header: { 'Idempotency-Key': requestId } },
       body: { name }
     })
   );

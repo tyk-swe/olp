@@ -157,7 +157,10 @@ it('creates a project and reveals its member controls', async () => {
     .querySelector<HTMLFormElement>('form[aria-label="Create project"]')!
     .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await settle();
-  expect(createProject).toHaveBeenCalledWith('Data science');
+  expect(createProject).toHaveBeenCalledWith(
+    'Data science',
+    expect.any(String)
+  );
 });
 
 it('adds, re-roles, and removes a member with the project etag', async () => {

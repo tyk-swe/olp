@@ -169,7 +169,7 @@ func (s *Server) predict(ctx context.Context, x *execution, slug, text string) (
 	if x.snapshot().HasBodyLimits() {
 		x.request.body = &measuredBody{decoded: int64(len(body))}
 	}
-	x.unary = &unaryExecution{dialect: codec, route: slug, surface: "native", plans: map[string]*operationplan.Plan{}}
+	x.unary = &unaryExecution{dialect: codec, route: slug, surface: "native"}
 	x.mode = "unary"
 	source, err := operationplan.Parse(codec.Identity.ID, body, int(s.cfg.MaxBodyBytes))
 	if err != nil {

@@ -1,4 +1,9 @@
 <script lang="ts">
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
+
   import { overviewKeys } from '$lib/features/overview/overviewKeys';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
@@ -22,6 +27,10 @@
   } from '$lib/features/providers/providerEditor';
   import type { RunProviderAction } from './providerEditor';
   import { formatDate, stateLabel } from '$lib/format';
+
+  const activateProviderIntent = useMutationIntent();
+  const disableProviderIntent = useMutationIntent();
+  const restoreProviderAsDraftIntent = useMutationIntent();
 
   let {
     current,
@@ -49,6 +58,19 @@
 
   const queryClient = useQueryClient();
   let referenceConflict = $state('');
+  let pendingRefresh = $state<{
+    providerId: string;
+    refresh: 'provider' | 'changed';
+    notice: string;
+  } | null>(null);
+  usePrincipalLifetime(() => {
+    pendingRefresh = null;
+    referenceConflict = '';
+  });
+  $effect(() => {
+    if (pendingRefresh && pendingRefresh.providerId !== current.id)
+      pendingRefresh = null;
+  });
   const editingLocked = $derived(providerDisabled(current));
   const hasDraft = $derived(
     current.state === 'draft' ||
@@ -65,6 +87,7 @@
   // Save draft runs through the parent, so it clears the banner on its own way
   // out rather than through `runAction`.
   function save() {
+    if (pendingRefresh) return;
     referenceConflict = '';
     onSave();
   }
@@ -88,63 +111,127 @@
   }
 
   async function testDraft() {
-    await runAction('detail-probe', async () => {
-      const probe = await probeProvider(current);
+    if (pendingRefresh) return;
+    await runAction('detail-probe', async (isCurrent) => {
+      const { result: probe } = await probeProvider(current);
+      if (!isCurrent()) return;
       if (!probe.succeeded) throw new Error(probe.detail);
       await onProviderChanged();
+      if (!isCurrent()) return;
       await queryClient.invalidateQueries({
         queryKey: providerKeys.summaries
       });
+      if (!isCurrent()) return;
       onNotice(`Connection succeeded: ${probeSummary(probe)}`);
     });
   }
 
   async function activate() {
-    await runAction('detail-activate', async () => {
-      const generation = await activateProvider(current);
-      const refreshed = await onRefetchProvider();
-      await invalidateProviderViews();
-      if (refreshed) {
-        onNotice(`Activated in runtime generation ${generation}.`);
-      }
+    if (pendingRefresh) return;
+    await runAction('detail-activate', async (isCurrent) => {
+      const submission = activateProviderIntent.prepare(current.id, () => ({
+        id: current.id,
+        etag: current.etag
+      }));
+      const generation = await activateProvider(
+        submission.input,
+        submission.requestId
+      );
+      if (!isCurrent()) return;
+      activateProviderIntent.reset();
+      pendingRefresh = {
+        providerId: current.id,
+        refresh: 'provider',
+        notice: `Activated in runtime generation ${generation}.`
+      };
+      await refreshConfirmedAction(isCurrent);
     });
   }
 
   async function disable() {
-    if (!canManage) return;
+    if (!canManage || pendingRefresh) return;
     if (
       !confirm(
         `Disable “${current.name}”? Revision ${current.active_revision} stops serving as soon as the next runtime generation is published.`
       )
     )
       return;
-    await runAction('detail-disable', async () => {
+    await runAction('detail-disable', async (isCurrent) => {
       let generation: number | null;
       try {
-        generation = await disableProvider(current);
+        const submission = disableProviderIntent.prepare(current.id, () => ({
+          id: current.id,
+          etag: current.etag
+        }));
+        generation = await disableProvider(
+          submission.input,
+          submission.requestId
+        );
+        if (!isCurrent()) return;
+        disableProviderIntent.reset();
       } catch (error) {
+        if (!isCurrent()) return;
         // The server refuses while a route still targets one of this
         // provider's models, or an upstream media job is still live.
         if (!isProviderInUse(error)) throw error;
         referenceConflict = providerActionError(error);
         return;
       }
-      const refreshed = await onRefetchProvider();
-      await invalidateProviderViews();
-      if (refreshed) onNotice(disableNotice(generation));
+      if (!isCurrent()) return;
+      pendingRefresh = {
+        providerId: current.id,
+        refresh: 'provider',
+        notice: disableNotice(generation)
+      };
+      await refreshConfirmedAction(isCurrent);
     });
   }
 
   async function restoreDraft() {
-    if (!canManage) return;
-    await runAction('detail-restore-draft', async () => {
-      await restoreProviderAsDraft(current);
-      await onProviderChanged();
-      await invalidateProviderViews();
-      onNotice(
-        'Provider restored as a draft. Stored capabilities are declared again: re-certify and test before activation.'
+    if (!canManage || pendingRefresh) return;
+    await runAction('detail-restore-draft', async (isCurrent) => {
+      const submission = restoreProviderAsDraftIntent.prepare(
+        current.id,
+        () => ({ id: current.id, etag: current.etag })
       );
+      await restoreProviderAsDraft(submission.input, submission.requestId);
+      if (!isCurrent()) return;
+      restoreProviderAsDraftIntent.reset();
+      pendingRefresh = {
+        providerId: current.id,
+        refresh: 'changed',
+        notice:
+          'Provider restored as a draft. Stored capabilities are declared again: re-certify and test before activation.'
+      };
+      await refreshConfirmedAction(isCurrent);
     });
+  }
+
+  async function refreshConfirmedAction(isCurrent: () => boolean) {
+    const confirmed = pendingRefresh;
+    if (!confirmed || !isCurrent()) return;
+    onNotice(confirmed.notice);
+    try {
+      if (confirmed.refresh === 'provider') {
+        if (!(await onRefetchProvider()))
+          throw new Error('The provider detail could not be refreshed.');
+      } else await onProviderChanged();
+      if (!isCurrent()) return;
+      await invalidateProviderViews();
+      if (!isCurrent()) return;
+      if (pendingRefresh === confirmed) pendingRefresh = null;
+      onNotice(confirmed.notice);
+    } catch (cause) {
+      if (!isCurrent()) return;
+      throw new Error(
+        `The provider change succeeded, but refreshing failed. ${providerActionError(cause)}`,
+        { cause }
+      );
+    }
+  }
+
+  async function retryRefresh() {
+    await runAction('detail-refresh', refreshConfirmedAction);
   }
 </script>
 
@@ -184,8 +271,11 @@
     class="button button-secondary"
     type="button"
     onclick={save}
-    disabled={!canManage || Boolean(busy) || !canSave || editingLocked}
-    >Save draft</button
+    disabled={!canManage ||
+      Boolean(busy) ||
+      Boolean(pendingRefresh) ||
+      !canSave ||
+      editingLocked}>Save draft</button
   >
   {#if canManage && hasDraft}
     <button
@@ -194,6 +284,7 @@
       onclick={testDraft}
       disabled={!canManage ||
         Boolean(busy) ||
+        Boolean(pendingRefresh) ||
         dirty ||
         !canSave ||
         !capabilitiesCertified(current)}
@@ -207,6 +298,7 @@
       onclick={activate}
       disabled={!canManage ||
         Boolean(busy) ||
+        Boolean(pendingRefresh) ||
         dirty ||
         !canSave ||
         !activationReady(current)}>Activate changes</button
@@ -217,7 +309,7 @@
       class="button button-primary"
       type="button"
       onclick={restoreDraft}
-      disabled={Boolean(busy)}
+      disabled={Boolean(busy) || Boolean(pendingRefresh)}
       >{busy === 'detail-restore-draft'
         ? 'Restoring provider…'
         : 'Restore provider as draft'}</button
@@ -227,11 +319,21 @@
       class="button button-secondary danger-button"
       type="button"
       onclick={disable}
-      disabled={Boolean(busy)}
+      disabled={Boolean(busy) || Boolean(pendingRefresh)}
       >{busy === 'detail-disable' ? 'Disabling…' : 'Disable provider'}</button
     >
   {/if}
 </div>
+{#if pendingRefresh}<p class="inline-problem" role="status">
+    The provider change succeeded. Retry refreshing the view before another
+    change.
+    <button
+      class="button button-secondary"
+      type="button"
+      disabled={Boolean(busy)}
+      onclick={retryRefresh}>Retry refresh</button
+    >
+  </p>{/if}
 {#if referenceConflict}<p class="inline-problem" role="alert">
     {referenceConflict} Retarget every route that still uses this provider's models,
     and let live media jobs finish, before disabling it.

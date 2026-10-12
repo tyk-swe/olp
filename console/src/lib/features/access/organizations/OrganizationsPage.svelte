@@ -1,10 +1,15 @@
 <script lang="ts">
+  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
   import { useRole } from '../session/useRole.svelte';
   import { projectKeys } from '../projects/projectKeys';
   import AggregateBudgetPanel from '../budgets/AggregateBudgetPanel.svelte';
   import * as api from './api';
+
+  const createIntent = useMutationIntent();
+  const projectIntent = useMutationIntent();
+
   const access = useRole();
   const client = useQueryClient();
   let selected = $state('');
@@ -70,8 +75,18 @@
     notice = '';
     try {
       await action();
-      await client.invalidateQueries({ queryKey: projectKeys.root });
       notice = 'Saved.';
+      try {
+        await Promise.all([
+          client.invalidateQueries({ queryKey: root }, { throwOnError: true }),
+          client.invalidateQueries(
+            { queryKey: projectKeys.root },
+            { throwOnError: true }
+          )
+        ]);
+      } catch (cause) {
+        problem = `Saved, but refreshing failed. ${errorMessage(cause)}`;
+      }
     } catch (e) {
       problem = errorMessage(e);
     } finally {
@@ -95,13 +110,18 @@
     onsubmit={(e) => {
       e.preventDefault();
       void run(async () => {
+        const submission = createIntent.prepare(newName.trim());
         const o = await api.createOrganization(
-          newName.trim(),
-          crypto.randomUUID()
+          submission.input,
+          submission.requestId
         );
-        // Refresh first, or the selection effect sees a list without the new
-        // organization and moves the selection back to the first one.
-        await client.invalidateQueries({ queryKey: root });
+        createIntent.reset();
+        newName = '';
+        client.setQueryData<api.Organization[]>(root, (current = []) => [
+          ...current.filter((item) => item.id !== o.id),
+          o
+        ]);
+        selected = o.id;
         selected = o.id;
         newName = '';
       });
@@ -232,16 +252,27 @@
         onsubmit={(e) => {
           e.preventDefault();
           void run(async () => {
-            const p = await api.createOrganizationProject(
-              selected,
-              projectName.trim(),
-              crypto.randomUUID()
-            );
-            await client.invalidateQueries({
-              queryKey: [...root, selected, 'projects']
+            const submission = projectIntent.prepare({
+              organization: selected,
+              name: projectName.trim()
             });
+            const p = await api.createOrganizationProject(
+              submission.input.organization,
+              submission.input.name,
+              submission.requestId
+            );
+            projectIntent.reset();
             projectName = '';
-            projectId = p.id;
+            client.setQueryData<
+              Awaited<ReturnType<typeof api.organizationProjects>>
+            >(
+              [...root, submission.input.organization, 'projects'],
+              (current = []) => [
+                ...current.filter((item) => item.id !== p.id),
+                p
+              ]
+            );
+            if (selected === submission.input.organization) projectId = p.id;
           });
         }}
       >

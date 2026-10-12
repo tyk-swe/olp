@@ -3,8 +3,13 @@
 package integration_test
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -184,4 +189,112 @@ func TestReenrollingAGrantRotatesTheCredentialOrChangesTheServingPrincipal(t *te
 		t.Fatalf("enrolled %v", enrolled)
 	}
 	activateEnrolled(t, h, owner, path, 200, backup, standby)
+}
+
+func TestGrantEnrollmentInvalidatesPendingNetworkChange(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	digest := installGrantPlugin(t, h, owner, newGrantUpstream(t, authority), "0.1.0")
+	path := grantProvider(t, h, owner, digest, nil)
+	pending := startGrantEnrollment(t, h, owner, path)
+	callback := signIn(t, pending).String()
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	proxy := httptest.NewServer(http.NotFoundHandler())
+	defer proxy.Close()
+	configuration := detail["configuration"].(map[string]any)
+	configuration["options"] = map[string]any{"network": map[string]any{"proxy_url": proxy.URL}}
+	h.want(owner, "PATCH", path, map[string]any{"name": detail["name"], "configuration": configuration}, etagHeader(detail), 200)
+	var state, secret bool
+	if err := h.Pool.QueryRow(t.Context(), "SELECT EXISTS(SELECT 1 FROM olp.grant_enrollments WHERE id=$1),EXISTS(SELECT 1 FROM olp.secrets WHERE id=$1)", pending["id"]).Scan(&state, &secret); err != nil {
+		t.Fatal(err)
+	}
+	if state || secret {
+		t.Fatal("changed provider destination retained pending challenge and secret", state, secret)
+	}
+	continueGrantEnrollment(h, owner, path, pending, callback, 404)
+	if len(authority.Issued()) != 0 {
+		t.Fatal("cancelled challenge exchanged upstream")
+	}
+}
+
+func TestGrantEnrollmentRejectsNetworkChangeDuringExchange(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	authority := testutil.NewOAuthServer(t)
+	issued, resume := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	forwardClient := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	delayed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request, err := http.NewRequestWithContext(r.Context(), r.Method, authority.URL+r.URL.RequestURI(), r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		request.Header = r.Header.Clone()
+		response, err := forwardClient.Do(request)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if r.URL.Path == "/token" {
+			close(issued)
+			select {
+			case <-resume:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		for name, values := range response.Header {
+			w.Header()[name] = values
+		}
+		w.WriteHeader(response.StatusCode)
+		w.Write(body)
+	}))
+	defer func() { once.Do(func() { close(resume) }); delayed.Close() }()
+	upstream := newGrantUpstream(t, authority)
+	digest := installReferencePlugin(t, h, owner, upstream, "0.1.0", "-X=main.authority="+delayed.URL)
+	path := grantProvider(t, h, owner, digest, nil)
+	pending := startGrantEnrollment(t, h, owner, path)
+	callback := signIn(t, pending).String()
+	result := make(chan struct {
+		status int
+		raw    []byte
+	}, 1)
+	go func() {
+		response, raw := h.do(owner, "POST", path+"/grant-enrollments/"+pending["id"].(string)+"/continue", map[string]any{"input": callback}, nil)
+		result <- struct {
+			status int
+			raw    []byte
+		}{response.StatusCode, raw}
+	}()
+	select {
+	case <-issued:
+	case <-time.After(10 * time.Second):
+		t.Fatal("exchange never issued token")
+	}
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	proxy := httptest.NewServer(http.NotFoundHandler())
+	defer proxy.Close()
+	configuration := detail["configuration"].(map[string]any)
+	configuration["options"] = map[string]any{"network": map[string]any{"proxy_url": proxy.URL}}
+	h.want(owner, "PATCH", path, map[string]any{"name": detail["name"], "configuration": configuration}, etagHeader(detail), 200)
+	once.Do(func() { close(resume) })
+	select {
+	case completion := <-result:
+		if completion.status != 409 || !strings.Contains(string(completion.raw), "problems/grant_enrollment_stale") {
+			t.Fatalf("changed destination committed remote grant: %d %s", completion.status, completion.raw)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("exchange did not finish")
+	}
+	if credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any); len(credentials) != 0 {
+		t.Fatal("stale remote grant created local credential")
+	}
 }

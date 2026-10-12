@@ -22,7 +22,6 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
-	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -191,34 +190,14 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 }
 
 func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, endpoint string, body []byte, contentType string) (*http.Response, *attemptFailure) {
-	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
-	fact.Mode = x.mode
-	if p.hold != nil {
-		fact.Budgets = p.hold.budgets
-	}
-	finish := func(class string, f *attemptFailure) *attemptFailure {
-		if f == nil {
-			f = &attemptFailure{}
-		}
-		f.class = class
-		fact.Class = class
-		fact.Committed = f.committed
-		if fact.Interaction != nil && (x.family == openai.FamilyGeminiInteractions || x.family == openai.FamilyBatch || x.family == openai.FamilyFile) {
-			fact.Interaction.UpstreamState = string(upstream.Evidence{Reached: f.dispatched, Status: f.status}.Acceptance())
-		}
-		fact.Duration = s.now().Sub(fact.StartedAt)
-		// Stored-response lifecycle calls do not generate billable work.
-		fact.recordEvidence(x.family != openai.FamilyResponses && x.actor != "api_key_resource")
-		x.facts = append(x.facts, fact)
-		return f
-	}
+	exchange := s.beginPinned(ctx, x, p, method)
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
-		return nil, finish(classConnect, nil)
+		return nil, exchange.fail(s, x, classConnect, nil)
 	}
 	parsed.RawQuery, parsed.Fragment = "", ""
 	if _, err := s.egress.ValidateEndpoint(parsed.String()); err != nil {
-		return nil, finish(classConnect, nil)
+		return nil, exchange.fail(s, x, classConnect, nil)
 	}
 	var reader io.Reader
 	if body != nil {
@@ -226,7 +205,7 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
 	if err != nil {
-		return nil, finish(classConnect, nil)
+		return nil, exchange.fail(s, x, classConnect, nil)
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
@@ -236,56 +215,13 @@ func (s *Server) pinnedDo(ctx context.Context, x *execution, p *pin, method, end
 	if x.mode == "streaming" && (x.family == openai.FamilyGeminiInteractions || x.family == openai.FamilyResponses) {
 		req.Header.Set("Accept", "text/event-stream")
 	}
-	cfg := p.provider.Connector()
-	if err := s.applySlotCredential(ctx, x, req, cfg, p.slot, body, &p.provider, p.model); err != nil {
+	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, body, &p.provider, p.model); err != nil {
 		if ctx.Err() != nil {
-			return nil, finish(classCancelled, nil)
+			return nil, exchange.fail(s, x, classCancelled, nil)
 		}
-		return nil, finish(classCredential, nil)
+		return nil, exchange.fail(s, x, classCredential, nil)
 	}
-	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
-	if err != nil {
-		return nil, finish(classCredential, nil)
-	}
-	resp, err := client.Do(req)
-	if p.hold != nil {
-		x.spendCaps(p.hold.budgets, p.attempt)
-	}
-	if err != nil {
-		class := upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
-		return nil, finish(string(class), &attemptFailure{dispatched: true})
-	}
-	received := s.now().Sub(fact.StartedAt)
-	fact.FirstByte = &received
-	fact.Status = resp.StatusCode
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fact.Class = "success"
-		fact.Committed = true
-		if fact.Interaction != nil && (x.family == openai.FamilyBatch || x.family == openai.FamilyFile) {
-			fact.Interaction.UpstreamState = usage.UpstreamAccepted
-		}
-		if x.family == openai.FamilyGeminiInteractions {
-			// The upstream has answered, but the client cannot observe a new
-			// Interaction until its encrypted ID mapping commits.
-			fact.Committed = false
-			if fact.Interaction != nil {
-				fact.Interaction.UpstreamState = usage.UpstreamAccepted
-			}
-		}
-		fact.Duration = s.now().Sub(fact.StartedAt)
-		// Stored-response lifecycle calls do not generate billable work.
-		fact.recordEvidence(x.family != openai.FamilyResponses && x.actor != "api_key_resource")
-		x.facts = append(x.facts, fact)
-		return resp, nil
-	}
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
-	resp.Body.Close()
-	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw)), dispatched: true}
-	f.class = string(upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
-	if f.class == classRateLimit {
-		f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.now())
-	}
-	return nil, finish(f.class, f)
+	return s.doPinnedRequest(ctx, x, p, exchange, req, openai.ParseErrorBody)
 }
 
 func upstreamError(f *attemptFailure) *Error {
@@ -362,10 +298,31 @@ func upstreamString(body json.RawMessage, name string) (string, bool) {
 	return value, true
 }
 
+// nativeResourceID proves one unambiguous native identity before a provider
+// result may create or update its retained mapping. The source parser refuses
+// duplicate (including escaped) keys and invalid Unicode spellings.
+func nativeResourceID(body []byte, maxBytes int64) (string, bool) {
+	source, err := oif.ParseJSON(body, oif.Limits{MaxBytes: int(maxBytes)})
+	if err != nil {
+		return "", false
+	}
+	id, present := source.Root().Lookup("id")
+	upstream, valid := id.Text()
+	return upstream, present && valid && upstream != "" && len(upstream) <= 512
+}
+
+func retainedIdentityMatches(body []byte, expected string, maxBytes int64) bool {
+	upstream, valid := nativeResourceID(body, maxBytes)
+	return valid && upstream == expected
+}
+
 func rewriteID(body []byte, name, value string) ([]byte, error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(body, &obj); err != nil {
 		return nil, err
+	}
+	if obj == nil {
+		return nil, errors.New("provider result is not a JSON object")
 	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
@@ -523,15 +480,9 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	if owner.Kind == resources.KindStrictBatch {
 		kind = resources.KindStrictFile
 	}
-	compatible := func(existing *resources.Resource) bool {
-		return existing.RouteSlug == owner.RouteSlug && existing.ProviderRevisionID == owner.ProviderRevisionID && existing.SlotID == owner.SlotID &&
-			(existing.CredentialID == nil) == (owner.CredentialID == nil) &&
-			(existing.CredentialID == nil || *existing.CredentialID == *owner.CredentialID)
-	}
-	if existing, err := s.Resources.GetByUpstream(ctx, kind, owner.APIKeyID, owner.ProviderID, upstreamID); err == nil {
-		if !compatible(existing) {
-			return nil, resources.ErrContract
-		}
+	identity := owner.NativeIdentity()
+	identity.Kind, identity.UpstreamID = kind, upstreamID
+	if existing, err := s.Resources.GetByUpstream(ctx, identity); err == nil {
 		return existing, nil
 	} else if !errors.Is(err, resources.ErrNotFound) {
 		return nil, err
@@ -544,6 +495,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		ProviderID:         owner.ProviderID,
 		ProviderRevisionID: owner.ProviderRevisionID,
 		RouteRevisionID:    owner.RouteRevisionID,
+		TargetID:           owner.TargetID,
 		SlotID:             owner.SlotID,
 		CredentialID:       owner.CredentialID,
 		UpstreamID:         upstreamID,
@@ -566,7 +518,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 		}
 		// Another authorized poll may have installed the same output-file
 		// mapping concurrently. A collision owned by someone else still fails.
-		if existing, readErr := s.Resources.GetByUpstream(ctx, kind, owner.APIKeyID, owner.ProviderID, upstreamID); readErr == nil && compatible(existing) {
+		if existing, readErr := s.Resources.GetByUpstream(ctx, identity); readErr == nil {
 			return existing, nil
 		}
 		return nil, err
@@ -575,7 +527,7 @@ func (s *Server) mapUpstreamFile(ctx context.Context, owner *resources.Resource,
 	if err == nil {
 		return created, nil
 	}
-	if existing, readErr := s.Resources.GetByUpstream(ctx, kind, owner.APIKeyID, owner.ProviderID, upstreamID); readErr == nil && compatible(existing) {
+	if existing, readErr := s.Resources.GetByUpstream(ctx, identity); readErr == nil {
 		return existing, nil
 	}
 	return nil, err
@@ -799,17 +751,20 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."), x.family)
 		return
 	}
-	upstreamID, ok := upstreamString(body, "id")
-	if !ok || len(upstreamID) > 512 {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."), x.family)
-		return
-	}
+	var upstreamID string
 	if x.strict() {
-		if _, _, err := strictResult(body, upstreamID); err != nil {
+		if _, upstreamID, err = strictResult(body, ""); err != nil {
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result."), x.family)
 			return
 		}
+	} else {
+		var valid bool
+		if upstreamID, valid = nativeResourceID(body, s.cfg.MaxResponseBytes); !valid {
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object."), x.family)
+			return
+		}
 	}
+	x.completePinned()
 	metadata, state, expires := fileMetadata(body, p.model)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
@@ -826,6 +781,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		ProviderID:         p.provider.ID,
 		ProviderRevisionID: p.provider.RevisionID,
 		RouteRevisionID:    route.RevisionID,
+		TargetID:           p.target.ID,
 		SlotID:             p.slot.ID,
 		CredentialID:       p.slot.CredentialID,
 		UpstreamID:         upstreamID,
@@ -925,76 +881,38 @@ func (s *Server) uploadMultipart(ctx context.Context, x *execution, p *pin, endp
 		}
 		sendDone <- pipeW.Close()
 	}()
-	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
-	finish := func(class string, f *attemptFailure) *attemptFailure {
-		if f == nil {
-			f = &attemptFailure{}
+	joined := false
+	defer func() {
+		_ = pipeR.CloseWithError(io.ErrClosedPipe)
+		if !joined {
+			<-sendDone
 		}
-		f.class = class
-		fact.Class = class
-		fact.Committed = f.committed
-		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = string(upstream.Evidence{Reached: f.dispatched, Status: f.status}.Acceptance())
-		}
-		fact.Duration = s.now().Sub(fact.StartedAt)
-		fact.recordEvidence(true)
-		x.facts = append(x.facts, fact)
-		return f
-	}
+	}()
+	exchange := s.beginPinned(ctx, x, p, http.MethodPost)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, pipeR)
 	if err != nil {
-		pipeR.CloseWithError(err)
-		return nil, finish(classConnect, nil)
+		return nil, exchange.fail(s, x, classConnect, nil)
 	}
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("User-Agent", "olp/gateway")
 	req.Header.Set("Accept", "application/json")
-	cfg := p.provider.Connector()
-	if err := s.applySlotCredential(ctx, x, req, cfg, p.slot, nil, &p.provider, p.model); err != nil {
-		pipeR.CloseWithError(err)
-		return nil, finish(classCredential, nil)
+	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, nil, &p.provider, p.model); err != nil {
+		return nil, exchange.fail(s, x, classCredential, nil)
 	}
-	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
-	if err != nil {
-		pipeR.CloseWithError(err)
-		return nil, finish(classCredential, nil)
+	resp, failure := s.doPinnedRequest(ctx, x, p, exchange, req, openai.ParseErrorBody)
+	if failure != nil {
+		return nil, failure
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		pipeR.CloseWithError(err)
-		class := upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
-		return nil, finish(string(class), &attemptFailure{dispatched: true})
-	}
-	// A provider may reply before consuming the entire multipart body. Close
-	// the read side so the writer cannot wait forever for a peer that has
-	// already accepted or rejected partial work.
+	// A provider can respond before consuming the body. Keep its rejection as
+	// authoritative; only successful headers with an incomplete upload are invalid.
 	_ = pipeR.CloseWithError(io.ErrClosedPipe)
-	if sendErr := <-sendDone; sendErr != nil {
-		resp.Body.Close()
-		return nil, finish(classConnect, &attemptFailure{dispatched: true})
+	sendErr := <-sendDone
+	joined = true
+	if sendErr != nil {
+		_ = resp.Body.Close()
+		return nil, exchange.fail(s, x, exchange.state.classify(sendErr, false), nil)
 	}
-	received := s.now().Sub(fact.StartedAt)
-	fact.FirstByte = &received
-	fact.Status = resp.StatusCode
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fact.Class = "success"
-		fact.Committed = true
-		if fact.Interaction != nil {
-			fact.Interaction.UpstreamState = usage.UpstreamAccepted
-		}
-		fact.Duration = s.now().Sub(fact.StartedAt)
-		fact.recordEvidence(true)
-		x.facts = append(x.facts, fact)
-		return resp, nil
-	}
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
-	resp.Body.Close()
-	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(openai.ParseErrorBody(raw)), dispatched: true}
-	f.class = string(upstream.Classifier{Declared: cfg.Classification()}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
-	if f.class == classRateLimit {
-		f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.now())
-	}
-	return nil, finish(f.class, f)
+	return resp, nil
 }
 
 var stateQuoteReplacer = strings.NewReplacer("\\", "\\\\", `"`, "\\\"", "\r", "", "\n", "", "\x00", "").Replace
@@ -1070,12 +988,18 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read.")
 		}
+		if res.Kind != resources.KindStrictFile {
+			if !retainedIdentityMatches(body, res.UpstreamID, s.cfg.MaxResponseBytes) {
+				return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed file object.")
+			}
+		}
 		metadata, state, expires := fileMetadata(body, resourceModel(res))
 		var out []byte
 		if res.Kind == resources.KindStrictFile {
 			if _, _, err := strictResult(body, res.UpstreamID); err != nil {
 				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result.")
 			}
+			x.completePinned()
 			_, contract, err := s.readDurable(ctx, res.Kind, authority.ID, res.ID)
 			if err != nil {
 				return durableError(err)
@@ -1092,6 +1016,7 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 			}
 			out, err = durableProjection(body, res.ID, nil)
 		} else {
+			x.completePinned()
 			if err := s.Resources.Update(ctx, res.ID, state, metadata, expires); err != nil {
 				return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed file state could not be committed.")
 			}
@@ -1126,6 +1051,8 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 		}
 		defer resp.Body.Close()
 		x.dispatched = true
+		// A successful DELETE status is the operation's terminal contract.
+		x.completePinned()
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, errorBodyLimit))
 		commitCtx, stopCommit := resourceCommitContext(ctx)
 		defer stopCommit()
@@ -1173,7 +1100,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			if len(x.facts) > 0 {
 				fact := &x.facts[len(x.facts)-1]
-				fact.Class, fact.UsageComplete, fact.BillingUncertain = classProtocol, false, true
+				fact.Class = classProtocol
 			}
 			var tooLarge *media.TooLargeError
 			if errors.As(err, &tooLarge) {
@@ -1181,6 +1108,7 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 			}
 			return serverError(http.StatusBadGateway, "media_content_unavailable", "The provider file could not be staged.")
 		}
+		x.completePinned()
 		defer spool.Remove(artifact.Handle)
 		opened, err := spool.Open(artifact.Handle)
 		if err != nil {
@@ -1197,12 +1125,18 @@ func (s *Server) fileContent(w http.ResponseWriter, r *http.Request) {
 		}
 		x.responseHeaders(w.Header(), false)
 		w.WriteHeader(http.StatusOK)
-		x.delivered(s.now())
 		written, copyErr := io.Copy(w, opened.File)
+		if copyErr == nil && written == artifact.ContentLength {
+			copyErr = http.NewResponseController(w).Flush()
+		}
 		if copyErr != nil || written != artifact.ContentLength {
 			x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The file response ended before all bytes were delivered.")
-			s.finish(x, &outcome{err: x.failure, committed: true}, x.failure.Status)
+			x.facts[len(x.facts)-1].Class = classCancelled
+			s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, x.failure.Status)
 			return nil
+		}
+		if written > 0 {
+			x.delivered(s.now())
 		}
 		s.finish(x, &outcome{committed: true}, http.StatusOK)
 		return nil
@@ -1264,11 +1198,29 @@ func gateError(gate gateResult) *Error {
 }
 
 func (s *Server) writeStateJSON(w http.ResponseWriter, x *execution, body []byte) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 	w.Header().Set("Content-Type", "application/json")
 	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(body)
-	x.delivered(s.now())
+	n, err := w.Write(body)
+	if err == nil && n == len(body) {
+		err = http.NewResponseController(w).Flush()
+	}
+	if err != nil || n != len(body) {
+		x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The resource result could not be delivered.")
+		if len(x.facts) > 0 {
+			fact := &x.facts[len(x.facts)-1]
+			fact.Class = classCancelled
+			if fact.Interaction != nil && n > 0 {
+				fact.Interaction.ClientState = usage.ClientPartial
+			}
+		}
+		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, 0)
+		return
+	}
+	if n > 0 {
+		x.delivered(s.now())
+	}
 	if len(x.facts) > 0 {
 		if evidence := x.facts[len(x.facts)-1].Interaction; evidence != nil {
 			evidence.ClientState = usage.ClientTerminal
@@ -1446,18 +1398,22 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider response could not be read."), x.family)
 		return
 	}
-	upstreamID, ok := upstreamString(result, "id")
-	if !ok || len(upstreamID) > 512 {
-		s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."), x.family)
-		return
-	}
+	var upstreamID string
 	if x.strict() {
-		validated, _, err := strictBatchResult(result, upstreamID)
+		var validated oif.Document
+		validated, upstreamID, err = strictBatchResult(result, "")
 		if err != nil || !strictBatchInputMatches(validated, upstream) {
 			s.stateFail(x, w, serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native batch result."), x.family)
 			return
 		}
+	} else {
+		var valid bool
+		if upstreamID, valid = nativeResourceID(result, s.cfg.MaxResponseBytes); !valid {
+			s.stateFail(x, w, serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object."), x.family)
+			return
+		}
 	}
+	x.completePinned()
 	metadata, state := batchMetadata(result, p.model, localFile)
 	commitCtx, stopCommit := resourceCommitContext(ctx)
 	defer stopCommit()
@@ -1473,6 +1429,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		ProviderID:         p.provider.ID,
 		ProviderRevisionID: p.provider.RevisionID,
 		RouteRevisionID:    route.RevisionID,
+		TargetID:           p.target.ID,
 		SlotID:             p.slot.ID,
 		CredentialID:       p.slot.CredentialID,
 		UpstreamID:         upstreamID,
@@ -1658,6 +1615,7 @@ func (s *Server) batchRefresh(ctx context.Context, x *execution, res *resources.
 		if !strictBatchInputMatches(validated, contract.Effective) {
 			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider changed the batch input file identity.")
 		}
+		x.completePinned()
 		contract.Result = result
 		payload, err := json.Marshal(contract)
 		if err != nil {
@@ -1667,6 +1625,10 @@ func (s *Server) batchRefresh(ctx context.Context, x *execution, res *resources.
 			return durableError(err)
 		}
 	} else {
+		if !retainedIdentityMatches(result, res.UpstreamID, s.cfg.MaxResponseBytes) {
+			return serverError(http.StatusBadGateway, "upstream_error", "The provider returned a malformed batch object.")
+		}
+		x.completePinned()
 		if err := s.Resources.Update(commitCtx, res.ID, state, metadata, nil); err != nil {
 			return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The refreshed batch state could not be committed.")
 		}

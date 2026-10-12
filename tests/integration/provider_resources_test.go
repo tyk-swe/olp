@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/resources"
 )
 
 type captureSink struct {
@@ -293,7 +295,11 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 				_, _ = io.WriteString(w, wire)
 				return
 			}
-			created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": out})
+			pending := maps.Clone(out)
+			pending["status"] = "in_progress"
+			pending["output"] = []any{}
+			delete(pending, "usage")
+			created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": pending})
 			completed, _ := json.Marshal(map[string]any{"type": "response.completed", "sequence_number": 1, "response": out})
 			fmt.Fprintf(w, "event: response.created\ndata: %s\n\nevent: response.completed\ndata: %s\n\n", created, completed)
 			return
@@ -324,7 +330,11 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 				_, _ = io.WriteString(w, wire)
 				return
 			}
-			created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": res})
+			pending := maps.Clone(res)
+			pending["status"] = "in_progress"
+			pending["output"] = []any{}
+			delete(pending, "usage")
+			created, _ := json.Marshal(map[string]any{"type": "response.created", "sequence_number": 0, "response": pending})
 			completed, _ := json.Marshal(map[string]any{"type": "response.completed", "sequence_number": 1, "response": res})
 			fmt.Fprintf(w, "event: response.created\ndata: %s\n\nevent: response.completed\ndata: %s\n\n", created, completed)
 			return
@@ -612,8 +622,8 @@ func TestBatchLifecycle(t *testing.T) {
 	}
 	overflowEnvelope := sink.last()
 	overflow := overflowEnvelope.Attempts[len(overflowEnvelope.Attempts)-1]
-	if overflowEnvelope.Outcome != "failure" || overflowEnvelope.Committed || overflow.Class != "protocol" || overflow.UsageComplete || !overflow.BillingUncertain {
-		t.Fatalf("overflow acceptance/observation was not separated: %+v %+v", overflowEnvelope, overflow)
+	if overflowEnvelope.Outcome != "failure" || overflowEnvelope.Committed || overflow.Class != "protocol" || overflow.UsageObserved || !overflow.UsageComplete || overflow.BillingUncertain {
+		t.Fatalf("non-generating download failure changed billing evidence: %+v %+v", overflowEnvelope, overflow)
 	}
 	fixture.content.Store(fileContent)
 	status, fetched, _ = h.gateway("GET", "/v1/files/"+fileID, otherSecret, nil)
@@ -684,21 +694,41 @@ func TestBatchLifecycle(t *testing.T) {
 	fixture.mu.Unlock()
 
 	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.provider_resources
-		(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata)
-		SELECT gen_random_uuid(),'file',$1,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,'file-up-out','processed','{}'
+		(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,target_id,slot_id,credential_id,upstream_id,state,metadata)
+		SELECT gen_random_uuid(),'file',$1,route_slug,provider_id,provider_revision_id,route_revision_id,target_id,slot_id,credential_id,'file-up-out','processed',jsonb_build_object('upstream_model',metadata->>'upstream_model')
 		FROM olp.provider_resources WHERE kind='batch' AND upstream_id='batch-up-1'`, other["id"]); err != nil {
 		t.Fatal(err)
 	}
+	var foreignFileID, batchTargetID string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.provider_resources WHERE kind='file' AND api_key_id=$1 AND upstream_id='file-up-out'`, other["id"]).Scan(&foreignFileID); err != nil {
+		t.Fatal(err)
+	}
+	foreignFileLocal := resources.LocalID(resources.KindFile, uuid.MustParse(foreignFileID))
+	if err := h.Pool.QueryRow(t.Context(), `SELECT target_id::text FROM olp.provider_resources WHERE kind='batch' AND upstream_id='batch-up-1'`).Scan(&batchTargetID); err != nil {
+		t.Fatal(err)
+	}
 	status, raw, _ = h.gatewayRaw("GET", "/v1/batches/"+batchID, secret, nil, nil)
-	if status < 500 || bytes.Contains(raw, []byte("file-up-out")) {
-		t.Fatalf("mapping collision leaked upstream identifier: %d %s", status, raw)
+	if status != 200 || bytes.Contains(raw, []byte("file-up-out")) || bytes.Contains(raw, []byte(foreignFileLocal)) {
+		t.Fatalf("other key's native file identity was reused or exposed: %d %s", status, raw)
 	}
 	beforeList := fixture.dials.Load()
+	status, raw, _ = h.gatewayRaw("GET", "/v1/batches", secret, nil, nil)
+	if status != 200 || bytes.Contains(raw, []byte("file-up-out")) || bytes.Contains(raw, []byte(foreignFileLocal)) || fixture.dials.Load() != beforeList {
+		t.Fatalf("owned batch inventory changed its source or dispatched: status=%d body=%s", status, raw)
+	}
+	status, _, _ = h.gatewayRaw("GET", "/v1/files/"+foreignFileLocal, secret, nil, nil)
+	if status != 404 || fixture.dials.Load() != beforeList {
+		t.Fatalf("other key's local file identity was usable: %d", status)
+	}
+	// Inventory must surface an unprovable source instead of silently omitting it.
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET target_id=NULL WHERE kind='batch' AND upstream_id='batch-up-1'`); err != nil {
+		t.Fatal(err)
+	}
 	status, raw, _ = h.gatewayRaw("GET", "/v1/batches", secret, nil, nil)
 	if status != http.StatusServiceUnavailable || !bytes.Contains(raw, []byte(`"code":"provider_resource_unavailable"`)) || fixture.dials.Load() != beforeList {
 		t.Fatalf("unprojectable batch was silently omitted from local list: status=%d body=%s", status, raw)
 	}
-	if _, err := h.Pool.Exec(t.Context(), `DELETE FROM olp.provider_resources WHERE kind='file' AND upstream_id='file-up-out'`); err != nil {
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_resources SET target_id=$1 WHERE kind='batch' AND upstream_id='batch-up-1'`, batchTargetID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -814,7 +844,7 @@ func TestResponseLifecycle(t *testing.T) {
 	fixture.resps["resp-up-1"]["output"] = []any{map[string]any{"id": "msg-up-1", "type": "message", "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": "response-output-marker-3", "annotations": []any{}}}}}
 	h := newAccessHarness(t)
 	owner, detail, slug, _ := provisionOpenAI(t, h, fixture.URL,
-		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}},
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"}},
 		[]string{"generation"})
 	plain := stateKey(t, h, owner, slug, false)
 	opted := stateKey(t, h, owner, slug, true)
@@ -846,24 +876,32 @@ func TestResponseLifecycle(t *testing.T) {
 	block := func(upstreamID string) {
 		t.Helper()
 		if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.provider_resources
-			(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,upstream_id,state,metadata)
-			SELECT gen_random_uuid(),'response',$1,route_slug,provider_id,provider_revision_id,route_revision_id,slot_id,credential_id,$2,'completed','{}'
+			(id,kind,api_key_id,route_slug,provider_id,provider_revision_id,route_revision_id,target_id,slot_id,credential_id,upstream_id,state,metadata)
+			SELECT gen_random_uuid(),'response',$1,route_slug,provider_id,provider_revision_id,route_revision_id,target_id,slot_id,credential_id,$2,'completed',jsonb_build_object('upstream_model',metadata->>'upstream_model')
 			FROM olp.provider_resources WHERE kind='response' AND upstream_id='resp-up-1'`, otherKeyID, upstreamID); err != nil {
 			t.Fatal(err)
 		}
 	}
+	foreignAlias := func(upstreamID string) string {
+		t.Helper()
+		var id string
+		if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.provider_resources WHERE kind='response' AND api_key_id=$1 AND upstream_id=$2`, otherKeyID, upstreamID).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return resources.LocalID(resources.KindResponse, uuid.MustParse(id))
+	}
 	fixture.respID.Store("resp-up-blocked")
 	block("resp-up-blocked")
 	status, raw, _ := h.gatewayRaw("POST", "/v1/responses", opted, strings.NewReader(`{"model":"`+slug+`","input":"hi","store":true}`), map[string]string{"Content-Type": "application/json"})
-	if status < 500 || bytes.Contains(raw, []byte("resp-up-blocked")) {
-		t.Fatalf("unary mapping collision leaked upstream identifier: %d %s", status, raw)
+	if status != 200 || bytes.Contains(raw, []byte("resp-up-blocked")) || bytes.Contains(raw, []byte(foreignAlias("resp-up-blocked"))) {
+		t.Fatalf("unary mapping reused another key's identity: %d %s", status, raw)
 	}
 
 	fixture.respID.Store("resp-up-stream")
 	block("resp-up-stream")
 	status, raw, header := h.gatewayRaw("POST", "/v1/responses", opted, strings.NewReader(`{"model":"`+slug+`","input":"hi","store":true,"stream":true}`), map[string]string{"Content-Type": "application/json"})
-	if status < 500 || bytes.Contains(raw, []byte("resp-up-stream")) || strings.Contains(header.Get("Content-Type"), "event-stream") {
-		t.Fatalf("streamed mapping collision emitted an offending frame: %d %s %v", status, raw, header.Get("Content-Type"))
+	if status != 200 || bytes.Contains(raw, []byte("resp-up-stream")) || bytes.Contains(raw, []byte(foreignAlias("resp-up-stream"))) || !strings.Contains(header.Get("Content-Type"), "event-stream") {
+		t.Fatalf("streamed mapping reused another key's identity: %d %s %v", status, raw, header.Get("Content-Type"))
 	}
 	fixture.respID.Store("resp-up-1")
 
@@ -1722,8 +1760,9 @@ func TestBackgroundResponseStreamAccounting(t *testing.T) {
 	if count != 1 || input != 4 || output != 6 {
 		t.Fatalf("stream usage: count=%d input=%d output=%d; %s", count, input, output, raw)
 	}
-	if original.Attempts[0].UsageObserved || !original.Attempts[0].ResponseUsageDeferred {
-		t.Fatal("background stream emitted duplicate billing evidence")
+	streamed := original.Attempts[0]
+	if !streamed.GenerationUsageDeferred || !streamed.UsageObserved || streamed.Usage == nil || streamed.Usage.InputTokens != 4 || streamed.Usage.OutputTokens != 6 {
+		t.Fatalf("background stream lost observed counters or durable accounting ownership: %+v", streamed)
 	}
 	for range 3 {
 		status, out, _ := h.gateway("GET", "/v1/responses/"+local, key, nil)

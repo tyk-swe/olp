@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { sdkSnippet } from '../../console/src/lib/features/access/api-keys/sdkSnippets.ts';
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -368,6 +369,37 @@ async function errorContractGoogle() {
     `an invalid credential must reach the Gemini SDK as a 401: ${unauthorized}`
   );
 }
+
+// Execute the exact constructors and calls shown by the console, rather than
+// treating its browser connection check as official SDK qualification.
+async function consoleSnippets() {
+  const directory = await mkdtemp(new URL('./.console-snippets-', import.meta.url));
+  try {
+    for (const surface of ['anthropic', 'gemini'].filter((name) => surfaces.has(name))) {
+      for (const [label, key] of [['success', apiKey], ['refusal', invalidApiKey]]) {
+        let requests = 0;
+        globalThis.fetch = (input, init) => { requests++; return localOnlyFetch(input, init); };
+        const source = sdkSnippet(surface, key, `${origin}/`, routeSlug);
+        const resultName = surface === 'anthropic' ? 'message' : 'response';
+        const path = `${directory}/${surface}-${label}.mjs`;
+        await writeFile(path, `${source}\nexport { ${resultName} as result };\n`);
+        if (label === 'success') {
+          const { result } = await import(path);
+          const text = surface === 'anthropic' ? result.content[0].text : result.text;
+          assert.equal(text, `official ${surface} sdk reached ${routeSlug}`);
+        } else {
+          const error = await rejection(`console ${surface} refuses an invalid key`, () => import(path));
+          assert.equal(error.status, 401);
+        }
+        assert.equal(requests, 1, `console ${surface} ${label} must send one request`);
+      }
+    }
+  } finally {
+    globalThis.fetch = localOnlyFetch;
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+await consoleSnippets();
 
 if (surfaces.has('openai')) {
   for (const [label, baseURL] of openAIBaseURLs) await smokeOpenAI(baseURL, label);

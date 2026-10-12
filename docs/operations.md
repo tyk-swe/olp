@@ -408,6 +408,21 @@ delivery is configured, not merely when shared state is live — monitor
 
 ## Accounting delivery and shutdown
 
+Every startup phase uses the same producer-first cleanup as normal shutdown,
+including a listener bind failure after delivery or workers start. Authority
+stays available while requests, shadows and probes drain. Metadata intake then
+closes and flushes, delivery stops, workers stop and dependencies close against
+one shared deadline. At expiry the process explicitly closes blocking resources
+and logs incomplete task/dependency joins; those warnings are uncertainty,
+not evidence that a worker finished. There is no extra unbounded shutdown wait.
+
+Aggregate monetary ownership is evaluated per attempt: key project first,
+provider project second, route project third. Installation, organization,
+project, attribution and key/route subjects use the same rule for incremental
+facts, raw/hourly retention and Valkey reconstruction. A retry crossing provider
+projects cannot charge every attempt to its final provider. Durable commit still
+precedes stream acknowledgment; duplicate delivery does not repeat its deltas.
+
 Every attributable caller request, playground call and health probe produces one
 content-free metadata event. With Valkey configured, gateway, control and worker
 processes each buffer up to 8192 events and write them to the installation stream.
@@ -426,6 +441,55 @@ supported neighboring events continue to persist. Missing versions, malformed
 payloads and permanently invalid records become `malformed_stream_event` gaps
 instead of being interpreted as another format.
 See [metadata tests](../internal/usage/) for the persistence contract.
+
+Retained Responses and Interactions can temporarily own the original immutable
+content-free usage event. Their indexed subject projection makes pending spend
+visible to newly enabled cost budgets without guessing a dollar amount.
+Terminal observation persists the original event once; delete/expiry preserves
+partial counters and conservative uncertainty first. Submission timing stays
+separate from delayed observation time. Unsupported templates remain owned.
+Resource expiry and usage rollup each receive a bounded maintenance turn;
+per-resource savepoints keep a poison owner from starving unrelated cleanup.
+Check `resources.ExpiryFailures` and maintenance checkpoints when unresolved
+owners remain. Recorded accrual is not a promise of admission while native
+usage is pending or unpriced.
+
+Native completion and HTTP delivery are separate observations. Valid matching
+terminal usage settles before local response projection, even when that
+projection returns 502. Gemini downstream write/flush failures and original
+caller cancellation record request cancellation; they cannot reverse validated
+native consumption. Failed flush does not prove payload delivery. An active
+generation's validated native failure retains its provider-fault classification
+and sanitized native error body even when delivery fails. Retrieving a failed
+resource remains a successful read. Accepted native POSTs commit the existing
+no-retry signal before payload delivery, including with response metadata
+disabled. A caller's route timeout and a genuinely malformed native frame
+remain distinct from client cancellation.
+A deferred generation's unfinished HTTP outcome is
+stored as null until the original gateway exchange finishes. Its detached,
+two-second finalizer locks the resource and patches the pending template, or
+receipt-qualified existing request/attempt observations if settlement happened
+first. It preserves event/request/attempt identities, prices, counters and the
+receipt, and creates no early request-history row. A crash or failed finalizer
+can leave null HTTP metadata; null is not successful delivery. Check gateway
+warnings for `deferred generation HTTP outcome not recorded` when investigating
+that gap. Consumption certainty and pending monetary ownership also remain
+separate from ordinary token-rate allowance, which only grows on reconciliation.
+
+Retained native identifiers are scoped to caller, immutable provider/route
+revisions, selected route target, slot and credential version, in addition to
+resource kind and native ID. Migration 0062 preserves existing local aliases
+and ciphertexts; it fills the selected target only when historical published
+models, slots and targets prove one match. Unknown or ambiguous historical
+sources remain null and refuse provider dispatch. Do not substitute current
+configuration to repair that identity; retain the original historical evidence.
+
+Budget-group deletion retains a hidden, policy-free accounting identity after
+the existing member, notification and history dependency checks. Late usage
+keeps its original group UUID; a new group using the same name receives a new
+identity. Retired groups cannot be selected, edited or assigned. Migration 0061
+also retains already orphaned pending references as retired identities without
+inventing a creator, project or active policy.
 
 Transcription durations are recorded at microsecond precision to match the
 accounting tables; this does not change the native response bytes. Negative,

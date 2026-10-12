@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { untrack } from 'svelte';
+  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
+  import { stringifyNativeJSON } from '$lib/json/nativeJson';
   import { createQuery } from '@tanstack/svelte-query';
   import { collectCursorPages } from '$lib/api/pagination';
-  import { errorMessage } from '$lib/api/http';
+  import { ApiProblem, errorMessage, serializeIfMatch } from '$lib/api/http';
   import { certificationPrerequisiteReady } from './providerEditor';
   import { providerKeys } from './providerKeys';
   import { getProvider, probeProvider, type Provider } from './api/providers';
@@ -28,23 +30,79 @@
   let busy = $state(false);
   let cancelled = $state(false);
   let status = $state('');
+  let refreshPending = $state(false);
   let controller: AbortController | undefined;
-  onDestroy(() => {
+  let generation = 0;
+  function providerTarget(value: Provider) {
+    return stringifyNativeJSON([
+      value.id,
+      value.configuration,
+      value.draft_credential_id
+    ]);
+  }
+  function retire() {
+    generation += 1;
     cancelled = true;
     controller?.abort();
+    busy = false;
+    refreshPending = false;
+    status = '';
+    failures = [];
+  }
+  const capturePrincipal = usePrincipalLifetime(() => {
+    retire();
+    selected = [];
+  });
+  const scope = $derived(
+    JSON.stringify([
+      providerTarget(provider),
+      [...selected].sort(),
+      operation,
+      canManage
+    ])
+  );
+  let previousScope = untrack(() => scope);
+  $effect(() => {
+    const next = scope;
+    if (next !== previousScope) {
+      previousScope = next;
+      untrack(retire);
+    }
   });
   let failures = $state<{ id: string | null; message: string }[]>([]);
   const failed = $derived(
     failures.flatMap((failure) => (failure.id ? [failure.id] : []))
   );
-  const models = createQuery(() => ({
-    queryKey: providerKeys.bulkModels(provider.id, provider.etag),
-    queryFn: () =>
-      collectCursorPages((cursor) => listProviderModelPage(provider.id, cursor))
-  }));
+  const models = createQuery(() => {
+    const id = provider.id;
+    const etag = provider.etag;
+    return {
+      queryKey: providerKeys.bulkModels(id, etag),
+      queryFn: async ({ signal }) => {
+        let snapshot: Provider | undefined;
+        const items = await collectCursorPages(async (cursor) => {
+          const page = await listProviderModelPage(id, cursor, signal);
+          if (
+            snapshot &&
+            serializeIfMatch(snapshot.etag) !==
+              serializeIfMatch(page.provider.etag)
+          ) {
+            throw new Error(
+              'The connection changed while models were loaded. Refresh before reviewing them.'
+            );
+          }
+          snapshot ??= page.provider;
+          return page;
+        });
+        if (!snapshot)
+          throw new Error('The model inventory has no connection version.');
+        return { items, provider: snapshot };
+      }
+    };
+  });
   /** The client surface that speaks the provider's dialect natively. */
-  async function nativeSurface() {
-    const { kind, profile_id, profile_revision } = provider.configuration;
+  async function nativeSurface(configuration: Provider['configuration']) {
+    const { kind, profile_id, profile_revision } = configuration;
     if (kind === 'anthropic') return 'anthropic';
     if (kind === 'gemini' || kind === 'vertex_ai') return 'gemini';
     if (kind !== 'plugin') return 'openai';
@@ -55,24 +113,115 @@
     );
     return dialectSurface(profile?.dialect);
   }
-  async function validateSelected() {
+  async function refresh(isCurrent: () => boolean) {
+    if (!isCurrent()) return;
+    await onChanged();
+    if (!isCurrent()) return;
+    await models.refetch({ throwOnError: true });
+    if (isCurrent()) {
+      refreshPending = false;
+      failures = failures.filter((failure) => failure.id !== null);
+    }
+  }
+  async function retryRefresh() {
+    if (busy || !refreshPending || !canManage) return;
+    const principalCurrent = capturePrincipal();
+    const submittedScope = scope;
+    const submittedGeneration = generation;
+    const isCurrent = () =>
+      principalCurrent() &&
+      generation === submittedGeneration &&
+      scope === submittedScope;
     busy = true;
-    controller = new AbortController();
+    try {
+      await refresh(isCurrent);
+    } catch (error) {
+      if (isCurrent()) failures = [{ id: null, message: errorMessage(error) }];
+    } finally {
+      if (isCurrent()) busy = false;
+    }
+  }
+  async function validateSelected() {
+    if (busy || refreshPending || !canManage || !selected.length) return;
+    const principalCurrent = capturePrincipal();
+    const submittedScope = scope;
+    const submittedGeneration = ++generation;
+    const providerId = provider.id;
+    const snapshot = models.data;
+    if (
+      !snapshot ||
+      providerTarget(snapshot.provider) !== providerTarget(provider)
+    ) {
+      refreshPending = true;
+      failures = [
+        {
+          id: null,
+          message:
+            'The connection changed. Refresh before validating these models.'
+        }
+      ];
+      return;
+    }
+    const reviewedTarget = providerTarget(snapshot.provider);
+    let expectedETag = snapshot.provider.etag;
+    const configuration = { ...snapshot.provider.configuration };
+    const submittedOperation = operation;
+    const vendor = configuration.options?.vendor_id;
+    const targets = selected.flatMap((id) => {
+      const model = snapshot.items.find((candidate) => candidate.id === id);
+      return model
+        ? [
+            {
+              id,
+              name: model.display_name,
+              capabilities: model.capabilities.map(
+                ({ operation, surface, mode }) => ({ operation, surface, mode })
+              )
+            }
+          ]
+        : [];
+    });
+    const isCurrent = () =>
+      principalCurrent() &&
+      generation === submittedGeneration &&
+      scope === submittedScope;
+    const canContinue = () => isCurrent() && !cancelled;
+    busy = true;
+    const submittedController = new AbortController();
+    controller = submittedController;
     cancelled = false;
     failures = [];
     let completed = 0;
+    const matchesReviewedTarget = (current: Provider) => {
+      if (
+        providerTarget(current) === reviewedTarget &&
+        serializeIfMatch(current.etag) === serializeIfMatch(expectedETag)
+      )
+        return true;
+      cancelled = true;
+      submittedController.abort();
+      refreshPending = true;
+      failures.push({
+        id: null,
+        message:
+          'The connection changed. Refresh before validating these models.'
+      });
+      return false;
+    };
     try {
       const options = await getProviderCapabilityOptions(
-        provider.configuration.kind
+        configuration.kind,
+        submittedController.signal
       );
-      const vendor = provider.configuration.options?.vendor_id;
+      if (!canContinue()) return;
       const desired =
-        operation === 'configured'
+        submittedOperation === 'configured'
           ? vendor === 'voyage'
             ? ['embeddings']
             : ['generation']
-          : [operation];
-      const surface = await nativeSurface();
+          : [submittedOperation];
+      const surface = await nativeSurface(configuration);
+      if (!canContinue()) return;
       const candidates = options.capabilities.filter(
         (tuple) =>
           desired.includes(tuple.operation) &&
@@ -85,64 +234,102 @@
         const native = forOp.filter((tuple) => tuple.surface === surface);
         return native.length ? native : forOp;
       });
-      for (const id of selected) {
-        if (cancelled) break;
-        const model = models.data?.find((m) => m.id === id);
-        if (!model) continue;
-        status = `Validating ${model.display_name} (${completed + 1}/${selected.length})…`;
+      for (const model of targets) {
+        if (!canContinue()) break;
+        const id = model.id;
+        status = `Validating ${model.name} (${completed + 1}/${targets.length})…`;
+        let mutationPending = false;
         try {
-          let current = await getProvider(provider.id);
+          let current = await getProvider(
+            providerId,
+            submittedController.signal
+          );
+          if (!canContinue()) break;
+          if (!matchesReviewedTarget(current)) break;
           if (!certificationPrerequisiteReady(current)) {
+            mutationPending = true;
             const probe = await probeProvider(current);
-            if (!probe.succeeded) throw new Error(probe.detail);
-            current = await getProvider(provider.id);
+            mutationPending = false;
+            expectedETag = probe.etag;
+            if (!canContinue()) break;
+            if (!probe.result.succeeded) throw new Error(probe.result.detail);
+            current = await getProvider(providerId, submittedController.signal);
+            if (!canContinue()) break;
+            if (!matchesReviewedTarget(current)) break;
           }
+          mutationPending = true;
           current = await setProviderModel(
             current,
             id,
             true,
-            operation === 'configured' &&
+            submittedOperation === 'configured' &&
               vendor !== 'voyage' &&
               model.capabilities.length
               ? // Responses carry source and certification fields the
                 // request schema refuses.
-                model.capabilities.map(({ operation, surface, mode }) => ({
-                  operation,
-                  surface,
-                  mode
-                }))
+                model.capabilities
               : suggested
           );
-          if (cancelled) break;
-          const outcome = await certifyProviderModel(
+          mutationPending = false;
+          expectedETag = current.etag;
+          if (isCurrent()) refreshPending = true;
+          if (!canContinue()) break;
+          mutationPending = true;
+          const certification = await certifyProviderModel(
             current,
             id,
-            controller.signal
+            submittedController.signal
           );
+          mutationPending = false;
+          expectedETag = certification.etag;
+          if (!canContinue()) break;
+          const outcome = certification.result;
           if (
             !outcome.results.length ||
             !outcome.results.every((item) => item.succeeded)
           ) {
             failures.push({
               id,
-              message: `${model.display_name}: one or more capabilities failed validation.`
+              message: `${model.name}: one or more capabilities failed validation.`
             });
           }
         } catch (e) {
+          if (!canContinue()) break;
           failures.push({
             id,
-            message: `${model.display_name}: ${errorMessage(e)}`
+            message: `${model.name}: ${errorMessage(e)}`
           });
+          if (
+            mutationPending &&
+            !(
+              e instanceof ApiProblem &&
+              e.problem.status >= 400 &&
+              e.problem.status < 500 &&
+              e.problem.status !== 408 &&
+              e.problem.status !== 429 &&
+              !e.problem.type?.endsWith('/idempotency_conflict')
+            )
+          ) {
+            cancelled = true;
+            submittedController.abort();
+            refreshPending = true;
+            break;
+          }
         }
         completed += 1;
       }
+      if (!isCurrent()) return;
       status = `${cancelled ? 'Stopped after' : 'Checked'} ${completed} models. Review the results before activation.`;
-      await onChanged();
-      await models.refetch();
+      if (canContinue()) await refresh(isCurrent);
     } catch (e) {
+      if (!isCurrent()) return;
       failures.push({ id: null, message: errorMessage(e) });
     } finally {
-      busy = false;
+      if (isCurrent()) {
+        if (cancelled)
+          status = `Stopped after ${completed} models. Review the results before activation.`;
+        busy = false;
+      }
     }
   }
 </script>
@@ -174,7 +361,7 @@
     >
   </div>
   <div class="model-list">
-    {#each models.data ?? [] as model (model.id)}<label
+    {#each models.data?.items ?? [] as model (model.id)}<label
         ><input
           type="checkbox"
           value={model.id}
@@ -188,17 +375,24 @@
     {#if canManage}<button
         class="button button-primary"
         type="button"
-        disabled={busy || !selected.length}
+        disabled={busy || refreshPending || !selected.length}
         onclick={validateSelected}
         >Validate {selected.length} selected models</button
       >{/if}
-    {#if failed.length && !busy}<button
+    {#if failed.length && !busy && !refreshPending}<button
         class="button button-secondary"
         type="button"
         onclick={() => {
           selected = [...failed];
+          retire();
+          previousScope = scope;
           void validateSelected();
         }}>Retry {failed.length} failed models</button
+      >{/if}
+    {#if refreshPending && !busy}<button
+        class="button button-secondary"
+        type="button"
+        onclick={retryRefresh}>Retry refresh</button
       >{/if}
     {#if busy}<button
         class="button button-secondary"

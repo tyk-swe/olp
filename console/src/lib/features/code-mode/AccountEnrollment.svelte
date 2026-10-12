@@ -4,16 +4,9 @@
   import { listProviderKinds } from '$lib/features/providers/api/models';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import { requiresGrant } from '$lib/features/providers/providerEditor';
-  import {
-    startGrantEnrollment,
-    continueGrantEnrollment,
-    pollGrantEnrollment,
-    cancelGrantEnrollment,
-    type GrantEnrollment,
-    type GrantEnrollmentCompletion
-  } from '$lib/features/providers/api/grants';
+  import { GrantEnrollmentState } from '$lib/features/providers/grantEnrollment.svelte';
   import GrantEnrollmentPanel from '$lib/features/providers/GrantEnrollmentPanel.svelte';
-  import { ApiProblem, errorMessage } from '$lib/api/http';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
 
   let {
     providerId,
@@ -44,70 +37,35 @@
       !!spec &&
       requiresGrant(spec, provider.data.configuration.auth_mode)
   );
-  let enrollment = $state<GrantEnrollment | null>(null);
-  let input = $state('');
-  let busy = $state('');
+  const access = useRole();
+  const principal = access.user?.id;
   let error = $state('');
   let notice = $state('');
-  $effect(() => onBusyChange(!!busy || !!enrollment));
-
-  async function completed(result: GrantEnrollmentCompletion) {
-    const pasted = enrollment?.input === 'secret';
-    enrollment = null;
-    input = '';
-    await Promise.all([
-      client.invalidateQueries({
-        queryKey: providerKeys.credentials(providerId)
-      }),
-      client.invalidateQueries({ queryKey: providerKeys.detail(providerId) })
-    ]);
-    onComplete(result.credential_id);
-    notice = pasted
-      ? 'Key enrolled. Save the account to associate this credential. Enrollment did not test the key or inference.'
-      : 'Grant enrolled. Save the account to associate this credential. Enrollment did not test inference.';
-  }
-  async function run(action: string, work: () => Promise<void>) {
-    if (busy || !allowed) return;
-    busy = action;
-    error = '';
-    try {
-      await work();
-    } catch (e) {
-      error = errorMessage(e);
-    } finally {
-      busy = '';
+  const grant = new GrantEnrollmentState({
+    reportTransientErrors: true,
+    allowed: () => allowed && access.user?.id === principal,
+    error: (message) => (error = message),
+    completed: async (result, { secret }) => {
+      // The credential write succeeded independently of subsequent refresh.
+      onComplete(result.credential_id);
+      notice = secret
+        ? 'Key enrolled. Save the account to associate this credential. Enrollment did not test the key or inference.'
+        : 'Grant enrolled. Save the account to associate this credential. Enrollment did not test inference.';
+      await Promise.all([
+        client.invalidateQueries(
+          {
+            queryKey: providerKeys.credentials(providerId)
+          },
+          { throwOnError: true }
+        ),
+        client.invalidateQueries(
+          { queryKey: providerKeys.detail(providerId) },
+          { throwOnError: true }
+        )
+      ]);
     }
-  }
-  async function poll(): Promise<number | null> {
-    if (!enrollment || !allowed) return null;
-    if (busy) return enrollment.device?.interval ?? null;
-    let interval: number | null = null;
-    await run('poll', async () => {
-      if (!enrollment) return;
-      const result = await pollGrantEnrollment(enrollment).catch(
-        (e: unknown) => {
-          if (
-            e instanceof ApiProblem &&
-            e.problem.status >= 400 &&
-            e.problem.status < 500 &&
-            ![408, 429].includes(e.problem.status)
-          )
-            enrollment = null;
-          throw e;
-        }
-      );
-      if (result.completion) await completed(result.completion);
-      else if (result.status === 'pending')
-        interval = result.interval ?? enrollment.device?.interval ?? null;
-      else {
-        error = `Grant authorization ${result.status}. Start enrollment again.`;
-        enrollment = null;
-      }
-    });
-    return enrollment
-      ? (interval ?? enrollment.device?.interval ?? null)
-      : null;
-  }
+  });
+  $effect(() => onBusyChange(!!grant.busy || !!grant.enrollment));
 </script>
 
 <div class="enrollment">
@@ -131,42 +89,34 @@
         }}>Retry</button
       >
     </p>
-  {:else if enrollment}
+  {:else if grant.enrollment}
     <GrantEnrollmentPanel
-      {enrollment}
-      bind:input
-      {busy}
-      onContinue={() =>
-        run('continue', async () => {
-          if (enrollment)
-            await completed(await continueGrantEnrollment(enrollment, input));
-        })}
-      onPoll={poll}
-      onCancel={() =>
-        run('cancel', async () => {
-          if (enrollment) await cancelGrantEnrollment(enrollment);
-          enrollment = null;
-          input = '';
-        })}
+      enrollment={grant.enrollment}
+      bind:input={grant.input}
+      busy={grant.busy}
+      onContinue={() => grant.continue()}
+      onPoll={() => grant.poll()}
+      onCancel={() => grant.cancel()}
     />
     {#if error}<button
         class="button button-secondary"
         type="button"
-        disabled={!!busy || !allowed}
-        onclick={poll}>Check authorization again</button
+        disabled={!!grant.busy || !allowed}
+        onclick={() => grant.poll()}>Check authorization again</button
       >{/if}
   {:else}
     <button
       class="button button-secondary"
       type="button"
-      disabled={!allowed || !supported || !!busy}
-      onclick={() =>
-        run('start', async () => {
-          if (provider.data)
-            enrollment = await startGrantEnrollment(provider.data);
-        })}
+      disabled={!allowed || !supported || !!grant.busy}
+      onclick={() => {
+        if (provider.data) {
+          notice = '';
+          void grant.start(provider.data);
+        }
+      }}
     >
-      {busy ? 'Starting…' : 'Enroll subscription account'}
+      {grant.busy ? 'Starting…' : 'Enroll subscription account'}
     </button>
     {#if provider.data && !supported && !kinds.isPending}<p>
         A supported grant authentication mode must be configured on this

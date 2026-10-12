@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
   import { listProviders } from '$lib/features/providers/api/providers';
@@ -10,6 +10,9 @@
   import { listAllProjectMembers } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+  import { confirmDiscardChanges } from '$lib/forms/unsavedChanges';
+  import { ApiProblem, unanswered } from '$lib/api/http';
   import {
     saveCodeAccount,
     saveCodePool,
@@ -28,6 +31,8 @@
   } from './presentation';
   import AccountEnrollment from './AccountEnrollment.svelte';
 
+  const createIntent = useMutationIntent();
+
   let {
     editing,
     projectId,
@@ -35,6 +40,7 @@
     pools,
     routes,
     allowed,
+    onDraftChange,
     onSaved,
     onCancel
   }: {
@@ -44,6 +50,7 @@
     pools: CodePool[];
     routes: CodeRoute[];
     allowed: boolean;
+    onDraftChange: (dirty: boolean) => void;
     onSaved: () => Promise<void>;
     onCancel: () => void;
   } = $props();
@@ -114,6 +121,30 @@
   let busy = $state(false);
   let enrolling = $state(false);
   let error = $state('');
+  let dirty = $state(false);
+  // A create whose response was lost remains the same logical submission.
+  // Keep its fields fixed until the operator retries or explicitly edits it.
+  let submitted = $state(false);
+  let active = true;
+  $effect(() => onDraftChange(dirty || submitted || enrolling || busy));
+  onDestroy(() => {
+    active = false;
+    onDraftChange(false);
+  });
+  function cancel() {
+    if (confirmDiscardChanges(dirty || submitted || enrolling)) onCancel();
+  }
+  function editRequest() {
+    if (
+      !confirm(
+        'The previous request may already have been saved. Start a different submission?'
+      )
+    )
+      return;
+    submitted = false;
+    createIntent.reset();
+    error = '';
+  }
 
   const providers = createQuery(() => ({
     queryKey: providerKeys.all(),
@@ -135,7 +166,9 @@
   const members = createQuery(() => ({
     queryKey: projectKeys.allMembers(projectId),
     queryFn: ({ signal }) => listAllProjectMembers(projectId, signal),
-    enabled: editing.kind === 'pools'
+    enabled:
+      editing.kind === 'pools' &&
+      access.allows('GET /api/v1/projects/{project_id}/members')
   }));
   const projectKeysList = $derived(
     (keys.data ?? []).filter((key) => key.project_id === projectId)
@@ -169,37 +202,55 @@
     if (busy || enrolling || !allowed) return;
     busy = true;
     error = '';
+    let dispatched = false;
+    function dispatch<T>(work: () => Promise<T>): Promise<T> {
+      const promise = work();
+      dispatched = true;
+      return promise;
+    }
     try {
       switch (editing.kind) {
         case 'accounts':
-          await saveCodeAccount(
-            {
+          await dispatch(() => {
+            const submission = createIntent.prepare<
+              Parameters<typeof saveCodeAccount>[0]
+            >({
               project_id: projectId,
               name,
               provider_id: providerId,
               credential_id: credentialId,
               models: nativeModels(models),
               enabled
-            },
-            editing.current
-          );
+            });
+            return saveCodeAccount(
+              submission.input,
+              editing.current,
+              submission.requestId
+            );
+          });
           break;
         case 'pools':
           if (accountIds.length > 100 || keyIds.length > 100)
             throw new Error(
               'A pool accepts at most 100 accounts and 100 explicit keys.'
             );
-          await saveCodePool(
-            {
+          await dispatch(() => {
+            const submission = createIntent.prepare<
+              Parameters<typeof saveCodePool>[0]
+            >({
               project_id: projectId,
               name,
               kind,
               owner_user_id: kind === 'personal' ? owner : null,
               account_ids: accountIds,
               api_key_ids: keyIds
-            },
-            editing.current
-          );
+            });
+            return saveCodePool(
+              submission.input,
+              editing.current,
+              submission.requestId
+            );
+          });
           break;
         case 'routes':
           if (!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(slug))
@@ -215,39 +266,60 @@
             throw new Error(
               'Use a body limit from 1 to 1073741824 bytes, or leave it empty.'
             );
-          await saveCodeRoute(
-            {
+          await dispatch(() => {
+            const submission = createIntent.prepare<
+              Parameters<typeof saveCodeRoute>[0]
+            >({
               project_id: projectId,
               slug,
               pool_id: poolId,
               max_body_bytes: maxBodyBytes ? Number(maxBodyBytes) : null,
               models: nativeModels(models),
               enabled
-            },
-            editing.current
-          );
+            });
+            return saveCodeRoute(
+              submission.input,
+              editing.current,
+              submission.requestId
+            );
+          });
           break;
         case 'budgets': {
           const dailyTokens = tokenLimit(daily),
             monthlyTokens = tokenLimit(monthly);
           if (dailyTokens === null && monthlyTokens === null)
             throw new Error('Set at least one daily or monthly token limit.');
-          await saveCodeBudget(
-            {
+          await dispatch(() => {
+            const submission = createIntent.prepare<
+              Parameters<typeof saveCodeBudget>[0]
+            >({
               project_id: projectId,
               route_id: routeId || null,
               api_key_id: keyId || null,
               daily_tokens: dailyTokens,
               monthly_tokens: monthlyTokens,
               enabled
-            },
-            editing.current
-          );
+            });
+            return saveCodeBudget(
+              submission.input,
+              editing.current,
+              submission.requestId
+            );
+          });
           break;
         }
       }
+      if (!active) return;
+      createIntent.reset();
+      dirty = false;
+      submitted = false;
       await onSaved();
     } catch (e) {
+      if (!active) return;
+      submitted =
+        dispatched &&
+        !editing.current &&
+        (unanswered(e) || !(e instanceof ApiProblem));
       error = mutationError(e);
     } finally {
       busy = false;
@@ -271,8 +343,13 @@
       Some choices could not be loaded. Existing selections are retained. Cancel
       and reopen to retry.
     </p>{/if}
-  <form class="form-field" onsubmit={save}>
-    <fieldset disabled={busy || !allowed}>
+  <form
+    class="form-field"
+    onsubmit={save}
+    oninput={() => (dirty = true)}
+    onchange={() => (dirty = true)}
+  >
+    <fieldset disabled={busy || submitted || !allowed}>
       {#if editing.kind === 'accounts' || editing.kind === 'pools'}
         <label for="code-name">Name</label><input
           id="code-name"
@@ -508,20 +585,32 @@
         class="button button-primary"
         type="submit"
         disabled={busy || enrolling || !allowed}
-        >{busy ? 'Saving…' : 'Save'}</button
+        >{busy ? 'Saving…' : submitted ? 'Retry save' : 'Save'}</button
       ><button
         class="button button-secondary"
         type="button"
         disabled={busy || enrolling}
-        onclick={onCancel}>Cancel</button
+        onclick={cancel}>Cancel</button
       >
+      {#if submitted}<button
+          class="button button-secondary"
+          type="button"
+          disabled={busy || !allowed}
+          onclick={editRequest}>Edit request</button
+        >
+        <p>
+          Retry keeps the original submission to recover a lost response.
+        </p>{/if}
     </div>
   </form>
   {#if editing.kind === 'accounts' && providerId}
     {#key providerId}<AccountEnrollment
         {providerId}
-        allowed={allowed && !busy}
-        onComplete={(id) => (credentialId = id)}
+        allowed={allowed && !busy && !submitted}
+        onComplete={(id) => {
+          credentialId = id;
+          dirty = true;
+        }}
         onBusyChange={(value) => (enrolling = value)}
       />{/key}
   {/if}

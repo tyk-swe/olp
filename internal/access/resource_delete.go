@@ -46,12 +46,25 @@ func (s *Server) deleteResource(r *http.Request, _ Principal, spec deletableReso
 		return Reply{}, err
 	}
 	if replayed != nil {
+		if spec.kind == "budget_group" {
+			var projectID *string
+			if err := tx.QueryRow(r.Context(), "SELECT project_id::text FROM olp.budget_groups WHERE id=$1", id).Scan(&projectID); err != nil {
+				return Reply{}, err
+			}
+			if err := p.Project(projectID, Change); err != nil {
+				return Reply{}, err
+			}
+		}
 		return Commit(r, tx, *replayed)
 	}
 	table := pgx.Identifier{"olp", spec.table}.Sanitize()
+	visible := ""
+	if spec.kind == "budget_group" {
+		visible = " AND retired_at IS NULL"
+	}
 	var etag string
 	var projectID *string
-	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text FROM "+table+" WHERE id=$1 FOR UPDATE", id).Scan(&etag, &projectID); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text FROM "+table+" WHERE id=$1"+visible+" FOR UPDATE", id).Scan(&etag, &projectID); err != nil {
 		return Reply{}, err
 	}
 	if err = p.Project(projectID, Change); err != nil {
@@ -60,22 +73,18 @@ func (s *Server) deleteResource(r *http.Request, _ Principal, spec deletableReso
 	if err = Match(r, etag); err != nil {
 		return Reply{}, err
 	}
-	if spec.kind == "budget_group" {
-		var used bool
-		if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.notification_rules WHERE subject_kind='budget_group' AND subject_id=$1)`, id).Scan(&used); err != nil {
-			return Reply{}, err
-		}
-		if used {
-			return Reply{}, Fail(409, "budget_group_in_use", "The budget group still has notification rules or retained accounting dependencies.")
-		}
-	}
 	var secretID *string
 	if spec.kind == "notification_destination" {
 		if err = tx.QueryRow(r.Context(), "SELECT secret_id::text FROM "+table+" WHERE id=$1", id).Scan(&secretID); err != nil {
 			return Reply{}, err
 		}
 	}
-	if _, err = tx.Exec(r.Context(), "DELETE FROM "+table+" WHERE id=$1", id); err != nil {
+	if spec.kind == "budget_group" {
+		err = retireBudgetGroup(r.Context(), tx, id)
+	} else {
+		_, err = tx.Exec(r.Context(), "DELETE FROM "+table+" WHERE id=$1", id)
+	}
+	if err != nil {
 		var constraint *pgconn.PgError
 		if errors.As(err, &constraint) && constraint.Code == "23503" {
 			return Reply{}, Fail(409, spec.kind+"_in_use", "The resource still has dependent resources or retained history.")

@@ -1,13 +1,14 @@
+import { snapshotNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
 import { overviewKeys } from '$lib/features/overview/overviewKeys';
 import { providerKeys } from '$lib/features/providers/providerKeys';
 import { createQuery, skipToken, useQueryClient } from '@tanstack/svelte-query';
 import { onDestroy } from 'svelte';
 import { SvelteURLSearchParams } from 'svelte/reactivity';
 import {
+  ApiProblem,
   errorMessage as message,
   fieldIssues,
   isEtagMismatch,
-  unanswered,
   type FieldIssue
 } from '$lib/api/http';
 import { emptyCursorHistory, resetCursor } from '$lib/lists/pagination';
@@ -38,14 +39,8 @@ import {
 } from '$lib/features/providers/api/credentials';
 import type { ProviderProfile } from '$lib/features/providers/api/profiles';
 import type { ProviderVendor } from '$lib/features/providers/api/providers';
-import {
-  cancelGrantEnrollment,
-  continueGrantEnrollment,
-  pollGrantEnrollment,
-  startGrantEnrollment,
-  type GrantEnrollment,
-  type GrantEnrollmentStatus
-} from '$lib/features/providers/api/grants';
+import type { GrantEnrollment } from './api/grants';
+import { GrantEnrollmentState } from './grantEnrollment.svelte';
 import {
   authOptionsFor,
   buildCreateProviderInput,
@@ -59,6 +54,10 @@ import {
   type ProviderDraft
 } from '$lib/features/providers/providerEditor';
 import { useRole } from '$lib/features/access/session/useRole.svelte';
+import {
+  useMutationIntent,
+  usePrincipalLifetime
+} from '$lib/forms/mutationIntent.svelte';
 
 /** Reports whether the credential version with the id is a live grant
  * enrolled through the plugin build with the digest, which a provider pinning
@@ -78,7 +77,32 @@ function isLiveGrant(
   );
 }
 
+type ConnectionProgress = {
+  input: Parameters<typeof createProvider>[0];
+  existing?: Pick<Provider, 'id' | 'etag'>;
+  configured?: Pick<Provider, 'id' | 'etag'>;
+  id?: string;
+  saved: boolean;
+  credentialRefused?: boolean;
+  writeAmbiguous?: boolean;
+  credentialAmbiguous?: boolean;
+};
+
+type ActivationProgress = {
+  input: Pick<Provider, 'id' | 'etag'>;
+  generation?: number;
+  ambiguous?: boolean;
+};
+
 export class ProviderWizardState {
+  private connectionProgress?: ConnectionProgress;
+  private activationProgress?: ActivationProgress;
+  private ownerEpoch = 0;
+  rotateProviderCredentialIntent = useMutationIntent();
+  activateProviderIntent = useMutationIntent();
+
+  createIntent = useMutationIntent();
+
   stepLabels = ['Connection', 'Models and capabilities', 'Activation'] as const;
   access = useRole();
   canManage = $derived(this.access.can('providers.manage'));
@@ -97,11 +121,42 @@ export class ProviderWizardState {
   draftCredentials;
   probe = $state<ProviderProbe | null>(null);
   /** The grant enrollment the operator is signing in through, if any. */
-  grantEnrollment = $state<GrantEnrollment | null>(null);
+  private grantPrincipal = this.access.user?.id;
+  grant = new GrantEnrollmentState({
+    allowed: () =>
+      this.canManage && this.access.user?.id === this.grantPrincipal,
+    error: (error, failure) => {
+      if (this.wizardProvider && isEtagMismatch(failure))
+        this.wizardConflict = true;
+      else {
+        this.errorMessage = error;
+        this.validationIssues = fieldIssues(failure);
+      }
+    },
+    completed: async (_completion, { isCurrent }) => {
+      this.notice =
+        'Grant enrolled. Testing the connection remains a separate step.';
+      await this.testEnrolledGrant(isCurrent);
+    }
+  });
+  get grantEnrollment(): GrantEnrollment | null {
+    return this.grant.enrollment;
+  }
   /** What the operator pastes back from the upstream's sign-in. */
-  grantInput = $state('');
+  get grantInput() {
+    return this.grant.input;
+  }
+  set grantInput(input: string) {
+    this.grant.input = input;
+  }
   manualModelNames = $state('');
-  busy = $state('');
+  private operationBusy = $state('');
+  get busy() {
+    return this.operationBusy || this.grant.busy;
+  }
+  set busy(value: string) {
+    this.operationBusy = value;
+  }
   errorMessage = $state('');
   validationIssues = $state<FieldIssue[]>([]);
   notice = $state('');
@@ -140,18 +195,66 @@ export class ProviderWizardState {
       this.draft?.profileRevision
     )
   );
+  private refused(error: unknown) {
+    return (
+      error instanceof ApiProblem &&
+      error.problem.status >= 400 &&
+      error.problem.status < 500 &&
+      ![408, 429].includes(error.problem.status)
+    );
+  }
+  private retireProgress() {
+    if (this.connectionProgress) {
+      this.connectionProgress.input = snapshotNativeJSON({
+        ...this.connectionProgress.input,
+        credential: undefined,
+        credential_reference: undefined
+      });
+    }
+    this.connectionProgress = undefined;
+    this.activationProgress = undefined;
+    this.createIntent.reset();
+    this.rotateProviderCredentialIntent.reset();
+    this.activateProviderIntent.reset();
+  }
+  private capturePrincipal = usePrincipalLifetime(() => {
+    this.ownerEpoch += 1;
+    this.retireProgress();
+    if (this.draft) {
+      this.draft.credential = '';
+      this.draft.externalCredentialReference = '';
+    }
+    this.grantInput = '';
+    this.busy = this.errorMessage = this.notice = '';
+    this.validationIssues = [];
+  });
+  private captureOwner = () => {
+    const principalCurrent = this.capturePrincipal();
+    const epoch = this.ownerEpoch;
+    return () => principalCurrent() && epoch === this.ownerEpoch;
+  };
   run = async (
     label: string,
-    action: () => Promise<void>
+    action: (isCurrent: () => boolean) => Promise<void>
   ): Promise<boolean> => {
+    if (this.busy || !this.canManage) return false;
+    const isCurrent = this.captureOwner();
     this.busy = label;
     this.errorMessage = '';
     this.validationIssues = [];
     this.notice = '';
     try {
-      await action();
-      return true;
+      await action(isCurrent);
+      return isCurrent();
     } catch (error) {
+      if (!isCurrent()) return false;
+      const progress = this.connectionProgress;
+      if (progress && !progress.id && !progress.configured) {
+        if (this.refused(error) && !progress.writeAmbiguous) {
+          this.connectionProgress = undefined;
+          this.createIntent.reset();
+        } else if (!this.refused(error)) progress.writeAmbiguous = true;
+      }
       if (this.wizardProvider && isEtagMismatch(error))
         this.wizardConflict = true;
       else {
@@ -160,10 +263,12 @@ export class ProviderWizardState {
       }
       return false;
     } finally {
-      this.busy = '';
+      if (isCurrent()) this.busy = '';
     }
   };
   clearCertificationResults = () => {
+    this.activationProgress = undefined;
+    this.activateProviderIntent.reset();
     this.certificationResults = {};
   };
   refetchWizardModels = async () => {
@@ -177,22 +282,20 @@ export class ProviderWizardState {
   };
   reloadWizard = async () => {
     if (!this.wizardProvider) return;
-    this.busy = 'reload';
-    this.errorMessage = '';
-    this.validationIssues = [];
-    this.notice = '';
-    try {
+    await this.run('reload', async (isCurrent) => {
       await this.refetchWizardModels();
+      if (!isCurrent()) return;
       this.wizardModelReloadVersion += 1;
       this.wizardConflict = false;
-    } catch (error) {
-      this.errorMessage = message(error);
-    } finally {
-      this.busy = '';
-    }
+    });
   };
   goBack = () => {
-    if (this.wizardStep <= 1) return;
+    if (this.busy || this.wizardStep <= 1) return;
+    if (this.activateProviderIntent.unresolved) {
+      this.errorMessage =
+        'Activation may already have committed. Retry activation before changing this connection, or leave the wizard.';
+      return;
+    }
     this.wizardStep -= 1;
     const provider = this.wizardProvider;
     const spec = this.selectedSpec;
@@ -211,11 +314,17 @@ export class ProviderWizardState {
   /** Return to a blank step 1 without leaving the route; the draft effect
    * recreates the connection form from the first provider kind. */
   startAnother = () => {
+    this.ownerEpoch += 1;
+    this.retireProgress();
+    if (this.draft) {
+      this.draft.credential = '';
+      this.draft.externalCredentialReference = '';
+    }
     this.providerId = '';
     this.draft = null;
     this.wizardStep = 1;
     this.probe = null;
-    this.grantEnrollment = null;
+    this.grant.abandon();
     this.grantInput = '';
     this.manualModelNames = '';
     this.busy = '';
@@ -228,7 +337,8 @@ export class ProviderWizardState {
   };
   createDraft = async (event: SubmitEvent) => {
     event.preventDefault();
-    if (!this.draft || !this.selectedSpec) return;
+    if (!this.canManage || this.busy || !this.draft || !this.selectedSpec)
+      return;
     const current = this.draft;
     const spec = this.selectedSpec;
     // The connector kind is locked once the draft exists, so stepping back
@@ -237,7 +347,9 @@ export class ProviderWizardState {
     const issue = validateProviderDraft(current, spec, {
       // The first pass stored a write-only credential; the field is cleared
       // afterwards and must not be demanded again on a re-save.
-      credentialAlreadyStored: Boolean(existing),
+      credentialAlreadyStored: Boolean(
+        existing || this.connectionProgress?.saved
+      ),
       // The connection form loads the profile catalogue.
       profiles: this.queryClient.getQueryData<ProviderProfile[]>(
         providerKeys.profiles()
@@ -251,45 +363,133 @@ export class ProviderWizardState {
       this.validationIssues = [];
       return;
     }
-    await this.run('create', async () => {
-      const input = buildCreateProviderInput(current, spec);
-      let id: string;
-      if (existing) {
-        const updated = await updateProvider(existing.id, existing.etag, {
-          name: input.name,
-          configuration: input.configuration
-        });
-        if (current.credential) {
-          await rotateProviderCredential(updated, current.credential);
-        }
-        id = updated.id;
-      } else {
-        id = await createProvider(input);
-      }
-      current.credential = '';
-      this.providerId = id;
-      const snapshot = await this.refetchWizardModels();
-      await Promise.all([
-        this.queryClient.invalidateQueries({
-          queryKey: providerKeys.summaries
-        }),
-        this.queryClient.invalidateQueries({
-          queryKey: providerKeys.modelCatalog
-        })
-      ]);
-      // A grant comes from the operator's sign-in upstream, which the grant
-      // enrollment panel collects before the connection is tested. Unless a
-      // live grant of the pinned build backs the draft, its credential is
-      // none, a static credential from another profile, or a grant that
-      // lapsed, was revoked or came through another build.
+    const input = buildCreateProviderInput(current, spec);
+    let progress = this.connectionProgress;
+    if (
+      progress &&
+      stringifyNativeJSON(progress.input) !== stringifyNativeJSON(input)
+    ) {
       if (
-        this.grantRequired &&
-        !(await this.holdsLiveGrant(snapshot.provider))
+        progress.credentialRefused &&
+        stringifyNativeJSON({
+          ...progress.input,
+          credential: undefined,
+          credential_reference: undefined
+        }) ===
+          stringifyNativeJSON({
+            ...input,
+            credential: undefined,
+            credential_reference: undefined
+          })
       ) {
-        this.grantEnrollment = await startGrantEnrollment(snapshot.provider);
+        progress.input = snapshotNativeJSON(input);
+        progress.credentialRefused = false;
+      } else {
+        this.errorMessage = progress.saved
+          ? 'Connection saved. Retry the original fields to refresh and test it before editing, or leave this wizard.'
+          : 'The previous submission may already have saved. Retry its original fields before editing, or leave this wizard.';
         return;
       }
-      await this.testConnection(snapshot.provider);
+    }
+    if (!progress) {
+      progress = {
+        input: snapshotNativeJSON(input),
+        existing: existing
+          ? { id: existing.id, etag: existing.etag }
+          : undefined,
+        saved: false
+      };
+      this.connectionProgress = progress;
+      this.activationProgress = undefined;
+      this.activateProviderIntent.reset();
+    }
+    const submission = progress;
+    await this.run('create', async (isCurrent) => {
+      if (!submission.id) {
+        if (submission.existing) {
+          if (!submission.configured) {
+            const updated = await updateProvider(
+              submission.existing.id,
+              submission.existing.etag,
+              {
+                name: submission.input.name,
+                configuration: submission.input.configuration
+              }
+            );
+            if (!isCurrent()) return;
+            submission.configured = { id: updated.id, etag: updated.etag };
+            this.notice = 'Connection configuration saved.';
+          }
+          const credential =
+            submission.input.credential_reference ??
+            submission.input.credential;
+          if (credential) {
+            submission.credentialRefused = false;
+            try {
+              await this.rotateProviderCredentialIntent.submit(
+                [submission.configured, credential] as const,
+                (input, requestId) =>
+                  rotateProviderCredential(...input, requestId)
+              );
+            } catch (error) {
+              if (isCurrent()) {
+                if (this.refused(error) && !submission.credentialAmbiguous) {
+                  submission.credentialRefused = true;
+                  this.rotateProviderCredentialIntent.reset();
+                } else if (!this.refused(error))
+                  submission.credentialAmbiguous = true;
+              }
+              throw error;
+            }
+            if (!isCurrent()) return;
+          }
+          submission.id = submission.configured.id;
+        } else {
+          const request = this.createIntent.prepare(submission.input);
+          const id = await createProvider(request.input, request.requestId);
+          if (!isCurrent()) return;
+          submission.id = id;
+          this.createIntent.reset();
+        }
+        submission.saved = true;
+        submission.input = snapshotNativeJSON({
+          ...submission.input,
+          credential:
+            requiresCredential(spec, current.authMode) &&
+            !current.useExternalCredential
+              ? ''
+              : undefined
+        });
+        current.credential = '';
+      }
+      this.providerId = submission.id;
+      this.notice =
+        'Provider saved. Connection testing remains a separate step.';
+      const snapshot = await this.refetchWizardModels();
+      if (!isCurrent()) return;
+      await Promise.all([
+        this.queryClient.invalidateQueries(
+          { queryKey: providerKeys.summaries },
+          { throwOnError: true }
+        ),
+        this.queryClient.invalidateQueries(
+          { queryKey: providerKeys.modelCatalog },
+          { throwOnError: true }
+        )
+      ]);
+      if (!isCurrent()) return;
+      if (this.grantRequired) {
+        const enrolled = await this.holdsLiveGrant(snapshot.provider);
+        if (!isCurrent()) return;
+        if (!enrolled) {
+          await this.grant.start(snapshot.provider);
+          if (isCurrent() && this.grantEnrollment)
+            this.connectionProgress = undefined;
+          return;
+        }
+      }
+      await this.testConnection(snapshot.provider, isCurrent);
+      if (isCurrent()) this.connectionProgress = undefined;
     });
   };
   /** Reports whether a live grant, enrolled through the plugin build the
@@ -308,89 +508,36 @@ export class ProviderWizardState {
     );
   };
   /** Tests the connection with the grant a completed enrollment staged. */
-  private testEnrolledGrant = async () => {
-    await this.queryClient.invalidateQueries({
-      queryKey: providerKeys.credentials(this.providerId)
-    });
-    await this.testConnection((await this.refetchWizardModels()).provider);
+  private testEnrolledGrant = async (isCurrent: () => boolean) => {
+    await this.queryClient.invalidateQueries(
+      {
+        queryKey: providerKeys.credentials(this.providerId)
+      },
+      { throwOnError: true }
+    );
+    if (!isCurrent()) return;
+    const snapshot = await this.refetchWizardModels();
+    if (isCurrent()) await this.testConnection(snapshot.provider, isCurrent);
   };
-  private testConnection = async (provider: Provider) => {
-    this.probe = await probeProvider(provider);
+  private testConnection = async (
+    provider: Provider,
+    isCurrent: () => boolean
+  ) => {
+    const { result: probe } = await probeProvider(provider);
+    if (!isCurrent()) return;
+    this.probe = probe;
     if (!this.probe.succeeded) throw new Error(this.probe.detail);
     this.wizardStep = 2;
   };
-  /** Exchanges what the operator pasted back for a grant, which becomes the
-   * draft's credential version, then tests the connection with it. */
-  continueGrantEnrollment = async () => {
-    const enrollment = this.grantEnrollment;
-    const input = this.grantInput.trim();
-    if (!enrollment) return;
-    if (!input) {
-      this.errorMessage =
-        'Paste the callback URL, or the code the upstream displayed.';
-      this.validationIssues = [];
-      return;
-    }
-    await this.run('grant', async () => {
-      try {
-        await continueGrantEnrollment(enrollment, input);
-      } finally {
-        // A grant enrollment is continued once, whether or not it succeeds.
-        this.grantEnrollment = null;
-        this.grantInput = '';
-      }
-      await this.testEnrolledGrant();
-    });
-  };
-  /** Asks whether the operator approved the device upstream, and returns how
-   * many seconds to wait before asking again, or null once the enrollment
-   * ended. On approval, the grant is the draft's credential version, and the
-   * connection is tested with it. A request that fails without an answer,
-   * such as while OLP restarts, is asked again. */
-  pollGrantEnrollment = async (): Promise<number | null> => {
-    const enrollment = this.grantEnrollment;
-    if (!enrollment) return null;
-    let status: GrantEnrollmentStatus | undefined;
-    let failure: unknown;
-    try {
-      status = await pollGrantEnrollment(enrollment);
-    } catch (error) {
-      failure = error;
-    }
-    // Cancelled meanwhile.
-    if (this.grantEnrollment !== enrollment) return null;
-    const interval = enrollment.device?.interval ?? null;
-    if (status?.status === 'pending') return status.interval ?? interval;
-    if (unanswered(failure)) return interval;
-    this.grantEnrollment = null;
-    if (status?.status === 'completed') {
-      await this.run('grant', this.testEnrolledGrant);
-      return null;
-    }
-    this.errorMessage =
-      status?.status === 'denied'
-        ? 'The device sign-in was denied upstream. Save and sign in upstream to try again.'
-        : status?.status === 'expired'
-          ? 'The device sign-in expired before it was approved. Save and sign in upstream to try again.'
-          : message(failure);
-    this.validationIssues = [];
-    return null;
-  };
-  cancelGrantEnrollment = async () => {
-    const enrollment = this.grantEnrollment;
-    if (!enrollment) return;
-    await this.run('grant-cancel', async () => {
-      // Abandoned at once, so a status request answering meanwhile is ignored.
-      this.grantEnrollment = null;
-      this.grantInput = '';
-      await cancelGrantEnrollment(enrollment);
-    });
-  };
+  continueGrantEnrollment = () => this.grant.continue();
+  pollGrantEnrollment = () => this.grant.poll();
+  cancelGrantEnrollment = () => this.grant.cancel();
   discoverWizardProvider = async () => {
     const provider = this.wizardProvider;
     if (!provider) return;
-    await this.run('discover', async () => {
+    await this.run('discover', async (isCurrent) => {
       const discovered = await discoverProviderModels(provider);
+      if (!isCurrent()) return;
       if (discovered.model_count === 0) {
         throw new Error(
           discovered.configuration.kind === 'openai_compatible'
@@ -401,6 +548,7 @@ export class ProviderWizardState {
       this.clearCertificationResults();
       resetCursor(this.wizardModelPagination);
       await this.refetchWizardModels();
+      if (!isCurrent()) return;
       this.wizardStep = 2;
       await this.queryClient.invalidateQueries({
         queryKey: providerKeys.modelCatalog
@@ -415,12 +563,14 @@ export class ProviderWizardState {
       this.errorMessage = 'Enter at least one upstream model identifier.';
       return;
     }
-    await this.run('declare-models', async () => {
+    await this.run('declare-models', async (isCurrent) => {
       await declareProviderModels(provider, names);
+      if (!isCurrent()) return;
       this.clearCertificationResults();
       this.manualModelNames = '';
       resetCursor(this.wizardModelPagination);
       await this.refetchWizardModels();
+      if (!isCurrent()) return;
       this.wizardStep = 2;
       await this.queryClient.invalidateQueries({
         queryKey: providerKeys.modelCatalog
@@ -435,42 +585,52 @@ export class ProviderWizardState {
   ): Promise<boolean> => {
     const provider = this.wizardProvider;
     if (!provider) return false;
-    return this.run(`model-${modelId}`, async () => {
+    return this.run(`model-${modelId}`, async (isCurrent) => {
       await setProviderModel(
         { ...provider, etag: providerEtag },
         modelId,
         enabled,
         capabilities
       );
+      if (!isCurrent()) return;
       this.clearCertificationResults();
       await this.refetchWizardModels();
+      if (!isCurrent()) return;
       await this.queryClient.invalidateQueries({
         queryKey: providerKeys.modelCatalog
       });
+      if (!isCurrent()) return;
       await this.queryClient.invalidateQueries({ queryKey: overviewKeys.root });
+      if (!isCurrent()) return;
       this.notice = 'Capability review saved with declared provenance.';
     });
   };
   certifyWizardModel = async (modelId: string) => {
     const current = this.wizardProvider;
     if (!current) return;
-    await this.run(`certify-${modelId}`, async () => {
+    await this.run(`certify-${modelId}`, async (isCurrent) => {
       let provider = current;
       if (!certificationPrerequisiteReady(provider)) {
-        this.probe = await probeProvider(provider);
+        const { result: probe } = await probeProvider(provider);
+        if (!isCurrent()) return;
+        this.probe = probe;
         if (!this.probe.succeeded) throw new Error(this.probe.detail);
-        // The probe advances the provider ETag, so certify the refreshed record.
+        // Refresh the observation before certifying the reviewed model.
         provider = (await this.refetchWizardModels()).provider;
+        if (!isCurrent()) return;
       }
-      const result = await certifyProviderModel(provider, modelId);
+      const { result } = await certifyProviderModel(provider, modelId);
+      if (!isCurrent()) return;
       this.certificationResults = {
         ...this.certificationResults,
         [modelId]: result
       };
       await this.refetchWizardModels();
+      if (!isCurrent()) return;
       await this.queryClient.invalidateQueries({
         queryKey: providerKeys.modelCatalog
       });
+      if (!isCurrent()) return;
       this.probe = null;
       this.notice = `${result.certified_count} of ${result.attempted_count} reviewed tuples passed server certification. Test the completed draft before activation.`;
     });
@@ -478,29 +638,60 @@ export class ProviderWizardState {
   testWizardDraftForActivation = async () => {
     const provider = this.wizardProvider;
     if (!provider) return;
-    await this.run('final-probe', async () => {
-      this.probe = await probeProvider(provider);
+    await this.run('final-probe', async (isCurrent) => {
+      const { result: probe } = await probeProvider(provider);
+      if (!isCurrent()) return;
+      this.probe = probe;
       if (!this.probe.succeeded) throw new Error(this.probe.detail);
       await this.refetchWizardModels();
+      if (!isCurrent()) return;
       this.notice = `Final draft test passed: ${probeSummary(this.probe)}`;
     });
   };
   activateWizardProvider = async () => {
     const provider = this.wizardProvider;
     if (!provider) return;
-    await this.run('activate', async () => {
-      const generation = await activateProvider(provider);
+    const progress: ActivationProgress = this.activationProgress ?? {
+      input: { id: provider.id, etag: provider.etag }
+    };
+    this.activationProgress = progress;
+    await this.run('activate', async (isCurrent) => {
+      if (progress.generation === undefined) {
+        let generation: number;
+        try {
+          generation = await this.activateProviderIntent.submit(
+            progress.input,
+            (input, requestId) => activateProvider(input, requestId)
+          );
+        } catch (error) {
+          if (isCurrent()) {
+            if (this.refused(error) && !progress.ambiguous) {
+              this.activationProgress = undefined;
+              this.activateProviderIntent.reset();
+            } else if (!this.refused(error)) progress.ambiguous = true;
+          }
+          throw error;
+        }
+        if (!isCurrent()) return;
+        progress.generation = generation;
+      }
+      this.notice = `Provider activated in runtime generation ${progress.generation}.`;
       await this.refetchWizardModels();
+      if (!isCurrent()) return;
       this.wizardStep = 3;
-      this.notice = `Provider activated in runtime generation ${generation}.`;
       await Promise.all([
-        this.queryClient.invalidateQueries({
-          queryKey: providerKeys.summaries
-        }),
-        this.queryClient.invalidateQueries({
-          queryKey: providerKeys.modelCatalog
-        }),
-        this.queryClient.invalidateQueries({ queryKey: overviewKeys.root })
+        this.queryClient.invalidateQueries(
+          { queryKey: providerKeys.summaries },
+          { throwOnError: true }
+        ),
+        this.queryClient.invalidateQueries(
+          { queryKey: providerKeys.modelCatalog },
+          { throwOnError: true }
+        ),
+        this.queryClient.invalidateQueries(
+          { queryKey: overviewKeys.root },
+          { throwOnError: true }
+        )
       ]);
     });
   };
@@ -550,10 +741,41 @@ export class ProviderWizardState {
       const copy = globalThis.location
         ? new SvelteURLSearchParams(globalThis.location.search).get('copy')
         : null;
-      if (!copy || this.copyLoaded || !this.providerKinds.data) return;
+      if (!copy || this.copyLoaded || !this.draft || !this.selectedSpec) return;
       this.copyLoaded = true;
+      const isCurrent = this.captureOwner();
+      const initialDraft = this.draft;
+      const initialInput =
+        initialDraft && this.selectedSpec
+          ? stringifyNativeJSON(
+              buildCreateProviderInput(initialDraft, this.selectedSpec)
+            )
+          : null;
+      const canApplyCopy = () => {
+        if (
+          !isCurrent() ||
+          this.providerId ||
+          this.connectionProgress ||
+          this.draft !== initialDraft
+        )
+          return false;
+        try {
+          return (
+            initialInput ===
+            (this.draft && this.selectedSpec
+              ? stringifyNativeJSON(
+                  buildCreateProviderInput(this.draft, this.selectedSpec)
+                )
+              : null)
+          );
+        } catch {
+          // Editing an incomplete draft also retires the original copy result.
+          return false;
+        }
+      };
       void getProvider(copy)
         .then((source) => {
+          if (!canApplyCopy()) return;
           const spec = this.providerKinds.data?.find(
             (kind) => kind.kind === source.configuration.kind
           );
@@ -576,6 +798,7 @@ export class ProviderWizardState {
           this.draft = duplicate;
         })
         .catch((error) => {
+          if (!canApplyCopy()) return;
           this.errorMessage = message(error);
         });
     });
@@ -583,8 +806,6 @@ export class ProviderWizardState {
       void this.queryClient.cancelQueries({
         queryKey: providerKeys.modelsOf(this.providerId)
       });
-      if (this.draft) this.draft.credential = '';
-      this.grantInput = '';
     });
   }
 }

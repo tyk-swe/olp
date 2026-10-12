@@ -77,6 +77,9 @@ func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label
 	if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
 		return nil, e
 	}
+	if e := a.checkPendingCostAccounting(ctx, owner); e != nil {
+		return nil, e
+	}
 	request := limits.Request{
 		CostOwnerID:      owner,
 		CostIncreases:    increases,
@@ -148,7 +151,7 @@ func (s *Server) reserveSystemBudgets(ctx context.Context, x *execution) *Error 
 func (x *execution) admissionAuthority(authority access.Authority) access.Authority {
 	if x != nil {
 		authority.Attribution = x.attribution
-		if x.callerCostExempt() {
+		if x.actor == "api_key_resource" || x.callerCostExempt() {
 			authority = withoutCostBudgets(authority)
 		}
 	}

@@ -3,15 +3,17 @@ package management
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -46,21 +48,25 @@ func (operation Operation) Request(ctx context.Context, args Arguments) (*http.R
 		case "query":
 			knownQuery[parameter.Name] = true
 			value, ok := args.Query[parameter.Name]
-			text, _ := value.(string)
-			if parameter.Required && (!ok || value == nil || (text == "" && isString(value))) {
+			if parameter.Required && (!ok || value == nil) {
 				return nil, fmt.Errorf("missing query parameter %s", parameter.Name)
 			}
-			if ok {
-				if err := addQuery(query, parameter.Name, value); err != nil {
-					return nil, err
+			if ok && value != nil {
+				text, err := queryScalar(parameter.Type, value)
+				if err != nil {
+					return nil, fmt.Errorf("invalid query parameter %s: %w", parameter.Name, err)
 				}
+				if parameter.Required && text == "" {
+					return nil, fmt.Errorf("missing query parameter %s", parameter.Name)
+				}
+				query.Set(parameter.Name, text)
 			}
 		case "header":
 			if parameter.Required && strings.EqualFold(parameter.Name, "If-Match") && args.IfMatch == "" {
 				return nil, errors.New("If-Match is required; supply the ETag from a previous read")
 			}
 			if parameter.Required && strings.EqualFold(parameter.Name, "Idempotency-Key") && args.IdempotencyKey == "" {
-				return nil, errors.New("Idempotency-Key is required")
+				return nil, errors.New("Idempotency-Key is required; retain the same key and payload when retrying an uncertain write")
 			}
 		}
 	}
@@ -113,29 +119,53 @@ func (operation Operation) Request(ctx context.Context, args Arguments) (*http.R
 	return req, nil
 }
 
-func addQuery(query url.Values, name string, value any) error {
-	switch v := value.(type) {
-	case string:
-		query.Add(name, v)
-	case bool, float64, json.Number:
-		query.Add(name, fmt.Sprint(v))
-	case []any:
-		for _, item := range v {
-			if err := addQuery(query, name, item); err != nil {
-				return err
+// queryScalar encodes only the scalar shapes the generated registry admits.
+// Omitted optional values (including nil) never become a literal "null";
+// false and zero are values. JSON numbers and Go integers retain exact digits.
+func queryScalar(kind string, value any) (string, error) {
+	if number, ok := value.(json.Number); ok {
+		if kind != "integer" {
+			return "", errors.New("must match the declared scalar type")
+		}
+		text := string(number)
+		digits := strings.TrimPrefix(text, "-")
+		if digits == "" || len(digits) > 1 && digits[0] == '0' {
+			return "", errors.New("must be an integer")
+		}
+		for _, c := range digits {
+			if c < '0' || c > '9' {
+				return "", errors.New("must be an integer")
 			}
 		}
-	case []string:
-		for _, item := range v {
-			query.Add(name, item)
-		}
-	default:
-		return fmt.Errorf("query parameter %s must be a scalar or array of scalars", name)
+		return text, nil
 	}
-	return nil
+	v := reflect.ValueOf(value)
+	switch kind {
+	case "string":
+		if v.Kind() == reflect.String {
+			return v.String(), nil
+		}
+	case "boolean":
+		if v.Kind() == reflect.Bool {
+			return strconv.FormatBool(v.Bool()), nil
+		}
+	case "integer":
+		switch v.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return strconv.FormatInt(v.Int(), 10), nil
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			return strconv.FormatUint(v.Uint(), 10), nil
+		case reflect.Float64:
+			n := v.Float()
+			// A default JSON decoder uses float64. Refuse values whose original
+			// integer digits may already have been rounded; UseNumber preserves them.
+			if !math.IsNaN(n) && !math.IsInf(n, 0) && math.Trunc(n) == n && math.Abs(n) <= 1<<53-1 {
+				return strconv.FormatFloat(n, 'f', 0, 64), nil
+			}
+		}
+	}
+	return "", errors.New("must match the declared scalar type")
 }
-
-func isString(value any) bool { _, ok := value.(string); return ok }
 
 // Client reads the token file for each call, so operator token rotation takes
 // effect without restarting a long-lived client.
@@ -184,15 +214,10 @@ func (err *APIError) Error() string {
 	return fmt.Sprintf("management API returned %d (%s)", err.Status, err.Code)
 }
 
-// Call invokes a generated operation with a management token. A fresh mutation
-// key is generated only when the contract requires one and the caller omitted
-// it; callers retrying an uncertain write should supply the same explicit key.
+// Call invokes a generated operation with a management token. The caller owns
+// each logical mutation's explicit idempotency key and retains it across an
+// uncertain response; this transport never creates a new mutation identity.
 func (client *Client) Call(ctx context.Context, operation Operation, args Arguments) (Response, error) {
-	for _, p := range operation.Parameters {
-		if p.Required && strings.EqualFold(p.Name, "Idempotency-Key") && args.IdempotencyKey == "" {
-			args.IdempotencyKey = rand.Text()
-		}
-	}
 	req, err := operation.Request(ctx, args)
 	if err != nil {
 		return Response{}, err
@@ -229,8 +254,9 @@ func (client *Client) Call(ctx context.Context, operation Operation, args Argume
 	if len(data) > 0 && !json.Valid(data) {
 		return Response{}, errors.New("management API response must be JSON")
 	}
-	return Response{Status: resp.StatusCode, ETag: resp.Header.Get("ETag"), Body: data,
-		PreviousParentETag: resp.Header.Get("OLP-Previous-Parent-ETag"), ParentETag: resp.Header.Get("OLP-Parent-ETag")}, nil
+	metadata := operation.ResponseMetadata(resp.Header)
+	return Response{Status: resp.StatusCode, ETag: metadata["etag"], Body: data,
+		PreviousParentETag: metadata["previous_parent_etag"], ParentETag: metadata["parent_etag"]}, nil
 }
 
 // ReadTokenFile bounds file reads and rejects empty or multi-line credentials.

@@ -334,7 +334,11 @@ describe('cancellation', () => {
     flushSync();
     await vi.advanceTimersByTimeAsync(10);
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('route-0'));
-    expect(retireRoute).toHaveBeenCalledWith('route-0', 'route-etag-a');
+    expect(retireRoute).toHaveBeenCalledWith(
+      'route-0',
+      'route-etag-a',
+      expect.any(String)
+    );
     await settle();
     expect(vi.mocked(listRoutePage).mock.calls.length).toBeGreaterThan(1);
   });

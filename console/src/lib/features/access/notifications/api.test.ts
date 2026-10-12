@@ -42,11 +42,14 @@ describe('notification destinations', () => {
       jsonResponse({ ...destination, name: 'hook', url: 'https://h.example' })
     );
 
-    await createNotificationDestination({
-      name: 'hook',
-      url: 'https://h.example',
-      secret: 'signing-key'
-    });
+    await createNotificationDestination(
+      {
+        name: 'hook',
+        url: 'https://h.example',
+        secret: 'signing-key'
+      },
+      '12345678-1234-4234-8234-123456789abc'
+    );
 
     const request = requests[0]!;
     expect(request.method).toBe('POST');
@@ -85,15 +88,18 @@ describe('notification rules', () => {
       jsonResponse({ id: '01980000-0000-7000-8000-000000000701' })
     );
 
-    await createNotificationRule({
-      name: 'monthly 80',
-      event: 'budget.threshold',
-      subject_kind: 'api_key',
-      subject_id: '01980000-0000-7000-8000-000000000801',
-      window_kind: 'month',
-      threshold_percent: 80,
-      destination_id: destination.id
-    });
+    await createNotificationRule(
+      {
+        name: 'monthly 80',
+        event: 'budget.threshold',
+        subject_kind: 'api_key',
+        subject_id: '01980000-0000-7000-8000-000000000801',
+        window_kind: 'month',
+        threshold_percent: 80,
+        destination_id: destination.id
+      },
+      '12345678-1234-4234-8234-123456789abc'
+    );
 
     const request = requests[0]!;
     expect(request.method).toBe('POST');

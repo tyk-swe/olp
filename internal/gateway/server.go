@@ -614,7 +614,11 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			return
 		}
 		if x.continuation != nil && x.continuation.replay != nil {
-			status, _ = s.replayContinuation(w, x)
+			var deliveryErr error
+			status, deliveryErr = s.replayContinuation(w, x)
+			out = continuationDeliveryOutcome(deliveryErr)
+			// Replaying a committed response never starts shadow inference.
+			x.mirrors = false
 			return
 		}
 		if family == openai.FamilyResponses {

@@ -1,9 +1,13 @@
 <script lang="ts">
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/forms/mutationIntent.svelte';
+
   import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
   import { parseExternalReference } from './externalReference';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 
-  import { onDestroy } from 'svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage as providerDetailError } from '$lib/api/http';
   import { type Provider } from '$lib/features/providers/api/providers';
@@ -22,6 +26,9 @@
     requiresGrant
   } from '$lib/features/providers/providerEditor';
   import type { RunProviderAction } from './providerEditor';
+
+  const rotateProviderCredentialIntent = useMutationIntent();
+  const revokeProviderCredentialIntent = useMutationIntent();
 
   let {
     current,
@@ -51,59 +58,106 @@
   let credentialValue = $state('');
   let useExternal = $state(false);
   let externalValue = $state('');
+  let refreshPending = $state(false);
   // The store refuses a rotation on a disabled provider with the same 409 that
   // Save draft returns, so the form is locked until it is restored as a draft.
   const editingLocked = $derived(providerDisabled(current));
 
-  onDestroy(() => {
+  const captureOwner = usePrincipalLifetime(() => {
     credentialValue = '';
+    externalValue = '';
+    useExternal = false;
+    refreshPending = false;
   });
+
+  async function refreshCredentials(isCurrent: () => boolean) {
+    if (!isCurrent()) return;
+    await credentials.refetch({ throwOnError: true });
+    if (!isCurrent()) return;
+    onResetModelPage();
+    await onProviderChanged();
+    if (!isCurrent()) return;
+    await queryClient.invalidateQueries(
+      { queryKey: providerKeys.summaries },
+      { throwOnError: true }
+    );
+    if (isCurrent()) refreshPending = false;
+  }
+
+  async function retryRefresh() {
+    await run('credential-refresh', refreshCredentials);
+  }
 
   async function rotate(event: SubmitEvent) {
     event.preventDefault();
     if (
       !(useExternal ? externalValue : credentialValue) ||
       !canManage ||
-      editingLocked
+      editingLocked ||
+      refreshPending
     )
       return;
     const submittedCredential = credentialValue;
-    await run('rotate-credential', async () => {
-      await rotateProviderCredential(
-        current,
-        useExternal
-          ? parseExternalReference(externalValue)
-          : submittedCredential
+    const secretCurrent = captureOwner();
+    await run('rotate-credential', async (isCurrent) => {
+      const credential = useExternal
+        ? parseExternalReference(externalValue)
+        : submittedCredential;
+      const submission = rotateProviderCredentialIntent.prepare(
+        { providerId: current.id, credential },
+        () => [{ id: current.id, etag: current.etag }, credential] as const
       );
+      await rotateProviderCredential(...submission.input, submission.requestId);
+      if (!isCurrent() || !secretCurrent()) return;
+      rotateProviderCredentialIntent.reset();
+      refreshPending = true;
       externalValue = '';
       if (credentialValue === submittedCredential) credentialValue = '';
-      await credentials.refetch();
-      onResetModelPage();
-      await onProviderChanged();
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.summaries
-      });
       onNotice(
         'Credential version staged. Test and activate the provider to publish it; the current runtime credential remains live until then.'
       );
+      try {
+        await refreshCredentials(isCurrent);
+      } catch (cause) {
+        throw new Error('Credential staged, but refreshing failed.', { cause });
+      }
     });
   }
 
   async function revoke(credential: ProviderCredential) {
+    if (refreshPending) return;
     if (!confirm(`Revoke credential version ${credential.version}?`)) return;
-    await run(`revoke-${credential.id}`, async () => {
-      await revokeProviderCredential(current, credential.id);
-      await credentials.refetch();
-      await onProviderChanged();
-      await queryClient.invalidateQueries({
-        queryKey: providerKeys.summaries
-      });
+    await run(`revoke-${credential.id}`, async (isCurrent) => {
+      const submission = revokeProviderCredentialIntent.prepare(
+        { providerId: current.id, credentialId: credential.id },
+        () => [{ id: current.id, etag: current.etag }, credential.id] as const
+      );
+      await revokeProviderCredential(...submission.input, submission.requestId);
+      if (!isCurrent()) return;
+      revokeProviderCredentialIntent.reset();
+      refreshPending = true;
       onNotice(`Credential version ${credential.version} revoked.`);
+      try {
+        await refreshCredentials(isCurrent);
+      } catch (cause) {
+        throw new Error('Credential revoked, but refreshing failed.', {
+          cause
+        });
+      }
     });
   }
 </script>
 
 <section class="card editor" aria-labelledby="credential-heading">
+  {#if refreshPending}<p class="inline-problem" role="status">
+      The credential change succeeded. Refresh the view before another change.
+      <button
+        type="button"
+        class="button button-secondary"
+        disabled={Boolean(busy)}
+        onclick={retryRefresh}>Retry refresh</button
+      >
+    </p>{/if}
   <p class="eyebrow">Secrets</p>
   <h2 id="credential-heading">Credential versions</h2>
   <p class="muted">
@@ -135,12 +189,18 @@
         ><input
           type="checkbox"
           bind:checked={useExternal}
-          disabled={!canManage || editingLocked || Boolean(busy)}
+          disabled={!canManage ||
+            editingLocked ||
+            refreshPending ||
+            Boolean(busy)}
         />Use an external credential version</label
       >
       {#if useExternal}<ExternalReferenceEditor
           bind:value={externalValue}
-          disabled={!canManage || editingLocked || Boolean(busy)}
+          disabled={!canManage ||
+            editingLocked ||
+            refreshPending ||
+            Boolean(busy)}
         />{:else}
         <label class="sr-only" for="rotation-secret">New credential</label
         ><input
@@ -149,7 +209,10 @@
           autocomplete="new-password"
           bind:value={credentialValue}
           placeholder="New credential"
-          disabled={!canManage || editingLocked}
+          disabled={!canManage ||
+            editingLocked ||
+            refreshPending ||
+            Boolean(busy)}
         />{/if}<button
         class="button button-secondary"
         type="submit"
@@ -157,7 +220,8 @@
           !(useExternal ? externalValue : credentialValue) ||
           Boolean(busy) ||
           !providerSpec ||
-          editingLocked}
+          editingLocked ||
+          refreshPending}
         >{busy === 'rotate-credential' ? 'Staging…' : 'Stage rotation'}</button
       >
     </form>
@@ -215,7 +279,7 @@
               class="button button-secondary"
               type="button"
               onclick={() => revoke(credential)}
-              disabled={Boolean(busy)}>Revoke</button
+              disabled={Boolean(busy) || refreshPending}>Revoke</button
             >{/if}
         </li>{/each}
     </ul>{/if}

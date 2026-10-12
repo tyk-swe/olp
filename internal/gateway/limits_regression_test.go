@@ -190,3 +190,35 @@ func TestPartialUpstreamWriteIsNotRefundable(t *testing.T) {
 		t.Fatal("a request partially sent upstream was treated as undispatched")
 	}
 }
+
+func TestPartialTokenSettlementPreservesOrIncreasesTheReservation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fact AttemptFact
+		want int64
+	}{
+		{"partial below estimate", AttemptFact{Usage: &openai.Usage{InputTokens: 11, OutputTokens: 1}, UsageObserved: true, BillingUncertain: true}, 100},
+		{"partial above estimate", AttemptFact{Usage: &openai.Usage{InputTokens: 150, OutputTokens: 3}, UsageObserved: true, BillingUncertain: true}, 153},
+		{"complete observed", AttemptFact{Usage: &openai.Usage{InputTokens: 11, OutputTokens: 1}, UsageObserved: true, UsageComplete: true}, 12},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := settledAttemptTokens(&tc.fact, 100)
+			if actual == nil || *actual != tc.want {
+				t.Fatalf("target settlement=%v want%d", actual, tc.want)
+			}
+			x := execution{estimate: 100, facts: []AttemptFact{tc.fact}}
+			if got := *x.settledTokens(); got != tc.want {
+				t.Fatalf("key settlement=%d want%d", got, tc.want)
+			}
+		})
+	}
+	x := execution{estimate: 100, facts: []AttemptFact{
+		{Usage: &openai.Usage{InputTokens: 11, OutputTokens: 1}, UsageObserved: true, BillingUncertain: true},
+		{Usage: &openai.Usage{InputTokens: 150, OutputTokens: 3}, UsageObserved: true, BillingUncertain: true},
+		{Usage: &openai.Usage{InputTokens: 11, OutputTokens: 1}, UsageObserved: true, UsageComplete: true},
+		{BillingUncertain: true}, {UsageComplete: true},
+	}}
+	if got := *x.settledTokens(); got != 365 {
+		t.Fatalf("all attempts=%d want365", got)
+	}
+}

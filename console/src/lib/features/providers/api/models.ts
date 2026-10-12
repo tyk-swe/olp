@@ -30,6 +30,11 @@ export type ProviderPreset = Schemas['ProviderPresetResponse'];
 export type CapabilityCertification =
   Schemas['CapabilityCertificationResponse'];
 
+export type ProviderModelCertificationReceipt = {
+  result: CapabilityCertification;
+  etag: string;
+};
+
 export async function getProviderCapabilityOptions(
   providerKind: ProviderKind,
   signal?: AbortSignal
@@ -158,7 +163,7 @@ export async function certifyProviderModel(
   provider: Provider,
   modelId: string,
   signal?: AbortSignal
-): Promise<CapabilityCertification> {
+): Promise<ProviderModelCertificationReceipt> {
   const response = await apiClient.POST(
     '/api/v1/providers/{provider_id}/models/{model_id}/certify',
     {
@@ -169,5 +174,11 @@ export async function certifyProviderModel(
       }
     }
   );
-  return unwrap(response);
+  const result = unwrap(response);
+  const etag = response.response.headers.get('ETag');
+  if (!etag?.trim())
+    throw new Error(
+      'The certification response has no provider version. Refresh before continuing.'
+    );
+  return { result, etag };
 }

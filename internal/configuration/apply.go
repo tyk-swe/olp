@@ -166,14 +166,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			if err != nil {
 				return err
 			}
-			if err := providers.PreserveCredentialBoundary(ctx, tx, providerID, &current.Configuration, &entry.Configuration); err != nil {
-				return err
-			}
-			if !canonicalEqualProvider(entry, current) {
-				if _, err = tx.Exec(ctx, "UPDATE olp.providers SET name=$2,configuration=$3,etag=$4,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, entry.Name, configuration, access.NewID()); err != nil {
-					return err
-				}
-			} else {
+			if canonicalEqualProvider(entry, current) {
 				if err = s.bindChangedCredentials(ctx, tx, providerID, entry, existing, bindings); err != nil {
 					return err
 				}
@@ -191,7 +184,15 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 		if err != nil {
 			return err
 		}
-		if err = s.replaceDraftContents(ctx, tx, providerID, entry, resolved); err != nil {
+		draftSlots := make([]providers.DraftSlot, 0, len(resolved))
+		for _, slot := range resolved {
+			restrictions := slot.entry.Restrictions
+			restrictions.AllowedAPIKeys = slot.allowedAPIKeys
+			draftSlots = append(draftSlots, providers.DraftSlot{ID: slot.id, Default: slot.entry.IsDefault, Position: slot.entry.Position, Name: slot.entry.Name,
+				Enabled: slot.entry.Enabled, Priority: slot.entry.Priority, Weight: slot.entry.Weight, CredentialID: slot.credentialID,
+				Restrictions: restrictions, Limits: slot.entry.Limits})
+		}
+		if err = providers.StageDraftInventory(ctx, tx, providerID, entry.Models, draftSlots); err != nil {
 			return err
 		}
 		providerIDs[strings.ToLower(entry.Name)] = providerID
@@ -358,7 +359,6 @@ func (s *Server) resolveSlots(ctx context.Context, tx pgx.Tx, providerID string,
 }
 
 func (s *Server) bindChangedCredentials(ctx context.Context, tx pgx.Tx, providerID string, entry *ProviderEntry, existing *existingProvider, bindings bindingSet) error {
-	changed := false
 	for j := range entry.Slots {
 		slot := &entry.Slots[j]
 		if slot.CredentialRef == nil {
@@ -383,60 +383,7 @@ func (s *Server) bindChangedCredentials(ctx context.Context, tx pgx.Tx, provider
 		if err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, "UPDATE olp.provider_slots SET credential_id=$3 WHERE provider_id=$1 AND id=$2", providerID, current.ID, stored); err != nil {
-			return err
-		}
-		changed = true
-	}
-	if changed {
-		if _, err := tx.Exec(ctx, "UPDATE olp.providers SET slots_etag=$2,draft_dirty=true,updated_at=now() WHERE id=$1", providerID, access.NewID()); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Server) replaceDraftContents(ctx context.Context, tx pgx.Tx, providerID string, entry *ProviderEntry, resolved []resolvedSlot) error {
-	desired := make([]string, 0, len(entry.Models))
-	for _, m := range entry.Models {
-		desired = append(desired, m.UpstreamModel)
-	}
-	if _, err := tx.Exec(ctx, "UPDATE olp.provider_models SET enabled=false,capabilities='[]'::jsonb WHERE provider_id=$1 AND NOT (upstream_model = ANY($2::text[]))", providerID, desired); err != nil {
-		return err
-	}
-	for _, m := range entry.Models {
-		display := m.DisplayName
-		if display == "" {
-			display = m.UpstreamModel
-		}
-		type capability struct {
-			Operation   string  `json:"operation"`
-			Surface     string  `json:"surface"`
-			Mode        string  `json:"mode"`
-			Source      string  `json:"source"`
-			CertifiedAt *string `json:"certified_at"`
-		}
-		declared := make([]capability, 0, len(m.Capabilities))
-		for _, c := range m.Capabilities {
-			declared = append(declared, capability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: "declared"})
-		}
-		capabilities, _ := json.Marshal(declared)
-		if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,$5,$6)
-            ON CONFLICT(provider_id,upstream_model) DO UPDATE SET display_name=excluded.display_name,enabled=excluded.enabled,capabilities=excluded.capabilities`, access.NewID(), providerID, m.UpstreamModel, display, m.Enabled, capabilities); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.Exec(ctx, "DELETE FROM olp.provider_slots WHERE provider_id=$1", providerID); err != nil {
-		return err
-	}
-	for _, slot := range resolved {
-		restrictions, _ := json.Marshal(struct {
-			AllowedAPIKeys []string `json:"allowed_api_keys"`
-			AllowedModels  []string `json:"allowed_models"`
-			AllowedRoutes  []string `json:"allowed_routes"`
-		}{orEmpty(slot.allowedAPIKeys), orEmpty(slot.entry.Restrictions.AllowedModels), orEmpty(slot.entry.Restrictions.AllowedRoutes)})
-		limits, _ := json.Marshal(slot.entry.Limits)
-		if _, err := tx.Exec(ctx, "INSERT INTO olp.provider_slots(id,provider_id,is_default,position,name,enabled,priority,weight,credential_id,restrictions,limits) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", slot.id, providerID, slot.entry.IsDefault, slot.entry.Position, slot.entry.Name, slot.entry.Enabled, slot.entry.Priority, slot.entry.Weight, slot.credentialID, restrictions, limits); err != nil {
+		if err = providers.BindDraftCredential(ctx, tx, providerID, current.ID, stored); err != nil {
 			return err
 		}
 	}

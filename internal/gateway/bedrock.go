@@ -1,8 +1,8 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -17,7 +17,6 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/runtime"
-	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 func bedrockQualified(p *runtime.Provider, model, operation, mode string) bool {
@@ -178,6 +177,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 		fail(e)
 		return
 	}
+	x.completePinned()
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/json"
@@ -185,32 +185,27 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 	w.Header().Set("Content-Type", contentType)
 	x.responseHeaders(w.Header(), false)
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(result)
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+	n, writeErr := w.Write(result)
+	if writeErr == nil && n == len(result) {
+		writeErr = rc.Flush()
+	}
+	if writeErr != nil || n != len(result) {
+		x.failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The native result could not be delivered.")
+		x.facts[len(x.facts)-1].Class = classCancelled
+		s.finish(x, &outcome{err: x.failure, committed: true, cancelled: true}, 0)
+		return
+	}
 	x.delivered(s.now())
 	s.finish(x, &outcome{committed: true}, http.StatusOK)
 }
 
 func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint string, body []byte, stream bool) (*http.Response, *attemptFailure) {
-	fact := s.newFact(x, p.attempt, p.slot, len(x.facts)+1, &p.provider)
-	fact.Mode = x.mode
-	if p.hold != nil {
-		fact.Budgets = p.hold.budgets
-	}
-	finish := func(class string, f *attemptFailure) *attemptFailure {
-		if f == nil {
-			f = &attemptFailure{}
-		}
-		f.class = class
-		fact.Class = class
-		fact.Committed = f.committed
-		fact.Duration = s.now().Sub(fact.StartedAt)
-		fact.recordEvidence(true)
-		x.facts = append(x.facts, fact)
-		return f
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
+	exchange := s.beginPinned(ctx, x, p, http.MethodPost)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, finish(classConnect, nil)
+		return nil, exchange.fail(s, x, classConnect, nil)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -220,41 +215,11 @@ func (s *Server) bedrockCall(ctx context.Context, x *execution, p *pin, endpoint
 	req.Header.Set("User-Agent", "olp/gateway")
 	if err := s.applySlotCredential(ctx, x, req, p.provider.Connector(), p.slot, body, &p.provider, p.model); err != nil {
 		if ctx.Err() != nil {
-			return nil, finish(classCancelled, nil)
+			return nil, exchange.fail(s, x, classCancelled, nil)
 		}
-		return nil, finish(classCredential, nil)
+		return nil, exchange.fail(s, x, classCredential, nil)
 	}
-	client, err := s.providerClient(ctx, x.request.release, &p.provider, p.slot)
-	if err != nil {
-		return nil, finish(classCredential, nil)
-	}
-	resp, err := client.Do(req)
-	if p.hold != nil {
-		x.spendCaps(p.hold.budgets, p.attempt)
-	}
-	if err != nil {
-		class := upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Interrupted: ctx.Err(), Err: err}).Class
-		return nil, finish(string(class), &attemptFailure{dispatched: true})
-	}
-	received := s.now().Sub(fact.StartedAt)
-	fact.FirstByte = &received
-	fact.Status = resp.StatusCode
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fact.Class = "success"
-		fact.Committed = true
-		fact.Duration = s.now().Sub(fact.StartedAt)
-		fact.recordEvidence(true)
-		x.facts = append(x.facts, fact)
-		return resp, nil
-	}
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
-	resp.Body.Close()
-	f := &attemptFailure{status: resp.StatusCode, upstream: x.redacted(bedrockErrorBody(raw)), dispatched: true}
-	f.class = string(upstream.Classifier{}.Classify(upstream.Evidence{Reached: true, Status: resp.StatusCode, Error: f.upstream}).Class)
-	if f.class == classRateLimit {
-		f.retryAfter = upstream.RetryAfter(resp.Header.Get("Retry-After"), s.now())
-	}
-	return nil, finish(f.class, f)
+	return s.doPinnedRequest(ctx, x, p, exchange, req, bedrockErrorBody)
 }
 
 func bedrockErrorBody(body []byte) *openai.UpstreamError {
@@ -347,8 +312,8 @@ func (s *Server) recordBedrockUsage(x *execution, usage *openai.Usage) {
 		return
 	}
 	fact := &x.facts[len(x.facts)-1]
-	fact.Usage = usage
-	fact.UsageObserved, fact.UsageComplete, fact.BillingUncertain = true, true, false
+	fact.observeUsage(usage, true)
+	fact.recordEvidence(false)
 }
 
 func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, x *execution, p *pin, resp *http.Response) {
@@ -359,7 +324,6 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 	w.Header().Set("Content-Type", contentType)
 	x.responseHeaders(w.Header(), true)
 	w.WriteHeader(http.StatusOK)
-	x.delivered(s.now())
 	rc := http.NewResponseController(w)
 	encoder := eventstream.NewEncoder()
 	limit := int(s.cfg.MaxEventBytes)
@@ -367,205 +331,73 @@ func (s *Server) relayBedrockStream(ctx context.Context, w http.ResponseWriter, 
 		limit = 1 << 20
 	}
 	var usage *openai.Usage
-	truncated := false
+	var failure *Error
+	class := classProtocol
+	terminal, authoritativeUsage, initialUsage, finalUsage := false, false, false, false
 	for {
 		message, err := protocols.ReadBedrockEvent(resp.Body, limit)
 		if errors.Is(err, io.EOF) {
+			if !terminal {
+				failure = serverError(http.StatusBadGateway, "upstream_error", "The native stream ended without a terminal event.")
+			}
 			break
 		}
 		if err != nil {
-			truncated = true
+			failure = serverError(http.StatusBadGateway, "upstream_error", "The native stream was malformed or truncated.")
 			break
 		}
-		if u, authoritative := bedrockStreamUsage(&message); u != nil {
-			if authoritative {
-				usage = u
-			} else {
-				usage = mergeBedrockUsage(usage, u)
-			}
+		observation, err := protocols.ObserveBedrockEvent(&message, limit)
+		if err != nil {
+			failure = serverError(http.StatusBadGateway, "upstream_error", "The native stream contained an invalid event.")
+			break
 		}
+		if observed := observation.Usage; observed.Value != nil {
+			merged, err := observed.Merge(usage)
+			if err != nil {
+				failure = serverError(http.StatusBadGateway, "upstream_error", "The native stream contained invalid usage counts.")
+				break
+			}
+			usage = merged
+			authoritativeUsage = authoritativeUsage || observed.Authoritative
+			initialUsage = initialUsage || observation.Kind == "message_start" && observed.InputPresent
+			finalUsage = finalUsage || observation.Kind == "message_delta" && observed.OutputPresent
+		}
+		terminal = terminal || observation.Terminal
+		if observation.Failed {
+			if err := x.redactBedrockFailure(&message, observation); err != nil {
+				failure = serverError(http.StatusBadGateway, "upstream_error", "The native error could not be safely delivered.")
+				break
+			}
+			failure = serverError(http.StatusBadGateway, "upstream_error", "The provider terminated the native stream with an error.")
+			class = classUpstreamServer
+		}
+		// Observe completion and usage before a downstream write can fail.
+		if terminal && !observation.Failed {
+			x.completePinned()
+		}
+		_ = rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
 		if err := encoder.Encode(w, message); err != nil {
-			truncated = true
+			failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The native stream could not be delivered.")
+			class = classCancelled
 			break
 		}
 		if err := rc.Flush(); err != nil {
-			truncated = true
+			failure = serverError(http.StatusBadGateway, "client_delivery_failed", "The native stream could not be delivered.")
+			class = classCancelled
+			break
+		}
+		x.delivered(s.now())
+		if observation.Failed {
 			break
 		}
 	}
-	if usage != nil {
-		s.recordBedrockUsage(x, usage)
+	completeUsage := terminal && (authoritativeUsage || initialUsage && finalUsage)
+	fact := &x.facts[len(x.facts)-1]
+	fact.observeUsage(usage, completeUsage)
+	fact.recordEvidence(!completeUsage)
+	if failure != nil {
+		x.failure = failure
+		x.facts[len(x.facts)-1].Class = class
 	}
-	if len(x.facts) > 0 && (truncated || usage == nil) {
-		fact := &x.facts[len(x.facts)-1]
-		if truncated {
-			fact.Class = classUpstreamServer
-		}
-		fact.UsageComplete = false
-		fact.BillingUncertain = true
-	}
-	s.finish(x, &outcome{committed: true}, http.StatusOK)
-}
-
-// bedrockStreamUsage reads the token usage one Bedrock eventstream message
-// carries. Converse's metadata event and the invocation metrics on an invoke
-// stream's final chunk are authoritative totals. The Anthropic message_start
-// and message_delta usage inside an invoke chunk is partial: it merges into
-// what earlier chunks reported.
-func bedrockStreamUsage(message *eventstream.Message) (usage *openai.Usage, authoritative bool) {
-	kind := ""
-	if v := message.Headers.Get(":event-type"); v != nil {
-		kind = v.String()
-	}
-	switch kind {
-	case "metadata":
-		var wire struct {
-			Usage *struct {
-				InputTokens           int64  `json:"inputTokens"`
-				OutputTokens          int64  `json:"outputTokens"`
-				TotalTokens           *int64 `json:"totalTokens"`
-				CacheReadInputTokens  int64  `json:"cacheReadInputTokens"`
-				CacheWriteInputTokens int64  `json:"cacheWriteInputTokens"`
-			} `json:"usage"`
-		}
-		if json.Unmarshal(message.Payload, &wire) != nil || wire.Usage == nil {
-			return nil, false
-		}
-		u := wire.Usage
-		if u.TotalTokens != nil && *u.TotalTokens < 0 {
-			return nil, false
-		}
-		usage := bedrockTokenUsage(u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheWriteInputTokens)
-		if usage != nil && u.TotalTokens != nil {
-			usage.TotalTokens = max(usage.TotalTokens, *u.TotalTokens)
-		}
-		return usage, usage != nil
-	case "chunk":
-		return bedrockChunkUsage(message.Payload)
-	}
-	return nil, false
-}
-
-// bedrockTokenUsage normalizes Bedrock's split counts: inputTokens excludes
-// cache reads and writes, while input usage here includes them.
-func bedrockTokenUsage(input, output, cacheRead, cacheWrite int64) *openai.Usage {
-	if input < 0 || output < 0 || cacheRead < 0 || cacheWrite < 0 {
-		return nil
-	}
-	in := addBounded(addBounded(input, cacheRead), cacheWrite)
-	usage := &openai.Usage{InputTokens: in, OutputTokens: output, TotalTokens: addBounded(in, output)}
-	if cacheRead > 0 {
-		usage.CachedInputTokens = &cacheRead
-	}
-	if cacheWrite > 0 {
-		usage.CacheWriteInputTokens = &cacheWrite
-	}
-	return usage
-}
-
-type bedrockAnthropicUsage struct {
-	InputTokens   *int64 `json:"input_tokens"`
-	OutputTokens  *int64 `json:"output_tokens"`
-	CacheRead     *int64 `json:"cache_read_input_tokens"`
-	CacheCreation *int64 `json:"cache_creation_input_tokens"`
-}
-
-// bedrockChunkUsage decodes an InvokeModelWithResponseStream chunk, whose
-// payload wraps the model's native event as base64 bytes.
-func bedrockChunkUsage(payload []byte) (*openai.Usage, bool) {
-	var chunk struct {
-		Bytes string `json:"bytes"`
-	}
-	if json.Unmarshal(payload, &chunk) != nil || chunk.Bytes == "" {
-		return nil, false
-	}
-	decoded, err := base64.StdEncoding.DecodeString(chunk.Bytes)
-	if err != nil {
-		return nil, false
-	}
-	var event struct {
-		Type    string `json:"type"`
-		Message *struct {
-			Usage *bedrockAnthropicUsage `json:"usage"`
-		} `json:"message"`
-		Usage   *bedrockAnthropicUsage `json:"usage"`
-		Metrics *struct {
-			InputTokenCount           *int64 `json:"inputTokenCount"`
-			OutputTokenCount          *int64 `json:"outputTokenCount"`
-			CacheReadInputTokenCount  int64  `json:"cacheReadInputTokenCount"`
-			CacheWriteInputTokenCount int64  `json:"cacheWriteInputTokenCount"`
-		} `json:"amazon-bedrock-invocationMetrics"`
-	}
-	if json.Unmarshal(decoded, &event) != nil {
-		return nil, false
-	}
-	if m := event.Metrics; m != nil && m.InputTokenCount != nil && m.OutputTokenCount != nil {
-		if usage := bedrockTokenUsage(*m.InputTokenCount, *m.OutputTokenCount, m.CacheReadInputTokenCount, m.CacheWriteInputTokenCount); usage != nil {
-			return usage, true
-		}
-	}
-	var native *bedrockAnthropicUsage
-	switch event.Type {
-	case "message_start":
-		if event.Message != nil {
-			native = event.Message.Usage
-		}
-	case "message_delta":
-		native = event.Usage
-	}
-	if native == nil {
-		return nil, false
-	}
-	value := func(v *int64) int64 {
-		if v == nil {
-			return 0
-		}
-		return *v
-	}
-	for _, v := range []*int64{native.InputTokens, native.OutputTokens, native.CacheRead, native.CacheCreation} {
-		if v != nil && *v < 0 {
-			return nil, false
-		}
-	}
-	// A partial event carries only the counts it names; the merge keeps the
-	// rest from earlier events.
-	usage := &openai.Usage{OutputTokens: value(native.OutputTokens)}
-	if native.InputTokens != nil {
-		usage.InputTokens = addBounded(addBounded(*native.InputTokens, value(native.CacheRead)), value(native.CacheCreation))
-	}
-	if native.CacheRead != nil {
-		read := *native.CacheRead
-		usage.CachedInputTokens = &read
-	}
-	if native.CacheCreation != nil {
-		write := *native.CacheCreation
-		usage.CacheWriteInputTokens = &write
-	}
-	return usage, false
-}
-
-// mergeBedrockUsage folds a partial Anthropic usage event into the usage seen
-// so far: input and cache counts come from message_start, and the cumulative
-// output count from the latest message_delta.
-func mergeBedrockUsage(prev, next *openai.Usage) *openai.Usage {
-	if prev == nil {
-		merged := *next
-		merged.TotalTokens = addBounded(merged.InputTokens, merged.OutputTokens)
-		return &merged
-	}
-	merged := *prev
-	if next.InputTokens != 0 {
-		merged.InputTokens = next.InputTokens
-	}
-	if next.OutputTokens != 0 {
-		merged.OutputTokens = next.OutputTokens
-	}
-	if next.CachedInputTokens != nil {
-		merged.CachedInputTokens = next.CachedInputTokens
-	}
-	if next.CacheWriteInputTokens != nil {
-		merged.CacheWriteInputTokens = next.CacheWriteInputTokens
-	}
-	merged.TotalTokens = addBounded(merged.InputTokens, merged.OutputTokens)
-	return &merged
+	s.finish(x, &outcome{committed: true, err: failure, cancelled: class == classCancelled}, http.StatusOK)
 }

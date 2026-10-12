@@ -178,7 +178,7 @@ func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 	var etag string
 	var projectID *string
 	var data []byte
-	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text,jsonb_build_object('limit_template',limit_template,'requests_per_minute',requests_per_minute,'tokens_per_minute',tokens_per_minute,'max_concurrency',max_concurrency,'name',name,'daily_cost_limit',daily_cost_limit::text,'monthly_cost_limit',monthly_cost_limit::text,'weekly_cost_limit',weekly_cost_limit::text) FROM olp.budget_groups WHERE id=$1", id).Scan(&etag, &projectID, &data); err != nil {
+	if err = tx.QueryRow(r.Context(), "SELECT etag::text,project_id::text,jsonb_build_object('limit_template',limit_template,'requests_per_minute',requests_per_minute,'tokens_per_minute',tokens_per_minute,'max_concurrency',max_concurrency,'name',name,'daily_cost_limit',daily_cost_limit::text,'monthly_cost_limit',monthly_cost_limit::text,'weekly_cost_limit',weekly_cost_limit::text) FROM olp.budget_groups WHERE id=$1 AND retired_at IS NULL", id).Scan(&etag, &projectID, &data); err != nil {
 		return Reply{}, err
 	}
 	if err := p.Project(projectID, Change); err != nil {
@@ -224,7 +224,7 @@ func checkBudgetGroup(ctx context.Context, q Queryer, groupID, projectID *string
 		return nil
 	}
 	var groupProject *string
-	if err := q.QueryRow(ctx, "SELECT project_id::text FROM olp.budget_groups WHERE id=$1", *groupID).Scan(&groupProject); err != nil {
+	if err := q.QueryRow(ctx, "SELECT project_id::text FROM olp.budget_groups WHERE id=$1 AND retired_at IS NULL", *groupID).Scan(&groupProject); err != nil {
 		return err
 	}
 	if (groupProject == nil) != (projectID == nil) || (groupProject != nil && *groupProject != *projectID) {
