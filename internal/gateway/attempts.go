@@ -44,6 +44,9 @@ func runAttempts[Result any](ctx context.Context, s *Server, x *execution, adapt
 	for {
 		out, conditions := runRoute(ctx, s, x, adapter)
 		if len(conditions) == 0 || !s.fallBack(ctx, x, conditions) {
+			if x.costExcluded && out.err != nil && out.err.Status >= 500 {
+				return attemptOutcome[Result]{err: costLimitExceeded()}
+			}
 			return out
 		}
 		if e := s.reserveFallbackCost(ctx, x); e != nil {

@@ -139,6 +139,10 @@ func (s *Server) selectPinSurface(ctx context.Context, x *execution, route *runt
 		return nil, requestError(err)
 	}
 	if len(plan.Attempts) == 0 {
+		x.noteCostExceeded(plan)
+		if x.costExcluded {
+			return nil, costLimitExceeded()
+		}
 		return nil, selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}
 	attempt := plan.Attempts[0]

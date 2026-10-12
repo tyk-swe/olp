@@ -489,15 +489,22 @@ func requestError(err error) *Error {
 	return invalidRequest("invalid_request", err.Error(), nil)
 }
 
-// costLimitExceeded reports whether the plan's only blocker was a maximum cost
-// ceiling, so the caller can reject with 400 rather than route-unavailable.
-func costLimitExceeded(plan runtime.Plan) *Error {
+// noteCostExceeded remembers that a leg this request planned excluded a
+// non-shadow target for its maximum cost; when nothing serves, the refusal is
+// 400 cost_limit_exceeded rather than route-unavailable.
+func (x *execution) noteCostExceeded(plan runtime.Plan) {
 	for index := range plan.Decisions {
 		if plan.Decisions[index].Reason != nil && *plan.Decisions[index].Reason == "cost_limit_exceeded" && !plan.Decisions[index].Shadow {
-			return invalidRequest("cost_limit_exceeded", "Every candidate exceeds the request's maximum cost.", func() *string { p := "max_cost"; return &p }())
+			x.costExcluded = true
+			return
 		}
 	}
-	return nil
+}
+
+// costLimitExceeded is the refusal a request ends on when a leg it planned
+// excluded a non-shadow target for its maximum cost.
+func costLimitExceeded() *Error {
+	return invalidRequest("cost_limit_exceeded", "Every candidate exceeds the request's maximum cost.", func() *string { p := "max_cost"; return &p }())
 }
 
 func selectionError(err error, model string) *Error {
@@ -903,8 +910,9 @@ func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
 				}
 			}
 		}
-		if exceeded := costLimitExceeded(plan); exceeded != nil {
-			return exceeded
+		x.noteCostExceeded(plan)
+		if x.costExcluded {
+			return costLimitExceeded()
 		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}

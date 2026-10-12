@@ -360,8 +360,9 @@ func (s *Server) planMedia(ctx context.Context, x *execution) *Error {
 		if semantic != nil {
 			return requestError(semantic)
 		}
-		if exceeded := costLimitExceeded(plan); exceeded != nil {
-			return exceeded
+		x.noteCostExceeded(plan)
+		if x.costExcluded {
+			return costLimitExceeded()
 		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}

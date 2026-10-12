@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -280,4 +281,62 @@ func glSeedCommitted(t *testing.T, limiter *limits.Limiter) (f struct {
 	})
 	f.h, f.secret = h, key["secret"].(string)
 	return f
+}
+
+// A fallback leg plans with the same ceiling: when the named route's targets
+// fail retryably and the fallback route's only target exceeds max_cost, the
+// request refuses 400 cost_limit_exceeded rather than its upstream failure.
+func TestMaxCostOnFallbackLeg(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	generation := []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}
+	// The fallback route's target is priced high; the primary is priced low
+	// enough to plan but will fail in dispatch.
+	backupFixture := newOpenAIFixture(t, "")
+	backup := "backup-" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
+	_, backupProvider, _, _ := provisionOpenAIInProject(t, h, owner, nil, backupFixture.URL, generation, []string{"generation"},
+		map[string]any{"slug": backup})
+	endpoint, broken := flakyUpstream(t)
+	primaryProvider := activeAzureProvider(t, h, owner, "Flaky primary", endpoint, generation)
+	primary := "primary-" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+		"slug": primary, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 3,
+		"fidelity":  map[string]any{"mode": "transformed"},
+		"targets":   []any{map[string]any{"provider_id": primaryProvider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}},
+		"fallbacks": []any{map[string]any{"route": backup, "on": []string{"exhausted"}}},
+	}, idem("primary-draft"), 201)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("primary-activate")), 200)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+		"name": "fallback caller", "scopes": []string{"inference"}, "allowed_routes": []string{primary, backup},
+	}, idem("fallback-key"), 201)
+	// Cheap on the primary, expensive on the fallback target.
+	h.want(owner, "POST", "/api/v1/pricing/revisions", map[string]any{"effective_at": time.Now().UTC().Format(time.RFC3339Nano), "prices": []any{
+		map[string]any{"provider_kind": "azure_openai", "provider_id": primaryProvider["id"], "model": vendorModel, "operation": "generation", "currency": "USD", "input_per_million": "1", "output_per_million": "1"},
+		map[string]any{"provider_kind": "azure_openai", "provider_id": backupProvider["id"], "model": vendorModel, "operation": "generation", "currency": "USD", "input_per_million": "1000000", "output_per_million": "1000000"},
+	}}, idem("fallback-prices"), 201)
+	h.refresh()
+	glEventually(t, "the price lists to reach the gateway", func() bool {
+		h.refresh()
+		inputs := h.Runtime.RoutingInputs()
+		return inputs != nil && len(inputs.Prices) >= 2
+	})
+	broken.Store(true)
+
+	body, _ := json.Marshal(map[string]any{"model": primary, "messages": []any{map[string]string{"role": "user", "content": "hi"}}, "max_tokens": 16})
+	req, err := http.NewRequestWithContext(t.Context(), "POST", h.HTTP.URL+"/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+key["secret"].(string))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-OLP-Routing", `{"max_cost":"0.01"}`)
+	reply, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(reply.Body)
+	reply.Body.Close()
+	if reply.StatusCode != 400 || !strings.Contains(string(data), "cost_limit_exceeded") {
+		t.Fatalf("fallback leg: %d %s", reply.StatusCode, data)
+	}
 }
