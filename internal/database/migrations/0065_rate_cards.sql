@@ -145,7 +145,8 @@ BEGIN
     'image_input_tokens',sum(f.image_input_tokens),'cached_image_input_tokens',sum(f.cached_image_input_tokens),
     'image_output_tokens',sum(f.image_output_tokens),
     'media_units',sum(f.media_units)::text,'estimated_cost',sum(f.estimated_cost)::text,'currency',f.currency,
-    'commitment_weight',sum(f.commitment_weight)::text,'charge',sum(f.charge)::text,
+    'commitment_weight',sum(f.commitment_weight)::text) ||
+   jsonb_build_object('charge',sum(f.charge)::text,
     'uncharged_attempt_count',count(*) FILTER(WHERE f.charge_status<>'not_billable' AND f.charge IS NULL),
     'estimated_input_tokens',sum(CASE WHEN f.usage_observed AND f.input_tokens IS NOT NULL AND f.estimated_input_tokens IS NOT NULL THEN f.estimated_input_tokens ELSE 0 END)::text,
     'estimate_reported_input_tokens',sum(CASE WHEN f.usage_observed AND f.input_tokens IS NOT NULL AND f.estimated_input_tokens IS NOT NULL THEN f.input_tokens ELSE 0 END)::text,
