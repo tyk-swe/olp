@@ -1,0 +1,42 @@
+{
+  "api_version": "openllmproxy.dev/catalog/v2",
+  "published_at": "2026-10-05T12:00:00Z",
+  "currency": "USD",
+  "estimation": [],
+  "vendors": [
+    {
+      "id": "example",
+      "name": "Example",
+      "models": [
+        {
+          "id": "example",
+          "input_modalities": ["text"],
+          "output_modalities": ["text"],
+          "capabilities": {},
+          "prices": [
+            {
+              "operation": "generation",
+              "input_per_million": "1",
+              "windows": {
+                "time_zone": "UTC",
+                "periods": [
+                  {"days": [1], "start": "09:00", "end": "17:00", "multiplier": "0.5"},
+                  {"days": [1], "start": "12:00", "end": "24:00", "multiplier": "2"}
+                ]
+              },
+              "unrepresentable": [],
+              "provenance": {
+                "source_url": "https://example.test/pricing",
+                "observed_at": "2026-10-05T11:00:00Z"
+              }
+            }
+          ],
+          "provenance": {
+            "source_url": "https://example.test/models",
+            "observed_at": "2026-10-05T11:00:00Z"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -95,4 +95,14 @@ func TestGeminiMediaModalityShares(t *testing.T) {
 		usage.ImageOutputTokens == nil || *usage.ImageOutputTokens != 4 {
 		t.Fatalf("usage %+v", usage)
 	}
+	// Without modality detail every output token stays text.
+	var plain geminiResult
+	if err := json.Unmarshal([]byte(`{"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":4,"totalTokenCount":14}}`), &plain); err != nil {
+		t.Fatal(err)
+	}
+	usage = plain.tokens()
+	if usage == nil || usage.ImageOutputTokens != nil || usage.AudioOutputTokens != nil ||
+		usage.OutputTokens != 4 {
+		t.Fatalf("usage %+v", usage)
+	}
 }

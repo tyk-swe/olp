@@ -4013,12 +4013,10 @@ type AttemptResponse struct {
 	// CommitmentAmount The commitment amount the attempt's provider owes per period.
 	CommitmentAmount nullable.Nullable[string] `json:"commitment_amount,omitempty"`
 
-	// CommitmentPeriod The UTC calendar period the commitment amount covers, when
-	// the attempt's provider is committed.
+	// CommitmentPeriod The UTC calendar period the commitment amount covers, when the attempt's provider is committed.
 	CommitmentPeriod nullable.Nullable[string] `json:"commitment_period,omitempty"`
 
-	// CommitmentWeight The list-cost weight the committed attempt divides its
-	// commitment period's amount by.
+	// CommitmentWeight The list-cost weight the committed attempt divides its commitment period's amount by.
 	CommitmentWeight  nullable.Nullable[string]    `json:"commitment_weight,omitempty"`
 	Committed         bool                         `json:"committed"`
 	CompletedAt       nullable.Nullable[time.Time] `json:"completed_at,omitempty"`
@@ -4874,9 +4872,7 @@ type CodeTokenWindowsList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
-// Commitment Provisioned capacity the connection pays for: attempts bill at zero
-// marginal cost and share the amount across each UTC calendar period by
-// list-cost weight.
+// Commitment Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.
 type Commitment struct {
 	// Amount The commitment amount, a positive decimal string.
 	Amount string `json:"amount"`
@@ -5022,37 +5018,30 @@ type ConfigurationPlanResponse struct {
 
 // ConfigurationPriceEntry defines model for ConfigurationPriceEntry.
 type ConfigurationPriceEntry struct {
-	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio
-	// input at the input rate.
+	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.
 	AudioInputPerMillion nullable.Nullable[string] `json:"audio_input_per_million"`
 
-	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it
-	// at the output rate.
+	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it at the output rate.
 	AudioOutputPerMillion nullable.Nullable[string] `json:"audio_output_per_million"`
 
-	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as
-	// batch. Usage marked batch with no multiplier is unpriced.
+	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.
 	BatchMultiplier             nullable.Nullable[string] `json:"batch_multiplier"`
 	CacheWrite1hInputPerMillion nullable.Nullable[string] `json:"cache_write_1h_input_per_million"`
 	CacheWrite5mInputPerMillion nullable.Nullable[string] `json:"cache_write_5m_input_per_million"`
 	CacheWriteInputPerMillion   nullable.Nullable[string] `json:"cache_write_input_per_million"`
 
-	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill
-	// it at the cached input rate, then the input rate.
+	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.
 	CachedAudioInputPerMillion nullable.Nullable[string] `json:"cached_audio_input_per_million"`
 
-	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill
-	// it at the cached input rate, then the input rate.
+	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.
 	CachedImageInputPerMillion nullable.Nullable[string] `json:"cached_image_input_per_million"`
 	CachedInputPerMillion      nullable.Nullable[string] `json:"cached_input_per_million"`
 	Currency                   string                    `json:"currency"`
 
-	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image
-	// input at the input rate.
+	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image input at the input rate.
 	ImageInputPerMillion nullable.Nullable[string] `json:"image_input_per_million"`
 
-	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it
-	// at the output rate.
+	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it at the output rate.
 	ImageOutputPerMillion nullable.Nullable[string] `json:"image_output_per_million"`
 	InputPerMillion       nullable.Nullable[string] `json:"input_per_million"`
 	Model                 string                    `json:"model"`
@@ -5066,8 +5055,7 @@ type ConfigurationPriceEntry struct {
 	Provider     nullable.Nullable[string] `json:"provider"`
 	ProviderKind string                    `json:"provider_kind"`
 
-	// Tiers Input-token tiers, ascending by above_input_tokens. The highest
-	// exceeded tier replaces the entry's per-million rate set.
+	// Tiers Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.
 	Tiers     nullable.Nullable[[]PriceTier]    `json:"tiers"`
 	ToolCalls nullable.Nullable[PriceToolCalls] `json:"tool_calls"`
 	UnitPrice nullable.Nullable[string]         `json:"unit_price"`
@@ -5356,8 +5344,10 @@ type ConnectionLimits struct {
 // ConnectionOptions defines model for ConnectionOptions.
 type ConnectionOptions struct {
 	// Bindings Serving bindings keyed by configured upstream model.
-	Bindings   *map[string]ProviderServingBinding `json:"bindings,omitempty"`
-	Commitment nullable.Nullable[Commitment]      `json:"commitment,omitempty"`
+	Bindings *map[string]ProviderServingBinding `json:"bindings,omitempty"`
+
+	// Commitment Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.
+	Commitment *Commitment `json:"commitment,omitempty"`
 
 	// CredentialHeaders Header names whose values are supplied in the encrypted credential JSON.
 	CredentialHeaders *[]string                           `json:"credential_headers,omitempty"`
@@ -7389,16 +7379,13 @@ type PriceOperation = string
 
 // PriceRequest defines model for PriceRequest.
 type PriceRequest struct {
-	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio
-	// input at the input rate.
+	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.
 	AudioInputPerMillion nullable.Nullable[string] `json:"audio_input_per_million,omitempty"`
 
-	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it
-	// at the output rate.
+	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it at the output rate.
 	AudioOutputPerMillion nullable.Nullable[string] `json:"audio_output_per_million,omitempty"`
 
-	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as
-	// batch. Usage marked batch with no multiplier is unpriced.
+	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.
 	BatchMultiplier nullable.Nullable[string] `json:"batch_multiplier,omitempty"`
 
 	// CacheWrite1hInputPerMillion Rate for the 1-hour TTL share of cache writes. Omit to bill
@@ -7413,12 +7400,10 @@ type PriceRequest struct {
 	// Omit to bill cache writes at the full input rate.
 	CacheWriteInputPerMillion nullable.Nullable[string] `json:"cache_write_input_per_million,omitempty"`
 
-	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill
-	// it at the cached input rate, then the input rate.
+	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.
 	CachedAudioInputPerMillion nullable.Nullable[string] `json:"cached_audio_input_per_million,omitempty"`
 
-	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill
-	// it at the cached input rate, then the input rate.
+	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.
 	CachedImageInputPerMillion nullable.Nullable[string] `json:"cached_image_input_per_million,omitempty"`
 
 	// CachedInputPerMillion Rate for the cached share of the input tokens. Omit to bill cached
@@ -7426,12 +7411,10 @@ type PriceRequest struct {
 	CachedInputPerMillion nullable.Nullable[string] `json:"cached_input_per_million,omitempty"`
 	Currency              string                    `json:"currency"`
 
-	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image
-	// input at the input rate.
+	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image input at the input rate.
 	ImageInputPerMillion nullable.Nullable[string] `json:"image_input_per_million,omitempty"`
 
-	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it
-	// at the output rate.
+	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it at the output rate.
 	ImageOutputPerMillion nullable.Nullable[string] `json:"image_output_per_million,omitempty"`
 	InputPerMillion       nullable.Nullable[string] `json:"input_per_million,omitempty"`
 	Model                 string                    `json:"model"`
@@ -7449,8 +7432,7 @@ type PriceRequest struct {
 	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 	ProviderKind ProviderKind `json:"provider_kind"`
 
-	// Tiers Input-token tiers, ascending by above_input_tokens. The highest
-	// exceeded tier replaces the entry's per-million rate set.
+	// Tiers Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.
 	Tiers     nullable.Nullable[[]PriceTier]    `json:"tiers,omitempty"`
 	ToolCalls nullable.Nullable[PriceToolCalls] `json:"tool_calls,omitempty"`
 	UnitPrice nullable.Nullable[string]         `json:"unit_price,omitempty"`
@@ -7460,16 +7442,13 @@ type PriceRequest struct {
 
 // PriceResponse defines model for PriceResponse.
 type PriceResponse struct {
-	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio
-	// input at the input rate.
+	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.
 	AudioInputPerMillion nullable.Nullable[string] `json:"audio_input_per_million,omitempty"`
 
-	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it
-	// at the output rate.
+	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it at the output rate.
 	AudioOutputPerMillion nullable.Nullable[string] `json:"audio_output_per_million,omitempty"`
 
-	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as
-	// batch. Usage marked batch with no multiplier is unpriced.
+	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.
 	BatchMultiplier nullable.Nullable[string] `json:"batch_multiplier,omitempty"`
 
 	// CacheWrite1hInputPerMillion Rate for the 1-hour TTL share of cache writes. Omit to bill
@@ -7484,12 +7463,10 @@ type PriceResponse struct {
 	// Omit to bill cache writes at the full input rate.
 	CacheWriteInputPerMillion nullable.Nullable[string] `json:"cache_write_input_per_million,omitempty"`
 
-	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill
-	// it at the cached input rate, then the input rate.
+	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.
 	CachedAudioInputPerMillion nullable.Nullable[string] `json:"cached_audio_input_per_million,omitempty"`
 
-	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill
-	// it at the cached input rate, then the input rate.
+	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.
 	CachedImageInputPerMillion nullable.Nullable[string] `json:"cached_image_input_per_million,omitempty"`
 
 	// CachedInputPerMillion Rate for the cached share of the input tokens. Omit to bill cached
@@ -7497,12 +7474,10 @@ type PriceResponse struct {
 	CachedInputPerMillion nullable.Nullable[string] `json:"cached_input_per_million,omitempty"`
 	Currency              string                    `json:"currency"`
 
-	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image
-	// input at the input rate.
+	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image input at the input rate.
 	ImageInputPerMillion nullable.Nullable[string] `json:"image_input_per_million,omitempty"`
 
-	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it
-	// at the output rate.
+	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it at the output rate.
 	ImageOutputPerMillion nullable.Nullable[string] `json:"image_output_per_million,omitempty"`
 	InputPerMillion       nullable.Nullable[string] `json:"input_per_million,omitempty"`
 	Model                 string                    `json:"model"`
@@ -7516,8 +7491,7 @@ type PriceResponse struct {
 	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
 	ProviderKind ProviderKind `json:"provider_kind"`
 
-	// Tiers Input-token tiers, ascending by above_input_tokens. The highest
-	// exceeded tier replaces the entry's per-million rate set.
+	// Tiers Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.
 	Tiers     nullable.Nullable[[]PriceTier]    `json:"tiers,omitempty"`
 	ToolCalls nullable.Nullable[PriceToolCalls] `json:"tool_calls,omitempty"`
 	UnitPrice nullable.Nullable[string]         `json:"unit_price,omitempty"`
@@ -7525,9 +7499,7 @@ type PriceResponse struct {
 	Windows   nullable.Nullable[PriceWindows]   `json:"windows,omitempty"`
 }
 
-// PriceTier Per-million rates that apply once an attempt's input tokens exceed
-// above_input_tokens. A tier replaces the entry's whole per-million rate set,
-// so it names exactly the per-million fields the entry names.
+// PriceTier Per-million rates that apply once an attempt's input tokens exceed above_input_tokens. A tier replaces the entry's whole per-million rate set, so it names exactly the per-million fields the entry names.
 type PriceTier struct {
 	// AboveInputTokens Input tokens per attempt above which this tier's rates apply.
 	AboveInputTokens int64 `json:"above_input_tokens"`
@@ -7587,8 +7559,7 @@ type PriceWindowPeriod struct {
 	Start string `json:"start"`
 }
 
-// PriceWindows Time-of-day and day-of-week multipliers evaluated in the named zone
-// at the attempt's start.
+// PriceWindows Time-of-day and day-of-week multipliers evaluated in the named zone at the attempt's start.
 type PriceWindows struct {
 	Periods []PriceWindowPeriod `json:"periods"`
 
@@ -9300,37 +9271,30 @@ type RoutingPreferences struct {
 
 // RoutingPrice defines model for RoutingPrice.
 type RoutingPrice struct {
-	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio
-	// input at the input rate.
+	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.
 	AudioInputPerMillion nullable.Nullable[string] `json:"audio_input_per_million,omitempty"`
 
-	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it
-	// at the output rate.
+	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it at the output rate.
 	AudioOutputPerMillion nullable.Nullable[string] `json:"audio_output_per_million,omitempty"`
 
-	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as
-	// batch. Usage marked batch with no multiplier is unpriced.
+	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.
 	BatchMultiplier             nullable.Nullable[string] `json:"batch_multiplier,omitempty"`
 	CacheWrite1hInputPerMillion nullable.Nullable[string] `json:"cache_write_1h_input_per_million,omitempty"`
 	CacheWrite5mInputPerMillion nullable.Nullable[string] `json:"cache_write_5m_input_per_million,omitempty"`
 	CacheWriteInputPerMillion   nullable.Nullable[string] `json:"cache_write_input_per_million,omitempty"`
 
-	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill
-	// it at the cached input rate, then the input rate.
+	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.
 	CachedAudioInputPerMillion nullable.Nullable[string] `json:"cached_audio_input_per_million,omitempty"`
 
-	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill
-	// it at the cached input rate, then the input rate.
+	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.
 	CachedImageInputPerMillion nullable.Nullable[string] `json:"cached_image_input_per_million,omitempty"`
 	Currency                   string                    `json:"currency"`
 	EffectiveAt                time.Time                 `json:"effective_at"`
 
-	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image
-	// input at the input rate.
+	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image input at the input rate.
 	ImageInputPerMillion nullable.Nullable[string] `json:"image_input_per_million,omitempty"`
 
-	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it
-	// at the output rate.
+	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it at the output rate.
 	ImageOutputPerMillion nullable.Nullable[string] `json:"image_output_per_million,omitempty"`
 	InputPerMillion       nullable.Nullable[string] `json:"input_per_million,omitempty"`
 	Model                 string                    `json:"model"`
@@ -9344,8 +9308,7 @@ type RoutingPrice struct {
 	RevisionId    openapi_types.UUID        `json:"revision_id"`
 	ScopePriority int32                     `json:"scope_priority"`
 
-	// Tiers Input-token tiers, ascending by above_input_tokens. The highest
-	// exceeded tier replaces the entry's per-million rate set.
+	// Tiers Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.
 	Tiers     nullable.Nullable[[]PriceTier]    `json:"tiers,omitempty"`
 	ToolCalls nullable.Nullable[PriceToolCalls] `json:"tool_calls,omitempty"`
 	UnitPrice nullable.Nullable[string]         `json:"unit_price,omitempty"`
@@ -10323,8 +10286,7 @@ type UpdateUserRoleRequestAccessScope string
 
 // UsageBreakdownItem defines model for UsageBreakdownItem.
 type UsageBreakdownItem struct {
-	// AllocatedCommitment This row's share of the commitment amounts its committed
-	// attempts divide by list-cost weight, an exact decimal string.
+	// AllocatedCommitment This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.
 	AllocatedCommitment     string                    `json:"allocated_commitment"`
 	AudioInputTokens        string                    `json:"audio_input_tokens"`
 	AudioOutputTokens       string                    `json:"audio_output_tokens"`
@@ -10379,8 +10341,7 @@ type UsageCompletenessResponse struct {
 
 // UsagePointResponse defines model for UsagePointResponse.
 type UsagePointResponse struct {
-	// AllocatedCommitment This row's share of the commitment amounts its committed
-	// attempts divide by list-cost weight, an exact decimal string.
+	// AllocatedCommitment This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.
 	AllocatedCommitment     string                    `json:"allocated_commitment"`
 	AudioInputTokens        string                    `json:"audio_input_tokens"`
 	AudioOutputTokens       string                    `json:"audio_output_tokens"`
@@ -10421,8 +10382,7 @@ type UsageRangeCoverageResponse struct {
 
 // UsageSummaryResponse defines model for UsageSummaryResponse.
 type UsageSummaryResponse struct {
-	// AllocatedCommitment This row's share of the commitment amounts its committed
-	// attempts divide by list-cost weight, an exact decimal string.
+	// AllocatedCommitment This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.
 	AllocatedCommitment     string                     `json:"allocated_commitment"`
 	AudioInputTokens        string                     `json:"audio_input_tokens"`
 	AudioOutputTokens       string                     `json:"audio_output_tokens"`

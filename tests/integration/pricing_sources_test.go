@@ -252,9 +252,18 @@ func catalogFor(t *testing.T, published time.Time, input string) []byte {
 	t.Helper()
 	provenance := catalog.Provenance{SourceURL: "https://example.test/pricing", ObservedAt: published}
 	rate, output := catalog.Decimal(input), catalog.Decimal("15")
+	toolFee := catalog.Decimal("0.01")
+	batch := catalog.Decimal("0.5")
+	window := catalog.Decimal("0.75")
 	document, err := catalog.Encode(&catalog.Catalog{APIVersion: catalog.APIVersion, PublishedAt: published, Currency: "USD", Vendors: []catalog.Vendor{{ID: "anthropic", Name: "Anthropic", Models: []catalog.Model{{
 		ID: "claude-catalog", Aliases: []string{"claude-catalog-20261001"}, InputModalities: []string{"text"}, OutputModalities: []string{"text"}, Provenance: provenance,
-		Prices: []catalog.Price{{Operation: "generation", InputPerMillion: &rate, OutputPerMillion: &output, Unrepresentable: []catalog.Unrepresentable{{Component: "batch_multiplier", Detail: "Batch is half price."}}, Provenance: provenance}},
+		Prices: []catalog.Price{{
+			Operation: "generation", InputPerMillion: &rate, OutputPerMillion: &output,
+			ToolCalls: map[string]catalog.Decimal{"web_search": toolFee}, BatchMultiplier: &batch,
+			Tiers:           []catalog.Tier{{AboveInputTokens: 100000, InputPerMillion: &rate, OutputPerMillion: &output}},
+			Windows:         &catalog.Windows{TimeZone: "UTC", Periods: []catalog.WindowPeriod{{Days: []int{6, 7}, Start: "00:00", End: "24:00", Multiplier: window}}},
+			Unrepresentable: []catalog.Unrepresentable{{Component: "service_tier", Detail: "A priority tier is billed at 1.5x."}},
+			Provenance:      provenance}},
 	}}}}})
 	if err != nil {
 		t.Fatal(err)
@@ -312,6 +321,20 @@ func TestCatalogPricingSourceLifecycle(t *testing.T) {
 	}
 	if unrepresentable := snapshot["document"].(map[string]any)["unrepresentable"].([]any); len(unrepresentable) != 1 {
 		t.Fatalf("unrepresentable = %v", unrepresentable)
+	}
+	// A catalog snapshot carries every price component it lists.
+	prices := snapshot["document"].(map[string]any)["prices"].([]any)
+	if len(prices) != 2 {
+		t.Fatalf("snapshot prices = %v", prices)
+	}
+	price := prices[0].(map[string]any)
+	tiers, _ := price["tiers"].([]any)
+	windows, _ := price["windows"].(map[string]any)
+	if len(tiers) != 1 || tiers[0].(map[string]any)["above_input_tokens"] != float64(100000) ||
+		price["tool_calls"].(map[string]any)["web_search"] != "0.01" ||
+		price["batch_multiplier"] != "0.5" ||
+		windows["time_zone"] != "UTC" {
+		t.Fatalf("snapshot price = %v", price)
 	}
 
 	tampered := catalogFor(t, october.Add(time.Hour), "0.3")

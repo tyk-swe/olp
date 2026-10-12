@@ -71,7 +71,12 @@ func catalogDocument(c *catalog.Catalog, vendorKind func(string) (string, bool))
 						VendorID: &vendor.ID, ProviderKind: kind, Model: name, Operation: listed.Operation, Currency: c.Currency,
 						InputPerMillion: catalogRate(listed.InputPerMillion), CachedInputPerMillion: catalogRate(listed.CachedInputPerMillion),
 						CacheWriteInputPerMillion: catalogRate(listed.CacheWriteInputPerMillion), CacheWrite5MInputPerMillion: catalogRate(listed.CacheWrite5MInputPerMillion),
-						CacheWrite1HInputPerMillion: catalogRate(listed.CacheWrite1HInputPerMillion), OutputPerMillion: catalogRate(listed.OutputPerMillion), UnitPrice: catalogRate(listed.UnitPrice),
+						CacheWrite1HInputPerMillion: catalogRate(listed.CacheWrite1HInputPerMillion), OutputPerMillion: catalogRate(listed.OutputPerMillion),
+						AudioInputPerMillion: catalogRate(listed.AudioInputPerMillion), CachedAudioInputPerMillion: catalogRate(listed.CachedAudioInputPerMillion),
+						AudioOutputPerMillion: catalogRate(listed.AudioOutputPerMillion), ImageInputPerMillion: catalogRate(listed.ImageInputPerMillion),
+						CachedImageInputPerMillion: catalogRate(listed.CachedImageInputPerMillion), ImageOutputPerMillion: catalogRate(listed.ImageOutputPerMillion),
+						UnitPrice: catalogRate(listed.UnitPrice), PerRequest: catalogRate(listed.PerRequest), BatchMultiplier: catalogRate(listed.BatchMultiplier),
+						ToolCalls: catalogToolCalls(listed.ToolCalls), Tiers: catalogTiers(listed.Tiers), Windows: catalogWindows(listed.Windows),
 					})
 				}
 			}
@@ -89,6 +94,53 @@ func catalogRate(d *catalog.Decimal) *string {
 	}
 	value := d.String()
 	return &value
+}
+
+func catalogToolCalls(fees map[string]catalog.Decimal) map[string]string {
+	if len(fees) == 0 {
+		return nil
+	}
+	calls := make(map[string]string, len(fees))
+	for tool, fee := range fees {
+		calls[tool] = fee.String()
+	}
+	return calls
+}
+
+func catalogTiers(tiers []catalog.Tier) []PriceTier {
+	if len(tiers) == 0 {
+		return nil
+	}
+	out := make([]PriceTier, len(tiers))
+	for i, tier := range tiers {
+		out[i] = PriceTier{
+			AboveInputTokens:            tier.AboveInputTokens,
+			InputPerMillion:             catalogRate(tier.InputPerMillion),
+			CachedInputPerMillion:       catalogRate(tier.CachedInputPerMillion),
+			CacheWriteInputPerMillion:   catalogRate(tier.CacheWriteInputPerMillion),
+			CacheWrite5MInputPerMillion: catalogRate(tier.CacheWrite5MInputPerMillion),
+			CacheWrite1HInputPerMillion: catalogRate(tier.CacheWrite1HInputPerMillion),
+			OutputPerMillion:            catalogRate(tier.OutputPerMillion),
+			AudioInputPerMillion:        catalogRate(tier.AudioInputPerMillion),
+			CachedAudioInputPerMillion:  catalogRate(tier.CachedAudioInputPerMillion),
+			AudioOutputPerMillion:       catalogRate(tier.AudioOutputPerMillion),
+			ImageInputPerMillion:        catalogRate(tier.ImageInputPerMillion),
+			CachedImageInputPerMillion:  catalogRate(tier.CachedImageInputPerMillion),
+			ImageOutputPerMillion:       catalogRate(tier.ImageOutputPerMillion),
+		}
+	}
+	return out
+}
+
+func catalogWindows(windows *catalog.Windows) *PriceWindows {
+	if windows == nil {
+		return nil
+	}
+	out := &PriceWindows{TimeZone: windows.TimeZone, Periods: make([]PriceWindowPeriod, len(windows.Periods))}
+	for i, period := range windows.Periods {
+		out.Periods[i] = PriceWindowPeriod{Days: slices.Clone(period.Days), Start: period.Start, End: period.End, Multiplier: period.Multiplier.String()}
+	}
+	return out
 }
 
 func (s *Server) referenceCatalog(r *http.Request, _ access.Principal) (access.Reply, error) {

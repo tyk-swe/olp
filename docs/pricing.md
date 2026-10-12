@@ -19,25 +19,25 @@ stored cost stays explicable in the terms it was charged under.
 Every rate, fee and multiplier is a decimal string with no redundant zeros.
 All components are optional; an absent component is simply not billed.
 
-| Member                                                                 | Charges                                                                                                    |
-| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `input_per_million`                                                    | The text share of the input tokens, per million.                                                           |
-| `cached_input_per_million`                                             | Cached text input. Falls back to the input rate. Requires the input rate.                                  |
-| `cache_write_input_per_million`                                        | Generic cache writes. Falls back to the input rate. Requires the input rate.                               |
-| `cache_write_5m_input_per_million`, `cache_write_1h_input_per_million` | TTL-classed writes; each falls back to the generic write rate, then input. Requires the input rate.        |
-| `output_per_million`                                                   | The text share of the output tokens, per million.                                                          |
-| `audio_input_per_million`                                              | The audio share of input. Falls back to the input rate.                                                    |
-| `cached_audio_input_per_million`                                       | Cached audio input. Falls back to cached input, then input.                                                |
-| `audio_output_per_million`                                             | The audio share of output. Falls back to the output rate.                                                  |
-| `image_input_per_million`                                              | The image share of input. Falls back to the input rate.                                                    |
-| `cached_image_input_per_million`                                       | Cached image input. Falls back to cached input, then input.                                                |
-| `image_output_per_million`                                             | The image share of output. Falls back to the output rate.                                                  |
-| `unit_price`                                                           | A fixed amount per media unit.                                                                             |
-| `per_request`                                                          | A fixed fee charged once per successful attempt.                                                           |
-| `batch_multiplier`                                                     | Multiplies the whole usage charge of attempts marked batch.                                                |
-| `tool_calls`                                                           | Fees per metered server-side tool invocation, `{tool: fee}`, 1–16 names matching `^[a-z][a-z0-9_]{0,63}$`. |
-| `tiers`                                                                | Input-token tiers; see below.                                                                              |
-| `windows`                                                              | Time-of-day multipliers in a named IANA zone; see below.                                                   |
+| Member | Charges |
+| --- | --- |
+| `input_per_million` | The text share of the input tokens, per million. |
+| `cached_input_per_million` | Cached text input. Falls back to the input rate. Requires the input rate. |
+| `cache_write_input_per_million` | Generic cache writes. Falls back to the input rate. Requires the input rate. |
+| `cache_write_5m_input_per_million`, `cache_write_1h_input_per_million` | TTL-classed writes; each falls back to the generic write rate, then input. Requires the input rate. |
+| `output_per_million` | The text share of the output tokens, per million. |
+| `audio_input_per_million` | The audio share of input. Falls back to the input rate. |
+| `cached_audio_input_per_million` | Cached audio input. Falls back to cached input, then input. |
+| `audio_output_per_million` | The audio share of output. Falls back to the output rate. |
+| `image_input_per_million` | The image share of input. Falls back to the input rate. |
+| `cached_image_input_per_million` | Cached image input. Falls back to cached input, then input. |
+| `image_output_per_million` | The image share of output. Falls back to the output rate. |
+| `unit_price` | A fixed amount per media unit. |
+| `per_request` | A fixed fee charged once per successful attempt. |
+| `batch_multiplier` | Multiplies the whole usage charge of attempts marked batch. |
+| `tool_calls` | Fees per metered server-side tool invocation, `{tool: fee}`, 1–16 names matching `^[a-z][a-z0-9_]{0,63}$`. |
+| `tiers` | Input-token tiers; see below. |
+| `windows` | Time-of-day multipliers in a named IANA zone; see below. |
 
 An entry must name at least one of input, output, any audio or image rate,
 unit price, per-request, or tool fees.
@@ -109,7 +109,7 @@ a rate: an input total needs at least one input-side rate (input, audio input
 or image input) with every nonzero share resolvable through its chain, an
 output total likewise, media units need a unit price, positive tool counts need
 their fees, and batch usage needs a batch multiplier. Anything else is
-recorded _unpriced_ — no estimated cost — and _incomplete_ when the usage
+recorded *unpriced* — no estimated cost — and *incomplete* when the usage
 itself is unsettled. Absent usage is not zero usage.
 
 ## What an attempt records
@@ -127,21 +127,23 @@ Usage shares come from the provider's own accounting fields; the gateway never
 invents a share it was not given. When a provider's detail contradicts its
 totals (a share larger than the total it is part of, a cached share larger
 than the cached tokens it rides on), the modality and tool detail is dropped
-and the attempt settles _incomplete_ rather than being billed at text rates.
+and the attempt settles *incomplete* rather than being billed at text rates.
 
-| Provider                                                 | Mapping                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenAI chat completions                                  | `prompt_tokens_details.audio_tokens` → audio input; `completion_tokens_details.audio_tokens` → audio output                                                                                                                                                                                                                                                                                                               |
-| OpenAI realtime (`response.done`)                        | `input_token_details.audio_tokens`/`image_tokens` → audio/image input; `input_token_details.cached_tokens_details.audio_tokens`/`image_tokens` → cached audio/image input; `output_token_details.audio_tokens` → audio output                                                                                                                                                                                             |
-| OpenAI images (generation, edit, variation)              | `input_tokens_details.image_tokens` → image input; `output_tokens_details.image_tokens` → image output, or every output token when no output breakdown is reported                                                                                                                                                                                                                                                        |
-| OpenAI speech                                            | every output token → audio output                                                                                                                                                                                                                                                                                                                                                                                         |
-| OpenAI transcription                                     | `input_token_details.audio_tokens` → audio input                                                                                                                                                                                                                                                                                                                                                                          |
-| OpenAI responses                                         | completed `web_search_call` items → `web_search`; completed `file_search_call` items → `file_search`                                                                                                                                                                                                                                                                                                                      |
-| Anthropic messages                                       | `usage.server_tool_use.web_search_requests` → `web_search`; `web_fetch_requests` → `web_fetch`; other server-tool counters are ignored                                                                                                                                                                                                                                                                                    |
+| Provider | Mapping |
+| --- | --- |
+| OpenAI chat completions | `prompt_tokens_details.audio_tokens` → audio input; `completion_tokens_details.audio_tokens` → audio output |
+| OpenAI realtime (`response.done`) | `input_token_details.audio_tokens`/`image_tokens` → audio/image input; `input_token_details.cached_tokens_details.audio_tokens`/`image_tokens` → cached audio/image input; `output_token_details.audio_tokens` → audio output |
+| OpenAI images (generation, edit, variation) | `input_tokens_details.image_tokens` → image input; `output_tokens_details.image_tokens` → image output, or every output token when no output breakdown is reported |
+| OpenAI speech | every output token → audio output |
+| OpenAI transcription | `input_token_details.audio_tokens` → audio input |
+| OpenAI responses | completed `web_search_call` items → `web_search`; completed `file_search_call` items → `file_search` |
+| Anthropic messages | `usage.server_tool_use.web_search_requests` → `web_search`; `web_fetch_requests` → `web_fetch`; other server-tool counters are ignored |
 | Gemini generateContent / streaming / Live / interactions | `promptTokensDetails` modality `AUDIO`/`IMAGE`/`VIDEO` → audio/image input; `cacheTokensDetails` likewise → cached audio/image input; `candidatesTokensDetails` (Live: `responseTokensDetails`) `AUDIO`/`IMAGE` → audio/image output; `TEXT` and `DOCUMENT` stay in the text share; grounding `webSearchQueries` across candidates → `google_search_query` per query plus `google_search_prompt` once per grounded prompt |
 
 A price must carry a fee for every tool name a route's provider can meter —
-possibly `"0"` — or the attempt bills as unpriced.
+possibly `"0"` — or the attempt bills as unpriced. Gemini Interactions usage
+carries modality shares but its grounding is not metered; only
+generateContent, streaming and Live grounding counts.
 
 ## Commitments
 
@@ -164,7 +166,7 @@ attempt whose usage cannot be priced is unpriced as usual and gets no weight.
 
 Usage reports allocate the commitment across the period's committed usage by
 list-cost weight: each usage row earns `amount × weight / W`, where `W` is the
-total weight of _every_ committed fact and retained hourly row in that
+total weight of *every* committed fact and retained hourly row in that
 provider's `(period, UTC bucket)` — regardless of the report's own filters —
 and `amount` is the commitment the bucket's latest row recorded. A report that
 fully covers a closed period allocates the whole amount; a period still open

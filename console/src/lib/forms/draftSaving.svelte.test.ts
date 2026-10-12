@@ -197,7 +197,6 @@ it('preserves resolved connection options when returning to a saved wizard draft
   const options = {
     vendor_id: 'openai',
     credential_headers: ['x-service-key'],
-    commitment: null,
     limits: {
       requests_per_minute: 10,
       tokens_per_minute: null,
@@ -884,7 +883,6 @@ it('preserves the unified native draft and its original ETag across provider ref
         vendor_id: null,
         limits: null,
         credential_headers: [],
-        commitment: null,
         models: {},
         parameter_defaults: { temperature: 0.8 }
       }

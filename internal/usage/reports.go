@@ -338,12 +338,14 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		"     SELECT f.commitment_weight AS weight, f.commitment_amount AS amount, f.observed_at AS at" +
 		"     FROM olp.attempt_usage_facts f" +
 		"     WHERE f.provider_id = p.provider_id AND f.commitment_period = p.commitment_period" +
-		"       AND date_trunc(p.commitment_period, f.observed_at AT TIME ZONE 'UTC') = p.commitment_bucket" +
+		"       AND f.observed_at >= p.commitment_bucket AT TIME ZONE 'UTC'" +
+		"       AND f.observed_at < (p.commitment_bucket + ('1 ' || p.commitment_period)::interval) AT TIME ZONE 'UTC'" +
 		"     UNION ALL" +
 		"     SELECT h.commitment_weight, h.commitment_amount, h.bucket" +
 		"     FROM olp.attempt_usage_hourly h" +
 		"     WHERE h.provider_id = p.provider_id AND h.commitment_period = p.commitment_period" +
-		"       AND date_trunc(p.commitment_period, h.bucket AT TIME ZONE 'UTC') = p.commitment_bucket" +
+		"       AND h.bucket >= p.commitment_bucket AT TIME ZONE 'UTC'" +
+		"       AND h.bucket < (p.commitment_bucket + ('1 ' || p.commitment_period)::interval) AT TIME ZONE 'UTC'" +
 		"   ) rows" +
 		" ) w)")
 	q.push(", report_rows AS (" +

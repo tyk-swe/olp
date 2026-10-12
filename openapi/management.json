@@ -736,7 +736,7 @@
             ]
           },
           "commitment_weight": {
-            "description": "The list-cost weight the committed attempt divides its\ncommitment period's amount by.",
+            "description": "The list-cost weight the committed attempt divides its commitment period's amount by.",
             "type": [
               "string",
               "null"
@@ -750,7 +750,7 @@
             ]
           },
           "commitment_period": {
-            "description": "The UTC calendar period the commitment amount covers, when\nthe attempt's provider is committed.",
+            "description": "The UTC calendar period the commitment amount covers, when the attempt's provider is committed.",
             "type": [
               "string",
               "null"
@@ -1875,7 +1875,7 @@
             ]
           },
           "audio_input_per_million": {
-            "description": "Rate for the audio share of the input tokens. Omit to bill audio\ninput at the input rate.",
+            "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
             "pattern": "^[0-9]+(\\.[0-9]+)?$",
             "type": [
               "string",
@@ -1883,7 +1883,7 @@
             ]
           },
           "cached_audio_input_per_million": {
-            "description": "Rate for the cached share of audio input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+            "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
             "pattern": "^[0-9]+(\\.[0-9]+)?$",
             "type": [
               "string",
@@ -1891,7 +1891,7 @@
             ]
           },
           "audio_output_per_million": {
-            "description": "Rate for the audio share of the output tokens. Omit to bill it\nat the output rate.",
+            "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
             "pattern": "^[0-9]+(\\.[0-9]+)?$",
             "type": [
               "string",
@@ -1899,7 +1899,7 @@
             ]
           },
           "image_input_per_million": {
-            "description": "Rate for the image share of the input tokens. Omit to bill image\ninput at the input rate.",
+            "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
             "pattern": "^[0-9]+(\\.[0-9]+)?$",
             "type": [
               "string",
@@ -1907,7 +1907,7 @@
             ]
           },
           "cached_image_input_per_million": {
-            "description": "Rate for the cached share of image input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+            "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
             "pattern": "^[0-9]+(\\.[0-9]+)?$",
             "type": [
               "string",
@@ -1915,7 +1915,7 @@
             ]
           },
           "image_output_per_million": {
-            "description": "Rate for the image share of the output tokens. Omit to bill it\nat the output rate.",
+            "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
             "pattern": "^[0-9]+(\\.[0-9]+)?$",
             "type": [
               "string",
@@ -1931,7 +1931,7 @@
             ]
           },
           "batch_multiplier": {
-            "description": "Multiplier applied to the whole usage charge of usage marked as\nbatch. Usage marked batch with no multiplier is unpriced.",
+            "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
             "pattern": "^[0-9]+(\\.[0-9]+)?$",
             "type": [
               "string",
@@ -1949,7 +1949,7 @@
             ]
           },
           "tiers": {
-            "description": "Input-token tiers, ascending by above_input_tokens. The highest\nexceeded tier replaces the entry's per-million rate set.",
+            "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
             "oneOf": [
               {
                 "type": "null"
@@ -2581,7 +2581,7 @@
       },
       "Commitment": {
         "additionalProperties": false,
-        "description": "Provisioned capacity the connection pays for: attempts bill at zero\nmarginal cost and share the amount across each UTC calendar period by\nlist-cost weight.",
+        "description": "Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.",
         "properties": {
           "amount": {
             "description": "The commitment amount, a positive decimal string.",
@@ -2708,15 +2708,7 @@
             ]
           },
           "commitment": {
-            "default": null,
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Commitment"
-              }
-            ]
+            "$ref": "#/components/schemas/Commitment"
           }
         },
         "type": "object"
@@ -6667,42 +6659,42 @@
             ]
           },
           "audio_input_per_million": {
-            "description": "Rate for the audio share of the input tokens. Omit to bill audio\ninput at the input rate.",
+            "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "cached_audio_input_per_million": {
-            "description": "Rate for the cached share of audio input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+            "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "audio_output_per_million": {
-            "description": "Rate for the audio share of the output tokens. Omit to bill it\nat the output rate.",
+            "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "image_input_per_million": {
-            "description": "Rate for the image share of the input tokens. Omit to bill image\ninput at the input rate.",
+            "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "cached_image_input_per_million": {
-            "description": "Rate for the cached share of image input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+            "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "image_output_per_million": {
-            "description": "Rate for the image share of the output tokens. Omit to bill it\nat the output rate.",
+            "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
             "type": [
               "string",
               "null"
@@ -6716,7 +6708,7 @@
             ]
           },
           "batch_multiplier": {
-            "description": "Multiplier applied to the whole usage charge of usage marked as\nbatch. Usage marked batch with no multiplier is unpriced.",
+            "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
             "type": [
               "string",
               "null"
@@ -6733,7 +6725,7 @@
             ]
           },
           "tiers": {
-            "description": "Input-token tiers, ascending by above_input_tokens. The highest\nexceeded tier replaces the entry's per-million rate set.",
+            "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
             "oneOf": [
               {
                 "type": "null"
@@ -6841,42 +6833,42 @@
             ]
           },
           "audio_input_per_million": {
-            "description": "Rate for the audio share of the input tokens. Omit to bill audio\ninput at the input rate.",
+            "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "cached_audio_input_per_million": {
-            "description": "Rate for the cached share of audio input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+            "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "audio_output_per_million": {
-            "description": "Rate for the audio share of the output tokens. Omit to bill it\nat the output rate.",
+            "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "image_input_per_million": {
-            "description": "Rate for the image share of the input tokens. Omit to bill image\ninput at the input rate.",
+            "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "cached_image_input_per_million": {
-            "description": "Rate for the cached share of image input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+            "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "image_output_per_million": {
-            "description": "Rate for the image share of the output tokens. Omit to bill it\nat the output rate.",
+            "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
             "type": [
               "string",
               "null"
@@ -6890,7 +6882,7 @@
             ]
           },
           "batch_multiplier": {
-            "description": "Multiplier applied to the whole usage charge of usage marked as\nbatch. Usage marked batch with no multiplier is unpriced.",
+            "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
             "type": [
               "string",
               "null"
@@ -6907,7 +6899,7 @@
             ]
           },
           "tiers": {
-            "description": "Input-token tiers, ascending by above_input_tokens. The highest\nexceeded tier replaces the entry's per-million rate set.",
+            "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
             "oneOf": [
               {
                 "type": "null"
@@ -6953,7 +6945,7 @@
       },
       "PriceTier": {
         "additionalProperties": false,
-        "description": "Per-million rates that apply once an attempt's input tokens exceed\nabove_input_tokens. A tier replaces the entry's whole per-million rate set,\nso it names exactly the per-million fields the entry names.",
+        "description": "Per-million rates that apply once an attempt's input tokens exceed above_input_tokens. A tier replaces the entry's whole per-million rate set, so it names exactly the per-million fields the entry names.",
         "properties": {
           "above_input_tokens": {
             "description": "Input tokens per attempt above which this tier's rates apply.",
@@ -7092,7 +7084,7 @@
       },
       "PriceWindows": {
         "additionalProperties": false,
-        "description": "Time-of-day and day-of-week multipliers evaluated in the named zone\nat the attempt's start.",
+        "description": "Time-of-day and day-of-week multipliers evaluated in the named zone at the attempt's start.",
         "properties": {
           "periods": {
             "items": {
@@ -11729,42 +11721,42 @@
             ]
           },
           "audio_input_per_million": {
-            "description": "Rate for the audio share of the input tokens. Omit to bill audio\ninput at the input rate.",
+            "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "cached_audio_input_per_million": {
-            "description": "Rate for the cached share of audio input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+            "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "audio_output_per_million": {
-            "description": "Rate for the audio share of the output tokens. Omit to bill it\nat the output rate.",
+            "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "image_input_per_million": {
-            "description": "Rate for the image share of the input tokens. Omit to bill image\ninput at the input rate.",
+            "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "cached_image_input_per_million": {
-            "description": "Rate for the cached share of image input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+            "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
             "type": [
               "string",
               "null"
             ]
           },
           "image_output_per_million": {
-            "description": "Rate for the image share of the output tokens. Omit to bill it\nat the output rate.",
+            "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
             "type": [
               "string",
               "null"
@@ -11778,7 +11770,7 @@
             ]
           },
           "batch_multiplier": {
-            "description": "Multiplier applied to the whole usage charge of usage marked as\nbatch. Usage marked batch with no multiplier is unpriced.",
+            "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
             "type": [
               "string",
               "null"
@@ -11795,7 +11787,7 @@
             ]
           },
           "tiers": {
-            "description": "Input-token tiers, ascending by above_input_tokens. The highest\nexceeded tier replaces the entry's per-million rate set.",
+            "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
             "oneOf": [
               {
                 "type": "null"
@@ -13164,7 +13156,7 @@
             "type": "string"
           },
           "allocated_commitment": {
-            "description": "This row's share of the commitment amounts its committed\nattempts divide by list-cost weight, an exact decimal string.",
+            "description": "This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.",
             "type": "string"
           }
         },
@@ -13365,7 +13357,7 @@
             "type": "string"
           },
           "allocated_commitment": {
-            "description": "This row's share of the commitment amounts its committed\nattempts divide by list-cost weight, an exact decimal string.",
+            "description": "This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.",
             "type": "string"
           }
         },
@@ -13519,7 +13511,7 @@
             "type": "string"
           },
           "allocated_commitment": {
-            "description": "This row's share of the commitment amounts its committed\nattempts divide by list-cost weight, an exact decimal string.",
+            "description": "This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.",
             "type": "string"
           }
         },

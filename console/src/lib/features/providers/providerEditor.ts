@@ -70,7 +70,6 @@ export function emptyProviderOptions(): NonNullable<
   return {
     vendor_id: null,
     limits: null,
-    commitment: null,
     credential_headers: [],
     parameter_defaults: {},
     models: {}

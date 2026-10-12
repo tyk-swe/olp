@@ -85,10 +85,10 @@ plugin's `grant`, whose credential versions come from
    upstream list or from up to 2000 declared identifiers. Discovered models
    start disabled with no capabilities.
 3. **Reviews** capabilities (`PATCH /providers/{id}/models/{model_id}`),
-   which records _declared_ tuples of operation, surface, and mode.
+   which records *declared* tuples of operation, surface, and mode.
 4. **Certifies** each model (`POST /providers/{id}/models/{model_id}/certify`),
    which proves each operation/surface/mode tuple and marks successful tuples
-   as _certified_. An OpenAI-surface generation capability proves both Chat
+   as *certified*. An OpenAI-surface generation capability proves both Chat
    and Responses unless the vendor profile explicitly translates Responses
    through Chat. Review at most 64 tuples per model. Each probe has a 15-second
    budget, with at most eight concurrent probes and a one-minute
@@ -203,11 +203,7 @@ concurrency. `priority_shares` sum to 100 across critical/high/normal/low, with
 above it atomic shares preserve headroom across replicas:
 
 ```json
-{
-  "max_concurrency": 40,
-  "priority_shares": { "critical": 50, "high": 25, "normal": 20, "low": 5 },
-  "saturation_percent": 60
-}
+{"max_concurrency":40,"priority_shares":{"critical":50,"high":25,"normal":20,"low":5},"saturation_percent":60}
 ```
 
 Connection/slot day/month supply caps use exact-decimal PostgreSQL facts/Valkey
@@ -289,36 +285,21 @@ carry them all:
 {
   "slug": "assistant",
   "targets": [
-    { "provider_model_id": "…", "tags": ["small"] },
-    { "provider_model_id": "…", "tags": ["large"] },
-    { "provider_model_id": "…", "shadow": { "sample_rate": 0.05 } }
+    {"provider_model_id": "…", "tags": ["small"]},
+    {"provider_model_id": "…", "tags": ["large"]},
+    {"provider_model_id": "…", "shadow": {"sample_rate": 0.05}}
   ],
   "fallbacks": [
-    { "route": "assistant-long-context", "on": ["context_window"] },
-    { "route": "assistant-backup", "on": ["exhausted", "content_filter"] }
+    {"route": "assistant-long-context", "on": ["context_window"]},
+    {"route": "assistant-backup", "on": ["exhausted", "content_filter"]}
   ],
   "selectors": [
-    {
-      "id": "short",
-      "when": { "max_input_tokens": 2000, "tools": false },
-      "tags": ["small"]
-    },
-    {
-      "id": "reasoning",
-      "when": { "reasoning_effort": ["high"] },
-      "route": "assistant-reasoning"
-    }
+    {"id": "short", "when": {"max_input_tokens": 2000, "tools": false}, "tags": ["small"]},
+    {"id": "reasoning", "when": {"reasoning_effort": ["high"]}, "route": "assistant-reasoning"}
   ],
-  "retry": {
-    "upstream_server": {
-      "max_retries": 2,
-      "base_backoff_ms": 200,
-      "max_backoff_ms": 2000,
-      "respect_retry_after": true
-    }
-  },
-  "affinity": { "source": "cache_key" },
-  "budget": { "daily_cost_limit": "250" }
+  "retry": {"upstream_server": {"max_retries": 2, "base_backoff_ms": 200, "max_backoff_ms": 2000, "respect_retry_after": true}},
+  "affinity": {"source": "cache_key"},
+  "budget": {"daily_cost_limit": "250"}
 }
 ```
 
@@ -327,13 +308,13 @@ carry them all:
 `fallbacks` lists up to four other routes, in order, each with the conditions
 that start it:
 
-| Condition        | The route's attempts ended…                                                             |
-| ---------------- | --------------------------------------------------------------------------------------- |
-| `exhausted`      | without success, every attempt having failed with a retryable class                     |
+| Condition | The route's attempts ended… |
+| --- | --- |
+| `exhausted` | without success, every attempt having failed with a retryable class |
 | `context_window` | on a context-window refusal, or planning found no target whose window holds the request |
-| `content_filter` | on an upstream content-filter refusal                                                   |
-| `rate_limit`     | on an upstream rate limit or a local quota                                              |
-| `budget`         | on a supply-side spend cap, at planning or before dispatch                              |
+| `content_filter` | on an upstream content-filter refusal |
+| `rate_limit` | on an upstream rate limit or a local quota |
+| `budget` | on a supply-side spend cap, at planning or before dispatch |
 
 A content-filter refusal is a typed upstream error, such as `content_filter` or
 `content_policy_violation`. It is terminal within the route, never counts
@@ -367,16 +348,16 @@ Plan decisions record the selector, and targets it excluded carry the reason
 `selector_excluded`. A predicate is the conjunction of what it declares, over
 features the gateway computes during admission:
 
-| Predicate                                 | Matches                                                                               |
-| ----------------------------------------- | ------------------------------------------------------------------------------------- |
-| `operations`                              | the planned operation                                                                 |
-| `min_input_tokens`, `max_input_tokens`    | the estimated input tokens                                                            |
-| `min_output_tokens`, `max_output_tokens`  | the requested output tokens                                                           |
+| Predicate | Matches |
+| --- | --- |
+| `operations` | the planned operation |
+| `min_input_tokens`, `max_input_tokens` | the estimated input tokens |
+| `min_output_tokens`, `max_output_tokens` | the requested output tokens |
 | `streaming`, `tools`, `structured_output` | a streaming request, one that offers tools, one that asks for a JSON schema or object |
-| `modalities`                              | any of `text`, `image`, `audio`, `video` and `file` among the input parts             |
-| `reasoning_effort`                        | the request's reasoning effort, such as `high`                                        |
-| `classifier`                              | the label another route returns for the request                                       |
-| `plugin`                                  | the verdict of an approved confined plugin                                            |
+| `modalities` | any of `text`, `image`, `audio`, `video` and `file` among the input parts |
+| `reasoning_effort` | the request's reasoning effort, such as `high` |
+| `classifier` | the label another route returns for the request |
+| `plugin` | the verdict of an approved confined plugin |
 
 Attribution labels never take part, so labels stay free of routing effect.
 
@@ -462,15 +443,7 @@ overall deadline, an attempt budget, a fidelity, a routing policy, and whether
 to publish automatically:
 
 ```json
-{
-  "name": "claude",
-  "provider_selector": "vendor:anthropic",
-  "model_filter": "claude-*",
-  "slug_pattern": "{vendor}-{model}",
-  "overall_timeout_ms": 120000,
-  "max_attempts": 2,
-  "auto_publish": true
-}
+{"name": "claude", "provider_selector": "vendor:anthropic", "model_filter": "claude-*", "slug_pattern": "{vendor}-{model}", "overall_timeout_ms": 120000, "max_attempts": 2, "auto_publish": true}
 ```
 
 Manage templates under `/api/v1/route-templates`. When a provider activation
@@ -546,13 +519,13 @@ checks always apply, even when strict parameter filtering is off. Media controls
 include `n`, `size`, `mask`, `voice`, `response_format`, `language`, `prompt`,
 and `input_reference`; internal cleanup markers are excluded.
 
-| Strategy     | Ordering within a priority and preferred-order tier                                                                                                                                                                                             |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `weighted`   | Deterministic weighted rendezvous; the default                                                                                                                                                                                                  |
-| `price`      | Exact decimal rates; generation compares input plus output per million, embeddings use input, other units use their unit rate                                                                                                                   |
-| `latency`    | Median time to first meaningful output for streams, total attempt latency for unary operations                                                                                                                                                  |
-| `throughput` | Median generated output tokens per second after first meaningful output; reasoning tokens are excluded                                                                                                                                          |
-| `capacity`   | Remaining headroom of each credential slot, the smallest of its connection's and its own remaining request, token and concurrency fractions, read in one pipelined Valkey round trip; slots without quotas rank after slots with known headroom |
+| Strategy | Ordering within a priority and preferred-order tier |
+| --- | --- |
+| `weighted` | Deterministic weighted rendezvous; the default |
+| `price` | Exact decimal rates; generation compares input plus output per million, embeddings use input, other units use their unit rate |
+| `latency` | Median time to first meaningful output for streams, total attempt latency for unary operations |
+| `throughput` | Median generated output tokens per second after first meaningful output; reasoning tokens are excluded |
+| `capacity` | Remaining headroom of each credential slot, the smallest of its connection's and its own remaining request, token and concurrency fractions, read in one pipelined Valkey round trip; slots without quotas rank after slots with known headroom |
 
 Prices resolve connection scope before vendor scope before connector-kind scope,
 then the latest effective revision. Future rates become eligible at their

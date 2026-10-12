@@ -171,3 +171,59 @@ func TestIntegrationCommitmentAllocation(t *testing.T) {
 		t.Fatalf("rolled-up allocation = %s, want 300", summary.AllocatedCommitment)
 	}
 }
+
+// TestIntegrationNullCommitmentIsNotCommitted proves a stored
+// `"commitment": null` — the column keeps native JSON, so it is JSON null, not
+// SQL NULL — prices the attempt normally rather than violating the fact
+// constraint a NULL commitment would produce.
+func TestIntegrationNullCommitmentIsNotCommitted(t *testing.T) {
+	pool := notificationPool(t)
+	owner, key := seedParityOwner(t, pool)
+	seedParityPrices(t, pool, owner, time.Now().UTC().Add(-time.Hour), []parityCase{
+		{model: "plain-model", price: Price{ProviderKind: "openai", Model: "plain-model",
+			Operation: "generation", InputPerMillion: rate("3"), Currency: "USD"}},
+	})
+	for _, tc := range []struct {
+		name          string
+		commitmentKey string
+	}{
+		{name: "absent", commitmentKey: `"vendor_id":"openai"`},
+		{name: "null", commitmentKey: `"vendor_id":"openai","commitment":null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider, revision := uuid.NewString(), uuid.NewString()
+			configuration := `{"kind":"openai","auth_mode":"api_key","endpoint":"https://127.0.0.1:9","options":{` + tc.commitmentKey + `}}`
+			if _, err := pool.Exec(t.Context(), `INSERT INTO olp.providers
+			    (id, name, kind, state, configuration, etag, slots_etag, active_revision, active_revision_id, created_by)
+			    VALUES ($1::uuid, $2, 'openai', 'active', $3::jsonb, $4::uuid, $5::uuid, 1, $6::uuid, $7::uuid)`,
+				provider, "provider-"+provider, configuration, uuid.NewString(), uuid.NewString(), revision, owner); err != nil {
+				t.Fatalf("seed provider: %v", err)
+			}
+			if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_revisions
+			    (id, provider_id, revision, name, configuration, models, slots, source_etag, activated_by)
+			    VALUES ($1::uuid, $2::uuid, 1, $3, $4::jsonb, '[]'::jsonb, '[]'::jsonb, $5::uuid, $6::uuid)`,
+				revision, provider, "provider-"+provider, configuration, uuid.NewString(), owner); err != nil {
+				t.Fatalf("seed provider revision: %v", err)
+			}
+			observed := time.Now().UTC().Add(-time.Minute)
+			event := parityEvent(t, key, provider, observed, []parityCase{
+				{model: "plain-model", usage: AttemptUsage{Observed: true, Complete: true, InputTokens: tokens(1000)}},
+			})
+			result, facts := persistParity(t, pool, event)
+			if result.Outcome != PersistOutcomePersisted {
+				t.Fatalf("outcome = %v", result.Outcome)
+			}
+			if facts[0].cost == nil || *facts[0].cost != "0.003000000000" {
+				t.Fatalf("cost = %v, want 0.003000000000", facts[0].cost)
+			}
+			var weight *string
+			if err := pool.QueryRow(t.Context(), `SELECT commitment_weight::text FROM olp.attempt_usage_facts
+			    WHERE event_id=$1::uuid`, event.EventID).Scan(&weight); err != nil {
+				t.Fatalf("read weight: %v", err)
+			}
+			if weight != nil {
+				t.Fatalf("weight = %v", *weight)
+			}
+		})
+	}
+}

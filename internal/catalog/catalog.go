@@ -21,7 +21,7 @@ import (
 )
 
 // APIVersion identifies the catalog document format.
-const APIVersion = "openllmproxy.dev/catalog/v1"
+const APIVersion = "openllmproxy.dev/catalog/v2"
 
 // MaxBytes bounds a catalog document.
 const MaxBytes = 8 << 20
@@ -107,12 +107,55 @@ type Price struct {
 	CacheWrite5MInputPerMillion *Decimal `json:"cache_write_5m_input_per_million,omitempty"`
 	CacheWrite1HInputPerMillion *Decimal `json:"cache_write_1h_input_per_million,omitempty"`
 	OutputPerMillion            *Decimal `json:"output_per_million,omitempty"`
+	AudioInputPerMillion        *Decimal `json:"audio_input_per_million,omitempty"`
+	CachedAudioInputPerMillion  *Decimal `json:"cached_audio_input_per_million,omitempty"`
+	AudioOutputPerMillion       *Decimal `json:"audio_output_per_million,omitempty"`
+	ImageInputPerMillion        *Decimal `json:"image_input_per_million,omitempty"`
+	CachedImageInputPerMillion  *Decimal `json:"cached_image_input_per_million,omitempty"`
+	ImageOutputPerMillion       *Decimal `json:"image_output_per_million,omitempty"`
 	// UnitPrice is the price of one media unit the operation records: an
 	// image, a second of audio or video, a character of speech input, or a
 	// search unit.
-	UnitPrice       *Decimal          `json:"unit_price,omitempty"`
-	Unrepresentable []Unrepresentable `json:"unrepresentable"`
-	Provenance      Provenance        `json:"provenance"`
+	UnitPrice       *Decimal           `json:"unit_price,omitempty"`
+	PerRequest      *Decimal           `json:"per_request,omitempty"`
+	ToolCalls       map[string]Decimal `json:"tool_calls,omitempty"`
+	Tiers           []Tier             `json:"tiers,omitempty"`
+	Windows         *Windows           `json:"windows,omitempty"`
+	BatchMultiplier *Decimal           `json:"batch_multiplier,omitempty"`
+	Unrepresentable []Unrepresentable  `json:"unrepresentable"`
+	Provenance      Provenance         `json:"provenance"`
+}
+
+// Tier is the per-million rate set above an input-token threshold.
+type Tier struct {
+	AboveInputTokens            int64    `json:"above_input_tokens"`
+	InputPerMillion             *Decimal `json:"input_per_million,omitempty"`
+	CachedInputPerMillion       *Decimal `json:"cached_input_per_million,omitempty"`
+	CacheWriteInputPerMillion   *Decimal `json:"cache_write_input_per_million,omitempty"`
+	CacheWrite5MInputPerMillion *Decimal `json:"cache_write_5m_input_per_million,omitempty"`
+	CacheWrite1HInputPerMillion *Decimal `json:"cache_write_1h_input_per_million,omitempty"`
+	OutputPerMillion            *Decimal `json:"output_per_million,omitempty"`
+	AudioInputPerMillion        *Decimal `json:"audio_input_per_million,omitempty"`
+	CachedAudioInputPerMillion  *Decimal `json:"cached_audio_input_per_million,omitempty"`
+	AudioOutputPerMillion       *Decimal `json:"audio_output_per_million,omitempty"`
+	ImageInputPerMillion        *Decimal `json:"image_input_per_million,omitempty"`
+	CachedImageInputPerMillion  *Decimal `json:"cached_image_input_per_million,omitempty"`
+	ImageOutputPerMillion       *Decimal `json:"image_output_per_million,omitempty"`
+}
+
+// Windows are time-of-day multipliers in a named IANA zone.
+type Windows struct {
+	TimeZone string         `json:"time_zone"`
+	Periods  []WindowPeriod `json:"periods"`
+}
+
+// WindowPeriod is one multiplier for a set of weekdays over a local
+// half-open [start, end) window; "24:00" runs through midnight.
+type WindowPeriod struct {
+	Days       []int   `json:"days"`
+	Start      string  `json:"start"`
+	End        string  `json:"end"`
+	Multiplier Decimal `json:"multiplier"`
 }
 
 // Unrepresentable is a price component OLP cannot yet price, in the vendor's
@@ -233,10 +276,39 @@ func (c *Catalog) validateModel(m *Model, names map[string]bool) error {
 	return c.validateProvenance(m.Provenance)
 }
 
+// perMillionRates names each per-million rate pointer in a price or tier so
+// dependency, key-set and decimal checks see exactly one list.
+func priceRates(p *Price) []*Decimal {
+	return []*Decimal{p.InputPerMillion, p.CachedInputPerMillion, p.CacheWriteInputPerMillion,
+		p.CacheWrite5MInputPerMillion, p.CacheWrite1HInputPerMillion, p.OutputPerMillion,
+		p.AudioInputPerMillion, p.CachedAudioInputPerMillion, p.AudioOutputPerMillion,
+		p.ImageInputPerMillion, p.CachedImageInputPerMillion, p.ImageOutputPerMillion}
+}
+
+func tierRates(t *Tier) []*Decimal {
+	return []*Decimal{t.InputPerMillion, t.CachedInputPerMillion, t.CacheWriteInputPerMillion,
+		t.CacheWrite5MInputPerMillion, t.CacheWrite1HInputPerMillion, t.OutputPerMillion,
+		t.AudioInputPerMillion, t.CachedAudioInputPerMillion, t.AudioOutputPerMillion,
+		t.ImageInputPerMillion, t.CachedImageInputPerMillion, t.ImageOutputPerMillion}
+}
+
+// unrepresentableComponents is the closed vocabulary of price components OLP
+// cannot yet price. Anything representable by a revision — every per-million
+// rate, per-request, tool fees, tiers, windows and batch — may not appear.
+var unrepresentableComponents = map[string]bool{
+	"ambiguous": true, "batch_rates": true, "cache_storage": true,
+	"conditions": true, "free_allowance": true, "holiday_calendar": true,
+	"media_units": true, "minimum_charge": true, "plan_pricing": true,
+	"prepaid_credits": true, "promotion": true, "regional_uplift": true,
+	"service_tier": true, "thinking_mode": true, "tool_usage": true,
+	"unpublished_rates": true, "video_input": true,
+}
+
+var dayTime = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$|^24:00$`)
+
 func (c *Catalog) validatePrice(p Price) error {
-	rates := []*Decimal{p.InputPerMillion, p.CachedInputPerMillion, p.CacheWriteInputPerMillion, p.CacheWrite5MInputPerMillion, p.CacheWrite1HInputPerMillion, p.OutputPerMillion, p.UnitPrice}
 	priced := false
-	for _, rate := range rates {
+	for _, rate := range append(priceRates(&p), p.UnitPrice, p.PerRequest, p.BatchMultiplier) {
 		if rate != nil {
 			if !rate.Valid() {
 				return fmt.Errorf("rate %q is not a decimal", *rate)
@@ -244,24 +316,132 @@ func (c *Catalog) validatePrice(p Price) error {
 			priced = true
 		}
 	}
-	if !priced {
-		return errors.New("a price needs at least one rate")
-	}
 	cached := p.CachedInputPerMillion != nil || p.CacheWriteInputPerMillion != nil || p.CacheWrite5MInputPerMillion != nil || p.CacheWrite1HInputPerMillion != nil
 	if cached && p.InputPerMillion == nil {
 		return errors.New("a cache rate needs an input rate")
+	}
+	if len(p.ToolCalls) > 0 {
+		if len(p.ToolCalls) > 16 {
+			return errors.New("tool_calls takes at most 16 tool fees")
+		}
+		for tool, fee := range p.ToolCalls {
+			if !snakeName.MatchString(tool) {
+				return fmt.Errorf("tool name %q is malformed", tool)
+			}
+			if !fee.Valid() {
+				return fmt.Errorf("tool fee %q is not a decimal", string(fee))
+			}
+		}
+		priced = true
+	}
+	if !priced {
+		return errors.New("a price needs at least one rate")
+	}
+	if err := validateTiers(&p); err != nil {
+		return err
+	}
+	if err := validateWindows(p.Windows); err != nil {
+		return err
 	}
 	if p.Unrepresentable == nil {
 		return errors.New("unrepresentable components must be listed, even when there are none")
 	}
 	seen := map[string]bool{}
 	for _, u := range p.Unrepresentable {
-		if !snakeName.MatchString(u.Component) || u.Detail == "" || seen[u.Component] {
-			return fmt.Errorf("unrepresentable component %q is malformed, unexplained or repeated", u.Component)
+		if !unrepresentableComponents[u.Component] {
+			return fmt.Errorf("unrepresentable component %q is not a component OLP fails to price", u.Component)
+		}
+		if u.Detail == "" || seen[u.Component] {
+			return fmt.Errorf("unrepresentable component %q is unexplained or repeated", u.Component)
 		}
 		seen[u.Component] = true
 	}
 	return c.validateProvenance(p.Provenance)
+}
+
+// validateTiers applies the same rules a pricing revision does: one to eight
+// tiers, strictly increasing positive thresholds, each naming exactly the
+// entry's own per-million rate set.
+func validateTiers(p *Price) error {
+	if len(p.Tiers) == 0 {
+		return nil
+	}
+	if len(p.Tiers) > 8 {
+		return errors.New("tiers take at most 8 thresholds")
+	}
+	entry := priceRates(p)
+	previous := int64(0)
+	for index, tier := range p.Tiers {
+		if tier.AboveInputTokens <= 0 || tier.AboveInputTokens <= previous && index > 0 {
+			return errors.New("tier thresholds must be positive and strictly increasing")
+		}
+		previous = tier.AboveInputTokens
+		rates := tierRates(&p.Tiers[index])
+		for i := range entry {
+			if (entry[i] == nil) != (rates[i] == nil) {
+				return errors.New("a tier names the same per-million rates as its entry")
+			}
+			if rates[i] != nil && !rates[i].Valid() {
+				return fmt.Errorf("tier rate %q is not a decimal", *rates[i])
+			}
+		}
+	}
+	return nil
+}
+
+// validateWindows applies the pricing-revision window rules: a known IANA
+// zone, 1–32 non-overlapping periods each with unique ISO weekdays and
+// start < end ("24:00" allowed only at the end).
+func validateWindows(windows *Windows) error {
+	if windows == nil {
+		return nil
+	}
+	if windows.TimeZone == "" {
+		return errors.New("windows need an IANA time zone")
+	}
+	if _, err := time.LoadLocation(windows.TimeZone); err != nil {
+		return fmt.Errorf("time zone %q is unknown", windows.TimeZone)
+	}
+	if len(windows.Periods) == 0 || len(windows.Periods) > 32 {
+		return errors.New("windows take 1–32 periods")
+	}
+	periods := make([]WindowPeriod, 0, len(windows.Periods))
+	for index, period := range windows.Periods {
+		if len(period.Days) == 0 {
+			return errors.New("a window period needs days")
+		}
+		seen := map[int]bool{}
+		for _, day := range period.Days {
+			if day < 1 || day > 7 {
+				return errors.New("window days are ISO weekdays 1–7")
+			}
+			if seen[day] {
+				return errors.New("window days repeat")
+			}
+			seen[day] = true
+		}
+		if !dayTime.MatchString(period.Start) || period.Start == "24:00" ||
+			!dayTime.MatchString(period.End) {
+			return fmt.Errorf("period %d times are HH:MM (end may be 24:00)", index)
+		}
+		if period.End != "24:00" && period.End <= period.Start {
+			return fmt.Errorf("period %d ends after it starts", index)
+		}
+		if !period.Multiplier.Valid() {
+			return fmt.Errorf("period %d multiplier is not a decimal", index)
+		}
+		for _, earlier := range periods {
+			shared := false
+			for _, day := range period.Days {
+				shared = shared || slices.Contains(earlier.Days, day)
+			}
+			if shared && period.Start < earlier.End && earlier.Start < period.End {
+				return fmt.Errorf("period %d overlaps an earlier one", index)
+			}
+		}
+		periods = append(periods, period)
+	}
+	return nil
 }
 
 func (c *Catalog) validateProvenance(p Provenance) error {

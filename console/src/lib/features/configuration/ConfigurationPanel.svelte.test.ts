@@ -202,7 +202,6 @@ const pluginDocument: ConfigurationDocument = {
         api_version: null,
         options: {
           credential_headers: [],
-          commitment: null,
           limits: null,
           models: {},
           parameter_defaults: {},
