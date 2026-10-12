@@ -4,9 +4,13 @@ import (
 	"math/big"
 	"math/rand/v2"
 	"testing"
+	"time"
 )
 
 func rate(text string) *string { return &text }
+
+// settledAt is a fixed attempt start time for tests that do not exercise windows.
+var settledAt = time.Date(2025, 6, 2, 12, 0, 0, 0, time.UTC)
 
 func tokens(value int64) *int64 { return &value }
 
@@ -84,16 +88,16 @@ func TestPriceCostMatchesHandComputedBills(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := test.price.Cost(test.usage())
+			got, ok := test.price.Cost(test.usage(), settledAt, true)
 			if !ok || got.String() != test.want {
 				t.Fatalf("Cost = %q, %v, want %q", got.String(), ok, test.want)
 			}
 			routing := &RoutingPrice{Price: test.price}
-			if again, ok := routing.Cost(test.usage()); !ok || again.Cmp(got) != 0 {
+			if again, ok := routing.Cost(test.usage(), settledAt, true); !ok || again.Cmp(got) != 0 {
 				t.Fatalf("a routing price without cached rates costs %q, want %q", again.String(), got.String())
 			}
 			routing.rates = parseRates(&routing.Price)
-			if again, ok := routing.Cost(test.usage()); !ok || again.Cmp(got) != 0 {
+			if again, ok := routing.Cost(test.usage(), settledAt, true); !ok || again.Cmp(got) != 0 {
 				t.Fatalf("a routing price with cached rates costs %q, want %q", again.String(), got.String())
 			}
 		})
@@ -153,16 +157,16 @@ func TestPriceCostIsUnpricedWherePostgreSQLRecordsNoCost(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			if got, ok := test.price.Cost(test.usage()); ok {
+			if got, ok := test.price.Cost(test.usage(), settledAt, true); ok {
 				t.Fatalf("Cost = %q, true, want no cost", got.String())
 			}
 		})
 	}
 	var missing *RoutingPrice
-	if _, ok := missing.Cost(completeUsage()); ok {
+	if _, ok := missing.Cost(completeUsage(), settledAt, true); ok {
 		t.Fatal("a missing price costs something")
 	}
-	if _, ok := missing.CostBound(10, 10, true); ok {
+	if _, ok := missing.CostBound(10, 10, true, settledAt); ok {
 		t.Fatal("a missing price bounds something")
 	}
 }
@@ -173,7 +177,7 @@ func TestCostBoundIsACeilingOnEveryTierMix(t *testing.T) {
 		InputPerMillion: rate("3"), CachedInputPerMillion: rate("0.3"), CacheWriteInputPerMillion: rate("3.75"),
 		CacheWrite1HInputPerMillion: rate("6"), OutputPerMillion: rate("15"),
 	}}
-	got, ok := price.CostBound(1_000_000, 100_000, true)
+	got, ok := price.CostBound(1_000_000, 100_000, true, settledAt)
 	// A million input tokens at the dearest input rate, 6, plus the reply, 1.5.
 	if !ok || got.String() != "7.5" {
 		t.Fatalf("CostBound = %q, %v, want 7.5", got.String(), ok)
@@ -181,21 +185,21 @@ func TestCostBoundIsACeilingOnEveryTierMix(t *testing.T) {
 	// An embedding has no reply to bound, so a price without an output rate
 	// still prices it.
 	embedding := &RoutingPrice{Price: Price{InputPerMillion: rate("0.02")}}
-	if got, ok := embedding.CostBound(1000, 4096, false); !ok || got.String() != "0.00002" {
+	if got, ok := embedding.CostBound(1000, 4096, false, settledAt); !ok || got.String() != "0.00002" {
 		t.Fatalf("embedding CostBound = %q, %v", got.String(), ok)
 	}
-	if _, ok := embedding.CostBound(1000, 4096, true); ok {
+	if _, ok := embedding.CostBound(1000, 4096, true, settledAt); ok {
 		t.Fatal("a generation without an output rate has a bound")
 	}
-	if _, ok := (&RoutingPrice{Price: Price{OutputPerMillion: rate("1")}}).CostBound(1, 1, true); ok {
+	if _, ok := (&RoutingPrice{Price: Price{OutputPerMillion: rate("1")}}).CostBound(1, 1, true, settledAt); ok {
 		t.Fatal("a price without an input rate has a bound")
 	}
 	// Each division rounds up, so a single token never bounds at nothing.
-	if got, ok := price.CostBound(1, 0, true); !ok || got.String() != "0.000006" {
+	if got, ok := price.CostBound(1, 0, true, settledAt); !ok || got.String() != "0.000006" {
 		t.Fatalf("one token CostBound = %q, %v", got.String(), ok)
 	}
 	tiny := &RoutingPrice{Price: Price{InputPerMillion: rate("0.000000000001"), OutputPerMillion: rate("0.000000000001")}}
-	if got, ok := tiny.CostBound(1, 1, true); !ok || got.String() != "0.000000000002" {
+	if got, ok := tiny.CostBound(1, 1, true, settledAt); !ok || got.String() != "0.000000000002" {
 		t.Fatalf("rounded-up CostBound = %q, %v", got.String(), ok)
 	}
 
@@ -239,8 +243,8 @@ func TestCostBoundIsACeilingOnEveryTierMix(t *testing.T) {
 			write5m = random.Int64N(write - write1h + 1)
 			u.CacheWrite5MInputTokens = &write5m
 		}
-		actual, ok := p.Cost(u)
-		bound, boundOK := p.CostBound(input, output, true)
+		actual, ok := p.Cost(u, settledAt, true)
+		bound, boundOK := p.CostBound(input, output, true, settledAt)
 		if !ok || !boundOK || bound.Cmp(actual) < 0 {
 			t.Fatalf("bound %q < cost %q for %+v / %+v", bound.String(), actual.String(), *p, u)
 		}
@@ -253,7 +257,7 @@ func TestCostArithmetic(t *testing.T) {
 	if !zero.IsZero() || zero.String() != "0" || zero.Cmp(Cost{}) != 0 {
 		t.Fatal("the zero Cost is not nothing")
 	}
-	one, _ := (Price{UnitPrice: rate("1")}).Cost(AttemptUsage{Complete: true, MediaUnits: rate("1")})
+	one, _ := (Price{UnitPrice: rate("1")}).Cost(AttemptUsage{Complete: true, MediaUnits: rate("1")}, settledAt, true)
 	if one.String() != "1" || one.IsZero() || one.Cmp(zero) <= 0 || zero.Cmp(one) >= 0 {
 		t.Fatalf("one = %q", one.String())
 	}
@@ -263,7 +267,7 @@ func TestCostArithmetic(t *testing.T) {
 	if got := MaxCost().Add(one); got.Cmp(MaxCost()) != 0 || got.String() != "999999999999.999999999999" {
 		t.Fatalf("the sum of the largest cost and one = %q", got.String())
 	}
-	small, _ := (Price{UnitPrice: rate("0.000000000123")}).Cost(AttemptUsage{Complete: true, MediaUnits: rate("1")})
+	small, _ := (Price{UnitPrice: rate("0.000000000123")}).Cost(AttemptUsage{Complete: true, MediaUnits: rate("1")}, settledAt, true)
 	if small.String() != "0.000000000123" {
 		t.Fatalf("small = %q", small.String())
 	}
@@ -311,7 +315,7 @@ func BenchmarkCostBound(b *testing.B) {
 	price.rates = parseRates(&price.Price)
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, ok := price.CostBound(50_000, 4096, true); !ok {
+		if _, ok := price.CostBound(50_000, 4096, true, settledAt); !ok {
 			b.Fatal("unpriced")
 		}
 	}
@@ -328,7 +332,7 @@ func BenchmarkPriceCost(b *testing.B) {
 		tokens(50_000), tokens(20_000), tokens(5_000), tokens(300)
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, ok := price.Cost(usage); !ok {
+		if _, ok := price.Cost(usage, settledAt, true); !ok {
 			b.Fatal("unpriced")
 		}
 	}

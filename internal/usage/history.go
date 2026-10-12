@@ -64,6 +64,12 @@ type RequestSummary struct {
 	CacheWriteInputTokens   *int64                   `json:"cache_write_input_tokens"`
 	CacheWrite5MInputTokens *int64                   `json:"cache_write_5m_input_tokens"`
 	CacheWrite1HInputTokens *int64                   `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64                   `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64                   `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64                   `json:"audio_output_tokens"`
+	ImageInputTokens        *int64                   `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64                   `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64                   `json:"image_output_tokens"`
 	EstimatedCost           *string                  `json:"estimated_cost"`
 	Currency                *string                  `json:"currency"`
 	Unpriced                *bool                    `json:"unpriced"`
@@ -78,33 +84,42 @@ type RequestSummary struct {
 // provenance that explains why this provider served it and the charge evidence
 // that explains what it cost.
 type AttemptDetail struct {
-	Routing                 *Routing   `json:"routing"`
-	ID                      string     `json:"id"`
-	Ordinal                 int32      `json:"ordinal"`
-	ProviderID              string     `json:"provider_id"`
-	ProviderName            string     `json:"provider_name"`
-	UpstreamModel           string     `json:"upstream_model"`
-	StartedAt               time.Time  `json:"started_at"`
-	CompletedAt             *time.Time `json:"completed_at"`
-	StatusCode              *int32     `json:"status_code"`
-	ErrorClass              *string    `json:"error_class"`
-	Committed               bool       `json:"committed"`
-	LatencyMS               *int64     `json:"latency_ms"`
-	FirstByteMS             *int64     `json:"first_byte_ms"`
-	ChargeStatus            *string    `json:"charge_status"`
-	UsageObserved           *bool      `json:"usage_observed"`
-	UsageComplete           *bool      `json:"usage_complete"`
-	InputTokens             *int64     `json:"input_tokens"`
-	OutputTokens            *int64     `json:"output_tokens"`
-	CachedInputTokens       *int64     `json:"cached_input_tokens"`
-	CacheWriteInputTokens   *int64     `json:"cache_write_input_tokens"`
-	CacheWrite5MInputTokens *int64     `json:"cache_write_5m_input_tokens"`
-	CacheWrite1HInputTokens *int64     `json:"cache_write_1h_input_tokens"`
-	MediaUnits              *string    `json:"media_units"`
-	EstimatedCost           *string    `json:"estimated_cost"`
-	Currency                *string    `json:"currency"`
-	Unpriced                *bool      `json:"unpriced"`
-	PricingRevisionID       *string    `json:"pricing_revision_id"`
+	Routing                 *Routing         `json:"routing"`
+	ID                      string           `json:"id"`
+	Ordinal                 int32            `json:"ordinal"`
+	ProviderID              string           `json:"provider_id"`
+	ProviderName            string           `json:"provider_name"`
+	UpstreamModel           string           `json:"upstream_model"`
+	StartedAt               time.Time        `json:"started_at"`
+	CompletedAt             *time.Time       `json:"completed_at"`
+	StatusCode              *int32           `json:"status_code"`
+	ErrorClass              *string          `json:"error_class"`
+	Committed               bool             `json:"committed"`
+	LatencyMS               *int64           `json:"latency_ms"`
+	FirstByteMS             *int64           `json:"first_byte_ms"`
+	ChargeStatus            *string          `json:"charge_status"`
+	UsageObserved           *bool            `json:"usage_observed"`
+	UsageComplete           *bool            `json:"usage_complete"`
+	InputTokens             *int64           `json:"input_tokens"`
+	OutputTokens            *int64           `json:"output_tokens"`
+	CachedInputTokens       *int64           `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64           `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64           `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64           `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64           `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64           `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64           `json:"audio_output_tokens"`
+	ImageInputTokens        *int64           `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64           `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64           `json:"image_output_tokens"`
+	MediaUnits              *string          `json:"media_units"`
+	ToolCalls               map[string]int64 `json:"tool_calls"`
+	Batch                   *bool            `json:"batch"`
+	PricingComponents       []string         `json:"pricing_components"`
+	EstimatedCost           *string          `json:"estimated_cost"`
+	Currency                *string          `json:"currency"`
+	Unpriced                *bool            `json:"unpriced"`
+	PricingRevisionID       *string          `json:"pricing_revision_id"`
 }
 
 // RequestDetail is one request with its attempt timeline.
@@ -121,6 +136,8 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
         r.status_code::int, r.error_class, r.total_latency_ms::bigint, r.first_byte_ms::bigint,
         r.attempt_count::int, u.input_tokens, u.output_tokens, u.cached_input_tokens,
         u.cache_write_input_tokens, u.cache_write_5m_input_tokens, u.cache_write_1h_input_tokens,
+        u.audio_input_tokens, u.cached_audio_input_tokens, u.audio_output_tokens,
+        u.image_input_tokens, u.cached_image_input_tokens, u.image_output_tokens,
         u.estimated_cost, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions, r.end_user_digest,
         r.origin, r.parent_request_id::text, r.budget_boundary, r.payload_captured
     FROM olp.requests r LEFT JOIN LATERAL (
@@ -130,6 +147,12 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
              SUM(f.cache_write_input_tokens)::bigint AS cache_write_input_tokens,
              SUM(f.cache_write_5m_input_tokens)::bigint AS cache_write_5m_input_tokens,
              SUM(f.cache_write_1h_input_tokens)::bigint AS cache_write_1h_input_tokens,
+             SUM(f.audio_input_tokens)::bigint AS audio_input_tokens,
+             SUM(f.cached_audio_input_tokens)::bigint AS cached_audio_input_tokens,
+             SUM(f.audio_output_tokens)::bigint AS audio_output_tokens,
+             SUM(f.image_input_tokens)::bigint AS image_input_tokens,
+             SUM(f.cached_image_input_tokens)::bigint AS cached_image_input_tokens,
+             SUM(f.image_output_tokens)::bigint AS image_output_tokens,
              SUM(f.estimated_cost)::text AS estimated_cost,
              btrim(MAX(f.currency)) AS currency, BOOL_OR(f.unpriced) AS unpriced,
              BOOL_AND(f.charge_status = 'not_billable' OR f.usage_complete) AS usage_complete
@@ -143,6 +166,8 @@ func (s *RequestSummary) scanTargets() []any {
 		&s.StartedAt, &s.CompletedAt, &s.StatusCode, &s.ErrorClass, &s.TotalLatencyMS,
 		&s.FirstByteMS, &s.AttemptCount, &s.InputTokens, &s.OutputTokens, &s.CachedInputTokens,
 		&s.CacheWriteInputTokens, &s.CacheWrite5MInputTokens, &s.CacheWrite1HInputTokens,
+		&s.AudioInputTokens, &s.CachedAudioInputTokens, &s.AudioOutputTokens,
+		&s.ImageInputTokens, &s.CachedImageInputTokens, &s.ImageOutputTokens,
 		&s.EstimatedCost, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions, &s.EndUserDigest,
 		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary, &s.PayloadCaptured}
 }
@@ -282,7 +307,10 @@ const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider
         a.committed, a.latency_ms::bigint, a.first_byte_ms::bigint, f.charge_status,
         f.usage_observed, f.usage_complete, f.input_tokens, f.output_tokens, f.cached_input_tokens,
         f.cache_write_input_tokens, f.cache_write_5m_input_tokens, f.cache_write_1h_input_tokens,
-        f.media_units::text, f.estimated_cost::text, btrim(f.currency), f.unpriced,
+        f.audio_input_tokens, f.cached_audio_input_tokens, f.audio_output_tokens,
+        f.image_input_tokens, f.cached_image_input_tokens, f.image_output_tokens,
+        f.media_units::text, f.tool_calls::text, f.batch, f.pricing_components,
+        f.estimated_cost::text, btrim(f.currency), f.unpriced,
         f.pricing_revision_id::text
     FROM olp.attempts a JOIN olp.providers p ON p.id = a.provider_id
     LEFT JOIN olp.attempt_usage_facts f ON f.request_id = a.request_id
@@ -310,6 +338,7 @@ func GetRequest(ctx context.Context, q access.Queryer, id string) (RequestDetail
 	for rows.Next() {
 		var attempt AttemptDetail
 		var routing []byte
+		var attemptToolCalls *string
 		if err = rows.Scan(&routing, &attempt.ID, &attempt.Ordinal, &attempt.ProviderID,
 			&attempt.ProviderName, &attempt.UpstreamModel, &attempt.StartedAt, &attempt.CompletedAt,
 			&attempt.StatusCode, &attempt.ErrorClass, &attempt.Committed, &attempt.LatencyMS,
@@ -317,9 +346,17 @@ func GetRequest(ctx context.Context, q access.Queryer, id string) (RequestDetail
 			&attempt.UsageComplete, &attempt.InputTokens, &attempt.OutputTokens,
 			&attempt.CachedInputTokens, &attempt.CacheWriteInputTokens,
 			&attempt.CacheWrite5MInputTokens, &attempt.CacheWrite1HInputTokens,
-			&attempt.MediaUnits, &attempt.EstimatedCost,
+			&attempt.AudioInputTokens, &attempt.CachedAudioInputTokens, &attempt.AudioOutputTokens,
+			&attempt.ImageInputTokens, &attempt.CachedImageInputTokens, &attempt.ImageOutputTokens,
+			&attempt.MediaUnits, &attemptToolCalls, &attempt.Batch, &attempt.PricingComponents,
+			&attempt.EstimatedCost,
 			&attempt.Currency, &attempt.Unpriced, &attempt.PricingRevisionID); err != nil {
 			return RequestDetail{}, fmt.Errorf("read request attempts: %w", err)
+		}
+		if attemptToolCalls != nil {
+			if err = json.Unmarshal([]byte(*attemptToolCalls), &attempt.ToolCalls); err != nil {
+				return RequestDetail{}, fmt.Errorf("read request attempts: stored tool calls are invalid")
+			}
 		}
 		if routing != nil {
 			// Stored provenance is re-decoded rather than passed through, so a

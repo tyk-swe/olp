@@ -56,6 +56,12 @@ type Totals struct {
 	CacheWriteInputTokens   string  `json:"cache_write_input_tokens"`
 	CacheWrite5MInputTokens string  `json:"cache_write_5m_input_tokens"`
 	CacheWrite1HInputTokens string  `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        string  `json:"audio_input_tokens"`
+	CachedAudioInputTokens  string  `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       string  `json:"audio_output_tokens"`
+	ImageInputTokens        string  `json:"image_input_tokens"`
+	CachedImageInputTokens  string  `json:"cached_image_input_tokens"`
+	ImageOutputTokens       string  `json:"image_output_tokens"`
 	MediaUnits              string  `json:"media_units"`
 	EstimatedCost           *string `json:"estimated_cost"`
 	Currency                *string `json:"currency"`
@@ -272,6 +278,12 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" COALESCE(cache_write_input_tokens, 0)::numeric AS cache_write_input_tokens," +
 		" COALESCE(cache_write_5m_input_tokens, 0)::numeric AS cache_write_5m_input_tokens," +
 		" COALESCE(cache_write_1h_input_tokens, 0)::numeric AS cache_write_1h_input_tokens," +
+		" COALESCE(audio_input_tokens, 0)::numeric AS audio_input_tokens," +
+		" COALESCE(cached_audio_input_tokens, 0)::numeric AS cached_audio_input_tokens," +
+		" COALESCE(audio_output_tokens, 0)::numeric AS audio_output_tokens," +
+		" COALESCE(image_input_tokens, 0)::numeric AS image_input_tokens," +
+		" COALESCE(cached_image_input_tokens, 0)::numeric AS cached_image_input_tokens," +
+		" COALESCE(image_output_tokens, 0)::numeric AS image_output_tokens," +
 		" COALESCE(media_units, 0)::numeric AS media_units, estimated_cost," +
 		" CASE WHEN " + scope.unpriced + " THEN 1 ELSE 0 END::bigint AS unpriced_count," +
 		" CASE WHEN " + scope.incomplete + " THEN 1 ELSE 0 END::bigint AS incomplete_count," +
@@ -287,7 +299,10 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" api_key_id, operation, surface, attribution, end_user_digest, model_family, estimate_provenance, " +
 		scope.hourlyCount + ", input_tokens, output_tokens," +
 		" cached_input_tokens, cache_write_input_tokens, cache_write_5m_input_tokens," +
-		" cache_write_1h_input_tokens, media_units, estimated_cost, " + scope.hourlyUnpriced + ", " +
+		" cache_write_1h_input_tokens," +
+		" audio_input_tokens, cached_audio_input_tokens, audio_output_tokens," +
+		" image_input_tokens, cached_image_input_tokens, image_output_tokens," +
+		" media_units, estimated_cost, " + scope.hourlyUnpriced + ", " +
 		scope.hourlyIncomplete + ", currency::text AS currency, estimated_input_tokens," +
 		" estimate_reported_input_tokens, estimate_attempt_count FROM olp.attempt_usage_hourly WHERE true")
 	q.pushBind(" AND bucket >= ", ceilHour(f.Start))
@@ -306,6 +321,12 @@ const totalsColumns = "COALESCE(SUM(request_count), 0)::bigint," +
 	" COALESCE(SUM(cache_write_input_tokens), 0)::text," +
 	" COALESCE(SUM(cache_write_5m_input_tokens), 0)::text," +
 	" COALESCE(SUM(cache_write_1h_input_tokens), 0)::text," +
+	" COALESCE(SUM(audio_input_tokens), 0)::text," +
+	" COALESCE(SUM(cached_audio_input_tokens), 0)::text," +
+	" COALESCE(SUM(audio_output_tokens), 0)::text," +
+	" COALESCE(SUM(image_input_tokens), 0)::text," +
+	" COALESCE(SUM(cached_image_input_tokens), 0)::text," +
+	" COALESCE(SUM(image_output_tokens), 0)::text," +
 	" COALESCE(SUM(media_units), 0)::text," +
 	" SUM(estimated_cost)::text," +
 	" COALESCE(SUM(unpriced_count), 0)::bigint," +
@@ -320,6 +341,8 @@ const totalsColumns = "COALESCE(SUM(request_count), 0)::bigint," +
 func (t *Totals) scanTargets() []any {
 	return []any{&t.RequestCount, &t.InputTokens, &t.OutputTokens, &t.CachedInputTokens,
 		&t.CacheWriteInputTokens, &t.CacheWrite5MInputTokens, &t.CacheWrite1HInputTokens,
+		&t.AudioInputTokens, &t.CachedAudioInputTokens, &t.AudioOutputTokens,
+		&t.ImageInputTokens, &t.CachedImageInputTokens, &t.ImageOutputTokens,
 		&t.MediaUnits, &t.EstimatedCost, &t.UnpricedCount, &t.IncompleteCount, &t.Currency,
 		&t.EstimatedInputTokens, &t.ReportedInputTokens, &t.EstimatedAttemptCount}
 }

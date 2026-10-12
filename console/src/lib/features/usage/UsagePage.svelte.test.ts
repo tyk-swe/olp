@@ -52,6 +52,16 @@ let component: ReturnType<typeof mount> | undefined;
 
 // The totals every report carries about admission estimates; zero attempts
 // had both an estimate and reported usage.
+// The modality token sums every totals report carries.
+const modalityZeros = {
+  audio_input_tokens: '0',
+  cached_audio_input_tokens: '0',
+  audio_output_tokens: '0',
+  image_input_tokens: '0',
+  cached_image_input_tokens: '0',
+  image_output_tokens: '0'
+};
+
 const unestimated = {
   estimated_attempt_count: 0,
   estimated_input_tokens: '0',
@@ -68,6 +78,7 @@ beforeEach(() => {
   vi.mocked(usageSummary).mockResolvedValue({
     ...counts,
     ...unestimated,
+    ...modalityZeros,
     cache_write_1h_input_tokens: '0',
     cache_write_5m_input_tokens: '0',
     cache_write_input_tokens: '0',
@@ -135,6 +146,7 @@ it('shows no estimation error when no attempt had both an estimate and usage', a
 it('shows the signed estimation error with the sums it is drawn from', async () => {
   vi.mocked(usageSummary).mockResolvedValue({
     ...counts,
+    ...modalityZeros,
     cache_write_1h_input_tokens: '0',
     cache_write_5m_input_tokens: '0',
     cache_write_input_tokens: '0',
@@ -161,6 +173,7 @@ it('shows the signed estimation error with the sums it is drawn from', async () 
 it('does not claim an empty sample when the providers reported no input', async () => {
   vi.mocked(usageSummary).mockResolvedValue({
     ...counts,
+    ...modalityZeros,
     cache_write_1h_input_tokens: '0',
     cache_write_5m_input_tokens: '0',
     cache_write_input_tokens: '0',
@@ -220,6 +233,7 @@ it('sets estimated against reported input in each breakdown row', async () => {
   const row = {
     ...counts,
     dimension: 'openai-o200k',
+    ...modalityZeros,
     cache_write_1h_input_tokens: '0',
     cache_write_5m_input_tokens: '0',
     cache_write_input_tokens: '0',

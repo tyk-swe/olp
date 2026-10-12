@@ -116,6 +116,9 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
  SELECT rid::text,revision,effective_at,provider_kind,provider_id::text,vendor_id,model,operation,
  input_per_million::text,output_per_million::text,cached_input_per_million::text,
  cache_write_input_per_million::text,cache_write_5m_input_per_million::text,cache_write_1h_input_per_million::text,
+ audio_input_per_million::text,cached_audio_input_per_million::text,audio_output_per_million::text,
+ image_input_per_million::text,cached_image_input_per_million::text,image_output_per_million::text,
+ per_request::text,batch_multiplier::text,tool_calls::text,tiers::text,windows::text,
  unit_price::text,btrim(currency)
  FROM ranked WHERE rank=1 OR effective_at>$1 LIMIT 100001`, now)
 	if err != nil {
@@ -123,9 +126,29 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
 	}
 	for rows.Next() {
 		var p RoutingPrice
-		if err = rows.Scan(&p.RevisionID, &p.Revision, &p.EffectiveAt, &p.ProviderKind, &p.ProviderID, &p.VendorID, &p.Model, &p.Operation, &p.InputPerMillion, &p.OutputPerMillion, &p.CachedInputPerMillion, &p.CacheWriteInputPerMillion, &p.CacheWrite5MInputPerMillion, &p.CacheWrite1HInputPerMillion, &p.UnitPrice, &p.Currency); err != nil {
+		var toolCalls, tiers, windows *string
+		if err = rows.Scan(&p.RevisionID, &p.Revision, &p.EffectiveAt, &p.ProviderKind, &p.ProviderID, &p.VendorID, &p.Model, &p.Operation, &p.InputPerMillion, &p.OutputPerMillion, &p.CachedInputPerMillion, &p.CacheWriteInputPerMillion, &p.CacheWrite5MInputPerMillion, &p.CacheWrite1HInputPerMillion, &p.AudioInputPerMillion, &p.CachedAudioInputPerMillion, &p.AudioOutputPerMillion, &p.ImageInputPerMillion, &p.CachedImageInputPerMillion, &p.ImageOutputPerMillion, &p.PerRequest, &p.BatchMultiplier, &toolCalls, &tiers, &windows, &p.UnitPrice, &p.Currency); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if toolCalls != nil {
+			if err = json.Unmarshal([]byte(*toolCalls), &p.ToolCalls); err != nil {
+				rows.Close()
+				return nil, err
+			}
+		}
+		if tiers != nil {
+			if err = json.Unmarshal([]byte(*tiers), &p.Tiers); err != nil {
+				rows.Close()
+				return nil, err
+			}
+		}
+		if windows != nil {
+			p.Windows = &PriceWindows{}
+			if err = json.Unmarshal([]byte(*windows), p.Windows); err != nil {
+				rows.Close()
+				return nil, err
+			}
 		}
 		p.rates = parseRates(&p.Price)
 		in.Prices = append(in.Prices, p)

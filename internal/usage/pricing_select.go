@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -23,6 +24,9 @@ type attemptPricing struct {
 	// charged at a rate nobody configured.
 	complete      bool
 	estimatedCost *string
+	// components names the price components the attempt was charged through,
+	// which the fact stores so a report can show what produced its cost.
+	components []string
 }
 
 // routingPin is the pricing provenance the gateway recorded for one attempt.
@@ -84,41 +88,32 @@ var defaultVendorCases = func() string {
 // connector fronting a known vendor prices against that vendor), falling back
 // to the catalogue's default name for the connector kind.
 //
-// `$5` (input tokens) is cache inclusive, so the uncached portion is `$5 - $9`.
-// When the revision carries no cached tier the whole input count keeps billing
-// at the full input rate, exactly as it did before the tier existed, so history
-// stays comparable. The split is plain arithmetic rather than GREATEST/LEAST
-// around the subtraction because those skip NULL arguments: an attempt that
-// reports cached tokens without the total they came out of must propagate the
-// missing total and be recorded as unpriced, not charged for its cached
-// portion at a rate nothing checked. The same reason keeps the completeness
-// test and the charge behind one shared expression, so neither can admit a
-// dimension the other refuses to price.
+// The whole selected price row goes to olp.price_usage as jsonb, which applies
+// every component the entry carries: per-million shares with their fallbacks,
+// input tiers, time windows, tool fees, per-request fees and the batch
+// multiplier. The usage document it prices has `complete` forced true, so its
+// `complete` output answers the fact table's question — does every dimension
+// the attempt used have a rate — independently of whether the attempt's usage
+// is settled. The stored cost is gated on usage completeness here instead.
 var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
         selected.currency,
         priced.complete AS pricing_complete,
-        CASE WHEN $8::boolean AND priced.complete
-             THEN (COALESCE(priced.input_charge / 1000000, 0)
-                 + COALESCE($6::numeric * selected.output_per_million / 1000000, 0)
-                 + COALESCE($7::numeric * selected.unit_price, 0))::text
-             ELSE NULL END AS estimated_cost
+        priced.cost::text AS estimated_cost,
+        priced.components
     FROM olp.providers provider
     LEFT JOIN olp.provider_revisions provider_revision
-        ON provider_revision.id = COALESCE($11::uuid, provider.active_revision_id)
+        ON provider_revision.id = COALESCE($9::uuid, provider.active_revision_id)
        AND provider_revision.provider_id = provider.id
     LEFT JOIN LATERAL (
-        SELECT revision.id AS pricing_revision_id, price.input_per_million,
-               price.cached_input_per_million, price.output_per_million, price.unit_price,
-               price.cache_write_input_per_million, price.cache_write_5m_input_per_million,
-               price.cache_write_1h_input_per_million,
+        SELECT revision.id AS pricing_revision_id, to_jsonb(price) AS price_doc,
                btrim(price.currency::text) AS currency
         FROM olp.pricing_revisions revision
         JOIN olp.prices price ON price.pricing_revision_id = revision.id
         WHERE revision.effective_at <= $4
-          AND ($11::uuid IS NULL OR provider_revision.id IS NOT NULL)
-          AND (NOT $12::boolean OR revision.id = $10::uuid)
+          AND ($9::uuid IS NULL OR provider_revision.id IS NOT NULL)
+          AND (NOT $10::boolean OR revision.id = $8::uuid)
           AND price.provider_kind = COALESCE(provider_revision.configuration->>'kind', provider.kind)
-          AND (price.vendor_id IS NULL OR price.vendor_id = CASE WHEN $12::boolean THEN $13::text
+          AND (price.vendor_id IS NULL OR price.vendor_id = CASE WHEN $10::boolean THEN $11::text
                 ELSE COALESCE(CASE WHEN provider_revision.id IS NOT NULL
                                   THEN provider_revision.configuration->'options'->>'vendor_id'
                                   ELSE provider.configuration->'options'->>'vendor_id' END,
@@ -132,19 +127,8 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
                  revision.effective_at DESC, revision.revision DESC
         LIMIT 1) selected ON true
     CROSS JOIN LATERAL (
-        SELECT selected.pricing_revision_id IS NOT NULL
-                   AND (($5::bigint IS NULL AND $9::bigint IS NULL)
-                        OR ($5::bigint IS NOT NULL AND selected.input_per_million IS NOT NULL))
-                   AND ($6::bigint IS NULL OR selected.output_per_million IS NOT NULL)
-                   AND ($7::numeric IS NULL OR selected.unit_price IS NOT NULL) AS complete,
-               CASE WHEN $5::bigint IS NULL THEN NULL ELSE
-                     ($5::numeric-COALESCE($9::bigint,0)-COALESCE($14::bigint,0))*selected.input_per_million
-                    +COALESCE($9::bigint,0)*COALESCE(selected.cached_input_per_million,selected.input_per_million)
-                    +(COALESCE($14::bigint,0)-COALESCE($15::bigint,0)-COALESCE($16::bigint,0))
-                       *COALESCE(selected.cache_write_input_per_million,selected.input_per_million)
-                    +COALESCE($15::bigint,0)*COALESCE(selected.cache_write_5m_input_per_million,selected.cache_write_input_per_million,selected.input_per_million)
-                    +COALESCE($16::bigint,0)*COALESCE(selected.cache_write_1h_input_per_million,selected.cache_write_input_per_million,selected.input_per_million)
-               END AS input_charge) priced
+        SELECT * FROM olp.price_usage(selected.price_doc, $5::jsonb, $6::timestamptz, $7::boolean)
+    ) priced
     WHERE provider.id = $1::uuid`
 
 // priceAttempt resolves what one attempt cost. A provider that no longer exists
@@ -155,7 +139,10 @@ func priceAttempt(ctx context.Context, tx pgx.Tx, event *Event, attempt Validate
 	if err != nil {
 		return attemptPricing{}, err
 	}
-	return priceUsage(ctx, tx, event, attempt.Usage, attempt.Attempt.ProviderID, attempt.Attempt.UpstreamModel, pin)
+	successful := attempt.Attempt.ErrorClass == nil && attempt.StatusCode != nil &&
+		*attempt.StatusCode >= 200 && *attempt.StatusCode <= 299
+	return priceUsage(ctx, tx, event, attempt.Usage, attempt.Attempt.StartedAt,
+		successful, attempt.Attempt.ProviderID, attempt.Attempt.UpstreamModel, pin)
 }
 
 // priceBaseline prices an attempt's usage on the baseline a selector avoided,
@@ -163,25 +150,44 @@ func priceAttempt(ctx context.Context, tx pgx.Tx, event *Event, attempt Validate
 // baseline that cannot price the attempt's dimensions has no cost.
 func priceBaseline(ctx context.Context, tx pgx.Tx, event *Event, attempt ValidatedAttempt) (*string, error) {
 	baseline := attempt.Attempt.Routing.Baseline
-	pricing, err := priceUsage(ctx, tx, event, attempt.Usage, baseline.ProviderID, baseline.UpstreamModel, routingPin{vendorID: baseline.VendorID})
+	successful := attempt.Attempt.ErrorClass == nil && attempt.StatusCode != nil &&
+		*attempt.StatusCode >= 200 && *attempt.StatusCode <= 299
+	pricing, err := priceUsage(ctx, tx, event, attempt.Usage, attempt.Attempt.StartedAt,
+		successful, baseline.ProviderID, baseline.UpstreamModel, routingPin{vendorID: baseline.VendorID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	return pricing.estimatedCost, err
 }
 
-func priceUsage(ctx context.Context, tx pgx.Tx, event *Event, usage AttemptUsage, providerID, model string, pin routingPin) (attemptPricing, error) {
-	var pricing attemptPricing
-	err := tx.QueryRow(ctx, priceAttemptSQL,
-		providerID, model, event.Operation, event.ObservedAt,
-		usage.InputTokens, usage.OutputTokens, usage.MediaUnits,
-		usage.Complete, usage.CachedInputTokens,
-		pin.pricingRevisionID, pin.providerRevisionID, pin.pinned, pin.vendorID,
-		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens,
-		usage.CacheWrite1HInputTokens,
-	).Scan(&pricing.pricingRevisionID, &pricing.currency, &pricing.complete, &pricing.estimatedCost)
+func priceUsage(ctx context.Context, tx pgx.Tx, event *Event, usage AttemptUsage,
+	startedAt time.Time, successful bool, providerID, model string, pin routingPin) (attemptPricing, error) {
+	// The pricing function returns a cost only for complete usage. The fact
+	// still needs to know whether an incomplete attempt's dimensions had
+	// rates, so the usage document it prices reports completeness: its
+	// `complete` output is then "every used dimension has a rate", which is
+	// the flag unpriced facts are recorded under, and the cost it returns is
+	// gated on the usage being complete below.
+	documented := usage
+	documented.Complete = true
+	document, err := json.Marshal(documented)
 	if err != nil {
 		return attemptPricing{}, fmt.Errorf("price attempt: %w", err)
+	}
+	var pricing attemptPricing
+	var cost *string
+	err = tx.QueryRow(ctx, priceAttemptSQL,
+		providerID, model, event.Operation, event.ObservedAt,
+		string(document), startedAt, successful,
+		pin.pricingRevisionID, pin.providerRevisionID, pin.pinned, pin.vendorID,
+	).Scan(&pricing.pricingRevisionID, &pricing.currency, &pricing.complete, &cost, &pricing.components)
+	if err != nil {
+		return attemptPricing{}, fmt.Errorf("price attempt: %w", err)
+	}
+	if usage.Complete && pricing.complete {
+		pricing.estimatedCost = cost
+	} else {
+		pricing.components = nil
 	}
 	if pricing.currency != nil {
 		currency := strings.TrimSpace(*pricing.currency)

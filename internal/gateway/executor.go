@@ -1324,7 +1324,7 @@ func (s *Server) recordBusiness(env Envelope, x *execution) {
 		if u := fact.Usage; u != nil && fact.UsageObserved {
 			s.Business.Tokens(labels, &u.InputTokens, &u.OutputTokens)
 			if fact.Price != nil {
-				if cost, ok := fact.Price.Cost(attemptUsage(fact, env.Operation)); ok {
+				if cost, ok := fact.Price.Cost(attemptUsage(fact, env.Operation), fact.StartedAt, attemptSuccessful(fact)); ok {
 					if amount, err := strconv.ParseFloat(cost.String(), 64); err == nil {
 						s.Business.Cost(labels, fact.Price.Currency, amount)
 					}

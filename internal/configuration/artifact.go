@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const APIVersion = "openllmproxy.dev/config/v1"
@@ -166,24 +167,75 @@ func (r *RouteEntry) setBehavior(raw []byte) error {
 }
 
 type PriceEntry struct {
-	VendorID                    *string `json:"vendor_id"`
-	ProviderKind                string  `json:"provider_kind"`
-	Provider                    *string `json:"provider"`
-	Model                       string  `json:"model"`
-	Operation                   string  `json:"operation"`
-	InputPerMillion             *string `json:"input_per_million"`
-	CachedInputPerMillion       *string `json:"cached_input_per_million"`
-	OutputPerMillion            *string `json:"output_per_million"`
-	CacheWriteInputPerMillion   *string `json:"cache_write_input_per_million"`
-	CacheWrite5MInputPerMillion *string `json:"cache_write_5m_input_per_million"`
-	CacheWrite1HInputPerMillion *string `json:"cache_write_1h_input_per_million"`
-	UnitPrice                   *string `json:"unit_price"`
-	Currency                    string  `json:"currency"`
+	VendorID                    *string             `json:"vendor_id"`
+	ProviderKind                string              `json:"provider_kind"`
+	Provider                    *string             `json:"provider"`
+	Model                       string              `json:"model"`
+	Operation                   string              `json:"operation"`
+	InputPerMillion             *string             `json:"input_per_million"`
+	CachedInputPerMillion       *string             `json:"cached_input_per_million"`
+	OutputPerMillion            *string             `json:"output_per_million"`
+	CacheWriteInputPerMillion   *string             `json:"cache_write_input_per_million"`
+	CacheWrite5MInputPerMillion *string             `json:"cache_write_5m_input_per_million"`
+	CacheWrite1HInputPerMillion *string             `json:"cache_write_1h_input_per_million"`
+	AudioInputPerMillion        *string             `json:"audio_input_per_million"`
+	CachedAudioInputPerMillion  *string             `json:"cached_audio_input_per_million"`
+	AudioOutputPerMillion       *string             `json:"audio_output_per_million"`
+	ImageInputPerMillion        *string             `json:"image_input_per_million"`
+	CachedImageInputPerMillion  *string             `json:"cached_image_input_per_million"`
+	ImageOutputPerMillion       *string             `json:"image_output_per_million"`
+	UnitPrice                   *string             `json:"unit_price"`
+	PerRequest                  *string             `json:"per_request"`
+	BatchMultiplier             *string             `json:"batch_multiplier"`
+	ToolCalls                   map[string]string   `json:"tool_calls"`
+	Tiers                       []usage.PriceTier   `json:"tiers"`
+	Windows                     *usage.PriceWindows `json:"windows"`
+	Currency                    string              `json:"currency"`
 }
 
 type PricingEntry struct {
 	EffectiveAt string       `json:"effective_at"`
 	Prices      []PriceEntry `json:"prices"`
+}
+
+// priceEntryFromUsage carries one stored price into the configuration document.
+func priceEntryFromUsage(price usage.Price) PriceEntry {
+	return PriceEntry{
+		VendorID: price.VendorID, ProviderKind: price.ProviderKind, Model: price.Model, Operation: price.Operation,
+		InputPerMillion: price.InputPerMillion, CachedInputPerMillion: price.CachedInputPerMillion,
+		OutputPerMillion: price.OutputPerMillion, CacheWriteInputPerMillion: price.CacheWriteInputPerMillion,
+		CacheWrite5MInputPerMillion: price.CacheWrite5MInputPerMillion,
+		CacheWrite1HInputPerMillion: price.CacheWrite1HInputPerMillion,
+		AudioInputPerMillion:        price.AudioInputPerMillion,
+		CachedAudioInputPerMillion:  price.CachedAudioInputPerMillion,
+		AudioOutputPerMillion:       price.AudioOutputPerMillion,
+		ImageInputPerMillion:        price.ImageInputPerMillion,
+		CachedImageInputPerMillion:  price.CachedImageInputPerMillion,
+		ImageOutputPerMillion:       price.ImageOutputPerMillion,
+		UnitPrice:                   price.UnitPrice,
+		PerRequest:                  price.PerRequest, BatchMultiplier: price.BatchMultiplier,
+		ToolCalls: price.ToolCalls, Tiers: price.Tiers, Windows: price.Windows,
+		Currency: price.Currency}
+}
+
+// usagePrice carries one document entry into the usage price list.
+func (e PriceEntry) usagePrice() usage.Price {
+	return usage.Price{
+		VendorID: e.VendorID, ProviderKind: e.ProviderKind, Model: e.Model, Operation: e.Operation,
+		InputPerMillion: e.InputPerMillion, CachedInputPerMillion: e.CachedInputPerMillion,
+		OutputPerMillion: e.OutputPerMillion, CacheWriteInputPerMillion: e.CacheWriteInputPerMillion,
+		CacheWrite5MInputPerMillion: e.CacheWrite5MInputPerMillion,
+		CacheWrite1HInputPerMillion: e.CacheWrite1HInputPerMillion,
+		AudioInputPerMillion:        e.AudioInputPerMillion,
+		CachedAudioInputPerMillion:  e.CachedAudioInputPerMillion,
+		AudioOutputPerMillion:       e.AudioOutputPerMillion,
+		ImageInputPerMillion:        e.ImageInputPerMillion,
+		CachedImageInputPerMillion:  e.CachedImageInputPerMillion,
+		ImageOutputPerMillion:       e.ImageOutputPerMillion,
+		UnitPrice:                   e.UnitPrice,
+		PerRequest:                  e.PerRequest, BatchMultiplier: e.BatchMultiplier,
+		ToolCalls: e.ToolCalls, Tiers: e.Tiers, Windows: e.Windows,
+		Currency: e.Currency}
 }
 
 func canonicalProvider(p *ProviderEntry) {

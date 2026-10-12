@@ -997,6 +997,106 @@
                 "string",
                 "null"
               ]
+            },
+            "audio_input_per_million": {
+              "description": "Rate for the audio share of the input tokens. Omit to bill audio\ninput at the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Rate for the cached share of audio input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Rate for the audio share of the output tokens. Omit to bill it\nat the output rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Rate for the image share of the input tokens. Omit to bill image\ninput at the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Rate for the cached share of image input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Rate for the image share of the output tokens. Omit to bill it\nat the output rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "per_request": {
+              "description": "A fixed fee charged once per successful attempt.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "batch_multiplier": {
+              "description": "Multiplier applied to the whole usage charge of usage marked as\nbatch. Usage marked batch with no multiplier is unpriced.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_calls": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceToolCalls"
+                }
+              ]
+            },
+            "tiers": {
+              "description": "Input-token tiers, ascending by above_input_tokens. The highest\nexceeded tier replaces the entry's per-million rate set.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "items": {
+                    "$ref": "#/$defs/PriceTier"
+                  },
+                  "maxItems": 8,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              ]
+            },
+            "windows": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceWindows"
+                }
+              ]
             }
           },
           "required": [
@@ -1012,7 +1112,190 @@
             "cache_write_5m_input_per_million",
             "cache_write_1h_input_per_million",
             "unit_price",
-            "currency"
+            "currency",
+            "audio_input_per_million",
+            "cached_audio_input_per_million",
+            "audio_output_per_million",
+            "image_input_per_million",
+            "cached_image_input_per_million",
+            "image_output_per_million",
+            "per_request",
+            "batch_multiplier",
+            "tool_calls",
+            "tiers",
+            "windows"
+          ],
+          "type": "object"
+        },
+        "PriceToolCalls": {
+          "additionalProperties": {
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "description": "Fee per metered server-side tool invocation, keyed by tool name.",
+          "maxProperties": 16,
+          "minProperties": 1,
+          "type": "object"
+        },
+        "PriceTier": {
+          "additionalProperties": false,
+          "description": "Per-million rates that apply once an attempt's input tokens exceed\nabove_input_tokens. A tier replaces the entry's whole per-million rate set,\nso it names exactly the per-million fields the entry names.",
+          "properties": {
+            "above_input_tokens": {
+              "description": "Input tokens per attempt above which this tier's rates apply.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_per_million": {
+              "description": "Input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_input_per_million": {
+              "description": "Cached input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_input_per_million": {
+              "description": "Generic cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_5m_input_per_million": {
+              "description": "5-minute TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_1h_input_per_million": {
+              "description": "1-hour TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "output_per_million": {
+              "description": "Output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_input_per_million": {
+              "description": "Audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Cached audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Audio output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Cached image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Image output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "above_input_tokens"
+          ],
+          "type": "object"
+        },
+        "PriceWindows": {
+          "additionalProperties": false,
+          "description": "Time-of-day and day-of-week multipliers evaluated in the named zone\nat the attempt's start.",
+          "properties": {
+            "periods": {
+              "items": {
+                "$ref": "#/$defs/PriceWindowPeriod"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "time_zone": {
+              "description": "IANA time zone the periods are evaluated in, for example America/New_York.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "time_zone",
+            "periods"
+          ],
+          "type": "object"
+        },
+        "PriceWindowPeriod": {
+          "additionalProperties": false,
+          "properties": {
+            "days": {
+              "description": "ISO weekdays the period applies on: 1 is Monday, 7 is Sunday.",
+              "items": {
+                "maximum": 7,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 7,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "end": {
+              "description": "Local time the period ends at, exclusive; \"24:00\" runs through midnight.",
+              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+              "type": "string"
+            },
+            "multiplier": {
+              "description": "Multiplier applied to the attempt's whole usage charge.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "start": {
+              "description": "Local time the period starts at, inclusive.",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "days",
+            "start",
+            "end",
+            "multiplier"
           ],
           "type": "object"
         },
@@ -5468,6 +5751,98 @@
                 "string",
                 "null"
               ]
+            },
+            "audio_input_per_million": {
+              "description": "Rate for the audio share of the input tokens. Omit to bill audio\ninput at the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Rate for the cached share of audio input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Rate for the audio share of the output tokens. Omit to bill it\nat the output rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Rate for the image share of the input tokens. Omit to bill image\ninput at the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Rate for the cached share of image input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Rate for the image share of the output tokens. Omit to bill it\nat the output rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "per_request": {
+              "description": "A fixed fee charged once per successful attempt.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "batch_multiplier": {
+              "description": "Multiplier applied to the whole usage charge of usage marked as\nbatch. Usage marked batch with no multiplier is unpriced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_calls": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceToolCalls"
+                }
+              ]
+            },
+            "tiers": {
+              "description": "Input-token tiers, ascending by above_input_tokens. The highest\nexceeded tier replaces the entry's per-million rate set.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "items": {
+                    "$ref": "#/$defs/PriceTier"
+                  },
+                  "maxItems": 8,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              ]
+            },
+            "windows": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceWindows"
+                }
+              ]
             }
           },
           "required": [
@@ -5498,6 +5873,178 @@
           ],
           "type": "string",
           "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
+        },
+        "PriceToolCalls": {
+          "additionalProperties": {
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "description": "Fee per metered server-side tool invocation, keyed by tool name.",
+          "maxProperties": 16,
+          "minProperties": 1,
+          "type": "object"
+        },
+        "PriceTier": {
+          "additionalProperties": false,
+          "description": "Per-million rates that apply once an attempt's input tokens exceed\nabove_input_tokens. A tier replaces the entry's whole per-million rate set,\nso it names exactly the per-million fields the entry names.",
+          "properties": {
+            "above_input_tokens": {
+              "description": "Input tokens per attempt above which this tier's rates apply.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_per_million": {
+              "description": "Input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_input_per_million": {
+              "description": "Cached input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_input_per_million": {
+              "description": "Generic cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_5m_input_per_million": {
+              "description": "5-minute TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_1h_input_per_million": {
+              "description": "1-hour TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "output_per_million": {
+              "description": "Output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_input_per_million": {
+              "description": "Audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Cached audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Audio output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Cached image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Image output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "above_input_tokens"
+          ],
+          "type": "object"
+        },
+        "PriceWindows": {
+          "additionalProperties": false,
+          "description": "Time-of-day and day-of-week multipliers evaluated in the named zone\nat the attempt's start.",
+          "properties": {
+            "periods": {
+              "items": {
+                "$ref": "#/$defs/PriceWindowPeriod"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "time_zone": {
+              "description": "IANA time zone the periods are evaluated in, for example America/New_York.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "time_zone",
+            "periods"
+          ],
+          "type": "object"
+        },
+        "PriceWindowPeriod": {
+          "additionalProperties": false,
+          "properties": {
+            "days": {
+              "description": "ISO weekdays the period applies on: 1 is Monday, 7 is Sunday.",
+              "items": {
+                "maximum": 7,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 7,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "end": {
+              "description": "Local time the period ends at, exclusive; \"24:00\" runs through midnight.",
+              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+              "type": "string"
+            },
+            "multiplier": {
+              "description": "Multiplier applied to the attempt's whole usage charge.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "start": {
+              "description": "Local time the period starts at, inclusive.",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "days",
+            "start",
+            "end",
+            "multiplier"
+          ],
+          "type": "object"
         }
       }
     }
@@ -17486,6 +18033,106 @@
                 "string",
                 "null"
               ]
+            },
+            "audio_input_per_million": {
+              "description": "Rate for the audio share of the input tokens. Omit to bill audio\ninput at the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Rate for the cached share of audio input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Rate for the audio share of the output tokens. Omit to bill it\nat the output rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Rate for the image share of the input tokens. Omit to bill image\ninput at the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Rate for the cached share of image input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Rate for the image share of the output tokens. Omit to bill it\nat the output rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "per_request": {
+              "description": "A fixed fee charged once per successful attempt.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "batch_multiplier": {
+              "description": "Multiplier applied to the whole usage charge of usage marked as\nbatch. Usage marked batch with no multiplier is unpriced.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_calls": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceToolCalls"
+                }
+              ]
+            },
+            "tiers": {
+              "description": "Input-token tiers, ascending by above_input_tokens. The highest\nexceeded tier replaces the entry's per-million rate set.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "items": {
+                    "$ref": "#/$defs/PriceTier"
+                  },
+                  "maxItems": 8,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              ]
+            },
+            "windows": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceWindows"
+                }
+              ]
             }
           },
           "required": [
@@ -17501,7 +18148,190 @@
             "cache_write_5m_input_per_million",
             "cache_write_1h_input_per_million",
             "unit_price",
-            "currency"
+            "currency",
+            "audio_input_per_million",
+            "cached_audio_input_per_million",
+            "audio_output_per_million",
+            "image_input_per_million",
+            "cached_image_input_per_million",
+            "image_output_per_million",
+            "per_request",
+            "batch_multiplier",
+            "tool_calls",
+            "tiers",
+            "windows"
+          ],
+          "type": "object"
+        },
+        "PriceToolCalls": {
+          "additionalProperties": {
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "description": "Fee per metered server-side tool invocation, keyed by tool name.",
+          "maxProperties": 16,
+          "minProperties": 1,
+          "type": "object"
+        },
+        "PriceTier": {
+          "additionalProperties": false,
+          "description": "Per-million rates that apply once an attempt's input tokens exceed\nabove_input_tokens. A tier replaces the entry's whole per-million rate set,\nso it names exactly the per-million fields the entry names.",
+          "properties": {
+            "above_input_tokens": {
+              "description": "Input tokens per attempt above which this tier's rates apply.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_per_million": {
+              "description": "Input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_input_per_million": {
+              "description": "Cached input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_input_per_million": {
+              "description": "Generic cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_5m_input_per_million": {
+              "description": "5-minute TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_1h_input_per_million": {
+              "description": "1-hour TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "output_per_million": {
+              "description": "Output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_input_per_million": {
+              "description": "Audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Cached audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Audio output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Cached image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Image output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "above_input_tokens"
+          ],
+          "type": "object"
+        },
+        "PriceWindows": {
+          "additionalProperties": false,
+          "description": "Time-of-day and day-of-week multipliers evaluated in the named zone\nat the attempt's start.",
+          "properties": {
+            "periods": {
+              "items": {
+                "$ref": "#/$defs/PriceWindowPeriod"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "time_zone": {
+              "description": "IANA time zone the periods are evaluated in, for example America/New_York.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "time_zone",
+            "periods"
+          ],
+          "type": "object"
+        },
+        "PriceWindowPeriod": {
+          "additionalProperties": false,
+          "properties": {
+            "days": {
+              "description": "ISO weekdays the period applies on: 1 is Monday, 7 is Sunday.",
+              "items": {
+                "maximum": 7,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 7,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "end": {
+              "description": "Local time the period ends at, exclusive; \"24:00\" runs through midnight.",
+              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+              "type": "string"
+            },
+            "multiplier": {
+              "description": "Multiplier applied to the attempt's whole usage charge.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "start": {
+              "description": "Local time the period starts at, inclusive.",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "days",
+            "start",
+            "end",
+            "multiplier"
           ],
           "type": "object"
         },
@@ -20360,6 +21190,98 @@
                 "string",
                 "null"
               ]
+            },
+            "audio_input_per_million": {
+              "description": "Rate for the audio share of the input tokens. Omit to bill audio\ninput at the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Rate for the cached share of audio input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Rate for the audio share of the output tokens. Omit to bill it\nat the output rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Rate for the image share of the input tokens. Omit to bill image\ninput at the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Rate for the cached share of image input tokens. Omit to bill\nit at the cached input rate, then the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Rate for the image share of the output tokens. Omit to bill it\nat the output rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "per_request": {
+              "description": "A fixed fee charged once per successful attempt.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "batch_multiplier": {
+              "description": "Multiplier applied to the whole usage charge of usage marked as\nbatch. Usage marked batch with no multiplier is unpriced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_calls": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceToolCalls"
+                }
+              ]
+            },
+            "tiers": {
+              "description": "Input-token tiers, ascending by above_input_tokens. The highest\nexceeded tier replaces the entry's per-million rate set.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "items": {
+                    "$ref": "#/$defs/PriceTier"
+                  },
+                  "maxItems": 8,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              ]
+            },
+            "windows": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceWindows"
+                }
+              ]
             }
           },
           "required": [
@@ -20390,6 +21312,178 @@
           ],
           "type": "string",
           "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
+        },
+        "PriceToolCalls": {
+          "additionalProperties": {
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "description": "Fee per metered server-side tool invocation, keyed by tool name.",
+          "maxProperties": 16,
+          "minProperties": 1,
+          "type": "object"
+        },
+        "PriceTier": {
+          "additionalProperties": false,
+          "description": "Per-million rates that apply once an attempt's input tokens exceed\nabove_input_tokens. A tier replaces the entry's whole per-million rate set,\nso it names exactly the per-million fields the entry names.",
+          "properties": {
+            "above_input_tokens": {
+              "description": "Input tokens per attempt above which this tier's rates apply.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_per_million": {
+              "description": "Input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_input_per_million": {
+              "description": "Cached input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_input_per_million": {
+              "description": "Generic cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_5m_input_per_million": {
+              "description": "5-minute TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_1h_input_per_million": {
+              "description": "1-hour TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "output_per_million": {
+              "description": "Output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_input_per_million": {
+              "description": "Audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Cached audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Audio output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Cached image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Image output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "above_input_tokens"
+          ],
+          "type": "object"
+        },
+        "PriceWindows": {
+          "additionalProperties": false,
+          "description": "Time-of-day and day-of-week multipliers evaluated in the named zone\nat the attempt's start.",
+          "properties": {
+            "periods": {
+              "items": {
+                "$ref": "#/$defs/PriceWindowPeriod"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "time_zone": {
+              "description": "IANA time zone the periods are evaluated in, for example America/New_York.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "time_zone",
+            "periods"
+          ],
+          "type": "object"
+        },
+        "PriceWindowPeriod": {
+          "additionalProperties": false,
+          "properties": {
+            "days": {
+              "description": "ISO weekdays the period applies on: 1 is Monday, 7 is Sunday.",
+              "items": {
+                "maximum": 7,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 7,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "end": {
+              "description": "Local time the period ends at, exclusive; \"24:00\" runs through midnight.",
+              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+              "type": "string"
+            },
+            "multiplier": {
+              "description": "Multiplier applied to the attempt's whole usage charge.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "start": {
+              "description": "Local time the period starts at, inclusive.",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "days",
+            "start",
+            "end",
+            "multiplier"
+          ],
+          "type": "object"
         }
       }
     }

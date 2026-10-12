@@ -268,12 +268,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			}
 			prices := make([]usage.Price, 0, len(doc.Pricing.Prices))
 			for i, entry := range doc.Pricing.Prices {
-				price := usage.Price{VendorID: entry.VendorID, ProviderKind: entry.ProviderKind, Model: entry.Model, Operation: entry.Operation,
-					InputPerMillion: entry.InputPerMillion, CachedInputPerMillion: entry.CachedInputPerMillion,
-					OutputPerMillion: entry.OutputPerMillion, CacheWriteInputPerMillion: entry.CacheWriteInputPerMillion,
-					CacheWrite5MInputPerMillion: entry.CacheWrite5MInputPerMillion,
-					CacheWrite1HInputPerMillion: entry.CacheWrite1HInputPerMillion,
-					UnitPrice:                   entry.UnitPrice, Currency: entry.Currency}
+				price := entry.usagePrice()
 				if entry.Provider != nil {
 					id, ok := providerIDs[strings.ToLower(*entry.Provider)]
 					if !ok {

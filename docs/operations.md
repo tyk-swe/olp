@@ -195,7 +195,8 @@ Attribution filters and end-user digest breakdowns preserve raw-ID privacy.
 Estimate error compares only attempts with both estimated/reported input;
 model family/provenance breakdowns distinguish unestimated and historical unknown.
 
-Managed pricing sources refresh bounded, egress-checked immutable snapshots and
+Pricing entries and every component's exact billing semantics are covered in
+[pricing](pricing.md). Managed pricing sources refresh bounded, egress-checked immutable snapshots and
 return diffs; only explicit publication affects accounting. Negotiated rates use
 publish-time overrides. `catalog` sources verify detached signatures, refuse
 catalog rollback and map supported model aliases. Bundled refresh is offline;

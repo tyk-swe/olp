@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -66,8 +67,66 @@ type Price struct {
 	CacheWrite5MInputPerMillion *string `json:"cache_write_5m_input_per_million"`
 	CacheWrite1HInputPerMillion *string `json:"cache_write_1h_input_per_million"`
 	OutputPerMillion            *string `json:"output_per_million"`
-	UnitPrice                   *string `json:"unit_price"`
-	Currency                    string  `json:"currency"`
+
+	// The modality shares bill at their own per-million rates when the price
+	// names them, and fall back to the text rate when it does not.
+	AudioInputPerMillion       *string `json:"audio_input_per_million"`
+	CachedAudioInputPerMillion *string `json:"cached_audio_input_per_million"`
+	AudioOutputPerMillion      *string `json:"audio_output_per_million"`
+	ImageInputPerMillion       *string `json:"image_input_per_million"`
+	CachedImageInputPerMillion *string `json:"cached_image_input_per_million"`
+	ImageOutputPerMillion      *string `json:"image_output_per_million"`
+
+	UnitPrice *string `json:"unit_price"`
+	// PerRequest is a fixed fee charged once per successful attempt.
+	PerRequest *string `json:"per_request"`
+	// BatchMultiplier scales the whole usage charge of usage marked as batch.
+	BatchMultiplier *string `json:"batch_multiplier"`
+	// ToolCalls is a fee per metered tool invocation, keyed by tool name.
+	ToolCalls map[string]string `json:"tool_calls"`
+	// Tiers replace the whole per-million rate set once an attempt's input
+	// tokens exceed their threshold; Windows scale the charge by time of day
+	// in a named zone.
+	Tiers   []PriceTier   `json:"tiers"`
+	Windows *PriceWindows `json:"windows"`
+
+	Currency string `json:"currency"`
+}
+
+// PriceTier is one input-token threshold and the per-million rates that apply
+// above it. It names exactly the per-million fields its price names.
+type PriceTier struct {
+	AboveInputTokens            int64   `json:"above_input_tokens"`
+	InputPerMillion             *string `json:"input_per_million"`
+	CachedInputPerMillion       *string `json:"cached_input_per_million"`
+	CacheWriteInputPerMillion   *string `json:"cache_write_input_per_million"`
+	CacheWrite5MInputPerMillion *string `json:"cache_write_5m_input_per_million"`
+	CacheWrite1HInputPerMillion *string `json:"cache_write_1h_input_per_million"`
+	OutputPerMillion            *string `json:"output_per_million"`
+	AudioInputPerMillion        *string `json:"audio_input_per_million"`
+	CachedAudioInputPerMillion  *string `json:"cached_audio_input_per_million"`
+	AudioOutputPerMillion       *string `json:"audio_output_per_million"`
+	ImageInputPerMillion        *string `json:"image_input_per_million"`
+	CachedImageInputPerMillion  *string `json:"cached_image_input_per_million"`
+	ImageOutputPerMillion       *string `json:"image_output_per_million"`
+}
+
+// PriceWindows scales an attempt's whole usage charge by the time of day and
+// day of week it started at, evaluated in the named IANA time zone.
+type PriceWindows struct {
+	TimeZone string              `json:"time_zone"`
+	Periods  []PriceWindowPeriod `json:"periods"`
+}
+
+// PriceWindowPeriod is one recurring window: the days it applies on (ISO
+// weekday numbers, 1 = Monday), the local start inclusive and end exclusive,
+// and the multiplier it applies while it holds. An end of "24:00" runs the
+// period through midnight.
+type PriceWindowPeriod struct {
+	Days       []int  `json:"days"`
+	Start      string `json:"start"`
+	End        string `json:"end"`
+	Multiplier string `json:"multiplier"`
 }
 
 func (p Price) dimensionKey() string {
@@ -187,24 +246,79 @@ func insertPrice(ctx context.Context, tx pgx.Tx, revisionID string, price Price)
 			return fmt.Errorf("read pricing override provider: %w", err)
 		}
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO olp.prices
+	if price.Windows != nil {
+		// The zone was accepted by Go's LoadLocation; confirming it here keeps
+		// a zone the database cannot resolve from ever reaching the accounting
+		// function, where it would fail on every attempt priced by this row.
+		var local time.Time
+		if err := tx.QueryRow(ctx, "SELECT now() AT TIME ZONE $1", price.Windows.TimeZone).Scan(&local); err != nil {
+			return access.Invalid("prices", "The pricing window time zone is unknown.")
+		}
+	}
+	toolCalls, err := priceJSON(price.ToolCalls)
+	if err != nil {
+		return err
+	}
+	tiers, err := priceJSON(price.Tiers)
+	if err != nil {
+		return err
+	}
+	windows, err := priceJSON(price.Windows)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO olp.prices
             (pricing_revision_id, provider_kind, provider_id, model, operation,
              input_per_million, cached_input_per_million, output_per_million,
              cache_write_input_per_million, cache_write_5m_input_per_million,
              cache_write_1h_input_per_million,
+             audio_input_per_million, cached_audio_input_per_million, audio_output_per_million,
+             image_input_per_million, cached_image_input_per_million, image_output_per_million,
+             per_request, batch_multiplier, tool_calls, tiers, windows,
              unit_price, currency, vendor_id)
         VALUES ($1, $2, $3, $4, $5, $6::text::numeric, $7::text::numeric, $8::text::numeric,
                 $9::text::numeric, $10::text::numeric, $11::text::numeric, $12::text::numeric,
-                $13, $14)`,
+                $13::text::numeric, $14::text::numeric, $15::text::numeric, $16::text::numeric,
+                $17::text::numeric, $18::text::numeric, $19::text::numeric,
+                $20::jsonb, $21::jsonb, $22::jsonb,
+                $23, $24, $25)`,
 		revisionID, price.ProviderKind, price.ProviderID, price.Model, price.Operation,
 		price.InputPerMillion, price.CachedInputPerMillion, price.OutputPerMillion,
 		price.CacheWriteInputPerMillion, price.CacheWrite5MInputPerMillion,
 		price.CacheWrite1HInputPerMillion,
+		price.AudioInputPerMillion, price.CachedAudioInputPerMillion, price.AudioOutputPerMillion,
+		price.ImageInputPerMillion, price.CachedImageInputPerMillion, price.ImageOutputPerMillion,
+		price.PerRequest, price.BatchMultiplier,
+		toolCalls, tiers, windows,
 		price.UnitPrice, price.Currency, price.VendorID)
 	if err != nil {
 		return fmt.Errorf("store price: %w", err)
 	}
 	return nil
+}
+
+// priceJSON renders a structured price component for its jsonb column, or nil
+// for the NULL an absent component stores.
+func priceJSON(value any) (any, error) {
+	switch v := value.(type) {
+	case map[string]string:
+		if v == nil {
+			return nil, nil
+		}
+	case []PriceTier:
+		if v == nil {
+			return nil, nil
+		}
+	case *PriceWindows:
+		if v == nil {
+			return nil, nil
+		}
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("store price component: %w", err)
+	}
+	return string(data), nil
 }
 
 // validatePrices checks one revision as a whole and returns the normalized
@@ -283,7 +397,10 @@ func normalizePrice(price Price, vendorKind func(vendor string) (string, bool)) 
 		return Price{}, access.Invalid("prices",
 			"Pricing entries require a model and a three-letter ISO currency.")
 	}
-	if entry.InputPerMillion == nil && entry.OutputPerMillion == nil && entry.UnitPrice == nil {
+	if entry.InputPerMillion == nil && entry.OutputPerMillion == nil && entry.UnitPrice == nil &&
+		entry.PerRequest == nil && len(entry.ToolCalls) == 0 &&
+		entry.AudioInputPerMillion == nil && entry.AudioOutputPerMillion == nil &&
+		entry.ImageInputPerMillion == nil && entry.ImageOutputPerMillion == nil {
 		return Price{}, access.Invalid("prices", "Pricing entries require at least one rate.")
 	}
 	// A cached rate prices a share of the input count; without an input rate
@@ -297,19 +414,190 @@ func normalizePrice(price Price, vendorKind func(vendor string) (string, bool)) 
 		return Price{}, access.Invalid("prices",
 			"A cache write rate requires an input rate.")
 	}
-	for _, amount := range []**string{&entry.InputPerMillion, &entry.CachedInputPerMillion,
-		&entry.OutputPerMillion, &entry.UnitPrice, &entry.CacheWriteInputPerMillion,
-		&entry.CacheWrite5MInputPerMillion, &entry.CacheWrite1HInputPerMillion} {
-		if *amount == nil {
+	for _, amount := range []*string{entry.InputPerMillion, entry.CachedInputPerMillion,
+		entry.OutputPerMillion, entry.UnitPrice, entry.CacheWriteInputPerMillion,
+		entry.CacheWrite5MInputPerMillion, entry.CacheWrite1HInputPerMillion,
+		entry.AudioInputPerMillion, entry.CachedAudioInputPerMillion, entry.AudioOutputPerMillion,
+		entry.ImageInputPerMillion, entry.CachedImageInputPerMillion, entry.ImageOutputPerMillion,
+		entry.PerRequest, entry.BatchMultiplier} {
+		if amount == nil {
 			continue
 		}
-		value, err := normalizeDecimal(**amount)
+		value, err := normalizeDecimal(*amount)
 		if err != nil {
 			return Price{}, err
 		}
-		*amount = &value
+		*amount = value
+	}
+	if err := normalizeToolCallFees(entry.ToolCalls); err != nil {
+		return Price{}, err
+	}
+	if err := normalizeTiers(entry.Tiers, &entry); err != nil {
+		return Price{}, err
+	}
+	if err := normalizeWindows(entry.Windows); err != nil {
+		return Price{}, err
 	}
 	return entry, nil
+}
+
+// normalizeToolCallFees checks the tool fee map bounds and normalizes each fee.
+func normalizeToolCallFees(calls map[string]string) error {
+	if calls == nil {
+		return nil
+	}
+	if len(calls) < 1 || len(calls) > maxToolCalls {
+		return access.Invalid("prices",
+			"Tool call fees name 1–"+strconv.Itoa(maxToolCalls)+" tools.")
+	}
+	for tool, fee := range calls {
+		if !toolNamePattern.MatchString(tool) {
+			return access.Invalid("prices", "A tool call fee name is malformed.")
+		}
+		value, err := normalizeDecimal(fee)
+		if err != nil {
+			return err
+		}
+		calls[tool] = value
+	}
+	return nil
+}
+
+// perMillionRates pairs each per-million rate field of a price and a tier so
+// the tier's key set can be checked against the entry's.
+func perMillionRates(p *Price, t *PriceTier) [][2]**string {
+	if t == nil {
+		return [][2]**string{}
+	}
+	return [][2]**string{
+		{&p.InputPerMillion, &t.InputPerMillion},
+		{&p.CachedInputPerMillion, &t.CachedInputPerMillion},
+		{&p.CacheWriteInputPerMillion, &t.CacheWriteInputPerMillion},
+		{&p.CacheWrite5MInputPerMillion, &t.CacheWrite5MInputPerMillion},
+		{&p.CacheWrite1HInputPerMillion, &t.CacheWrite1HInputPerMillion},
+		{&p.OutputPerMillion, &t.OutputPerMillion},
+		{&p.AudioInputPerMillion, &t.AudioInputPerMillion},
+		{&p.CachedAudioInputPerMillion, &t.CachedAudioInputPerMillion},
+		{&p.AudioOutputPerMillion, &t.AudioOutputPerMillion},
+		{&p.ImageInputPerMillion, &t.ImageInputPerMillion},
+		{&p.CachedImageInputPerMillion, &t.CachedImageInputPerMillion},
+		{&p.ImageOutputPerMillion, &t.ImageOutputPerMillion},
+	}
+}
+
+// maxTiers bounds the thresholds one price may carry.
+const maxTiers = 8
+
+// normalizeTiers checks the thresholds are positive and strictly increasing,
+// normalizes every rate, and holds each tier to the per-million rate set its
+// entry carries: a tier replaces that set, so it must name exactly it.
+func normalizeTiers(tiers []PriceTier, entry *Price) error {
+	if tiers == nil {
+		return nil
+	}
+	if len(tiers) < 1 || len(tiers) > maxTiers {
+		return access.Invalid("prices",
+			"Pricing tiers name 1–"+strconv.Itoa(maxTiers)+" thresholds.")
+	}
+	previous := int64(0)
+	for i := range tiers {
+		tier := &tiers[i]
+		if tier.AboveInputTokens <= previous {
+			return access.Invalid("prices",
+				"Pricing tiers require strictly increasing positive input thresholds.")
+		}
+		previous = tier.AboveInputTokens
+		for _, pair := range perMillionRates(entry, tier) {
+			if (*pair[0] == nil) != (*pair[1] == nil) {
+				return access.Invalid("prices",
+					"A pricing tier must carry the same per-million rates as its entry.")
+			}
+			if *pair[1] == nil {
+				continue
+			}
+			value, err := normalizeDecimal(**pair[1])
+			if err != nil {
+				return err
+			}
+			**pair[1] = value
+		}
+	}
+	return nil
+}
+
+// maxWindowPeriods bounds the periods one price may carry.
+const maxWindowPeriods = 32
+
+// normalizeWindows checks one window set: a zone the clock can resolve,
+// well-formed periods, and no two periods covering the same time on a shared
+// day.
+func normalizeWindows(windows *PriceWindows) error {
+	if windows == nil {
+		return nil
+	}
+	if _, err := time.LoadLocation(windows.TimeZone); err != nil {
+		return access.Invalid("prices", "The pricing window time zone is unknown.")
+	}
+	if len(windows.Periods) < 1 || len(windows.Periods) > maxWindowPeriods {
+		return access.Invalid("prices",
+			"Pricing windows name 1–"+strconv.Itoa(maxWindowPeriods)+" periods.")
+	}
+	type span struct{ start, end int }
+	days := map[int][]span{}
+	for i := range windows.Periods {
+		period := &windows.Periods[i]
+		start, err := windowMinutes(period.Start, false)
+		if err != nil {
+			return access.Invalid("prices", "A pricing window start must be a time between 00:00 and 23:59.")
+		}
+		end, err := windowMinutes(period.End, true)
+		if err != nil {
+			return access.Invalid("prices", "A pricing window end must be a time between 00:01 and 24:00.")
+		}
+		if end <= start {
+			return access.Invalid("prices", "A pricing window end must fall after its start.")
+		}
+		multiplier, err := normalizeDecimal(period.Multiplier)
+		if err != nil {
+			return err
+		}
+		period.Multiplier = multiplier
+		if len(period.Days) < 1 || len(period.Days) > 7 {
+			return access.Invalid("prices", "A pricing window period names the days it applies on.")
+		}
+		seen := map[int]bool{}
+		for _, day := range period.Days {
+			if day < 1 || day > 7 || seen[day] {
+				return access.Invalid("prices", "A pricing window period names unique ISO weekdays.")
+			}
+			seen[day] = true
+			for _, other := range days[day] {
+				if start < other.end && other.start < end {
+					return access.Invalid("prices", "Pricing window periods must not overlap on a shared day.")
+				}
+			}
+			days[day] = append(days[day], span{start, end})
+		}
+	}
+	return nil
+}
+
+// windowMinutes parses an "HH:MM" wall time into minutes of day. allowEndOfDay
+// accepts "24:00" for a period end, which starts are denied.
+func windowMinutes(value string, allowEndOfDay bool) (int, error) {
+	hours, minutes, found := strings.Cut(value, ":")
+	if !found || len(hours) != 2 || len(minutes) != 2 || !priceDigits(hours) || !priceDigits(minutes) {
+		return 0, errors.New("malformed window time")
+	}
+	h, _ := strconv.Atoi(hours)
+	m, _ := strconv.Atoi(minutes)
+	if allowEndOfDay && h == 24 && m == 0 {
+		return 24 * 60, nil
+	}
+	if h > 23 || m > 59 {
+		return 0, errors.New("window time out of range")
+	}
+	return h*60 + m, nil
 }
 
 func currencyLetters(value string) bool {
@@ -352,6 +640,12 @@ const revisionColumns = `SELECT r.id::text, r.revision, r.effective_at, r.create
         p.input_per_million::text, p.cached_input_per_million::text, p.output_per_million::text,
         p.cache_write_input_per_million::text, p.cache_write_5m_input_per_million::text,
         p.cache_write_1h_input_per_million::text,
+        p.audio_input_per_million::text, p.cached_audio_input_per_million::text,
+        p.audio_output_per_million::text,
+        p.image_input_per_million::text, p.cached_image_input_per_million::text,
+        p.image_output_per_million::text,
+        p.per_request::text, p.batch_multiplier::text,
+        p.tool_calls::text, p.tiers::text, p.windows::text,
         p.unit_price::text, btrim(p.currency)
     FROM olp.pricing_revisions r
     LEFT JOIN olp.pricing_source_snapshots snap ON snap.id = r.source_snapshot_id
@@ -381,14 +675,36 @@ func ListRevisions(ctx context.Context, q access.Queryer, beforeRevision *int, l
 		var revision Revision
 		var price Price
 		var kind, model, operation, currency *string
+		var toolCalls, tiers, windows *string
 		if err = rows.Scan(&revision.ID, &revision.Revision, &revision.EffectiveAt,
 			&revision.CreatedBy, &revision.CreatedAt, &revision.SourceSnapshotID, &revision.SourceName,
 			&price.VendorID, &kind, &price.ProviderID,
 			&model, &operation, &price.InputPerMillion, &price.CachedInputPerMillion,
 			&price.OutputPerMillion, &price.CacheWriteInputPerMillion,
 			&price.CacheWrite5MInputPerMillion, &price.CacheWrite1HInputPerMillion,
+			&price.AudioInputPerMillion, &price.CachedAudioInputPerMillion,
+			&price.AudioOutputPerMillion, &price.ImageInputPerMillion,
+			&price.CachedImageInputPerMillion, &price.ImageOutputPerMillion,
+			&price.PerRequest, &price.BatchMultiplier,
+			&toolCalls, &tiers, &windows,
 			&price.UnitPrice, &currency); err != nil {
 			return nil, nil, fmt.Errorf("list pricing revisions: %w", err)
+		}
+		if toolCalls != nil {
+			if err = json.Unmarshal([]byte(*toolCalls), &price.ToolCalls); err != nil {
+				return nil, nil, errors.New("stored tool call fees are invalid")
+			}
+		}
+		if tiers != nil {
+			if err = json.Unmarshal([]byte(*tiers), &price.Tiers); err != nil {
+				return nil, nil, errors.New("stored pricing tiers are invalid")
+			}
+		}
+		if windows != nil {
+			price.Windows = &PriceWindows{}
+			if err = json.Unmarshal([]byte(*windows), price.Windows); err != nil {
+				return nil, nil, errors.New("stored pricing windows are invalid")
+			}
 		}
 		if len(items) == 0 || items[len(items)-1].ID != revision.ID {
 			revision.EffectiveAt = revision.EffectiveAt.UTC()

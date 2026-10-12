@@ -229,6 +229,12 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 	return attempt
 }
 
+// attemptSuccessful reports whether the attempt completed successfully, which
+// is when a per-request price component applies.
+func attemptSuccessful(fact *AttemptFact) bool {
+	return fact.Class == classSuccess && fact.Status >= 200 && fact.Status <= 299
+}
+
 // attemptUsage is the billing evidence an attempt carries into its usage event.
 // It is also what the gateway prices an attempt by when it settles the request's
 // cost, so what the budget holds for a request and what accounting later records

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -649,7 +650,15 @@ func samePrice(a, b Price) bool {
 		{a.CacheWriteInputPerMillion, b.CacheWriteInputPerMillion},
 		{a.CacheWrite5MInputPerMillion, b.CacheWrite5MInputPerMillion},
 		{a.CacheWrite1HInputPerMillion, b.CacheWrite1HInputPerMillion},
+		{a.AudioInputPerMillion, b.AudioInputPerMillion},
+		{a.CachedAudioInputPerMillion, b.CachedAudioInputPerMillion},
+		{a.AudioOutputPerMillion, b.AudioOutputPerMillion},
+		{a.ImageInputPerMillion, b.ImageInputPerMillion},
+		{a.CachedImageInputPerMillion, b.CachedImageInputPerMillion},
+		{a.ImageOutputPerMillion, b.ImageOutputPerMillion},
 		{a.UnitPrice, b.UnitPrice},
+		{a.PerRequest, b.PerRequest},
+		{a.BatchMultiplier, b.BatchMultiplier},
 	}
 	for _, pair := range rates {
 		if (pair[0] == nil) != (pair[1] == nil) {
@@ -659,7 +668,94 @@ func samePrice(a, b Price) bool {
 			return false
 		}
 	}
-	return a.Currency == b.Currency
+	return a.Currency == b.Currency && sameToolCallFees(a.ToolCalls, b.ToolCalls) &&
+		sameTiers(a.Tiers, b.Tiers) && sameWindows(a.Windows, b.Windows)
+}
+
+// sameToolCallFees compares two fee maps by tool and value.
+func sameToolCallFees(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for tool, fee := range a {
+		other, ok := b[tool]
+		if !ok || !sameRate(fee, other) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameTiers compares two tier lists element by element.
+func sameTiers(a, b []PriceTier) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for index := range a {
+		left, right := a[index], b[index]
+		if left.AboveInputTokens != right.AboveInputTokens {
+			return false
+		}
+		rates := [][2]*string{
+			{left.InputPerMillion, right.InputPerMillion},
+			{left.CachedInputPerMillion, right.CachedInputPerMillion},
+			{left.CacheWriteInputPerMillion, right.CacheWriteInputPerMillion},
+			{left.CacheWrite5MInputPerMillion, right.CacheWrite5MInputPerMillion},
+			{left.CacheWrite1HInputPerMillion, right.CacheWrite1HInputPerMillion},
+			{left.OutputPerMillion, right.OutputPerMillion},
+			{left.AudioInputPerMillion, right.AudioInputPerMillion},
+			{left.CachedAudioInputPerMillion, right.CachedAudioInputPerMillion},
+			{left.AudioOutputPerMillion, right.AudioOutputPerMillion},
+			{left.ImageInputPerMillion, right.ImageInputPerMillion},
+			{left.CachedImageInputPerMillion, right.CachedImageInputPerMillion},
+			{left.ImageOutputPerMillion, right.ImageOutputPerMillion},
+		}
+		for _, pair := range rates {
+			if (pair[0] == nil) != (pair[1] == nil) {
+				return false
+			}
+			if pair[0] != nil && !sameRate(*pair[0], *pair[1]) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// sameWindows compares two window sets: the zone, and the periods as a set of
+// day, start, end and multiplier.
+func sameWindows(a, b *PriceWindows) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == nil || a.TimeZone != b.TimeZone || len(a.Periods) != len(b.Periods) {
+		return a == nil
+	}
+	key := func(p PriceWindowPeriod) string {
+		days := slices.Clone(p.Days)
+		slices.Sort(days)
+		var text strings.Builder
+		for _, day := range days {
+			text.WriteString(strconv.Itoa(day))
+			text.WriteByte(',')
+		}
+		return text.String() + p.Start + "-" + p.End
+	}
+	rateAt := func(w *PriceWindows, k string) *string {
+		for index := range w.Periods {
+			if key(w.Periods[index]) == k {
+				return &w.Periods[index].Multiplier
+			}
+		}
+		return nil
+	}
+	for _, period := range a.Periods {
+		other := rateAt(b, key(period))
+		if other == nil || !sameRate(period.Multiplier, *other) {
+			return false
+		}
+	}
+	return true
 }
 
 // sameRate compares two decimal rates by value: numeric(24,12) columns read back
@@ -849,5 +945,9 @@ func (p Price) isRemoval() bool {
 	return p.InputPerMillion == nil && p.CachedInputPerMillion == nil &&
 		p.OutputPerMillion == nil && p.CacheWriteInputPerMillion == nil &&
 		p.CacheWrite5MInputPerMillion == nil && p.CacheWrite1HInputPerMillion == nil &&
-		p.UnitPrice == nil
+		p.AudioInputPerMillion == nil && p.CachedAudioInputPerMillion == nil &&
+		p.AudioOutputPerMillion == nil && p.ImageInputPerMillion == nil &&
+		p.CachedImageInputPerMillion == nil && p.ImageOutputPerMillion == nil &&
+		p.UnitPrice == nil && p.PerRequest == nil && p.BatchMultiplier == nil &&
+		len(p.ToolCalls) == 0 && len(p.Tiers) == 0 && p.Windows == nil
 }

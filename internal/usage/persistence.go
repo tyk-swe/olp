@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -124,11 +125,15 @@ const insertFactSQL = `INSERT INTO olp.attempt_usage_facts
          provider_unpriced_counted, model_unpriced_counted, target_unpriced_counted,
          request_incomplete_counted, provider_incomplete_counted,
          model_incomplete_counted, target_incomplete_counted, attribution,
-         estimated_input_tokens, estimate_provenance, model_family, selector, baseline_cost, end_user_digest, budget_exempt)
+         estimated_input_tokens, estimate_provenance, model_family, selector, baseline_cost, end_user_digest, budget_exempt,
+         audio_input_tokens, cached_audio_input_tokens, audio_output_tokens,
+         image_input_tokens, cached_image_input_tokens, image_output_tokens,
+         tool_calls, batch, pricing_components)
     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NULLIF($6, '')::uuid, $24::uuid, $7::uuid, $8, $9, $10, $11, $12,
             $13, $14, $15, $16, $17, $18, $25, $26, $27, $19::numeric, $20::numeric, $21, $22::uuid, $23,
             false, false, false, false, false, false, false, false, false, false, false, false, $28::jsonb,
-            $29, $30, $31, $32, $33::numeric, $34, $35)
+            $29, $30, $31, $32, $33::numeric, $34, $35,
+            $36, $37, $38, $39, $40, $41, $42::jsonb, $43, $44::text[])
     ON CONFLICT (request_id, attempt_ordinal) DO NOTHING`
 
 // factTotalsSQL sums exactly the facts this event inserted. The receipt
@@ -424,6 +429,14 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAtte
 			}
 		}
 	}
+	toolCalls := any("{}")
+	if len(usage.ToolCalls) > 0 {
+		data, err := json.Marshal(usage.ToolCalls)
+		if err != nil {
+			return factCharge{}, fmt.Errorf("persist attempt usage fact: %w", err)
+		}
+		toolCalls = string(data)
+	}
 	if _, err := tx.Exec(ctx, insertFactSQL,
 		attempt.Attempt.ID, ev.EventID, ev.RequestID, ev.RequestStartedAt, attempt.Ordinal,
 		ev.APIKeyID, attempt.Attempt.ProviderID, ev.RouteSlug, attempt.Attempt.UpstreamModel,
@@ -434,6 +447,9 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAtte
 		usage.CacheWrite1HInputTokens, string(AttributionJSON(ev.Attribution)),
 		attempt.Attempt.EstimatedInputTokens, attempt.Attempt.EstimateProvenance, attempt.Attempt.ModelFamily,
 		selector, baselineCost, ev.EndUserDigest, attempt.Attempt.Routing != nil && attempt.Attempt.Routing.BudgetExempt,
+		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,
+		usage.ImageInputTokens, usage.CachedImageInputTokens, usage.ImageOutputTokens,
+		toolCalls, usage.Batch, pricing.components,
 	); err != nil {
 		return factCharge{}, fmt.Errorf("persist attempt usage fact: %w", err)
 	}

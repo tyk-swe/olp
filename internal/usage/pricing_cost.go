@@ -3,6 +3,7 @@ package usage
 import (
 	"math/big"
 	"strings"
+	"time"
 )
 
 // This file prices an attempt in Go exactly as priceAttemptSQL does in
@@ -90,24 +91,117 @@ func clampCost(units *big.Int) Cost {
 	return Cost{units}
 }
 
+// rateSet is the per-million rates of a price, or of one of its tiers: a tier
+// replaces the entry's whole rate set, so both parse into the same shape.
+type rateSet struct {
+	input            *big.Int
+	cached           *big.Int
+	cacheWrite       *big.Int
+	cacheWrite5m     *big.Int
+	cacheWrite1h     *big.Int
+	output           *big.Int
+	audioInput       *big.Int
+	cachedAudioInput *big.Int
+	audioOutput      *big.Int
+	imageInput       *big.Int
+	cachedImageInput *big.Int
+	imageOutput      *big.Int
+}
+
+// inputHead reports whether the set has any rate an input share could bill at.
+func (s *rateSet) inputHead() bool {
+	return s.input != nil || s.audioInput != nil || s.imageInput != nil
+}
+
+// outputHead reports whether the set has any rate an output share could bill at.
+func (s *rateSet) outputHead() bool {
+	return s.output != nil || s.audioOutput != nil || s.imageOutput != nil
+}
+
+// firstRate returns the first rate present in a fallback chain, nil when the
+// chain resolves to nothing, and the field name of the rate it took.
+func (s *rateSet) firstRate(chain []rateField) (*big.Int, string) {
+	for _, field := range chain {
+		if rate := field.of(s); rate != nil {
+			return rate, field.name
+		}
+	}
+	return nil, ""
+}
+
+// rateField names one rate field so fallback chains and the components list
+// can share one ordering.
+type rateField struct {
+	name string
+	of   func(*rateSet) *big.Int
+}
+
+var (
+	fieldInput            = rateField{"input_per_million", func(s *rateSet) *big.Int { return s.input }}
+	fieldCached           = rateField{"cached_input_per_million", func(s *rateSet) *big.Int { return s.cached }}
+	fieldCacheWrite       = rateField{"cache_write_input_per_million", func(s *rateSet) *big.Int { return s.cacheWrite }}
+	fieldCacheWrite5m     = rateField{"cache_write_5m_input_per_million", func(s *rateSet) *big.Int { return s.cacheWrite5m }}
+	fieldCacheWrite1h     = rateField{"cache_write_1h_input_per_million", func(s *rateSet) *big.Int { return s.cacheWrite1h }}
+	fieldOutput           = rateField{"output_per_million", func(s *rateSet) *big.Int { return s.output }}
+	fieldAudioInput       = rateField{"audio_input_per_million", func(s *rateSet) *big.Int { return s.audioInput }}
+	fieldCachedAudioInput = rateField{"cached_audio_input_per_million", func(s *rateSet) *big.Int { return s.cachedAudioInput }}
+	fieldAudioOutput      = rateField{"audio_output_per_million", func(s *rateSet) *big.Int { return s.audioOutput }}
+	fieldImageInput       = rateField{"image_input_per_million", func(s *rateSet) *big.Int { return s.imageInput }}
+	fieldCachedImageInput = rateField{"cached_image_input_per_million", func(s *rateSet) *big.Int { return s.cachedImageInput }}
+	fieldImageOutput      = rateField{"image_output_per_million", func(s *rateSet) *big.Int { return s.imageOutput }}
+)
+
+// The fallback chains every input share bills through: the share's own rate,
+// then the rates a vendor that publishes only text rates charges it at.
+var (
+	chainText        = []rateField{fieldInput}
+	chainCached      = []rateField{fieldCached, fieldInput}
+	chainCachedAudio = []rateField{fieldCachedAudioInput, fieldCached, fieldInput}
+	chainCachedImage = []rateField{fieldCachedImageInput, fieldCached, fieldInput}
+	chainAudio       = []rateField{fieldAudioInput, fieldInput}
+	chainImage       = []rateField{fieldImageInput, fieldInput}
+	chainWrite       = []rateField{fieldCacheWrite, fieldInput}
+	chainWrite5m     = []rateField{fieldCacheWrite5m, fieldCacheWrite, fieldInput}
+	chainWrite1h     = []rateField{fieldCacheWrite1h, fieldCacheWrite, fieldInput}
+	chainOutput      = []rateField{fieldOutput}
+	chainAudioOut    = []rateField{fieldAudioOutput, fieldOutput}
+	chainImageOut    = []rateField{fieldImageOutput, fieldOutput}
+)
+
+// parsedTier is a threshold and the rate set above it.
+type parsedTier struct {
+	above int64
+	rates rateSet
+}
+
+// parsedWindow is one period of a price's windows, with its days as an
+// ISO-weekday set and its times as minutes of day.
+type parsedWindow struct {
+	days       [8]bool
+	start, end int
+	multiplier *big.Int
+}
+
 // priceRates is a Price with its rates parsed into 1e-12 units. Rates are
 // numeric(24,12) in PostgreSQL, so every one has twelve fractional digits there
 // whatever its text says, which is what the division scale below depends on.
 type priceRates struct {
 	// valid is false when a rate is not a decimal PostgreSQL could have stored.
 	// Such a price is treated as no price at all.
-	valid        bool
-	input        *big.Int
-	cached       *big.Int
-	cacheWrite   *big.Int
-	cacheWrite5m *big.Int
-	cacheWrite1h *big.Int
-	output       *big.Int
-	unit         *big.Int
+	valid bool
+	rateSet
+	unit       *big.Int
+	perRequest *big.Int
+	batch      *big.Int
+	tools      map[string]*big.Int
+	tiers      []parsedTier
+	location   *time.Location
+	windows    []parsedWindow
 }
 
 func parseRates(p *Price) *priceRates {
 	r := &priceRates{valid: true}
+	fail := func() *priceRates { return &priceRates{} }
 	for _, field := range [...]struct {
 		text *string
 		into **big.Int
@@ -118,16 +212,84 @@ func parseRates(p *Price) *priceRates {
 		{p.CacheWrite5MInputPerMillion, &r.cacheWrite5m},
 		{p.CacheWrite1HInputPerMillion, &r.cacheWrite1h},
 		{p.OutputPerMillion, &r.output},
+		{p.AudioInputPerMillion, &r.audioInput},
+		{p.CachedAudioInputPerMillion, &r.cachedAudioInput},
+		{p.AudioOutputPerMillion, &r.audioOutput},
+		{p.ImageInputPerMillion, &r.imageInput},
+		{p.CachedImageInputPerMillion, &r.cachedImageInput},
+		{p.ImageOutputPerMillion, &r.imageOutput},
 		{p.UnitPrice, &r.unit},
+		{p.PerRequest, &r.perRequest},
+		{p.BatchMultiplier, &r.batch},
 	} {
 		if field.text == nil {
 			continue
 		}
 		scaled, ok := scaledDecimal(*field.text, costDigits)
 		if !ok {
-			return &priceRates{}
+			return fail()
 		}
 		*field.into = scaled
+	}
+	if len(p.ToolCalls) > 0 {
+		r.tools = make(map[string]*big.Int, len(p.ToolCalls))
+		for tool, fee := range p.ToolCalls {
+			scaled, ok := scaledDecimal(fee, costDigits)
+			if !ok {
+				return fail()
+			}
+			r.tools[tool] = scaled
+		}
+	}
+	for _, tier := range p.Tiers {
+		parsed := parsedTier{above: tier.AboveInputTokens}
+		for _, field := range [...]struct {
+			text *string
+			into **big.Int
+		}{
+			{tier.InputPerMillion, &parsed.rates.input},
+			{tier.CachedInputPerMillion, &parsed.rates.cached},
+			{tier.CacheWriteInputPerMillion, &parsed.rates.cacheWrite},
+			{tier.CacheWrite5MInputPerMillion, &parsed.rates.cacheWrite5m},
+			{tier.CacheWrite1HInputPerMillion, &parsed.rates.cacheWrite1h},
+			{tier.OutputPerMillion, &parsed.rates.output},
+			{tier.AudioInputPerMillion, &parsed.rates.audioInput},
+			{tier.CachedAudioInputPerMillion, &parsed.rates.cachedAudioInput},
+			{tier.AudioOutputPerMillion, &parsed.rates.audioOutput},
+			{tier.ImageInputPerMillion, &parsed.rates.imageInput},
+			{tier.CachedImageInputPerMillion, &parsed.rates.cachedImageInput},
+			{tier.ImageOutputPerMillion, &parsed.rates.imageOutput},
+		} {
+			if field.text == nil {
+				continue
+			}
+			scaled, ok := scaledDecimal(*field.text, costDigits)
+			if !ok {
+				return fail()
+			}
+			*field.into = scaled
+		}
+		r.tiers = append(r.tiers, parsed)
+	}
+	if p.Windows != nil {
+		location, err := time.LoadLocation(p.Windows.TimeZone)
+		if err != nil {
+			return fail()
+		}
+		r.location = location
+		for _, period := range p.Windows.Periods {
+			start, errStart := windowMinutes(period.Start, false)
+			end, errEnd := windowMinutes(period.End, true)
+			multiplier, ok := scaledDecimal(period.Multiplier, costDigits)
+			if errStart != nil || errEnd != nil || !ok {
+				return fail()
+			}
+			window := parsedWindow{start: start, end: end, multiplier: multiplier}
+			for _, day := range period.Days {
+				window.days[day] = true
+			}
+			r.windows = append(r.windows, window)
+		}
 	}
 	return r
 }
@@ -154,17 +316,20 @@ func scaledDecimal(text string, digits int) (*big.Int, bool) {
 // Cost prices one attempt's usage against this price, exactly as PostgreSQL
 // does when the attempt is accounted: the amount, and false when PostgreSQL
 // would record no cost because the usage is incomplete or a dimension it used
-// has no rate.
-func (p Price) Cost(u AttemptUsage) (Cost, bool) { return parseRates(&p).cost(u) }
+// has no rate. startedAt decides which pricing window, if any, the attempt fell
+// in, and successful decides whether a per-request fee applies.
+func (p Price) Cost(u AttemptUsage, startedAt time.Time, successful bool) (Cost, bool) {
+	return parseRates(&p).cost(u, startedAt, successful)
+}
 
 // Cost prices one attempt's usage against this price. The rates are parsed once
 // when the routing inputs are loaded, so pricing a request does not parse them
 // again.
-func (p *RoutingPrice) Cost(u AttemptUsage) (Cost, bool) {
+func (p *RoutingPrice) Cost(u AttemptUsage, startedAt time.Time, successful bool) (Cost, bool) {
 	if p == nil {
 		return Cost{}, false
 	}
-	return p.parsed().cost(u)
+	return p.parsed().cost(u, startedAt, successful)
 }
 
 // parsed returns the rates of this price. A price built outside LoadRoutingInputs
@@ -177,84 +342,235 @@ func (p *RoutingPrice) parsed() *priceRates {
 	return parseRates(&p.Price)
 }
 
-// cost mirrors priceAttemptSQL. Each division by a million is rounded at the
-// scale PostgreSQL gives its quotient, the terms are summed exactly, and the sum
-// is rounded half away from zero to the twelve places the column stores.
-func (r *priceRates) cost(u AttemptUsage) (Cost, bool) {
-	if !u.Complete || !r.rated(u) {
+// cost mirrors olp.price_usage. Each division by a million is rounded at the
+// scale PostgreSQL gives its quotient, the terms are summed exactly, the window
+// and batch multipliers apply to the sum, and the total is rounded half away
+// from zero to the twelve places the column stores.
+func (r *priceRates) cost(u AttemptUsage, startedAt time.Time, successful bool) (Cost, bool) {
+	if !u.Complete || !r.valid {
 		return Cost{}, false
 	}
+	rates := r.selectRates(u.InputTokens)
 	total := new(big.Int)
-	if u.InputTokens != nil {
-		charge := r.inputCharge(u)
-		if charge.Sign() < 0 {
-			// Counts that exceed their own total are refused when an event is
-			// validated; PostgreSQL would reject the row.
+	if u.InputTokens == nil {
+		if !inputSharesAbsent(u) {
+			// Shares without the total they came out of cannot be priced.
+			return Cost{}, false
+		}
+	} else {
+		if !rates.inputHead() {
+			return Cost{}, false
+		}
+		charge, ok := rates.inputCharge(u)
+		if !ok {
 			return Cost{}, false
 		}
 		total.Add(total, quotient(charge))
 	}
-	if u.OutputTokens != nil {
-		total.Add(total, quotient(new(big.Int).Mul(big.NewInt(*u.OutputTokens), r.output)))
+	if u.OutputTokens == nil {
+		if u.AudioOutputTokens != nil || u.ImageOutputTokens != nil {
+			return Cost{}, false
+		}
+	} else {
+		if !rates.outputHead() {
+			return Cost{}, false
+		}
+		charge, ok := rates.outputCharge(u)
+		if !ok {
+			return Cost{}, false
+		}
+		total.Add(total, quotient(charge))
 	}
 	if u.MediaUnits != nil {
+		if r.unit == nil {
+			return Cost{}, false
+		}
 		units, ok := scaledDecimal(*u.MediaUnits, mediaDigits)
 		if !ok {
 			return Cost{}, false
 		}
 		total.Add(total, units.Mul(units, r.unit))
 	}
-	// total is in units of 10^-18: round half up, which is half away from zero
-	// for an amount that cannot be negative.
-	half := big.NewInt(500_000)
-	total.Add(total, half)
-	total.Quo(total, perMillion)
+	if successful && r.perRequest != nil {
+		total.Add(total, new(big.Int).Mul(r.perRequest, perMillion))
+	}
+	for tool, calls := range u.ToolCalls {
+		if calls <= 0 {
+			continue
+		}
+		fee, priced := r.tools[tool]
+		if !priced {
+			return Cost{}, false
+		}
+		total.Add(total, new(big.Int).Mul(new(big.Int).Mul(big.NewInt(calls), fee), perMillion))
+	}
+	window := r.windowAt(startedAt)
+	if u.Batch && r.batch == nil {
+		return Cost{}, false
+	}
+	if window == nil && !u.Batch {
+		// total is in units of 10^-18: round half up, which is half away from
+		// zero for an amount that cannot be negative.
+		total.Add(total, big.NewInt(500_000))
+		total.Quo(total, perMillion)
+		return clampCost(total), true
+	}
+	// Window and batch multipliers scale the whole usage charge. Each is a
+	// rate-scale decimal, so the product's scale grows twelve places per
+	// multiplier and the final rounding divides them back out.
+	divisorDigits := 6
+	if window != nil {
+		total.Mul(total, window)
+		divisorDigits += costDigits
+	}
+	if u.Batch {
+		total.Mul(total, r.batch)
+		divisorDigits += costDigits
+	}
+	divisor := new(big.Int).Exp(bigTen, big.NewInt(int64(divisorDigits)), nil)
+	total.Add(total, new(big.Int).Quo(divisor, big.NewInt(2)))
+	total.Quo(total, divisor)
 	return clampCost(total), true
 }
 
-// rated reports whether the price has a rate for every dimension the usage
-// reports, which is the completeness test priceAttemptSQL applies. Cached tokens
-// without the input they came out of cannot be priced at all.
-func (r *priceRates) rated(u AttemptUsage) bool {
-	inputRated := u.InputTokens == nil && u.CachedInputTokens == nil || u.InputTokens != nil && r.input != nil
-	return r.valid && inputRated && (u.OutputTokens == nil || r.output != nil) &&
-		(u.MediaUnits == nil || r.unit != nil)
+// selectRates is the rate set the attempt prices against: the highest tier its
+// input tokens exceed, else the entry's own rates.
+func (r *priceRates) selectRates(input *int64) *rateSet {
+	if input == nil {
+		return &r.rateSet
+	}
+	selected := &r.rateSet
+	for index := range r.tiers {
+		if r.tiers[index].above < *input {
+			selected = &r.tiers[index].rates
+		}
+	}
+	return selected
+}
+
+// windowAt is the multiplier of the pricing window that holds at this instant,
+// nil when no period matches, which prices like a multiplier of one.
+func (r *priceRates) windowAt(at time.Time) *big.Int {
+	if r.location == nil {
+		return nil
+	}
+	local := at.In(r.location)
+	day := (int(local.Weekday())+6)%7 + 1
+	minutes := local.Hour()*60 + local.Minute()
+	for index := range r.windows {
+		window := &r.windows[index]
+		if window.days[day] && minutes >= window.start && minutes < window.end {
+			return window.multiplier
+		}
+	}
+	return nil
+}
+
+// inputSharesAbsent reports whether no input-side share is reported, which an
+// absent input count requires of a validated event.
+func inputSharesAbsent(u AttemptUsage) bool {
+	return u.CachedInputTokens == nil && u.CacheWriteInputTokens == nil &&
+		u.CacheWrite5MInputTokens == nil && u.CacheWrite1HInputTokens == nil &&
+		u.AudioInputTokens == nil && u.CachedAudioInputTokens == nil &&
+		u.ImageInputTokens == nil && u.CachedImageInputTokens == nil
 }
 
 // inputCharge is the input side of the bill before it is divided by a million:
-// the input tokens split into the tiers the usage reports, each at its own
-// rate and falling back to the next one the price has.
-func (r *priceRates) inputCharge(u AttemptUsage) *big.Int {
+// the input tokens split into the shares the usage reports, each billed at the
+// first rate its fallback chain carries. It is false when a share exceeds its
+// total or a nonzero share finds no rate in its chain, either of which leaves
+// the attempt unpriced.
+func (s *rateSet) inputCharge(u AttemptUsage) (*big.Int, bool) {
 	count := func(tokens *int64) int64 {
 		if tokens == nil {
 			return 0
 		}
 		return *tokens
 	}
-	first := func(rates ...*big.Int) *big.Int {
-		for _, rate := range rates {
-			if rate != nil {
-				return rate
-			}
-		}
-		return nil
-	}
 	cached, write, write5m, write1h := count(u.CachedInputTokens), count(u.CacheWriteInputTokens),
 		count(u.CacheWrite5MInputTokens), count(u.CacheWrite1HInputTokens)
-	charge := new(big.Int)
-	for _, tier := range [...]struct {
+	audio, cachedAudio := count(u.AudioInputTokens), count(u.CachedAudioInputTokens)
+	image, cachedImage := count(u.ImageInputTokens), count(u.CachedImageInputTokens)
+	var charge *big.Int
+	for _, share := range [...]struct {
 		tokens int64
-		rate   *big.Int
+		chain  []rateField
 	}{
-		{*u.InputTokens - cached - write, r.input},
-		{cached, first(r.cached, r.input)},
-		{write - write5m - write1h, first(r.cacheWrite, r.input)},
-		{write5m, first(r.cacheWrite5m, r.cacheWrite, r.input)},
-		{write1h, first(r.cacheWrite1h, r.cacheWrite, r.input)},
+		{*u.InputTokens - cached - write - (audio - cachedAudio) - (image - cachedImage), chainText},
+		{cached - cachedAudio - cachedImage, chainCached},
+		{cachedAudio, chainCachedAudio},
+		{cachedImage, chainCachedImage},
+		{audio - cachedAudio, chainAudio},
+		{image - cachedImage, chainImage},
+		{write - write5m - write1h, chainWrite},
+		{write5m, chainWrite5m},
+		{write1h, chainWrite1h},
 	} {
-		charge.Add(charge, new(big.Int).Mul(big.NewInt(tier.tokens), tier.rate))
+		if share.tokens < 0 {
+			// Counts that exceed their own total are refused when an event is
+			// validated; PostgreSQL would reject the row.
+			return nil, false
+		}
+		if share.tokens == 0 {
+			continue
+		}
+		rate, _ := s.firstRate(share.chain)
+		if rate == nil {
+			return nil, false
+		}
+		term := new(big.Int).Mul(big.NewInt(share.tokens), rate)
+		if charge == nil {
+			charge = term
+		} else {
+			charge.Add(charge, term)
+		}
 	}
-	return charge
+	if charge == nil {
+		return new(big.Int), true
+	}
+	return charge, true
+}
+
+// outputCharge is the output side of the bill before it is divided by a
+// million, with the same share and fallback rules as inputCharge.
+func (s *rateSet) outputCharge(u AttemptUsage) (*big.Int, bool) {
+	count := func(tokens *int64) int64 {
+		if tokens == nil {
+			return 0
+		}
+		return *tokens
+	}
+	audio, image := count(u.AudioOutputTokens), count(u.ImageOutputTokens)
+	var charge *big.Int
+	for _, share := range [...]struct {
+		tokens int64
+		chain  []rateField
+	}{
+		{*u.OutputTokens - audio - image, chainOutput},
+		{audio, chainAudioOut},
+		{image, chainImageOut},
+	} {
+		if share.tokens < 0 {
+			return nil, false
+		}
+		if share.tokens == 0 {
+			continue
+		}
+		rate, _ := s.firstRate(share.chain)
+		if rate == nil {
+			return nil, false
+		}
+		term := new(big.Int).Mul(big.NewInt(share.tokens), rate)
+		if charge == nil {
+			charge = term
+		} else {
+			charge.Add(charge, term)
+		}
+	}
+	if charge == nil {
+		return new(big.Int), true
+	}
+	return charge, true
 }
 
 // quotient divides a charge in units of 10^-12 by a million the way PostgreSQL's
@@ -317,30 +633,55 @@ func atoi(digits string) int {
 
 // CostBound is the most a request of input tokens and, for a generation, output
 // tokens can cost under this price: a ceiling for admission to reserve, never an
-// estimate of what the request will cost. Input is charged at the highest of the
-// input, cached and cache write rates the price has, because nothing tells
-// admission whether the provider will read or write its cache, and each
-// division by a million is rounded up. It is false when the price lacks a rate
-// the request needs, which is a request nobody can price.
-func (p *RoutingPrice) CostBound(input, output int64, generation bool) (Cost, bool) {
+// estimate of what the request will cost. Input is charged at the highest of
+// the input-side rates the price has, because nothing tells admission whether
+// the provider will read or write its cache or share the input across
+// modalities, and each division by a million is rounded up. The bound includes
+// a per-request fee and the window multiplier in force at `at`; tool fees and
+// batch terms are excluded. It is false when the price lacks a rate the request
+// needs, which is a request nobody can price.
+func (p *RoutingPrice) CostBound(input, output int64, generation bool, at time.Time) (Cost, bool) {
 	if p == nil {
 		return Cost{}, false
 	}
 	r := p.parsed()
-	if !r.valid || r.input == nil || generation && r.output == nil {
+	if !r.valid {
 		return Cost{}, false
 	}
-	rate := r.input
-	for _, other := range [...]*big.Int{r.cached, r.cacheWrite, r.cacheWrite5m, r.cacheWrite1h} {
-		if other != nil && other.Cmp(rate) > 0 {
-			rate = other
-		}
+	rates := r.selectRates(&input)
+	if !rates.inputHead() || generation && !rates.outputHead() {
+		return Cost{}, false
 	}
+	rate := maxRate(rates.input, rates.cached, rates.cacheWrite, rates.cacheWrite5m,
+		rates.cacheWrite1h, rates.audioInput, rates.cachedAudioInput,
+		rates.imageInput, rates.cachedImageInput)
 	bound := ceilPerMillion(max(input, 0), rate)
 	if generation {
-		bound.Add(bound, ceilPerMillion(max(output, 0), r.output))
+		bound.Add(bound, ceilPerMillion(max(output, 0),
+			maxRate(rates.output, rates.audioOutput, rates.imageOutput)))
+	}
+	if r.perRequest != nil {
+		bound.Add(bound, r.perRequest)
+	}
+	if window := r.windowAt(at); window != nil {
+		// The product carries twelve places of the multiplier's scale; round
+		// the bound up to a whole unit so it never under-covers the request.
+		bound.Mul(bound, window)
+		bound.Add(bound, new(big.Int).Sub(costUnit, big.NewInt(1)))
+		bound.Quo(bound, costUnit)
 	}
 	return clampCost(bound), true
+}
+
+// maxRate is the highest of the rates present, nil when none is.
+func maxRate(rates ...*big.Int) *big.Int {
+	var highest *big.Int
+	for _, rate := range rates {
+		if rate != nil && (highest == nil || rate.Cmp(highest) > 0) {
+			highest = rate
+		}
+	}
+	return highest
 }
 
 // ceilPerMillion is tokens x rate / a million, rounded up to a whole unit.

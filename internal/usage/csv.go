@@ -52,6 +52,7 @@ func RequestCSV(items []RequestSummary) ([]byte, error) {
 		"request_id", "runtime_generation_id", "api_key_id", "origin", "parent_request_id", "route", "operation", "surface",
 		"started_at", "completed_at", "status_code", "error_class", "total_latency_ms", "first_byte_ms", "attempt_count",
 		"input_tokens", "output_tokens", "cached_input_tokens", "cache_write_input_tokens", "cache_write_5m_input_tokens", "cache_write_1h_input_tokens",
+		"audio_input_tokens", "cached_audio_input_tokens", "audio_output_tokens", "image_input_tokens", "cached_image_input_tokens", "image_output_tokens",
 		"estimated_cost", "currency", "unpriced", "usage_complete", "end_user_digest", "session_id", "payload_captured",
 	}); err != nil {
 		return nil, err
@@ -66,7 +67,10 @@ func RequestCSV(items []RequestSummary) ([]byte, error) {
 			item.StartedAt.UTC().Format(time.RFC3339Nano), completed, csvOptional(item.StatusCode), csvOptional(item.ErrorClass),
 			csvOptional(item.TotalLatencyMS), csvOptional(item.FirstByteMS), strconv.FormatInt(int64(item.AttemptCount), 10),
 			csvOptional(item.InputTokens), csvOptional(item.OutputTokens), csvOptional(item.CachedInputTokens), csvOptional(item.CacheWriteInputTokens),
-			csvOptional(item.CacheWrite5MInputTokens), csvOptional(item.CacheWrite1HInputTokens), csvOptional(item.EstimatedCost), csvOptional(item.Currency),
+			csvOptional(item.CacheWrite5MInputTokens), csvOptional(item.CacheWrite1HInputTokens),
+			csvOptional(item.AudioInputTokens), csvOptional(item.CachedAudioInputTokens), csvOptional(item.AudioOutputTokens),
+			csvOptional(item.ImageInputTokens), csvOptional(item.CachedImageInputTokens), csvOptional(item.ImageOutputTokens),
+			csvOptional(item.EstimatedCost), csvOptional(item.Currency),
 			csvOptional(item.Unpriced), csvOptional(item.UsageComplete), item.EndUserDigest, item.Attribution["session"], strconv.FormatBool(item.PayloadCaptured),
 		}
 		for i, value := range row {
@@ -89,7 +93,9 @@ func UsageCSV(filters Filters, dimension string, summary Summary, breakdown Brea
 	writer.UseCRLF = true
 	if err := writer.Write([]string{
 		"row_type", "dimension", "dimension_value", "start", "end", "request_count", "input_tokens", "output_tokens", "cached_input_tokens",
-		"cache_write_input_tokens", "cache_write_5m_input_tokens", "cache_write_1h_input_tokens", "media_units", "estimated_cost", "currency",
+		"cache_write_input_tokens", "cache_write_5m_input_tokens", "cache_write_1h_input_tokens",
+		"audio_input_tokens", "cached_audio_input_tokens", "audio_output_tokens", "image_input_tokens", "cached_image_input_tokens", "image_output_tokens",
+		"media_units", "estimated_cost", "currency",
 		"unpriced_count", "incomplete_count", "range_complete", "approximate", "excluded_partial_aggregate_boundaries", "complete",
 		"request_metadata_gap_events", "uncertain_request_metadata_gap_count", "estimated_input_tokens", "reported_input_tokens", "estimated_attempt_count",
 	}); err != nil {
@@ -102,7 +108,10 @@ func UsageCSV(filters Filters, dimension string, summary Summary, breakdown Brea
 		row := []string{
 			kind, dimension, value, filters.Start.UTC().Format(time.RFC3339Nano), filters.End.UTC().Format(time.RFC3339Nano),
 			strconv.FormatInt(totals.RequestCount, 10), totals.InputTokens, totals.OutputTokens, totals.CachedInputTokens, totals.CacheWriteInputTokens,
-			totals.CacheWrite5MInputTokens, totals.CacheWrite1HInputTokens, totals.MediaUnits, csvOptional(totals.EstimatedCost), csvOptional(totals.Currency),
+			totals.CacheWrite5MInputTokens, totals.CacheWrite1HInputTokens,
+			totals.AudioInputTokens, totals.CachedAudioInputTokens, totals.AudioOutputTokens,
+			totals.ImageInputTokens, totals.CachedImageInputTokens, totals.ImageOutputTokens,
+			totals.MediaUnits, csvOptional(totals.EstimatedCost), csvOptional(totals.Currency),
 			strconv.FormatInt(totals.UnpricedCount, 10), strconv.FormatInt(totals.IncompleteCount, 10), strconv.FormatBool(coverage.RangeComplete),
 			strconv.FormatBool(coverage.Approximate), strconv.Itoa(coverage.ExcludedBoundaries), strconv.FormatBool(summary.Complete),
 			strconv.FormatInt(summary.GapEvents, 10), strconv.FormatInt(summary.UncertainGapCount, 10), totals.EstimatedInputTokens, totals.ReportedInputTokens,
