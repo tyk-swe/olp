@@ -72,7 +72,7 @@ func ObserveResponseDocumentUsage(source oif.Document) (ResponseUsageObservation
 	observation, err := observeResponseUsage(fields)
 	if err == nil && observation.Usage != nil {
 		if output, present := source.Root().Lookup("output"); present {
-			observation.Usage.ToolCalls = responseToolCalls(json.RawMessage(output.Raw()))
+			observation.Usage.ToolCalls = responseToolCallsDocument(output)
 		}
 	}
 	return observation, err
@@ -601,6 +601,41 @@ func responseSummaryWithUsage(fields map[string]json.RawMessage, usage *Usage) (
 
 // responseToolCalls counts the server-side tools a Responses reply billed:
 // only completed web_search_call and file_search_call items are invocations.
+// responseToolCallsDocument counts the same invocations on an already parsed
+// output array, touching only the fields that name a call — the generated
+// text itself is never copied.
+func responseToolCallsDocument(output oif.Value) map[string]int64 {
+	var calls map[string]int64
+	for _, item := range output.Elements() {
+		kind, ok := item.Lookup("type")
+		if !ok || kind.Kind() != oif.String {
+			continue
+		}
+		name, ok := kind.Chars()
+		if !ok || name != "web_search_call" && name != "file_search_call" {
+			continue
+		}
+		status, ok := item.Lookup("status")
+		if !ok || status.Kind() != oif.String {
+			continue
+		}
+		done, ok := status.Chars()
+		if !ok || done != "completed" {
+			continue
+		}
+		if calls == nil {
+			calls = map[string]int64{}
+		}
+		switch name {
+		case "web_search_call":
+			calls["web_search"]++
+		case "file_search_call":
+			calls["file_search"]++
+		}
+	}
+	return calls
+}
+
 func responseToolCalls(raw json.RawMessage) map[string]int64 {
 	if raw == nil || isNull(raw) ||
 		!bytes.Contains(raw, []byte("web_search_call")) && !bytes.Contains(raw, []byte("file_search_call")) {
