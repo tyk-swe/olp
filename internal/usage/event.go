@@ -1157,6 +1157,27 @@ func validateUsageDimensions(input, output, read, write, write5m, write1h,
 // toolNamePattern bounds a metered tool name, in prices and in usage.
 var toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
+// ConsistentUsage reports whether one attempt's counters satisfy the share
+// invariants accounting stores. The gateway checks provider-reported usage
+// against it before billing evidence leaves the process.
+func ConsistentUsage(usage *AttemptUsage) bool {
+	for _, tokens := range [12]*int64{usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
+		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens,
+		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,
+		usage.ImageInputTokens, usage.CachedImageInputTokens, usage.ImageOutputTokens} {
+		if tokens != nil && *tokens < 0 {
+			return false
+		}
+	}
+	if err := validateUsageDimensions(usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
+		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens,
+		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,
+		usage.ImageInputTokens, usage.CachedImageInputTokens, usage.ImageOutputTokens); err != nil {
+		return false
+	}
+	return validateToolCalls(usage.ToolCalls) == nil
+}
+
 // maxToolCalls bounds the tool fee set a price or an attempt may name.
 const maxToolCalls = 16
 

@@ -179,6 +179,17 @@ it('submits exact decimals, zero and null rates, then refreshes revisions', asyn
         cache_write_1h_input_per_million: '0.012',
         output_per_million: '10.00',
         unit_price: null,
+        audio_input_per_million: null,
+        cached_audio_input_per_million: null,
+        audio_output_per_million: null,
+        image_input_per_million: null,
+        cached_image_input_per_million: null,
+        image_output_per_million: null,
+        per_request: null,
+        batch_multiplier: null,
+        tool_calls: null,
+        tiers: null,
+        windows: null,
         currency: 'EUR'
       }
     ],
@@ -405,4 +416,112 @@ it('shows the created revision on the first page after paging away', async () =>
       pricingKeys.page('older-page')
     )?.items[0]?.revision
   ).toBe(1);
+});
+
+it('submits modality rates, request fee, batch multiplier, tools, tiers and windows', async () => {
+  establish();
+  await ready();
+  edit('audio-input-price', '4.00');
+  edit('cached-audio-input-price', '0.50');
+  edit('audio-output-price', '16.00');
+  edit('image-input-price', '6.00');
+  edit('image-output-price', '24.00');
+  edit('per-request-price', '0.01');
+  edit('batch-multiplier', '0.50');
+  // One tool fee row.
+  host
+    .querySelectorAll<HTMLButtonElement>('.component-rows button')
+    .forEach((button) => {
+      if (button.textContent?.includes('Add tool fee')) button.click();
+    });
+  flushSync();
+  edit('tool-name-0', 'web_search');
+  edit('tool-fee-0', '0.010');
+  // A tier mirrors every per-million rate the entry fills.
+  host
+    .querySelectorAll<HTMLButtonElement>('.component-rows button')
+    .forEach((button) => {
+      if (button.textContent?.includes('Add tier')) button.click();
+    });
+  flushSync();
+  edit('tier-threshold-0', '1000000');
+  edit('tier-0-input_per_million', '3.00');
+  edit('tier-0-audio_input_per_million', '8.00');
+  edit('tier-0-cached_audio_input_per_million', '1.00');
+  edit('tier-0-audio_output_per_million', '32.00');
+  edit('tier-0-image_input_per_million', '12.00');
+  edit('tier-0-image_output_per_million', '48.00');
+  // A window across every weekday.
+  edit('window-zone', 'America/New_York');
+  host
+    .querySelectorAll<HTMLButtonElement>('.component-rows button')
+    .forEach((button) => {
+      if (button.textContent?.includes('Add window period')) button.click();
+    });
+  flushSync();
+  host
+    .querySelectorAll('.weekday-toggles button')
+    .forEach((button) =>
+      button.dispatchEvent(new Event('click', { bubbles: true }))
+    );
+  flushSync();
+  edit('window-start-0', '09:00');
+  edit('window-end-0', '24:00');
+  edit('window-multiplier-0', '0.75');
+  submit();
+  await vi.waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
+  const submitted = vi.mocked(createPricingRevision).mock.calls[0]?.[1]?.[0];
+  expect(submitted).toMatchObject({
+    audio_input_per_million: '4.00',
+    cached_audio_input_per_million: '0.50',
+    audio_output_per_million: '16.00',
+    image_input_per_million: '6.00',
+    image_output_per_million: '24.00',
+    cached_image_input_per_million: null,
+    per_request: '0.01',
+    batch_multiplier: '0.50',
+    tool_calls: { web_search: '0.010' },
+    tiers: [
+      {
+        above_input_tokens: 1000000,
+        input_per_million: '3.00',
+        audio_input_per_million: '8.00',
+        cached_audio_input_per_million: '1.00',
+        audio_output_per_million: '32.00',
+        image_input_per_million: '12.00',
+        image_output_per_million: '48.00'
+      }
+    ],
+    windows: {
+      time_zone: 'America/New_York',
+      periods: [
+        {
+          days: [1, 2, 3, 4, 5, 6, 7],
+          start: '09:00',
+          end: '24:00',
+          multiplier: '0.75'
+        }
+      ]
+    }
+  });
+});
+
+it('rejects a tool name that cannot price', async () => {
+  establish();
+  await ready();
+  host
+    .querySelectorAll<HTMLButtonElement>('.component-rows button')
+    .forEach((button) => {
+      if (button.textContent?.includes('Add tool fee')) button.click();
+    });
+  flushSync();
+  edit('tool-name-0', 'Web Search');
+  edit('tool-fee-0', '0.010');
+  submit();
+  expect(createPricingRevision).not.toHaveBeenCalled();
+  expect(onFeedback).toHaveBeenLastCalledWith({
+    status: '',
+    error:
+      'Tool names are lowercase letters, digits and underscores, starting with a letter.'
+  });
 });

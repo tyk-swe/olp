@@ -75,6 +75,10 @@ type Totals struct {
 	EstimatedInputTokens  string `json:"estimated_input_tokens"`
 	ReportedInputTokens   string `json:"reported_input_tokens"`
 	EstimatedAttemptCount int64  `json:"estimated_attempt_count"`
+	// AllocatedCommitment is this row's share of the commitment amounts its
+	// committed attempts divide by list-cost weight. A range or filter holding
+	// no committed usage allocates nothing.
+	AllocatedCommitment string `json:"allocated_commitment"`
 }
 
 // Summary is the totals for a range plus everything known about how much of the
@@ -290,7 +294,12 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" currency::text AS currency," +
 		" CASE WHEN " + estimatePaired + " THEN estimated_input_tokens ELSE 0 END::numeric AS estimated_input_tokens," +
 		" CASE WHEN " + estimatePaired + " THEN input_tokens ELSE 0 END::numeric AS estimate_reported_input_tokens," +
-		" CASE WHEN " + estimatePaired + " THEN 1 ELSE 0 END::bigint AS estimate_attempt_count" +
+		" CASE WHEN " + estimatePaired + " THEN 1 ELSE 0 END::bigint AS estimate_attempt_count," +
+		" commitment_weight::numeric AS commitment_weight," +
+		" commitment_amount::numeric AS commitment_amount," +
+		" commitment_period," +
+		" CASE WHEN commitment_period IS NOT NULL THEN date_trunc(commitment_period, observed_at AT TIME ZONE 'UTC')" +
+		" END AS commitment_bucket" +
 		" FROM olp.attempt_usage_facts WHERE true")
 	q.pushBind(" AND observed_at >= ", f.Start)
 	q.pushBind(" AND observed_at < ", f.End)
@@ -304,11 +313,48 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" image_input_tokens, cached_image_input_tokens, image_output_tokens," +
 		" media_units, estimated_cost, " + scope.hourlyUnpriced + ", " +
 		scope.hourlyIncomplete + ", currency::text AS currency, estimated_input_tokens," +
-		" estimate_reported_input_tokens, estimate_attempt_count FROM olp.attempt_usage_hourly WHERE true")
+		" estimate_reported_input_tokens, estimate_attempt_count, commitment_weight," +
+		" commitment_amount, commitment_period," +
+		" CASE WHEN commitment_period IS NOT NULL THEN date_trunc(commitment_period, bucket AT TIME ZONE 'UTC')" +
+		" END FROM olp.attempt_usage_hourly WHERE true")
 	q.pushBind(" AND bucket >= ", ceilHour(f.Start))
 	q.pushBind(" AND bucket + interval '1 hour' <= ", f.End)
 	f.dimensions(q)
 	q.push(")")
+	// A committed row shares its commitment period's amount by list-cost weight.
+	// The divisor is the whole period's weight — every fact and hourly row the
+	// (provider, period) bucket holds, whether or not this report's filters
+	// select it — and the amount is the one the bucket's latest row recorded.
+	q.push(", commitment_periods AS (" +
+		" SELECT DISTINCT provider_id, commitment_period, commitment_bucket FROM usage_rows" +
+		" WHERE commitment_period IS NOT NULL)")
+	q.push(", commitment_shares AS (" +
+		" SELECT p.provider_id, p.commitment_period, p.commitment_bucket, w.period_weight, w.latest_amount" +
+		" FROM commitment_periods p" +
+		" CROSS JOIN LATERAL (" +
+		"   SELECT SUM(rows.weight) AS period_weight," +
+		"          (ARRAY_AGG(rows.amount ORDER BY rows.at DESC, rows.amount DESC))[1] AS latest_amount" +
+		"   FROM (" +
+		"     SELECT f.commitment_weight AS weight, f.commitment_amount AS amount, f.observed_at AS at" +
+		"     FROM olp.attempt_usage_facts f" +
+		"     WHERE f.provider_id = p.provider_id AND f.commitment_period = p.commitment_period" +
+		"       AND date_trunc(p.commitment_period, f.observed_at AT TIME ZONE 'UTC') = p.commitment_bucket" +
+		"     UNION ALL" +
+		"     SELECT h.commitment_weight, h.commitment_amount, h.bucket" +
+		"     FROM olp.attempt_usage_hourly h" +
+		"     WHERE h.provider_id = p.provider_id AND h.commitment_period = p.commitment_period" +
+		"       AND date_trunc(p.commitment_period, h.bucket AT TIME ZONE 'UTC') = p.commitment_bucket" +
+		"   ) rows" +
+		" ) w)")
+	q.push(", report_rows AS (" +
+		" SELECT usage_rows.*," +
+		" round(shares.latest_amount * usage_rows.commitment_weight / NULLIF(shares.period_weight, 0), 12)" +
+		" AS allocated_commitment" +
+		" FROM usage_rows" +
+		" LEFT JOIN commitment_shares shares" +
+		"   ON shares.provider_id = usage_rows.provider_id" +
+		"  AND shares.commitment_period = usage_rows.commitment_period" +
+		"  AND shares.commitment_bucket = usage_rows.commitment_bucket)")
 }
 
 // totalsColumns is the aggregate projection shared by every report. The
@@ -335,7 +381,8 @@ const totalsColumns = "COALESCE(SUM(request_count), 0)::bigint," +
 	" (SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton))," +
 	" COALESCE(SUM(estimated_input_tokens), 0)::text," +
 	" COALESCE(SUM(estimate_reported_input_tokens), 0)::text," +
-	" COALESCE(SUM(estimate_attempt_count), 0)::bigint"
+	" COALESCE(SUM(estimate_attempt_count), 0)::bigint," +
+	" COALESCE(SUM(allocated_commitment), 0)::text"
 
 // scanTargets lists the destinations for totalsColumns in its column order.
 func (t *Totals) scanTargets() []any {
@@ -344,7 +391,8 @@ func (t *Totals) scanTargets() []any {
 		&t.AudioInputTokens, &t.CachedAudioInputTokens, &t.AudioOutputTokens,
 		&t.ImageInputTokens, &t.CachedImageInputTokens, &t.ImageOutputTokens,
 		&t.MediaUnits, &t.EstimatedCost, &t.UnpricedCount, &t.IncompleteCount, &t.Currency,
-		&t.EstimatedInputTokens, &t.ReportedInputTokens, &t.EstimatedAttemptCount}
+		&t.EstimatedInputTokens, &t.ReportedInputTokens, &t.EstimatedAttemptCount,
+		&t.AllocatedCommitment}
 }
 
 // valid rejects stored counts that cannot be true, so a corrupt aggregate
@@ -361,7 +409,7 @@ func ReadSummary(ctx context.Context, q access.Queryer, f Filters, now time.Time
 	}
 	var query filterQuery
 	f.usageRows(&query, scopeFor(f))
-	query.push(" SELECT " + totalsColumns + " FROM usage_rows")
+	query.push(" SELECT " + totalsColumns + " FROM report_rows")
 	var summary Summary
 	if err := q.QueryRow(ctx, query.sql(), query.args...).Scan(summary.Totals.scanTargets()...); err != nil {
 		return Summary{}, fmt.Errorf("read usage summary: %w", err)
@@ -488,7 +536,7 @@ func readBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension s
 	if dimension == DimensionAttribution {
 		expression = "attribution->>" + query.bind(*f.AttributionKey)
 	}
-	query.push(" SELECT " + expression + " AS dimension, " + totalsColumns + " FROM usage_rows" +
+	query.push(" SELECT " + expression + " AS dimension, " + totalsColumns + " FROM report_rows" +
 		" GROUP BY dimension ORDER BY 2 DESC, dimension LIMIT ")
 	query.push(query.bind(int64(limit)))
 	rows, err := q.Query(ctx, query.sql(), query.args...)
@@ -534,7 +582,7 @@ func ReadSeries(ctx context.Context, q access.Queryer, f Filters, granularity st
 	var query filterQuery
 	f.usageRows(&query, scopeFor(f))
 	query.push(" SELECT date_trunc('" + unit + "', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'" +
-		" AS bucket, " + totalsColumns + " FROM usage_rows GROUP BY bucket ORDER BY bucket")
+		" AS bucket, " + totalsColumns + " FROM report_rows GROUP BY bucket ORDER BY bucket")
 	rows, err := q.Query(ctx, query.sql(), query.args...)
 	if err != nil {
 		return Series{}, fmt.Errorf("read usage series: %w", err)

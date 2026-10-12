@@ -69,17 +69,17 @@ exempt spend still contributes observable cost.
 Worker mode has only private observability. Production needs Valkey plus worker
 or `all`; configured capability flags do not establish live worker health.
 
-| Task | Schedule/authority |
-| --- | --- |
-| Media reconciliation | Durable claims; historical pins and live revocation; also without Valkey |
+| Task                 | Schedule/authority                                                                                      |
+| -------------------- | ------------------------------------------------------------------------------------------------------- |
+| Media reconciliation | Durable claims; historical pins and live revocation; also without Valkey                                |
 | Plugin grant refresh | Five-second scan; per-grant advisory lock; record answered refresh during shutdown; also without Valkey |
-| Active probes | 15-second scan; fleet claim per configured interval/model; low-priority accounted system work |
-| Metadata consumer | Replay/reclaim, commit once then acknowledge/delete; dedicated blocking Valkey connection |
-| Export delivery | PostgreSQL leases, independent of Valkey |
-| Epoch detection | Two confirming passes before unclean-exit gap |
-| Maintenance | 60-second advisory-lock pass: roll up before purge; bounded resource expiry/savepoints |
-| Cost reconciliation | 60-second region-scoped leader pass |
-| Notifications | 60-second claims, durable attempt evidence, up to five retries with exponential minute backoff |
+| Active probes        | 15-second scan; fleet claim per configured interval/model; low-priority accounted system work           |
+| Metadata consumer    | Replay/reclaim, commit once then acknowledge/delete; dedicated blocking Valkey connection               |
+| Export delivery      | PostgreSQL leases, independent of Valkey                                                                |
+| Epoch detection      | Two confirming passes before unclean-exit gap                                                           |
+| Maintenance          | 60-second advisory-lock pass: roll up before purge; bounded resource expiry/savepoints                  |
+| Cost reconciliation  | 60-second region-scoped leader pass                                                                     |
+| Notifications        | 60-second claims, durable attempt evidence, up to five retries with exponential minute backoff          |
 
 Media/grant/consumer/epoch checkpoints stale at 20 seconds; maintenance/cost/
 notification checkpoints at 180. Follower skips do not prove leader success.
@@ -194,6 +194,9 @@ scope. Partial boundary buckets are approximate with exclusion/gap evidence.
 Attribution filters and end-user digest breakdowns preserve raw-ID privacy.
 Estimate error compares only attempts with both estimated/reported input;
 model family/provenance breakdowns distinguish unestimated and historical unknown.
+Committed connections report zero marginal cost; `allocated_commitment`
+apportions each commitment amount across the period's list-cost weight —
+see [pricing](pricing.md#commitments).
 
 Pricing entries and every component's exact billing semantics are covered in
 [pricing](pricing.md). Managed pricing sources refresh bounded, egress-checked immutable snapshots and
@@ -230,16 +233,16 @@ Every key is prefixed with the installation namespace
 `olp:<installation>:`, so installations sharing one Valkey service never
 read, acknowledge, or reconcile one another's state.
 
-| Key | Contents |
-| --- | --- |
-| `<prefix>limits:{<lookup>}:rate` | Request and token windows for one lookup. |
-| `<prefix>limits:{<lookup>}:concurrency` | Concurrency leases for one lookup. |
-| `<prefix>limits:{<cost owner>}:cost:day`, `:cost:week` and `:cost:month` | Current calendar spend windows for caller and supply owners; supply caps use day/month. Custom calendar hashes also contain start/end instants. |
-| `<prefix>limits:{<cost owner>}:cost:pending` and `:cost:expiry` | Cost reserved by requests in flight against that owner: a hash of each request's amount and their total, and the set of when each lapses. Advisory; absent when nothing is in flight. |
-| `<prefix>limits:provider-cooldown:<scope>` | Credential-version and slot cooldowns. |
-| `<prefix>limits:health:circuits` | Each provider whose circuit the fleet holds open, until when. Gateways publish transitions and read it every two seconds. |
-| `<prefix>limits:health:probes` and `:health:probe:<provider>/<model>` | Each provider's latest active probe result, and the claim that keeps one probe per model and interval. |
-| `<prefix>request-metadata` | The request metadata stream, read by consumer group `olp:persistence`. |
+| Key                                                                      | Contents                                                                                                                                                                              |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<prefix>limits:{<lookup>}:rate`                                         | Request and token windows for one lookup.                                                                                                                                             |
+| `<prefix>limits:{<lookup>}:concurrency`                                  | Concurrency leases for one lookup.                                                                                                                                                    |
+| `<prefix>limits:{<cost owner>}:cost:day`, `:cost:week` and `:cost:month` | Current calendar spend windows for caller and supply owners; supply caps use day/month. Custom calendar hashes also contain start/end instants.                                       |
+| `<prefix>limits:{<cost owner>}:cost:pending` and `:cost:expiry`          | Cost reserved by requests in flight against that owner: a hash of each request's amount and their total, and the set of when each lapses. Advisory; absent when nothing is in flight. |
+| `<prefix>limits:provider-cooldown:<scope>`                               | Credential-version and slot cooldowns.                                                                                                                                                |
+| `<prefix>limits:health:circuits`                                         | Each provider whose circuit the fleet holds open, until when. Gateways publish transitions and read it every two seconds.                                                             |
+| `<prefix>limits:health:probes` and `:health:probe:<provider>/<model>`    | Each provider's latest active probe result, and the claim that keeps one probe per model and interval.                                                                                |
+| `<prefix>request-metadata`                                               | The request metadata stream, read by consumer group `olp:persistence`.                                                                                                                |
 
 A lookup is the key's lookup identifier, `pc_<provider uuid>` for a connection,
 `ps_<slot uuid>` for a credential slot, or `rt_<route uuid>` for a route's

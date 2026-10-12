@@ -34,6 +34,14 @@ func TestIntegrationPricingParity(t *testing.T) {
 	owner, key := seedParityOwner(t, pool)
 	provider := seedParityProvider(t, pool, owner)
 	cases := parityCases(2400)
+	// A tier rate stored as a canonical string in jsonb has no declared scale;
+	// the function casts it to numeric(24,12) so a quotient past the 100M scale
+	// keeps the same decimals the Go mirror keeps.
+	cases = append(cases, parityCase{model: "parity-tier-scale",
+		price: Price{ProviderKind: "openai", Model: "parity-tier-scale", Operation: "generation",
+			InputPerMillion: rate("7.500000000001"), Currency: "USD",
+			Tiers: []PriceTier{{AboveInputTokens: 1, InputPerMillion: rate("7.500000000001")}}},
+		usage: AttemptUsage{Observed: true, Complete: true, InputTokens: tokens(123456789012345)}})
 	observed := time.Now().UTC().Add(-time.Minute)
 	seedParityPrices(t, pool, owner, observed.Add(-time.Hour), cases)
 	t.Run("priceAttemptSQL", func(t *testing.T) {

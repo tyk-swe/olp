@@ -98,6 +98,7 @@ func UsageCSV(filters Filters, dimension string, summary Summary, breakdown Brea
 		"media_units", "estimated_cost", "currency",
 		"unpriced_count", "incomplete_count", "range_complete", "approximate", "excluded_partial_aggregate_boundaries", "complete",
 		"request_metadata_gap_events", "uncertain_request_metadata_gap_count", "estimated_input_tokens", "reported_input_tokens", "estimated_attempt_count",
+		"allocated_commitment",
 	}); err != nil {
 		return nil, err
 	}
@@ -115,7 +116,7 @@ func UsageCSV(filters Filters, dimension string, summary Summary, breakdown Brea
 			strconv.FormatInt(totals.UnpricedCount, 10), strconv.FormatInt(totals.IncompleteCount, 10), strconv.FormatBool(coverage.RangeComplete),
 			strconv.FormatBool(coverage.Approximate), strconv.Itoa(coverage.ExcludedBoundaries), strconv.FormatBool(summary.Complete),
 			strconv.FormatInt(summary.GapEvents, 10), strconv.FormatInt(summary.UncertainGapCount, 10), totals.EstimatedInputTokens, totals.ReportedInputTokens,
-			strconv.FormatInt(totals.EstimatedAttemptCount, 10),
+			strconv.FormatInt(totals.EstimatedAttemptCount, 10), totals.AllocatedCommitment,
 		}
 		for i, value := range row {
 			row[i] = csvCell(value)

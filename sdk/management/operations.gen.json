@@ -1783,6 +1783,17 @@
                   "$ref": "#/$defs/HealthProbe"
                 }
               ]
+            },
+            "commitment": {
+              "default": null,
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/Commitment"
+                }
+              ]
             }
           },
           "type": "object"
@@ -2138,6 +2149,31 @@
           },
           "required": [
             "interval_seconds"
+          ],
+          "type": "object"
+        },
+        "Commitment": {
+          "additionalProperties": false,
+          "description": "Provisioned capacity the connection pays for: attempts bill at zero\nmarginal cost and share the amount across each UTC calendar period by\nlist-cost weight.",
+          "properties": {
+            "amount": {
+              "description": "The commitment amount, a positive decimal string.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "period": {
+              "description": "The UTC calendar period the amount covers.",
+              "enum": [
+                "hour",
+                "day",
+                "month"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "amount",
+            "period"
           ],
           "type": "object"
         },
@@ -6475,6 +6511,17 @@
                   "$ref": "#/$defs/HealthProbe"
                 }
               ]
+            },
+            "commitment": {
+              "default": null,
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/Commitment"
+                }
+              ]
             }
           },
           "type": "object"
@@ -6830,6 +6877,31 @@
           },
           "required": [
             "interval_seconds"
+          ],
+          "type": "object"
+        },
+        "Commitment": {
+          "additionalProperties": false,
+          "description": "Provisioned capacity the connection pays for: attempts bill at zero\nmarginal cost and share the amount across each UTC calendar period by\nlist-cost weight.",
+          "properties": {
+            "amount": {
+              "description": "The commitment amount, a positive decimal string.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "period": {
+              "description": "The UTC calendar period the amount covers.",
+              "enum": [
+                "hour",
+                "day",
+                "month"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "amount",
+            "period"
           ],
           "type": "object"
         },
@@ -18819,6 +18891,17 @@
                   "$ref": "#/$defs/HealthProbe"
                 }
               ]
+            },
+            "commitment": {
+              "default": null,
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/Commitment"
+                }
+              ]
             }
           },
           "type": "object"
@@ -19174,6 +19257,31 @@
           },
           "required": [
             "interval_seconds"
+          ],
+          "type": "object"
+        },
+        "Commitment": {
+          "additionalProperties": false,
+          "description": "Provisioned capacity the connection pays for: attempts bill at zero\nmarginal cost and share the amount across each UTC calendar period by\nlist-cost weight.",
+          "properties": {
+            "amount": {
+              "description": "The commitment amount, a positive decimal string.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "period": {
+              "description": "The UTC calendar period the amount covers.",
+              "enum": [
+                "hour",
+                "day",
+                "month"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "amount",
+            "period"
           ],
           "type": "object"
         },
@@ -31352,6 +31460,17 @@
                   "$ref": "#/$defs/HealthProbe"
                 }
               ]
+            },
+            "commitment": {
+              "default": null,
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/Commitment"
+                }
+              ]
             }
           },
           "type": "object"
@@ -31707,6 +31826,31 @@
           },
           "required": [
             "interval_seconds"
+          ],
+          "type": "object"
+        },
+        "Commitment": {
+          "additionalProperties": false,
+          "description": "Provisioned capacity the connection pays for: attempts bill at zero\nmarginal cost and share the amount across each UTC calendar period by\nlist-cost weight.",
+          "properties": {
+            "amount": {
+              "description": "The commitment amount, a positive decimal string.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "period": {
+              "description": "The UTC calendar period the amount covers.",
+              "enum": [
+                "hour",
+                "day",
+                "month"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "amount",
+            "period"
           ],
           "type": "object"
         }

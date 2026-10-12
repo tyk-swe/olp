@@ -734,6 +734,27 @@
               "array",
               "null"
             ]
+          },
+          "commitment_weight": {
+            "description": "The list-cost weight the committed attempt divides its\ncommitment period's amount by.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commitment_amount": {
+            "description": "The commitment amount the attempt's provider owes per period.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commitment_period": {
+            "description": "The UTC calendar period the commitment amount covers, when\nthe attempt's provider is committed.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -2558,6 +2579,31 @@
         },
         "type": "object"
       },
+      "Commitment": {
+        "additionalProperties": false,
+        "description": "Provisioned capacity the connection pays for: attempts bill at zero\nmarginal cost and share the amount across each UTC calendar period by\nlist-cost weight.",
+        "properties": {
+          "amount": {
+            "description": "The commitment amount, a positive decimal string.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "period": {
+            "description": "The UTC calendar period the amount covers.",
+            "enum": [
+              "hour",
+              "day",
+              "month"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "period"
+        ],
+        "type": "object"
+      },
       "ConnectionOptions": {
         "additionalProperties": false,
         "properties": {
@@ -2658,6 +2704,17 @@
               },
               {
                 "$ref": "#/components/schemas/HealthProbe"
+              }
+            ]
+          },
+          "commitment": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Commitment"
               }
             ]
           }
@@ -13105,6 +13162,10 @@
           },
           "image_output_tokens": {
             "type": "string"
+          },
+          "allocated_commitment": {
+            "description": "This row's share of the commitment amounts its committed\nattempts divide by list-cost weight, an exact decimal string.",
+            "type": "string"
           }
         },
         "required": [
@@ -13127,7 +13188,8 @@
           "audio_output_tokens",
           "image_input_tokens",
           "cached_image_input_tokens",
-          "image_output_tokens"
+          "image_output_tokens",
+          "allocated_commitment"
         ],
         "type": "object"
       },
@@ -13301,6 +13363,10 @@
           },
           "image_output_tokens": {
             "type": "string"
+          },
+          "allocated_commitment": {
+            "description": "This row's share of the commitment amounts its committed\nattempts divide by list-cost weight, an exact decimal string.",
+            "type": "string"
           }
         },
         "required": [
@@ -13323,7 +13389,8 @@
           "audio_output_tokens",
           "image_input_tokens",
           "cached_image_input_tokens",
-          "image_output_tokens"
+          "image_output_tokens",
+          "allocated_commitment"
         ],
         "type": "object"
       },
@@ -13450,6 +13517,10 @@
           },
           "image_output_tokens": {
             "type": "string"
+          },
+          "allocated_commitment": {
+            "description": "This row's share of the commitment amounts its committed\nattempts divide by list-cost weight, an exact decimal string.",
+            "type": "string"
           }
         },
         "required": [
@@ -13476,7 +13547,8 @@
           "audio_output_tokens",
           "image_input_tokens",
           "cached_image_input_tokens",
-          "image_output_tokens"
+          "image_output_tokens",
+          "allocated_commitment"
         ],
         "type": "object"
       },

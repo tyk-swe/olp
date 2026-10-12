@@ -374,6 +374,22 @@ func streamGeminiEvents(r io.Reader, limit int, route string, emit openai.Emit, 
 			}
 		}
 		if present(f["usageMetadata"]) && part.Usage != nil {
+			if c.Usage != nil && len(c.Usage.ToolCalls) > 0 {
+				// Usage snapshots replace token counts, while metered tool
+				// invocations accumulate across the chunks that reported them.
+				if part.Usage.ToolCalls == nil {
+					part.Usage.ToolCalls = c.Usage.ToolCalls
+				} else {
+					for tool, invocations := range c.Usage.ToolCalls {
+						part.Usage.ToolCalls[tool] += invocations
+					}
+					// The grounded-prompt marker is a flag, not a count: one
+					// grounded prompt no matter how many chunks grounded.
+					if _, ok := part.Usage.ToolCalls["google_search_prompt"]; ok {
+						part.Usage.ToolCalls["google_search_prompt"] = 1
+					}
+				}
+			}
 			c.Usage = part.Usage
 			usageAtFinish = seen
 			for _, done := range finished {

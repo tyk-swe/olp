@@ -1325,7 +1325,12 @@ func (s *Server) recordBusiness(env Envelope, x *execution) {
 			s.Business.Tokens(labels, &u.InputTokens, &u.OutputTokens)
 			if fact.Price != nil {
 				if cost, ok := fact.Price.Cost(attemptUsage(fact, env.Operation), fact.StartedAt, attemptSuccessful(fact)); ok {
+					// A committed attempt prices but owes nothing: record its
+					// zero marginal cost rather than skipping the metric.
 					if amount, err := strconv.ParseFloat(cost.String(), 64); err == nil {
+						if x.committed(fact.ProviderID) {
+							amount = 0
+						}
 						s.Business.Cost(labels, fact.Price.Currency, amount)
 					}
 				}

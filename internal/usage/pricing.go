@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -365,6 +366,27 @@ func normalizePrice(price Price, vendorKind func(vendor string) (string, bool)) 
 	entry := price
 	entry.Model = strings.TrimSpace(price.Model)
 	entry.Currency = strings.ToUpper(strings.TrimSpace(price.Currency))
+	// Validation writes normalized values back into the entry, so clone the
+	// structured components rather than writing through to the caller's.
+	if price.ToolCalls != nil {
+		entry.ToolCalls = maps.Clone(price.ToolCalls)
+	}
+	if price.Tiers != nil {
+		entry.Tiers = slices.Clone(price.Tiers)
+		for index := range entry.Tiers {
+			for _, pair := range perMillionRates(&Price{}, &entry.Tiers[index]) {
+				if *pair[1] != nil {
+					value := **pair[1]
+					*pair[1] = &value
+				}
+			}
+		}
+	}
+	if price.Windows != nil {
+		windows := *price.Windows
+		windows.Periods = slices.Clone(price.Windows.Periods)
+		entry.Windows = &windows
+	}
 	if !validProviderKind(entry.ProviderKind) {
 		return Price{}, access.Invalid("prices", "Use a supported provider kind.")
 	}

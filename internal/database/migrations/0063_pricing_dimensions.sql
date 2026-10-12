@@ -73,7 +73,7 @@ ALTER TABLE olp.attempt_usage_hourly
 -- the first field the rate set carries, or nothing.
 CREATE FUNCTION olp.price_first_rate(rates jsonb, VARIADIC names text[])
 RETURNS TABLE(rate numeric, field text) LANGUAGE sql IMMUTABLE AS $$
-    SELECT (rates->>name)::numeric, name FROM unnest(names) AS name
+    SELECT (rates->>name)::numeric(24,12), name FROM unnest(names) AS name
     WHERE rates->>name IS NOT NULL LIMIT 1
 $$;
 
@@ -238,7 +238,9 @@ BEGIN
             v_ok := false;
         ELSE
             v_charge := v_charge + v_media * (price->>'unit_price')::numeric;
-            v_comp := v_comp || 'unit_price'::text;
+            IF v_media > 0 THEN
+                v_comp := v_comp || 'unit_price'::text;
+            END IF;
         END IF;
     END IF;
 

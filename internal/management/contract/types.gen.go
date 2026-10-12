@@ -748,6 +748,27 @@ func (e CodeTokenWindowPeriod) Valid() bool {
 	}
 }
 
+// Defines values for CommitmentPeriod.
+const (
+	CommitmentPeriodDay   CommitmentPeriod = "day"
+	CommitmentPeriodHour  CommitmentPeriod = "hour"
+	CommitmentPeriodMonth CommitmentPeriod = "month"
+)
+
+// Valid indicates whether the value is a known member of the CommitmentPeriod enum.
+func (e CommitmentPeriod) Valid() bool {
+	switch e {
+	case CommitmentPeriodDay:
+		return true
+	case CommitmentPeriodHour:
+		return true
+	case CommitmentPeriodMonth:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConfigurationCapabilityEntryMode.
 const (
 	ConfigurationCapabilityEntryModeStreaming ConfigurationCapabilityEntryMode = "streaming"
@@ -3980,28 +4001,39 @@ type AttemptResponse struct {
 	AudioOutputTokens nullable.Nullable[int64] `json:"audio_output_tokens,omitempty"`
 
 	// Batch The attempt's usage was produced at batch terms.
-	Batch                   nullable.Nullable[bool]      `json:"batch,omitempty"`
-	CacheWrite1hInputTokens nullable.Nullable[int64]     `json:"cache_write_1h_input_tokens,omitempty"`
-	CacheWrite5mInputTokens nullable.Nullable[int64]     `json:"cache_write_5m_input_tokens,omitempty"`
-	CacheWriteInputTokens   nullable.Nullable[int64]     `json:"cache_write_input_tokens,omitempty"`
-	CachedAudioInputTokens  nullable.Nullable[int64]     `json:"cached_audio_input_tokens,omitempty"`
-	CachedImageInputTokens  nullable.Nullable[int64]     `json:"cached_image_input_tokens,omitempty"`
-	CachedInputTokens       nullable.Nullable[int64]     `json:"cached_input_tokens,omitempty"`
-	ChargeStatus            nullable.Nullable[string]    `json:"charge_status,omitempty"`
-	Committed               bool                         `json:"committed"`
-	CompletedAt             nullable.Nullable[time.Time] `json:"completed_at,omitempty"`
-	Currency                nullable.Nullable[string]    `json:"currency,omitempty"`
-	ErrorClass              nullable.Nullable[string]    `json:"error_class,omitempty"`
-	EstimatedCost           nullable.Nullable[string]    `json:"estimated_cost,omitempty"`
-	FirstByteMs             nullable.Nullable[int64]     `json:"first_byte_ms,omitempty"`
-	Id                      openapi_types.UUID           `json:"id"`
-	ImageInputTokens        nullable.Nullable[int64]     `json:"image_input_tokens,omitempty"`
-	ImageOutputTokens       nullable.Nullable[int64]     `json:"image_output_tokens,omitempty"`
-	InputTokens             nullable.Nullable[int64]     `json:"input_tokens,omitempty"`
-	LatencyMs               nullable.Nullable[int64]     `json:"latency_ms,omitempty"`
-	MediaUnits              nullable.Nullable[string]    `json:"media_units,omitempty"`
-	Ordinal                 int32                        `json:"ordinal"`
-	OutputTokens            nullable.Nullable[int64]     `json:"output_tokens,omitempty"`
+	Batch                   nullable.Nullable[bool]   `json:"batch,omitempty"`
+	CacheWrite1hInputTokens nullable.Nullable[int64]  `json:"cache_write_1h_input_tokens,omitempty"`
+	CacheWrite5mInputTokens nullable.Nullable[int64]  `json:"cache_write_5m_input_tokens,omitempty"`
+	CacheWriteInputTokens   nullable.Nullable[int64]  `json:"cache_write_input_tokens,omitempty"`
+	CachedAudioInputTokens  nullable.Nullable[int64]  `json:"cached_audio_input_tokens,omitempty"`
+	CachedImageInputTokens  nullable.Nullable[int64]  `json:"cached_image_input_tokens,omitempty"`
+	CachedInputTokens       nullable.Nullable[int64]  `json:"cached_input_tokens,omitempty"`
+	ChargeStatus            nullable.Nullable[string] `json:"charge_status,omitempty"`
+
+	// CommitmentAmount The commitment amount the attempt's provider owes per period.
+	CommitmentAmount nullable.Nullable[string] `json:"commitment_amount,omitempty"`
+
+	// CommitmentPeriod The UTC calendar period the commitment amount covers, when
+	// the attempt's provider is committed.
+	CommitmentPeriod nullable.Nullable[string] `json:"commitment_period,omitempty"`
+
+	// CommitmentWeight The list-cost weight the committed attempt divides its
+	// commitment period's amount by.
+	CommitmentWeight  nullable.Nullable[string]    `json:"commitment_weight,omitempty"`
+	Committed         bool                         `json:"committed"`
+	CompletedAt       nullable.Nullable[time.Time] `json:"completed_at,omitempty"`
+	Currency          nullable.Nullable[string]    `json:"currency,omitempty"`
+	ErrorClass        nullable.Nullable[string]    `json:"error_class,omitempty"`
+	EstimatedCost     nullable.Nullable[string]    `json:"estimated_cost,omitempty"`
+	FirstByteMs       nullable.Nullable[int64]     `json:"first_byte_ms,omitempty"`
+	Id                openapi_types.UUID           `json:"id"`
+	ImageInputTokens  nullable.Nullable[int64]     `json:"image_input_tokens,omitempty"`
+	ImageOutputTokens nullable.Nullable[int64]     `json:"image_output_tokens,omitempty"`
+	InputTokens       nullable.Nullable[int64]     `json:"input_tokens,omitempty"`
+	LatencyMs         nullable.Nullable[int64]     `json:"latency_ms,omitempty"`
+	MediaUnits        nullable.Nullable[string]    `json:"media_units,omitempty"`
+	Ordinal           int32                        `json:"ordinal"`
+	OutputTokens      nullable.Nullable[int64]     `json:"output_tokens,omitempty"`
 
 	// PricingComponents The price components the attempt was charged through.
 	PricingComponents nullable.Nullable[[]string]               `json:"pricing_components,omitempty"`
@@ -4842,6 +4874,20 @@ type CodeTokenWindowsList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// Commitment Provisioned capacity the connection pays for: attempts bill at zero
+// marginal cost and share the amount across each UTC calendar period by
+// list-cost weight.
+type Commitment struct {
+	// Amount The commitment amount, a positive decimal string.
+	Amount string `json:"amount"`
+
+	// Period The UTC calendar period the amount covers.
+	Period CommitmentPeriod `json:"period"`
+}
+
+// CommitmentPeriod The UTC calendar period the amount covers.
+type CommitmentPeriod string
+
 // ConfigurationCapabilityEntry defines model for ConfigurationCapabilityEntry.
 type ConfigurationCapabilityEntry struct {
 	Mode      ConfigurationCapabilityEntryMode `json:"mode"`
@@ -5310,7 +5356,8 @@ type ConnectionLimits struct {
 // ConnectionOptions defines model for ConnectionOptions.
 type ConnectionOptions struct {
 	// Bindings Serving bindings keyed by configured upstream model.
-	Bindings *map[string]ProviderServingBinding `json:"bindings,omitempty"`
+	Bindings   *map[string]ProviderServingBinding `json:"bindings,omitempty"`
+	Commitment nullable.Nullable[Commitment]      `json:"commitment,omitempty"`
 
 	// CredentialHeaders Header names whose values are supplied in the encrypted credential JSON.
 	CredentialHeaders *[]string                           `json:"credential_headers,omitempty"`
@@ -10276,6 +10323,9 @@ type UpdateUserRoleRequestAccessScope string
 
 // UsageBreakdownItem defines model for UsageBreakdownItem.
 type UsageBreakdownItem struct {
+	// AllocatedCommitment This row's share of the commitment amounts its committed
+	// attempts divide by list-cost weight, an exact decimal string.
+	AllocatedCommitment     string                    `json:"allocated_commitment"`
 	AudioInputTokens        string                    `json:"audio_input_tokens"`
 	AudioOutputTokens       string                    `json:"audio_output_tokens"`
 	CacheWrite1hInputTokens string                    `json:"cache_write_1h_input_tokens"`
@@ -10329,6 +10379,9 @@ type UsageCompletenessResponse struct {
 
 // UsagePointResponse defines model for UsagePointResponse.
 type UsagePointResponse struct {
+	// AllocatedCommitment This row's share of the commitment amounts its committed
+	// attempts divide by list-cost weight, an exact decimal string.
+	AllocatedCommitment     string                    `json:"allocated_commitment"`
 	AudioInputTokens        string                    `json:"audio_input_tokens"`
 	AudioOutputTokens       string                    `json:"audio_output_tokens"`
 	Bucket                  time.Time                 `json:"bucket"`
@@ -10368,6 +10421,9 @@ type UsageRangeCoverageResponse struct {
 
 // UsageSummaryResponse defines model for UsageSummaryResponse.
 type UsageSummaryResponse struct {
+	// AllocatedCommitment This row's share of the commitment amounts its committed
+	// attempts divide by list-cost weight, an exact decimal string.
+	AllocatedCommitment     string                     `json:"allocated_commitment"`
 	AudioInputTokens        string                     `json:"audio_input_tokens"`
 	AudioOutputTokens       string                     `json:"audio_output_tokens"`
 	CacheWrite1hInputTokens string                     `json:"cache_write_1h_input_tokens"`

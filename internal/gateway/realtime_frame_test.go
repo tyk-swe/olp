@@ -188,3 +188,23 @@ func TestRealtimeCaseAliasesCannotDischargePendingResponse(t *testing.T) {
 		}
 	}
 }
+
+func TestRealtimeUsageCarriesModalityShares(t *testing.T) {
+	frame := `{"type":"response.done","response":{"id":"resp_1","usage":{
+		"input_tokens":30,"output_tokens":20,
+		"input_token_details":{"cached_tokens":10,"audio_tokens":7,"image_tokens":3,
+			"cached_tokens_details":{"audio_tokens":4,"image_tokens":2}},
+		"output_token_details":{"audio_tokens":9}}}}`
+	for _, strict := range []bool{false, true} {
+		state := realtimeResponseState{}
+		usage := state.providerFrame(websocket.MessageText, []byte(frame), strict)
+		if usage == nil || usage.AudioInputTokens == nil || *usage.AudioInputTokens != 7 ||
+			usage.ImageInputTokens == nil || *usage.ImageInputTokens != 3 ||
+			usage.CachedAudioInputTokens == nil || *usage.CachedAudioInputTokens != 4 ||
+			usage.CachedImageInputTokens == nil || *usage.CachedImageInputTokens != 2 ||
+			usage.AudioOutputTokens == nil || *usage.AudioOutputTokens != 9 ||
+			usage.CachedInputTokens == nil || *usage.CachedInputTokens != 10 {
+			t.Fatalf("strict=%t usage %+v", strict, usage)
+		}
+	}
+}

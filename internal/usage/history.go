@@ -120,6 +120,9 @@ type AttemptDetail struct {
 	Currency                *string          `json:"currency"`
 	Unpriced                *bool            `json:"unpriced"`
 	PricingRevisionID       *string          `json:"pricing_revision_id"`
+	CommitmentWeight        *string          `json:"commitment_weight"`
+	CommitmentAmount        *string          `json:"commitment_amount"`
+	CommitmentPeriod        *string          `json:"commitment_period"`
 }
 
 // RequestDetail is one request with its attempt timeline.
@@ -311,7 +314,8 @@ const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider
         f.image_input_tokens, f.cached_image_input_tokens, f.image_output_tokens,
         f.media_units::text, f.tool_calls::text, f.batch, f.pricing_components,
         f.estimated_cost::text, btrim(f.currency), f.unpriced,
-        f.pricing_revision_id::text
+        f.pricing_revision_id::text, f.commitment_weight::text,
+        f.commitment_amount::text, f.commitment_period
     FROM olp.attempts a JOIN olp.providers p ON p.id = a.provider_id
     LEFT JOIN olp.attempt_usage_facts f ON f.request_id = a.request_id
         AND f.request_started_at = a.request_started_at AND f.attempt_ordinal = a.ordinal
@@ -350,7 +354,8 @@ func GetRequest(ctx context.Context, q access.Queryer, id string) (RequestDetail
 			&attempt.ImageInputTokens, &attempt.CachedImageInputTokens, &attempt.ImageOutputTokens,
 			&attempt.MediaUnits, &attemptToolCalls, &attempt.Batch, &attempt.PricingComponents,
 			&attempt.EstimatedCost,
-			&attempt.Currency, &attempt.Unpriced, &attempt.PricingRevisionID); err != nil {
+			&attempt.Currency, &attempt.Unpriced, &attempt.PricingRevisionID,
+			&attempt.CommitmentWeight, &attempt.CommitmentAmount, &attempt.CommitmentPeriod); err != nil {
 			return RequestDetail{}, fmt.Errorf("read request attempts: %w", err)
 		}
 		if attemptToolCalls != nil {

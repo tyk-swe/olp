@@ -442,8 +442,34 @@
       >
     </article>
     <article class="card metric-card">
+      <p>Audio / image tokens</p>
+      <strong
+        >{formatCompact(usage.data.summary.audio_input_tokens)} · {formatCompact(
+          usage.data.summary.image_input_tokens
+        )}</strong
+      >
+      <small
+        >in — {formatCompact(usage.data.summary.audio_output_tokens)} · {formatCompact(
+          usage.data.summary.image_output_tokens
+        )} out</small
+      >
+    </article>
+    <article class="card metric-card">
       <p>Media units</p>
       <strong>{formatCompact(usage.data.summary.media_units)}</strong>
+    </article>
+    <article class="card metric-card">
+      <p>Allocated commitment</p>
+      <small
+        >Provisioned-capacity share priced at zero above, allocated across the
+        period's committed usage.</small
+      >
+      <strong
+        >{formatCost(
+          usage.data.summary.allocated_commitment,
+          usage.data.summary.currency
+        )}</strong
+      >
     </article>
     <article class="card metric-card">
       <p>Estimated cost</p>
@@ -509,11 +535,12 @@
                 scope="col">Requests</th
               ><th scope="col">Input tokens</th><th scope="col">Cached input</th
               ><th scope="col">Cache write</th><th scope="col">Output tokens</th
-              ><th scope="col">Estimated / reported input</th><th scope="col"
-                >Estimate error</th
-              ><th scope="col">Estimated cost</th><th scope="col"
-                >Completeness</th
-              ></tr
+              ><th scope="col">Audio tokens</th><th scope="col">Image tokens</th
+              ><th scope="col">Allocated commitment</th><th scope="col"
+                >Estimated / reported input</th
+              ><th scope="col">Estimate error</th><th scope="col"
+                >Estimated cost</th
+              ><th scope="col">Completeness</th></tr
             ></thead
           >
           <tbody
@@ -525,6 +552,15 @@
                   >{formatCompact(row.cached_input_tokens)}</td
                 ><td>{formatCompact(row.cache_write_input_tokens)}</td><td
                   >{formatCompact(row.output_tokens)}</td
+                ><td
+                  >{formatCompact(row.audio_input_tokens)} / {formatCompact(
+                    row.audio_output_tokens
+                  )}</td
+                ><td
+                  >{formatCompact(row.image_input_tokens)} / {formatCompact(
+                    row.image_output_tokens
+                  )}</td
+                ><td>{formatCost(row.allocated_commitment, row.currency)}</td
                 ><td>{rowEstimate.comparison}</td><td>{rowEstimate.error}</td
                 ><td>{formatCost(row.estimated_cost, row.currency)}</td><td
                   >{#if row.incomplete_count > 0}<span class="badge danger"

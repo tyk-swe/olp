@@ -419,6 +419,7 @@ describe('provider editor API mappings', () => {
         options: {
           vendor_id: null,
           limits: null,
+          commitment: null,
           credential_headers: [],
           parameter_defaults: {},
           models: {}
@@ -457,6 +458,7 @@ describe('provider editor API mappings', () => {
     expect(input.configuration.options).toEqual({
       vendor_id: 'groq',
       limits: null,
+      commitment: null,
       credential_headers: ['X-API-Key', 'X-Secondary-Key'],
       parameter_defaults: { temperature: 0.2 },
       models: {}

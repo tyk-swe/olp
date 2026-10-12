@@ -68,6 +68,7 @@ const saved: Provider = {
       vendor_id: null,
       limits: null,
       credential_headers: [],
+      commitment: null,
       parameter_defaults: {},
       models: {}
     }

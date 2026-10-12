@@ -142,6 +142,11 @@ func (x *execution) attemptCostBound(attempt runtime.Attempt) usage.Cost {
 	if x.callerCostExempt() || attempt.Price == nil {
 		return usage.Cost{}
 	}
+	if x.committed(attempt.ProviderID) {
+		// Provisioned capacity owes nothing per attempt, so nothing is
+		// reserved for it.
+		return usage.Cost{}
+	}
 	if x.media != nil {
 		if x.media.Op != media.OpVideoCreate {
 			return usage.Cost{}
@@ -180,6 +185,20 @@ func (x *execution) attemptCostBound(attempt runtime.Attempt) usage.Cost {
 	return bound
 }
 
+// committed reports whether the attempt's provider settled under provisioned
+// capacity, whose usage has a price but no marginal cost.
+func (x *execution) committed(providerID string) bool {
+	if x.request.release == nil && x.historicalSnapshot == nil {
+		return false
+	}
+	snapshot := x.snapshot()
+	if snapshot == nil {
+		return false
+	}
+	provider, ok := snapshot.Providers[providerID]
+	return ok && provider.Commitment != nil
+}
+
 // settledCost is what the request cost, from the attempts that reported usage,
 // each priced by the price list it was dispatched under exactly as accounting
 // will price it. An attempt whose usage was never observed, is still to be
@@ -200,7 +219,9 @@ func (x *execution) costOf(owner string) usage.Cost {
 			continue
 		}
 		if cost, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact)); ok {
-			total = total.Add(cost)
+			if !x.committed(fact.ProviderID) {
+				total = total.Add(cost)
+			}
 		}
 	}
 	return total
@@ -235,7 +256,9 @@ func (x *execution) responseCost() (usage.Cost, bool) {
 		if !ok {
 			return usage.Cost{}, false
 		}
-		total = total.Add(cost)
+		if !x.committed(fact.ProviderID) {
+			total = total.Add(cost)
+		}
 	}
 	return total, billable
 }

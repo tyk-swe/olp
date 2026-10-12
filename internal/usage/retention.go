@@ -200,7 +200,8 @@ const rollupSQL = `WITH candidates AS (
                 target_request_counted, request_unpriced_counted, provider_unpriced_counted,
                 model_unpriced_counted, target_unpriced_counted, request_incomplete_counted,
                 provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted,
-                attribution, end_user_digest, budget_exempt, usage_observed, estimated_input_tokens, estimate_provenance, model_family
+                attribution, end_user_digest, budget_exempt, usage_observed, estimated_input_tokens, estimate_provenance, model_family,
+                commitment_weight, commitment_amount, commitment_period
     ), rolled AS (
       INSERT INTO olp.attempt_usage_hourly
         (bucket, budget_bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
@@ -215,7 +216,8 @@ const rollupSQL = `WITH candidates AS (
          target_unpriced_count, unpriced_attempt_count, request_incomplete_count,
          provider_incomplete_count, model_incomplete_count, target_incomplete_count, currency,
          model_family, estimate_provenance, estimated_input_tokens,
-         estimate_reported_input_tokens, estimate_attempt_count)
+         estimate_reported_input_tokens, estimate_attempt_count,
+         commitment_weight, commitment_amount, commitment_period)
       SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
              route_slug, provider_id, upstream_model, operation, surface, api_key_id,
              budget_group_id, attribution, end_user_digest, budget_exempt,
@@ -248,11 +250,13 @@ const rollupSQL = `WITH candidates AS (
              model_family, estimate_provenance,
              COALESCE(SUM(estimated_input_tokens) FILTER (WHERE ` + estimatePaired + `), 0),
              COALESCE(SUM(input_tokens) FILTER (WHERE ` + estimatePaired + `), 0),
-             COUNT(*) FILTER (WHERE ` + estimatePaired + `)
+             COUNT(*) FILTER (WHERE ` + estimatePaired + `),
+             COALESCE(SUM(commitment_weight), 0), commitment_amount, commitment_period
         FROM expired
        GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
                 route_slug, provider_id, upstream_model, operation, surface, api_key_id,
-                budget_group_id, attribution, end_user_digest, budget_exempt, model_family, estimate_provenance
+                budget_group_id, attribution, end_user_digest, budget_exempt, model_family, estimate_provenance,
+                commitment_amount, commitment_period
       ON CONFLICT ON CONSTRAINT attempt_usage_hourly_dimensions_key DO UPDATE SET
         request_count = attempt_usage_hourly.request_count + EXCLUDED.request_count,
         provider_request_count = attempt_usage_hourly.provider_request_count + EXCLUDED.provider_request_count,
@@ -286,7 +290,10 @@ const rollupSQL = `WITH candidates AS (
         currency = COALESCE(attempt_usage_hourly.currency, EXCLUDED.currency),
         estimated_input_tokens = attempt_usage_hourly.estimated_input_tokens + EXCLUDED.estimated_input_tokens,
         estimate_reported_input_tokens = attempt_usage_hourly.estimate_reported_input_tokens + EXCLUDED.estimate_reported_input_tokens,
-        estimate_attempt_count = attempt_usage_hourly.estimate_attempt_count + EXCLUDED.estimate_attempt_count
+        estimate_attempt_count = attempt_usage_hourly.estimate_attempt_count + EXCLUDED.estimate_attempt_count,
+        commitment_weight = attempt_usage_hourly.commitment_weight + EXCLUDED.commitment_weight,
+        commitment_amount = COALESCE(attempt_usage_hourly.commitment_amount, EXCLUDED.commitment_amount),
+        commitment_period = COALESCE(attempt_usage_hourly.commitment_period, EXCLUDED.commitment_period)
       RETURNING 1
     )
     SELECT (SELECT count(*) FROM rolled)::bigint, (SELECT count(*) FROM expired)::bigint`

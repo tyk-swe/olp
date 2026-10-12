@@ -27,6 +27,11 @@ type attemptPricing struct {
 	// components names the price components the attempt was charged through,
 	// which the fact stores so a report can show what produced its cost.
 	components []string
+	// commitmentWeight is the list cost a committed attempt divides its
+	// period's commitment amount by; amount and period travel with it.
+	commitmentWeight *string
+	commitmentAmount *string
+	commitmentPeriod *string
 }
 
 // routingPin is the pricing provenance the gateway recorded for one attempt.
@@ -98,8 +103,16 @@ var defaultVendorCases = func() string {
 var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
         selected.currency,
         priced.complete AS pricing_complete,
-        priced.cost::text AS estimated_cost,
-        priced.components
+        CASE WHEN commitment.commitment IS NOT NULL AND priced.cost IS NOT NULL THEN '0'::numeric
+             ELSE priced.cost END::text AS estimated_cost,
+        CASE WHEN commitment.commitment IS NULL OR priced.components IS NULL THEN priced.components
+             ELSE array_append(priced.components, 'commitment') END AS components,
+        CASE WHEN commitment.commitment IS NOT NULL AND priced.cost IS NOT NULL
+             THEN priced.list_cost END::text AS commitment_weight,
+        CASE WHEN commitment.commitment IS NOT NULL AND priced.cost IS NOT NULL
+             THEN commitment.commitment->>'amount' END AS commitment_amount,
+        CASE WHEN commitment.commitment IS NOT NULL AND priced.cost IS NOT NULL
+             THEN commitment.commitment->>'period' END AS commitment_period
     FROM olp.providers provider
     LEFT JOIN olp.provider_revisions provider_revision
         ON provider_revision.id = COALESCE($9::uuid, provider.active_revision_id)
@@ -129,6 +142,11 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
     CROSS JOIN LATERAL (
         SELECT * FROM olp.price_usage(selected.price_doc, $5::jsonb, $6::timestamptz, $7::boolean)
     ) priced
+    CROSS JOIN LATERAL (
+        SELECT CASE WHEN provider_revision.id IS NOT NULL
+                    THEN provider_revision.configuration->'options'->'commitment'
+                    ELSE provider.configuration->'options'->'commitment' END AS commitment
+    ) commitment
     WHERE provider.id = $1::uuid`
 
 // priceAttempt resolves what one attempt cost. A provider that no longer exists
@@ -180,7 +198,8 @@ func priceUsage(ctx context.Context, tx pgx.Tx, event *Event, usage AttemptUsage
 		providerID, model, event.Operation, event.ObservedAt,
 		string(document), startedAt, successful,
 		pin.pricingRevisionID, pin.providerRevisionID, pin.pinned, pin.vendorID,
-	).Scan(&pricing.pricingRevisionID, &pricing.currency, &pricing.complete, &cost, &pricing.components)
+	).Scan(&pricing.pricingRevisionID, &pricing.currency, &pricing.complete, &cost,
+		&pricing.components, &pricing.commitmentWeight, &pricing.commitmentAmount, &pricing.commitmentPeriod)
 	if err != nil {
 		return attemptPricing{}, fmt.Errorf("price attempt: %w", err)
 	}
@@ -188,6 +207,7 @@ func priceUsage(ctx context.Context, tx pgx.Tx, event *Event, usage AttemptUsage
 		pricing.estimatedCost = cost
 	} else {
 		pricing.components = nil
+		pricing.commitmentWeight, pricing.commitmentAmount, pricing.commitmentPeriod = nil, nil, nil
 	}
 	if pricing.currency != nil {
 		currency := strings.TrimSpace(*pricing.currency)

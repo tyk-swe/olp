@@ -22,12 +22,43 @@
   import {
     createPricingRevision,
     listPricing,
-    type PriceDraft
+    type PriceDraft,
+    type PricingRevision
   } from './api/pricing';
   import { pricingKeys } from './pricingKeys';
-  import { optionalDecimal } from './pricingValidation';
+  import {
+    decimalText,
+    optionalDecimal,
+    tierRows,
+    toolFeeRows,
+    windowsDraft
+  } from './pricingValidation';
 
   const createIntent = useMutationIntent();
+
+  // One compact line for the components beyond the per-million table columns.
+  function extraComponents(price: PricingRevision['prices'][number]): string {
+    const parts: string[] = [];
+    for (const [key, label] of [
+      ['audio_input_per_million', 'audio in'],
+      ['cached_audio_input_per_million', 'cached audio'],
+      ['audio_output_per_million', 'audio out'],
+      ['image_input_per_million', 'image in'],
+      ['cached_image_input_per_million', 'cached image'],
+      ['image_output_per_million', 'image out'],
+      ['per_request', 'per request'],
+      ['batch_multiplier', 'batch']
+    ] as const) {
+      if ((price as Record<string, unknown>)[key] != null)
+        parts.push(`${label} ${(price as Record<string, unknown>)[key]}`);
+    }
+    if (price.tool_calls && Object.keys(price.tool_calls).length)
+      parts.push(`tools ${Object.keys(price.tool_calls).join(', ')}`);
+    if (price.tiers?.length) parts.push(`${price.tiers.length} tiers`);
+    if (price.windows?.time_zone)
+      parts.push(`windows ${price.windows.time_zone}`);
+    return parts.join(' · ');
+  }
 
   let {
     blocked,
@@ -60,6 +91,47 @@
   let cacheWrite1hPrice = $state('');
   let outputPrice = $state('');
   let unitPrice = $state('');
+  let audioInputPrice = $state('');
+  let cachedAudioInputPrice = $state('');
+  let audioOutputPrice = $state('');
+  let imageInputPrice = $state('');
+  let cachedImageInputPrice = $state('');
+  let imageOutputPrice = $state('');
+  let perRequestPrice = $state('');
+  let batchMultiplier = $state('');
+  let toolFees = $state<{ name: string; fee: string }[]>([]);
+  let tiers = $state<{ threshold: string; rates: Record<string, string> }[]>(
+    []
+  );
+  let windowZone = $state('');
+  let windowPeriods = $state<
+    { days: number[]; start: string; end: string; multiplier: string }[]
+  >([]);
+  const weekDays = [
+    ['1', 'Mon'],
+    ['2', 'Tue'],
+    ['3', 'Wed'],
+    ['4', 'Thu'],
+    ['5', 'Fri'],
+    ['6', 'Sat'],
+    ['7', 'Sun']
+  ] as const;
+  // The per-million rate fields the entry carries decide every tier's rate
+  // set: a tier names exactly the same fields.
+  const rateFields = $derived([
+    ['input_per_million', inputPrice],
+    ['cached_input_per_million', cachedInputPrice],
+    ['cache_write_input_per_million', cacheWritePrice],
+    ['cache_write_5m_input_per_million', cacheWrite5mPrice],
+    ['cache_write_1h_input_per_million', cacheWrite1hPrice],
+    ['output_per_million', outputPrice],
+    ['audio_input_per_million', audioInputPrice],
+    ['cached_audio_input_per_million', cachedAudioInputPrice],
+    ['audio_output_per_million', audioOutputPrice],
+    ['image_input_per_million', imageInputPrice],
+    ['cached_image_input_per_million', cachedImageInputPrice],
+    ['image_output_per_million', imageOutputPrice]
+  ] as const);
   let currency = $state('USD');
   let effectiveAt = $state(dateTimeLocalValue(new Date()));
   let savingPrice = $state(false);
@@ -110,6 +182,18 @@
       cacheWrite1hPrice,
       outputPrice,
       unitPrice,
+      audioInputPrice,
+      cachedAudioInputPrice,
+      audioOutputPrice,
+      imageInputPrice,
+      cachedImageInputPrice,
+      imageOutputPrice,
+      perRequestPrice,
+      batchMultiplier,
+      toolFees,
+      tiers,
+      windowZone,
+      windowPeriods,
       currency,
       effectiveAt
     };
@@ -136,12 +220,38 @@
         ),
         output_per_million: optionalDecimal(submitted.outputPrice),
         unit_price: optionalDecimal(submitted.unitPrice),
+        audio_input_per_million: optionalDecimal(submitted.audioInputPrice),
+        cached_audio_input_per_million: optionalDecimal(
+          submitted.cachedAudioInputPrice
+        ),
+        audio_output_per_million: optionalDecimal(submitted.audioOutputPrice),
+        image_input_per_million: optionalDecimal(submitted.imageInputPrice),
+        cached_image_input_per_million: optionalDecimal(
+          submitted.cachedImageInputPrice
+        ),
+        image_output_per_million: optionalDecimal(submitted.imageOutputPrice),
+        per_request: optionalDecimal(submitted.perRequestPrice),
+        batch_multiplier: optionalDecimal(submitted.batchMultiplier),
+        tool_calls: toolFeeRows(submitted.toolFees),
+        tiers: tierRows(
+          submitted.tiers,
+          rateFields
+            .filter(([, value]) => decimalText(value) != null)
+            .map(([key]) => key)
+        ),
+        windows: windowsDraft(submitted.windowZone, submitted.windowPeriods),
         currency: submitted.currency.trim().toUpperCase()
       };
       if (
         !price.input_per_million &&
         !price.output_per_million &&
-        !price.unit_price
+        !price.unit_price &&
+        !price.per_request &&
+        !price.audio_input_per_million &&
+        !price.audio_output_per_million &&
+        !price.image_input_per_million &&
+        !price.image_output_per_million &&
+        !price.tool_calls
       )
         throw new Error('Enter at least one price.');
       const submission = createIntent.prepare({
@@ -171,6 +281,22 @@
         cacheWrite1hPrice = '';
       if (outputPrice === submitted.outputPrice) outputPrice = '';
       if (unitPrice === submitted.unitPrice) unitPrice = '';
+      if (audioInputPrice === submitted.audioInputPrice) audioInputPrice = '';
+      if (cachedAudioInputPrice === submitted.cachedAudioInputPrice)
+        cachedAudioInputPrice = '';
+      if (audioOutputPrice === submitted.audioOutputPrice)
+        audioOutputPrice = '';
+      if (imageInputPrice === submitted.imageInputPrice) imageInputPrice = '';
+      if (cachedImageInputPrice === submitted.cachedImageInputPrice)
+        cachedImageInputPrice = '';
+      if (imageOutputPrice === submitted.imageOutputPrice)
+        imageOutputPrice = '';
+      if (perRequestPrice === submitted.perRequestPrice) perRequestPrice = '';
+      if (batchMultiplier === submitted.batchMultiplier) batchMultiplier = '';
+      toolFees = [];
+      tiers = [];
+      windowZone = '';
+      windowPeriods = [];
       if (providerId === submitted.providerId) providerId = '';
       if (effectiveAt === submitted.effectiveAt)
         effectiveAt = dateTimeLocalValue(new Date());
@@ -338,6 +464,85 @@
           />
         </div>
         <div class="form-field">
+          <label for="audio-input-price">Audio input / million</label><input
+            id="audio-input-price"
+            bind:value={audioInputPrice}
+            inputmode="decimal"
+            placeholder="4.00"
+            disabled={!canEditPricing}
+          />
+        </div>
+        <div class="form-field">
+          <label for="cached-audio-input-price"
+            >Cached audio input / million</label
+          ><input
+            id="cached-audio-input-price"
+            bind:value={cachedAudioInputPrice}
+            inputmode="decimal"
+            placeholder="0.50"
+            disabled={!canEditPricing}
+          /><small>Defaults to cached input, then input.</small>
+        </div>
+        <div class="form-field">
+          <label for="audio-output-price">Audio output / million</label><input
+            id="audio-output-price"
+            bind:value={audioOutputPrice}
+            inputmode="decimal"
+            placeholder="16.00"
+            disabled={!canEditPricing}
+          /><small>Defaults to the output rate.</small>
+        </div>
+        <div class="form-field">
+          <label for="image-input-price">Image input / million</label><input
+            id="image-input-price"
+            bind:value={imageInputPrice}
+            inputmode="decimal"
+            placeholder="6.00"
+            disabled={!canEditPricing}
+          /><small>Defaults to the input rate.</small>
+        </div>
+        <div class="form-field">
+          <label for="cached-image-input-price"
+            >Cached image input / million</label
+          ><input
+            id="cached-image-input-price"
+            bind:value={cachedImageInputPrice}
+            inputmode="decimal"
+            placeholder="0.75"
+            disabled={!canEditPricing}
+          /><small>Defaults to cached input, then input.</small>
+        </div>
+        <div class="form-field">
+          <label for="image-output-price">Image output / million</label><input
+            id="image-output-price"
+            bind:value={imageOutputPrice}
+            inputmode="decimal"
+            placeholder="24.00"
+            disabled={!canEditPricing}
+          /><small>Defaults to the output rate.</small>
+        </div>
+        <div class="form-field">
+          <label for="per-request-price">Per-request fee</label><input
+            id="per-request-price"
+            bind:value={perRequestPrice}
+            inputmode="decimal"
+            placeholder="0.01"
+            disabled={!canEditPricing}
+          /><small>Charged once per successful attempt.</small>
+        </div>
+        <div class="form-field">
+          <label for="batch-multiplier">Batch multiplier</label><input
+            id="batch-multiplier"
+            bind:value={batchMultiplier}
+            inputmode="decimal"
+            placeholder="0.50"
+            disabled={!canEditPricing}
+          /><small
+            >Applies to usage marked batch; batch usage without a multiplier is
+            unpriced.</small
+          >
+        </div>
+        <div class="form-field full">
           <label for="currency">Currency</label><input
             id="currency"
             bind:value={currency}
@@ -356,6 +561,164 @@
           />
         </div>
       </div>
+      <fieldset class="extra-components" disabled={!canEditPricing}>
+        <legend>Additional components</legend>
+        <p class="muted">
+          Tool fees bill each invocation; tiers replace the per-million rate set
+          above an input threshold; windows multiply the charge by time of day.
+        </p>
+        <div class="component-rows" aria-label="Tool fees">
+          {#each toolFees as row, index (index)}
+            <div class="component-row">
+              <label class="sr-only" for={`tool-name-${index}`}>Tool name</label
+              >
+              <input
+                id={`tool-name-${index}`}
+                bind:value={row.name}
+                placeholder="web_search"
+                class="mono"
+              />
+              <label class="sr-only" for={`tool-fee-${index}`}>Fee</label>
+              <input
+                id={`tool-fee-${index}`}
+                bind:value={row.fee}
+                inputmode="decimal"
+                placeholder="0.010"
+              />
+              <button
+                type="button"
+                class="text-button"
+                onclick={() => {
+                  toolFees = toolFees.filter((_, i) => i !== index);
+                }}>Remove</button
+              >
+            </div>
+          {/each}
+          <button
+            type="button"
+            class="text-button"
+            onclick={() => {
+              toolFees = [...toolFees, { name: '', fee: '' }];
+            }}>Add tool fee</button
+          >
+        </div>
+        <div class="component-rows" aria-label="Input-token tiers">
+          {#each tiers as row, index (index)}
+            <div class="component-row tier-row">
+              <label for={`tier-threshold-${index}`}>Above input tokens</label>
+              <input
+                id={`tier-threshold-${index}`}
+                bind:value={row.threshold}
+                inputmode="numeric"
+                placeholder="1000000"
+              />
+              {#each rateFields.filter(([, value]) => value.trim() !== '') as [field, parentValue] (field)}
+                <label class="sr-only" for={`tier-${index}-${field}`}
+                  >{field.replaceAll('_', ' ')}</label
+                >
+                <input
+                  id={`tier-${index}-${field}`}
+                  bind:value={row.rates[field]}
+                  inputmode="decimal"
+                  placeholder={parentValue}
+                  title={field.replaceAll('_', ' ')}
+                />
+              {/each}
+              <button
+                type="button"
+                class="text-button"
+                onclick={() => {
+                  tiers = tiers.filter((_, i) => i !== index);
+                }}>Remove</button
+              >
+            </div>
+          {/each}
+          <button
+            type="button"
+            class="text-button"
+            onclick={() => {
+              const rates: Record<string, string> = {};
+              for (const [field, value] of rateFields)
+                if (value.trim() !== '') rates[field] = '';
+              tiers = [...tiers, { threshold: '', rates }];
+            }}>Add tier</button
+          >
+        </div>
+        <div class="component-rows" aria-label="Time windows">
+          <div class="component-row">
+            <label for="window-zone">Window time zone</label>
+            <input
+              id="window-zone"
+              bind:value={windowZone}
+              class="mono"
+              placeholder="America/New_York"
+            />
+          </div>
+          {#each windowPeriods as period, index (index)}
+            <div class="component-row window-row">
+              <div
+                class="weekday-toggles"
+                role="group"
+                aria-label={`Window ${index + 1} days`}
+              >
+                {#each weekDays as [day, label] (day)}
+                  <button
+                    type="button"
+                    class:selected={period.days.includes(Number(day))}
+                    aria-pressed={period.days.includes(Number(day))}
+                    onclick={() => {
+                      const value = Number(day);
+                      period.days = period.days.includes(value)
+                        ? period.days.filter((d) => d !== value)
+                        : [...period.days, value];
+                    }}>{label}</button
+                  >
+                {/each}
+              </div>
+              <label class="sr-only" for={`window-start-${index}`}>Start</label>
+              <input
+                id={`window-start-${index}`}
+                bind:value={period.start}
+                placeholder="00:00"
+                inputmode="numeric"
+              />
+              <label class="sr-only" for={`window-end-${index}`}>End</label>
+              <input
+                id={`window-end-${index}`}
+                bind:value={period.end}
+                placeholder="24:00"
+                inputmode="numeric"
+              />
+              <label class="sr-only" for={`window-multiplier-${index}`}
+                >Multiplier</label
+              >
+              <input
+                id={`window-multiplier-${index}`}
+                bind:value={period.multiplier}
+                inputmode="decimal"
+                placeholder="0.75"
+              />
+              <button
+                type="button"
+                class="text-button"
+                onclick={() => {
+                  windowPeriods = windowPeriods.filter((_, i) => i !== index);
+                }}>Remove</button
+              >
+            </div>
+          {/each}
+          <button
+            type="button"
+            class="text-button"
+            onclick={() => {
+              windowPeriods = [
+                ...windowPeriods,
+                { days: [], start: '', end: '', multiplier: '' }
+              ];
+            }}>Add window period</button
+          >
+        </div>
+      </fieldset>
       <button
         class="button button-primary"
         type="submit"
@@ -441,7 +804,9 @@
                       >Write 5m / million</th
                     ><th scope="col">Write 1h / million</th><th scope="col"
                       >Output / million</th
-                    ><th scope="col">Unit</th><th scope="col">Currency</th></tr
+                    ><th scope="col">Unit</th><th scope="col">Components</th><th
+                      scope="col">Currency</th
+                    ></tr
                   ></thead
                 >
                 <tbody
@@ -464,7 +829,9 @@
                       ><td>{price.cache_write_1h_input_per_million ?? '—'}</td
                       ><td>{price.output_per_million ?? '—'}</td><td
                         >{price.unit_price ?? '—'}</td
-                      ><td>{price.currency}</td></tr
+                      ><td>{extraComponents(price) || '—'}</td><td
+                        >{price.currency}</td
+                      ></tr
                     >{/each}</tbody
                 >
               </table>

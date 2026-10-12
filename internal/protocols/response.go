@@ -282,7 +282,126 @@ func nativeUsage(f Object, family string) (*openai.Usage, error) {
 	if n, ok := count(f[total]); ok {
 		u.TotalTokens = n
 	}
+	if family == "anthropic" {
+		tools, e := optionalObject(f["server_tool_use"])
+		if e != nil {
+			return nil, e
+		}
+		if tools != nil {
+			// Only request-counted tools carry a per-call fee; tools billed
+			// by time, such as code execution, have no key here.
+			for key, name := range map[string]string{
+				"web_search_requests": "web_search",
+				"web_fetch_requests":  "web_fetch",
+			} {
+				if v, ok := count(tools[key]); ok {
+					if v > 0 {
+						if u.ToolCalls == nil {
+							u.ToolCalls = map[string]int64{}
+						}
+						u.ToolCalls[name] = v
+					}
+				} else if present(tools[key]) {
+					return nil, protocolError("invalid usage count")
+				}
+			}
+		}
+	}
+	if family == "gemini" {
+		if e := geminiUsageDetails(u, f); e != nil {
+			return nil, e
+		}
+	}
 	return u, nil
+}
+
+// geminiTokenDetail is one modality bucket in a Gemini usage detail array.
+type geminiTokenDetail struct {
+	Modality   string `json:"modality"`
+	TokenCount int64  `json:"tokenCount"`
+}
+
+// geminiDetailCounts folds one detail array into the modality share it
+// describes. Negative counts mark the observation inconsistent so the caller
+// drops the detail rather than bill audio at a text rate.
+func geminiDetailCounts(detail []geminiTokenDetail) (audio, image int64) {
+	for _, entry := range detail {
+		switch entry.Modality {
+		case "AUDIO":
+			audio += entry.TokenCount
+		case "IMAGE", "VIDEO":
+			image += entry.TokenCount
+		}
+	}
+	return audio, image
+}
+
+// geminiUsageDetails reads the modality detail arrays on a usageMetadata or
+// equivalent usage object: prompt shares by modality, cache shares by modality,
+// and output shares by modality. Live calls its output detail response.
+func geminiUsageDetails(u *openai.Usage, f Object) error {
+	details := []struct {
+		name         string
+		audio, image **int64
+	}{
+		{"promptTokensDetails", &u.AudioInputTokens, &u.ImageInputTokens},
+		{"cacheTokensDetails", &u.CachedAudioInputTokens, &u.CachedImageInputTokens},
+		{"candidatesTokensDetails", &u.AudioOutputTokens, &u.ImageOutputTokens},
+		{"responseTokensDetails", &u.AudioOutputTokens, &u.ImageOutputTokens},
+	}
+	for _, slot := range details {
+		if !present(f[slot.name]) {
+			continue
+		}
+		var detail []geminiTokenDetail
+		if err := json.Unmarshal(f[slot.name], &detail); err != nil {
+			return protocolError("invalid usage modality detail")
+		}
+		for _, entry := range detail {
+			if entry.TokenCount < 0 {
+				return protocolError("invalid usage count")
+			}
+		}
+		audio, image := geminiDetailCounts(detail)
+		if audio > 0 {
+			*slot.audio = &audio
+		}
+		if image > 0 {
+			*slot.image = &image
+		}
+	}
+	return nil
+}
+
+// geminiGrounding counts the search queries grounded candidates made. Both
+// keys are emitted together so a price can bill per query or per grounded
+// prompt and set the other fee to zero.
+func geminiGrounding(u *openai.Usage, f Object) error {
+	if u == nil || !present(f["candidates"]) {
+		return nil
+	}
+	var candidates []struct {
+		Metadata *struct {
+			Queries []json.RawMessage `json:"webSearchQueries"`
+		} `json:"groundingMetadata"`
+	}
+	if err := json.Unmarshal(f["candidates"], &candidates); err != nil {
+		return protocolError("invalid candidates")
+	}
+	queries := int64(0)
+	for _, candidate := range candidates {
+		if candidate.Metadata != nil {
+			queries += int64(len(candidate.Metadata.Queries))
+		}
+	}
+	if queries > 0 {
+		if u.ToolCalls == nil {
+			u.ToolCalls = map[string]int64{}
+		}
+		u.ToolCalls["google_search_query"] = queries
+		u.ToolCalls["google_search_prompt"] = 1
+	}
+	return nil
 }
 func decodeAnthropic(body []byte, route string) (*openai.Completion, error) {
 	f, e := object(body)
@@ -471,6 +590,9 @@ func decodeGemini(body []byte, route string, partial bool) (*openai.Completion, 
 	}
 	c.Usage, e = nativeUsage(usage, "gemini")
 	if e != nil {
+		return nil, e
+	}
+	if e := geminiGrounding(c.Usage, f); e != nil {
 		return nil, e
 	}
 	if _, ok := f["modelVersion"]; ok {
