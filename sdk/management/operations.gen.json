@@ -1432,6 +1432,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         },
@@ -1506,6 +1514,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         },
@@ -3991,6 +4007,14 @@
                 "$ref": "#/$defs/RegionalRateLimits"
               },
               "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           },
           "required": [
@@ -4092,6 +4116,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         },
@@ -4248,6 +4280,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           },
           "required": [
@@ -19388,6 +19428,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         },
@@ -19462,6 +19510,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         },
@@ -23032,6 +23088,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         }
@@ -23139,6 +23203,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         }
@@ -23349,6 +23421,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         }
@@ -23565,6 +23645,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         }
@@ -23733,6 +23821,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         }
@@ -23869,6 +23965,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         }
@@ -27365,6 +27469,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           },
           "type": "object"
@@ -30644,6 +30756,14 @@
                 "$ref": "#/$defs/RegionalRateLimits"
               },
               "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           },
           "type": "object"
@@ -30742,6 +30862,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         },
@@ -30911,6 +31039,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           },
           "type": "object"

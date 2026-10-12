@@ -718,6 +718,10 @@ func (r *RoutingCardRevision) Charge(u AttemptUsage, startedAt time.Time, succes
 	if cost == nil {
 		return Cost{}, false
 	}
+	if cost.units == nil {
+		// A zero cost (a committed attempt) charges zero under any markup.
+		return Cost{units: new(big.Int)}, true
+	}
 	// Round the already-rounded cost by the markup in one half-up rounding.
 	total := new(big.Int).Mul(cost.units, r.parsedMarkup())
 	total.Add(total, new(big.Int).Quo(costUnit, big.NewInt(2)))
@@ -734,7 +738,8 @@ func (r *RoutingCardRevision) ChargeBound(input, output int64, generation bool, 
 		return explicit.CostBound(input, output, generation, at, nil)
 	}
 	if bound.units == nil {
-		return Cost{}, false
+		// A zero bound charges zero under any markup.
+		return Cost{units: new(big.Int)}, true
 	}
 	total := new(big.Int).Mul(bound.units, r.parsedMarkup())
 	total.Add(total, new(big.Int).Sub(costUnit, big.NewInt(1)))

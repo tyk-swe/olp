@@ -198,46 +198,71 @@ func (i *RoutingInputs) Discount(kind, provider, vendor string, now time.Time) *
 	return found
 }
 
-// RateCardRevision is the resolved card revision for a consumer at `now`,
-// nil when no card applies.
-func (i *RoutingInputs) RateCardRevision(projectID *string, now time.Time) *RoutingCardRevision {
+// RateCardRevision is the resolved card revision for a consumer at `now`:
+// the most specific card — project, then its organization, then the
+// installation — that has a revision in force; a card whose revisions all
+// start in the future falls through to the next scope. Known reports the
+// inputs are fresh enough to decide; when they are not the caller must leave
+// the attempt unpinned rather than pin "no card".
+func (i *RoutingInputs) RateCardRevision(projectID *string, now time.Time) (revision *RoutingCardRevision, known bool) {
 	if i == nil || now.Sub(i.RefreshedAt) > PerformanceMaxAge {
-		return nil
+		return nil, false
 	}
 	var organization string
 	if projectID != nil {
 		organization = i.ProjectOrganizations[*projectID]
 	}
-	var card *RoutingRateCard
+	inForce := func(card *RoutingRateCard) *RoutingCardRevision {
+		if card == nil {
+			return nil
+		}
+		var found *RoutingCardRevision
+		for index := range card.Revisions {
+			candidate := &card.Revisions[index]
+			if candidate.EffectiveAt.After(now) {
+				continue
+			}
+			if found == nil || candidate.EffectiveAt.After(found.EffectiveAt) ||
+				candidate.EffectiveAt.Equal(found.EffectiveAt) && candidate.Revision > found.Revision {
+				found = candidate
+			}
+		}
+		return found
+	}
+	var projectCard, organizationCard, installationCard *RoutingRateCard
 	for index := range i.RateCards {
 		candidate := &i.RateCards[index]
 		switch {
 		case projectID != nil && candidate.ProjectID != nil && *candidate.ProjectID == *projectID:
-			card = candidate
-		case card == nil && organization != "" && candidate.OrganizationID != nil && *candidate.OrganizationID == organization:
-			card = candidate
-		case card == nil && candidate.ProjectID == nil && candidate.OrganizationID == nil:
-			card = candidate
-		}
-		if card != nil && card.ProjectID != nil {
-			break
+			projectCard = candidate
+		case organization != "" && candidate.OrganizationID != nil && *candidate.OrganizationID == organization:
+			organizationCard = candidate
+		case candidate.ProjectID == nil && candidate.OrganizationID == nil:
+			installationCard = candidate
 		}
 	}
-	if card == nil {
+	for _, card := range []*RoutingRateCard{projectCard, organizationCard, installationCard} {
+		if found := inForce(card); found != nil {
+			return found, true
+		}
+	}
+	return nil, true
+}
+
+// CardRevision returns the revision the given id names, for a gateway that
+// pinned it at admission.
+func (i *RoutingInputs) CardRevision(id string) *RoutingCardRevision {
+	if i == nil {
 		return nil
 	}
-	var found *RoutingCardRevision
-	for index := range card.Revisions {
-		revision := &card.Revisions[index]
-		if revision.EffectiveAt.After(now) {
-			continue
-		}
-		if found == nil || revision.EffectiveAt.After(found.EffectiveAt) ||
-			revision.EffectiveAt.Equal(found.EffectiveAt) && revision.Revision > found.Revision {
-			found = revision
+	for index := range i.RateCards {
+		for j := range i.RateCards[index].Revisions {
+			if i.RateCards[index].Revisions[j].ID == id {
+				return &i.RateCards[index].Revisions[j]
+			}
 		}
 	}
-	return found
+	return nil
 }
 
 // Explicit is the card revision's rate for one attempt's dimensions, the
@@ -367,7 +392,7 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
 func loadRoutingDiscounts(ctx context.Context, q access.Queryer, now time.Time, in *RoutingInputs) error {
 	rows, err := q.Query(ctx, `SELECT id::text,provider_kind,vendor_id,provider_id::text,
  multiplier::text,effective_at,created_at
- FROM olp.pricing_discounts WHERE effective_at<=$1+interval '90 days' ORDER BY id LIMIT 100001`, now)
+ FROM olp.pricing_discounts WHERE effective_at<=$1::timestamptz+interval '90 days' ORDER BY id LIMIT 100001`, now)
 	if err != nil {
 		return err
 	}

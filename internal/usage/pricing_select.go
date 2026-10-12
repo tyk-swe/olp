@@ -202,20 +202,18 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
             (SELECT r.project_id FROM olp.routes r WHERE r.slug = $17)) AS project_id
     ) consumer
     LEFT JOIN LATERAL (
-        SELECT card.id FROM olp.rate_cards card
-        WHERE NOT $14::boolean
-          AND (card.project_id = consumer.project_id
-           OR card.organization_id = (SELECT p.organization_id FROM olp.projects p
-                                      WHERE p.id = consumer.project_id)
-           OR (card.organization_id IS NULL AND card.project_id IS NULL))
-        ORDER BY (card.project_id IS NOT NULL) DESC, (card.organization_id IS NOT NULL) DESC
-        LIMIT 1) card ON true
-    LEFT JOIN LATERAL (
         SELECT rev.id AS rate_card_revision_id, rev.markup
         FROM olp.rate_card_revisions rev
+        JOIN olp.rate_cards card ON card.id = rev.rate_card_id
         WHERE ($14::boolean AND rev.id = $15::uuid)
-           OR (NOT $14::boolean AND rev.rate_card_id = card.id AND rev.effective_at <= $4)
-        ORDER BY rev.effective_at DESC, rev.revision DESC
+           OR (NOT $14::boolean AND rev.effective_at <= $4
+               AND (card.project_id = consumer.project_id
+                    OR card.organization_id = (SELECT p.organization_id FROM olp.projects p
+                                               WHERE p.id = consumer.project_id)
+                    OR (card.organization_id IS NULL AND card.project_id IS NULL)))
+        ORDER BY (card.project_id IS NOT NULL) DESC,
+                 (card.organization_id IS NOT NULL) DESC,
+                 rev.effective_at DESC, rev.revision DESC
         LIMIT 1) cardrev ON true
     LEFT JOIN LATERAL (
         SELECT to_jsonb(cp) AS doc FROM olp.rate_card_prices cp
@@ -231,9 +229,12 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
                 THEN (SELECT c.cost FROM olp.price_usage(explicit.doc, $5::jsonb,
                               $6::timestamptz, $7::boolean, 1) c)
             WHEN cardrev.rate_card_revision_id IS NULL
-                THEN CASE WHEN committed.present THEN '0'::numeric ELSE priced.cost END
-            WHEN CASE WHEN committed.present THEN '0'::numeric ELSE priced.cost END IS NULL THEN NULL
-            ELSE round(CASE WHEN committed.present THEN '0'::numeric ELSE priced.cost END
+                THEN CASE WHEN committed.present AND priced.cost IS NOT NULL
+                    THEN '0'::numeric ELSE priced.cost END
+            WHEN CASE WHEN committed.present AND priced.cost IS NOT NULL
+                THEN '0'::numeric ELSE priced.cost END IS NULL THEN NULL
+            ELSE round(CASE WHEN committed.present AND priced.cost IS NOT NULL
+                THEN '0'::numeric ELSE priced.cost END
                        * cardrev.markup, 12)
         END AS charge
     ) charge

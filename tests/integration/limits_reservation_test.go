@@ -294,7 +294,7 @@ func TestLimitsCostReservationIncreasesOnlyWhenTheNewTotalFits(t *testing.T) {
 	limExceeded(t, err, limits.DimensionDailyCost)
 	f.wantReserved(t, "0.9")
 	// The original handle settles the grown reservation under the same identity.
-	lease.SetActualCost("0.1")
+	lease.SetActualCost("0.1", "0.1")
 	if err := lease.SettleCost(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestLimitsCostReservationsAreGivenBackAndSettled(t *testing.T) {
 	// Settlement replaces the estimate with what the request cost.
 	settled := f.request("0.4")
 	lease = limReserve(t, f.limiter, settled)
-	lease.SetActualCost("0.15")
+	lease.SetActualCost("0.15", "0.15")
 	for range 2 {
 		if err := lease.SettleCost(t.Context()); err != nil {
 			t.Fatalf("SettleCost: %v", err)
@@ -336,7 +336,7 @@ func TestLimitsCostReservationsAreGivenBackAndSettled(t *testing.T) {
 		t.Fatalf("pending = %v, want the actual cost", hash)
 	}
 	// Spending nothing releases the reservation.
-	lease.SetActualCost("0")
+	lease.SetActualCost("0", "0")
 	if err := lease.SettleCost(t.Context()); err != nil {
 		t.Fatalf("SettleCost: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestLimitsCostReservationsAreGivenBackAndSettled(t *testing.T) {
 
 	// Settling a reservation that is gone does nothing and creates nothing, which
 	// is what keeps a late settlement from counting spend that accounting has.
-	lease.SetActualCost("0.3")
+	lease.SetActualCost("0.3", "0.3")
 	if err := lease.SettleCost(t.Context()); err != nil {
 		t.Fatalf("SettleCost on a released reservation: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestLimitsSettlementShortensAReservationAndNeverExtendsIt(t *testing.T) {
 	long.LeaseTTL, long.CostGrace = time.Minute, 30*time.Second
 	lease := limReserve(t, f.limiter, long)
 	granted := limExpiryScore(t, f.c, expiry, long.RequestID)
-	lease.SetActualCost("0.1")
+	lease.SetActualCost("0.1", "0.1")
 	if err := lease.SettleCost(t.Context()); err != nil {
 		t.Fatalf("SettleCost: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestLimitsSettlementShortensAReservationAndNeverExtendsIt(t *testing.T) {
 	lease = limReserve(t, f.limiter, short)
 	granted = limExpiryScore(t, f.c, expiry, short.RequestID)
 	time.Sleep(50 * time.Millisecond)
-	lease.SetActualCost("0.1")
+	lease.SetActualCost("0.1", "0.1")
 	if err := lease.SettleCost(t.Context()); err != nil {
 		t.Fatalf("SettleCost: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestLimitsAccrualRemovesTheReservationItAccountsFor(t *testing.T) {
 	f.accrue(t, first.RequestID, "0.35")
 	f.wantReserved(t, "0.3")
 	// A settlement that arrives after accrual cannot bring the request back.
-	firstLease.SetActualCost("0.2")
+	firstLease.SetActualCost("0.2", "0.2")
 	if err := firstLease.SettleCost(t.Context()); err != nil {
 		t.Fatalf("SettleCost after accrual: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestLimitsExpiredReservationsStopCounting(t *testing.T) {
 	stale.LeaseTTL, stale.CostGrace = time.Millisecond, time.Millisecond
 	lease := limReserve(t, f.limiter, stale)
 	time.Sleep(60 * time.Millisecond)
-	lease.SetActualCost("0.05")
+	lease.SetActualCost("0.05", "0.05")
 	if err := lease.SettleCost(t.Context()); err != nil {
 		t.Fatalf("SettleCost: %v", err)
 	}
@@ -602,7 +602,7 @@ func TestLimitsEveryScriptSurvivesDamagedReservationKeys(t *testing.T) {
 			request := f.request("0.2")
 			held := limReserve(t, f.limiter, request)
 			damaged(t, f, request.RequestID)
-			held.SetActualCost("0.1")
+			held.SetActualCost("0.1", "0.1")
 			if err := held.SettleCost(t.Context()); err != nil {
 				t.Fatalf("SettleCost: %v", err)
 			}
@@ -647,7 +647,7 @@ func TestLimitsUnpricedRequestsReserveNothing(t *testing.T) {
 	if lease.HasCostReservation() {
 		t.Fatal("a request without an estimate reports a reservation")
 	}
-	lease.SetActualCost("0.4")
+	lease.SetActualCost("0.4", "0.4")
 	if err := errors.Join(lease.SettleCost(t.Context()), lease.Refund(t.Context())); err != nil {
 		t.Fatalf("finishing an unpriced lease: %v", err)
 	}
@@ -760,7 +760,7 @@ func TestLimitsReservationsStayConsistentUnderConcurrentChanges(t *testing.T) {
 					if rng.IntN(4) > 0 {
 						actual = money()
 					}
-					e.lease.SetActualCost(actual)
+					e.lease.SetActualCost(actual, actual)
 					if err := e.lease.SettleCost(t.Context()); err != nil {
 						t.Errorf("SettleCost: %v", err)
 						return
@@ -1022,7 +1022,7 @@ func TestLimitsSettlementSweepIsBoundedToo(t *testing.T) {
 	f.lapse(t, limBacklog, "0.0001")
 
 	before := f.expiries(t)
-	lease.SetActualCost("0.1")
+	lease.SetActualCost("0.1", "0.1")
 	if err := lease.SettleCost(t.Context()); err != nil {
 		t.Fatalf("SettleCost: %v", err)
 	}
@@ -1056,7 +1056,7 @@ func TestLimitsSettlementReleasesALapsedReservationTheSweepDidNotReach(t *testin
 
 	// A cost of nothing releases the reservation whether or not it had lapsed, and
 	// so would not tell the settlement apart from a release: this one costs 0.1.
-	lease.SetActualCost("0.1")
+	lease.SetActualCost("0.1", "0.1")
 	if err := lease.SettleCost(t.Context()); err != nil {
 		t.Fatalf("SettleCost: %v", err)
 	}
@@ -1384,7 +1384,7 @@ func TestLimitsReleaseOutlastsAServerSlowerThanASettlementMayWait(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Reserve through a slow server: %v", err)
 	}
-	lease.SetActualCost("0.1")
+	lease.SetActualCost("0.1", "0.1")
 	started := time.Now()
 	if err := lease.SettleCost(t.Context()); err == nil {
 		t.Fatal("a settlement slower than its bound succeeded")
@@ -1396,7 +1396,7 @@ func TestLimitsReleaseOutlastsAServerSlowerThanASettlementMayWait(t *testing.T) 
 
 	// A request that cost nothing, such as one whose usage is still to come, is a
 	// release and not a settlement: nothing else will give its estimate back.
-	lease.SetActualCost("0")
+	lease.SetActualCost("0", "0")
 	if err := lease.SettleCost(t.Context()); err != nil {
 		t.Fatalf("SettleCost to nothing through a slow server: %v", err)
 	}

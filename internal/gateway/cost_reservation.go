@@ -19,11 +19,18 @@ import (
 // the request is judged on the spend accrued so far, which is how a request that
 // nobody can price is treated.
 type costReservation struct {
-	// amount is the estimate as canonical decimal text, empty for none.
-	amount string
+	// amount is the cost estimate as canonical decimal text, empty for none;
+	// charge is the estimate a charge-basis budget enforces, which equals the
+	// cost estimate when the consumer holds no rate card.
+	amount, charge string
 	// requestID is the identifier accounting will record the request's spend
 	// under, which is how that spend later replaces the reservation.
 	requestID string
+}
+
+// amountFor is the estimate one owner's basis enforces.
+func (r costReservation) amountFor(basis limits.Basis) string {
+	return basis.Pick(r.amount, r.charge)
 }
 
 // costBudgeted reports whether this request spends against a caller budget.
@@ -42,10 +49,11 @@ func (x *execution) attemptCostReservation(authority access.Authority, attempt r
 		return costReservation{}
 	}
 	bound := x.attemptCostBound(attempt)
-	if bound.IsZero() {
+	charge := x.attemptChargeBound(attempt, bound)
+	if bound.IsZero() && charge.IsZero() {
 		return costReservation{}
 	}
-	return costReservation{amount: bound.String(), requestID: x.request.accountingID()}
+	return costReservation{amount: bound.String(), charge: charge.String(), requestID: x.request.accountingID()}
 }
 
 // costReservation prices the request for admission: the most it could cost
@@ -59,10 +67,23 @@ func (s *Server) costReservation(x *execution, authority access.Authority) costR
 		return costReservation{}
 	}
 	bound := s.routeCostBound(x)
-	if bound.IsZero() {
+	charge := s.routeChargeBound(x)
+	if bound.IsZero() && charge.IsZero() {
 		return costReservation{}
 	}
-	return costReservation{amount: bound.String(), requestID: x.request.accountingID()}
+	return costReservation{amount: bound.String(), charge: charge.String(), requestID: x.request.accountingID()}
+}
+
+// routeChargeBound is the reservation's charge-side total over the same
+// dispatches: each attempt's pinned card prices the bound it could bill, and
+// an unpinned request keeps the cost bound, as accounting will charge it the
+// same amount it costs.
+func (s *Server) routeChargeBound(x *execution) usage.Cost {
+	var bound usage.Cost
+	s.walkDispatchable(x, x.attempts, func(attempt runtime.Attempt) {
+		bound = bound.Add(x.attemptChargeBound(attempt, x.attemptCostBound(attempt)))
+	})
+	return bound
 }
 
 func (s *Server) routeCostBound(x *execution) usage.Cost {
@@ -91,11 +112,12 @@ func (s *Server) reserveFallbackCost(ctx context.Context, x *execution) *Error {
 		return nil
 	}
 	bound := x.spentCost.Add(s.routeCostBound(x))
-	if bound.IsZero() {
+	charge := x.spentCharge.Add(s.routeChargeBound(x))
+	if bound.IsZero() && charge.IsZero() {
 		return nil
 	}
 	deadline, _ := ctx.Deadline()
-	return s.growCost(ctx, x.lease, bound.String(), x.request.accountingID(), max(time.Until(deadline), time.Second))
+	return s.growCost(ctx, x.lease, bound.String(), charge.String(), x.request.accountingID(), max(time.Until(deadline), time.Second))
 }
 
 // reserveSessionCost holds the price of a realtime session's selected attempt.
@@ -106,10 +128,10 @@ func (s *Server) reserveSessionCost(ctx context.Context, x *execution, authority
 	if x.lease == nil || hold.amount == "" {
 		return nil
 	}
-	return s.growCost(ctx, x.lease, hold.amount, hold.requestID, ttl)
+	return s.growCost(ctx, x.lease, hold.amount, hold.charge, hold.requestID, ttl)
 }
 
-func (s *Server) growCost(ctx context.Context, lease *limits.Lease, amount, requestID string, ttl time.Duration) *Error {
+func (s *Server) growCost(ctx context.Context, lease *limits.Lease, cost, charge, requestID string, ttl time.Duration) *Error {
 	if e := s.Admission.checkCostAccounting(ctx); e != nil {
 		return e
 	}
@@ -122,10 +144,10 @@ func (s *Server) growCost(ctx context.Context, lease *limits.Lease, amount, requ
 	}
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
-	err := lease.GrowCost(decision, amount, requestID, ttl)
+	err := lease.GrowCost(decision, cost, charge, requestID, ttl)
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 		s.Admission.recordRejection(exceeded.Dimension)
-		return rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
+		return rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
 	}
 	if err != nil {
 		return limitsUnavailable()
@@ -182,6 +204,44 @@ func (x *execution) attemptCostBound(attempt runtime.Attempt) usage.Cost {
 	if !ok {
 		return usage.Cost{}
 	}
+	return bound
+}
+
+// attemptChargeBound is the most one attempt could charge under the card the
+// request pinned — the explicit rate's own bound, or the cost bound marked up —
+// and the cost bound itself when the request holds no card. A committed
+// attempt bounds nothing on cost but is still billable through an explicit
+// card rate, so the charge bound is computed independently.
+func (x *execution) attemptChargeBound(attempt runtime.Attempt, costBound usage.Cost) usage.Cost {
+	if x.callerCostExempt() {
+		return usage.Cost{}
+	}
+	rev := x.cardRev
+	if rev == nil || x.media != nil {
+		return costBound
+	}
+	provider, ok := x.snapshot().Providers[attempt.ProviderID]
+	if !ok {
+		return usage.Cost{}
+	}
+	var input, reply int64
+	generation := false
+	if x.parsed == nil && x.unary == nil {
+		input = max(resourceEstimate, x.estimate)
+		if x.operationName() == "generation" || x.operationName() == "realtime" {
+			reply = estimate.DefaultOutputTokens
+			generation = true
+		}
+	} else {
+		admitted, err := x.attemptEstimate(&provider, attempt.UpstreamModel)
+		if err != nil {
+			return usage.Cost{}
+		}
+		input, reply = admitted.input, admitted.reply
+		generation = reply > 0
+	}
+	bound, _ := rev.ChargeBound(input, reply, generation, x.request.startedAt, costBound,
+		provider.Kind, provider.VendorID, attempt.UpstreamModel, x.operationName())
 	return bound
 }
 
@@ -275,14 +335,61 @@ func (s *Server) settleAdmission(ctx context.Context, x *execution) {
 		// total the tokens it would have settled.
 		return
 	}
-	x.recordCost()
+	s.recordCost(x)
 	settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
+}
+
+// settledCharge is what the request's consumers owe from the attempts that
+// reported usage, priced under the card the request pinned exactly as
+// accounting will charge it: an unpriced or uncharged attempt adds nothing.
+func (s *Server) settledCharge(x *execution) usage.Cost {
+	var total usage.Cost
+	operation := x.operationName()
+	for index := range x.facts {
+		fact := &x.facts[index]
+		if fact.BudgetExempt || !fact.UsageObserved || fact.Price == nil {
+			continue
+		}
+		cost, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount)
+		if !ok {
+			cost = usage.Cost{}
+		}
+		rev := s.factCardRevision(x, fact)
+		if rev == nil {
+			// No card: the charge is the cost itself.
+			total = total.Add(cost)
+			continue
+		}
+		provider := x.snapshot().Providers[fact.ProviderID]
+		if charge, ok := rev.Charge(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), &cost,
+			provider.Kind, provider.VendorID, fact.UpstreamModel, operation); ok {
+			total = total.Add(charge)
+		}
+	}
+	return total
+}
+
+// factCardRevision resolves the card a fact charges under: the request's own
+// pin first, else the provider-project card when the inputs are fresh, else
+// no card — which is what accounting records too.
+func (s *Server) factCardRevision(x *execution, fact *AttemptFact) *usage.RoutingCardRevision {
+	if x.cardPinned {
+		return x.cardRev
+	}
+	var project *string
+	if provider, ok := x.snapshot().Providers[fact.ProviderID]; ok {
+		project = provider.ProjectID
+	}
+	if revision, known := s.Runtime.RoutingInputs().RateCardRevision(project, fact.StartedAt); known && revision != nil {
+		return revision
+	}
+	return nil
 }
 
 // recordCost gives a lease that holds a cost estimate what the request cost, for
 // settlement to replace the estimate with.
-func (x *execution) recordCost() {
+func (s *Server) recordCost(x *execution) {
 	if x.dispatched && x.lease.HasCostReservation() {
-		x.lease.SetActualCost(x.settledCost().String())
+		x.lease.SetActualCost(x.settledCost().String(), s.settledCharge(x).String())
 	}
 }

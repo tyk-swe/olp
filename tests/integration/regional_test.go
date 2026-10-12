@@ -161,7 +161,7 @@ func TestRegionalRateAndConcurrencyLimitsWithGlobalBudgetReconciliation(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		lease.SetActualCost("0.6")
+		lease.SetActualCost("0.6", "0.6")
 		if err = lease.Release(t.Context()); err != nil {
 			t.Fatal(err)
 		}

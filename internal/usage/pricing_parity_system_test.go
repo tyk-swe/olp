@@ -139,8 +139,8 @@ func TestIntegrationPricingParity(t *testing.T) {
 			own := seedParityKey(t, pool, owner)
 			accounted := parityEvent(t, own, provider, observed, attempts)
 			result, _ := persistParity(t, pool, accounted)
-			if len(result.CostSnapshots) != 1 {
-				t.Fatalf("event %d: %d snapshots, want one", event, len(result.CostSnapshots))
+			if len(result.CostSnapshots) != 2 {
+				t.Fatalf("event %d: %d snapshots, want the cost and charge pair", event, len(result.CostSnapshots))
 			}
 			snapshot := result.CostSnapshots[0]
 			if got := parityCost(t, snapshot.DailyAccrued); got.Cmp(want) != 0 {

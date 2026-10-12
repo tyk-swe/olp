@@ -107,6 +107,11 @@ state returns 503; known exhaustion returns 429. New budgets normally wait for
 next minute's pass. Never insert zero, remove policy or reset a valid counter to
 bypass initialization. Supply caps skip targets while unknown/exhausted.
 
+Accounting installs every owner's spend on both bases — `accrued`/
+`unpriced_attempts` from `estimated_cost`, `charged`/`uncharged_attempts` from
+`charge` — so a `cost_basis` change takes effect on the next admission and
+reconciliation installs both bases for every owner it reconciles.
+
 Each region has one dedicated PostgreSQL leader session, never returned while
 locked. Failure/cancellation/120-second pass deadline closes it; followers cannot
 claim leader success. Regional stores use the same durable facts, not global
@@ -238,7 +243,9 @@ read, acknowledge, or reconcile one another's state.
 | `<prefix>limits:{<lookup>}:rate` | Request and token windows for one lookup. |
 | `<prefix>limits:{<lookup>}:concurrency` | Concurrency leases for one lookup. |
 | `<prefix>limits:{<cost owner>}:cost:day`, `:cost:week` and `:cost:month` | Current calendar spend windows for caller and supply owners; supply caps use day/month. Custom calendar hashes also contain start/end instants. |
+| `<prefix>limits:{<cost owner>}:charge:day`, `:charge:week` and `:charge:month` | The same windows under the consumer-charge basis, installed for every owner so a budget can switch `cost_basis` without state migration. |
 | `<prefix>limits:{<cost owner>}:cost:pending` and `:cost:expiry` | Cost reserved by requests in flight against that owner: a hash of each request's amount and their total, and the set of when each lapses. Advisory; absent when nothing is in flight. |
+| `<prefix>limits:{<cost owner>}:charge:pending` and `:charge:expiry` | The same in-flight state for charge-basis reservations. |
 | `<prefix>limits:provider-cooldown:<scope>` | Credential-version and slot cooldowns. |
 | `<prefix>limits:health:circuits` | Each provider whose circuit the fleet holds open, until when. Gateways publish transitions and read it every two seconds. |
 | `<prefix>limits:health:probes` and `:health:probe:<provider>/<model>` | Each provider's latest active probe result, and the claim that keeps one probe per model and interval. |

@@ -641,7 +641,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		settled := geminiLiveSettlement(x)
 		s.settlePinHold(r.Context(), x, p.hold, settled)
-		x.recordCost()
+		s.recordCost(x)
 		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
 	}()
 	if x.strict() {

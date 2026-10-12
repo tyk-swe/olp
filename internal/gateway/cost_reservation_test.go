@@ -322,7 +322,7 @@ func TestAutomaticReservationsPriceEffectiveGeminiOutputControls(t *testing.T) {
 func TestVideoCreateHoldsItsTargetsPriceAgainstACostBudget(t *testing.T) {
 	attempt := runtime.Attempt{Price: &usage.RoutingPrice{Price: usage.Price{UnitPrice: costText("0.1")}}}
 	x := &execution{media: &media.Request{Op: media.OpVideoCreate, Seconds: costText("8")}, request: request{id: "video-create", minted: true}}
-	if hold := x.attemptCostReservation(budgeted(), attempt); hold != (costReservation{amount: "0.8", requestID: "video-create"}) {
+	if hold := x.attemptCostReservation(budgeted(), attempt); hold != (costReservation{amount: "0.8", charge: "0.8", requestID: "video-create"}) {
 		t.Fatalf("a budgeted video create holds %+v", hold)
 	}
 	if hold := x.attemptCostReservation(admissionAuthority(access.KeyPolicy{}), attempt); hold != (costReservation{}) {

@@ -37,6 +37,60 @@ func (e AdmissionPriority) Valid() bool {
 	}
 }
 
+// Defines values for AggregateBudgetUsageCostBasis.
+const (
+	AggregateBudgetUsageCostBasisCharge AggregateBudgetUsageCostBasis = "charge"
+	AggregateBudgetUsageCostBasisCost   AggregateBudgetUsageCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the AggregateBudgetUsageCostBasis enum.
+func (e AggregateBudgetUsageCostBasis) Valid() bool {
+	switch e {
+	case AggregateBudgetUsageCostBasisCharge:
+		return true
+	case AggregateBudgetUsageCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApiKeyBudgetResponseCostBasis.
+const (
+	ApiKeyBudgetResponseCostBasisCharge ApiKeyBudgetResponseCostBasis = "charge"
+	ApiKeyBudgetResponseCostBasisCost   ApiKeyBudgetResponseCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the ApiKeyBudgetResponseCostBasis enum.
+func (e ApiKeyBudgetResponseCostBasis) Valid() bool {
+	switch e {
+	case ApiKeyBudgetResponseCostBasisCharge:
+		return true
+	case ApiKeyBudgetResponseCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApiKeyDetailResponseCostBasis.
+const (
+	ApiKeyDetailResponseCostBasisCharge ApiKeyDetailResponseCostBasis = "charge"
+	ApiKeyDetailResponseCostBasisCost   ApiKeyDetailResponseCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the ApiKeyDetailResponseCostBasis enum.
+func (e ApiKeyDetailResponseCostBasis) Valid() bool {
+	switch e {
+	case ApiKeyDetailResponseCostBasisCharge:
+		return true
+	case ApiKeyDetailResponseCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ApiKeyDetailResponseEndUserSource.
 const (
 	ApiKeyDetailResponseEndUserSourceHeader      ApiKeyDetailResponseEndUserSource = "header"
@@ -178,6 +232,42 @@ func (e AuditEventResponseActorType) Valid() bool {
 	}
 }
 
+// Defines values for BudgetGroupBudgetResponseCostBasis.
+const (
+	BudgetGroupBudgetResponseCostBasisCharge BudgetGroupBudgetResponseCostBasis = "charge"
+	BudgetGroupBudgetResponseCostBasisCost   BudgetGroupBudgetResponseCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the BudgetGroupBudgetResponseCostBasis enum.
+func (e BudgetGroupBudgetResponseCostBasis) Valid() bool {
+	switch e {
+	case BudgetGroupBudgetResponseCostBasisCharge:
+		return true
+	case BudgetGroupBudgetResponseCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BudgetGroupDetailResponseCostBasis.
+const (
+	BudgetGroupDetailResponseCostBasisCharge BudgetGroupDetailResponseCostBasis = "charge"
+	BudgetGroupDetailResponseCostBasisCost   BudgetGroupDetailResponseCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the BudgetGroupDetailResponseCostBasis enum.
+func (e BudgetGroupDetailResponseCostBasis) Valid() bool {
+	switch e {
+	case BudgetGroupDetailResponseCostBasisCharge:
+		return true
+	case BudgetGroupDetailResponseCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BudgetIncreaseWindowKind.
 const (
 	BudgetIncreaseWindowKindDay   BudgetIncreaseWindowKind = "day"
@@ -241,6 +331,24 @@ func (e BudgetIncreaseTargetKind) Valid() bool {
 	case BudgetIncreaseTargetKindProjectEndUser:
 		return true
 	case BudgetIncreaseTargetKindSink:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BudgetPolicyCostBasis.
+const (
+	BudgetPolicyCostBasisCharge BudgetPolicyCostBasis = "charge"
+	BudgetPolicyCostBasisCost   BudgetPolicyCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the BudgetPolicyCostBasis enum.
+func (e BudgetPolicyCostBasis) Valid() bool {
+	switch e {
+	case BudgetPolicyCostBasisCharge:
+		return true
+	case BudgetPolicyCostBasisCost:
 		return true
 	default:
 		return false
@@ -1114,6 +1222,24 @@ func (e ContentPolicyRulePhase) Valid() bool {
 	}
 }
 
+// Defines values for CreateApiKeyRequestCostBasis.
+const (
+	CreateApiKeyRequestCostBasisCharge CreateApiKeyRequestCostBasis = "charge"
+	CreateApiKeyRequestCostBasisCost   CreateApiKeyRequestCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the CreateApiKeyRequestCostBasis enum.
+func (e CreateApiKeyRequestCostBasis) Valid() bool {
+	switch e {
+	case CreateApiKeyRequestCostBasisCharge:
+		return true
+	case CreateApiKeyRequestCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateApiKeyRequestEndUserSource.
 const (
 	CreateApiKeyRequestEndUserSourceHeader      CreateApiKeyRequestEndUserSource = "header"
@@ -1129,6 +1255,24 @@ func (e CreateApiKeyRequestEndUserSource) Valid() bool {
 	case CreateApiKeyRequestEndUserSourceLessThannil:
 		return true
 	case CreateApiKeyRequestEndUserSourceNative:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateBudgetGroupRequestCostBasis.
+const (
+	CreateBudgetGroupRequestCostBasisCharge CreateBudgetGroupRequestCostBasis = "charge"
+	CreateBudgetGroupRequestCostBasisCost   CreateBudgetGroupRequestCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the CreateBudgetGroupRequestCostBasis enum.
+func (e CreateBudgetGroupRequestCostBasis) Valid() bool {
+	switch e {
+	case CreateBudgetGroupRequestCostBasisCharge:
+		return true
+	case CreateBudgetGroupRequestCostBasisCost:
 		return true
 	default:
 		return false
@@ -1387,6 +1531,24 @@ func (e CredentialRequirement) Valid() bool {
 	case CredentialRequirementGrant:
 		return true
 	case CredentialRequirementRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EndUserLimitsCostBasis.
+const (
+	EndUserLimitsCostBasisCharge EndUserLimitsCostBasis = "charge"
+	EndUserLimitsCostBasisCost   EndUserLimitsCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the EndUserLimitsCostBasis enum.
+func (e EndUserLimitsCostBasis) Valid() bool {
+	switch e {
+	case EndUserLimitsCostBasisCharge:
+		return true
+	case EndUserLimitsCostBasisCost:
 		return true
 	default:
 		return false
@@ -2899,6 +3061,24 @@ func (e RequestSummaryBudgetBoundary) Valid() bool {
 	}
 }
 
+// Defines values for RotateApiKeyRequestCostBasis.
+const (
+	RotateApiKeyRequestCostBasisCharge RotateApiKeyRequestCostBasis = "charge"
+	RotateApiKeyRequestCostBasisCost   RotateApiKeyRequestCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the RotateApiKeyRequestCostBasis enum.
+func (e RotateApiKeyRequestCostBasis) Valid() bool {
+	switch e {
+	case RotateApiKeyRequestCostBasisCharge:
+		return true
+	case RotateApiKeyRequestCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RouteAffinitySource.
 const (
 	RouteAffinitySourceCacheKey RouteAffinitySource = "cache_key"
@@ -3412,6 +3592,24 @@ func (e TransportMode) Valid() bool {
 	}
 }
 
+// Defines values for UpdateApiKeyRequestCostBasis.
+const (
+	UpdateApiKeyRequestCostBasisCharge UpdateApiKeyRequestCostBasis = "charge"
+	UpdateApiKeyRequestCostBasisCost   UpdateApiKeyRequestCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the UpdateApiKeyRequestCostBasis enum.
+func (e UpdateApiKeyRequestCostBasis) Valid() bool {
+	switch e {
+	case UpdateApiKeyRequestCostBasisCharge:
+		return true
+	case UpdateApiKeyRequestCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UpdateApiKeyRequestEndUserSource.
 const (
 	UpdateApiKeyRequestEndUserSourceHeader      UpdateApiKeyRequestEndUserSource = "header"
@@ -3427,6 +3625,24 @@ func (e UpdateApiKeyRequestEndUserSource) Valid() bool {
 	case UpdateApiKeyRequestEndUserSourceLessThannil:
 		return true
 	case UpdateApiKeyRequestEndUserSourceNative:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateBudgetGroupRequestCostBasis.
+const (
+	UpdateBudgetGroupRequestCostBasisCharge UpdateBudgetGroupRequestCostBasis = "charge"
+	UpdateBudgetGroupRequestCostBasisCost   UpdateBudgetGroupRequestCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the UpdateBudgetGroupRequestCostBasis enum.
+func (e UpdateBudgetGroupRequestCostBasis) Valid() bool {
+	switch e {
+	case UpdateBudgetGroupRequestCostBasisCharge:
+		return true
+	case UpdateBudgetGroupRequestCostBasisCost:
 		return true
 	default:
 		return false
@@ -3873,7 +4089,9 @@ type AggregateBudget struct {
 
 // AggregateBudgetUsage defines model for AggregateBudgetUsage.
 type AggregateBudgetUsage struct {
-	Daily struct {
+	// CostBasis The measure accrued expresses.
+	CostBasis *AggregateBudgetUsageCostBasis `json:"cost_basis,omitempty"`
+	Daily     struct {
 		Accrued      string    `json:"accrued"`
 		WindowEndsAt time.Time `json:"window_ends_at"`
 	} `json:"daily"`
@@ -3881,23 +4099,34 @@ type AggregateBudgetUsage struct {
 		Accrued      string    `json:"accrued"`
 		WindowEndsAt time.Time `json:"window_ends_at"`
 	} `json:"monthly"`
-	UnpricedAttempts int `json:"unpriced_attempts"`
-	Weekly           *struct {
+
+	// UnchargedAttempts Billable attempts in the month whose charge could not be computed.
+	UnchargedAttempts *int64 `json:"uncharged_attempts,omitempty"`
+	UnpricedAttempts  int    `json:"unpriced_attempts"`
+	Weekly            *struct {
 		Accrued      string    `json:"accrued"`
 		WindowEndsAt time.Time `json:"window_ends_at"`
 	} `json:"weekly,omitempty"`
 }
 
+// AggregateBudgetUsageCostBasis The measure accrued expresses.
+type AggregateBudgetUsageCostBasis string
+
 // ApiKeyBudgetResponse defines model for ApiKeyBudgetResponse.
 type ApiKeyBudgetResponse struct {
-	Daily ApiKeyBudgetWindowResponse `json:"daily"`
+	CostBasis *ApiKeyBudgetResponseCostBasis `json:"cost_basis,omitempty"`
+	Daily     ApiKeyBudgetWindowResponse     `json:"daily"`
 
 	// EnforcementActive False when the amounts are stored policy only; accrued values are not live accounting.
 	EnforcementActive *bool                       `json:"enforcement_active,omitempty"`
 	Monthly           ApiKeyBudgetWindowResponse  `json:"monthly"`
+	UnchargedAttempts *int64                      `json:"uncharged_attempts,omitempty"`
 	UnpricedAttempts  int64                       `json:"unpriced_attempts"`
 	Weekly            *ApiKeyBudgetWindowResponse `json:"weekly,omitempty"`
 }
+
+// ApiKeyBudgetResponseCostBasis defines model for ApiKeyBudgetResponse.CostBasis.
+type ApiKeyBudgetResponseCostBasis string
 
 // ApiKeyBudgetWindowResponse defines model for ApiKeyBudgetWindowResponse.
 type ApiKeyBudgetWindowResponse struct {
@@ -3944,7 +4173,10 @@ type ApiKeyDetailResponse struct {
 
 	// BudgetGroupId Shared budget group this key spends against; null means key-only budgets.
 	BudgetGroupId nullable.Nullable[openapi_types.UUID] `json:"budget_group_id"`
-	CreatedAt     time.Time                             `json:"created_at"`
+
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis *ApiKeyDetailResponseCostBasis `json:"cost_basis,omitempty"`
+	CreatedAt time.Time                      `json:"created_at"`
 
 	// CreatedBy The operator who issued this installation-scoped key.
 	CreatedBy      openapi_types.UUID `json:"created_by"`
@@ -4004,6 +4236,9 @@ type ApiKeyDetailResponse struct {
 	// WorkloadMapping Present for a digest-only workload principal. Its permissions belong to the issuer mapping and it has no static secret.
 	WorkloadMapping nullable.Nullable[string] `json:"workload_mapping,omitempty"`
 }
+
+// ApiKeyDetailResponseCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type ApiKeyDetailResponseCostBasis string
 
 // ApiKeyDetailResponseEndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
 type ApiKeyDetailResponseEndUserSource string
@@ -4220,14 +4455,19 @@ type BTreeMap map[string][]struct {
 
 // BudgetGroupBudgetResponse defines model for BudgetGroupBudgetResponse.
 type BudgetGroupBudgetResponse struct {
-	Daily BudgetGroupBudgetWindowResponse `json:"daily"`
+	CostBasis *BudgetGroupBudgetResponseCostBasis `json:"cost_basis,omitempty"`
+	Daily     BudgetGroupBudgetWindowResponse     `json:"daily"`
 
 	// EnforcementActive False when the amounts are stored policy only; accrued values are not live accounting.
 	EnforcementActive *bool                            `json:"enforcement_active,omitempty"`
 	Monthly           BudgetGroupBudgetWindowResponse  `json:"monthly"`
+	UnchargedAttempts *int64                           `json:"uncharged_attempts,omitempty"`
 	UnpricedAttempts  int64                            `json:"unpriced_attempts"`
 	Weekly            *BudgetGroupBudgetWindowResponse `json:"weekly,omitempty"`
 }
+
+// BudgetGroupBudgetResponseCostBasis defines model for BudgetGroupBudgetResponse.CostBasis.
+type BudgetGroupBudgetResponseCostBasis string
 
 // BudgetGroupBudgetWindowResponse defines model for BudgetGroupBudgetWindowResponse.
 type BudgetGroupBudgetWindowResponse struct {
@@ -4248,11 +4488,14 @@ type BudgetGroupBudgetWindowResponse struct {
 
 // BudgetGroupDetailResponse defines model for BudgetGroupDetailResponse.
 type BudgetGroupDetailResponse struct {
-	Budget         BudgetGroupBudgetResponse `json:"budget"`
-	CreatedAt      time.Time                 `json:"created_at"`
-	CreatedBy      openapi_types.UUID        `json:"created_by"`
-	CreatedByEmail string                    `json:"created_by_email"`
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit"`
+	Budget BudgetGroupBudgetResponse `json:"budget"`
+
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis      *BudgetGroupDetailResponseCostBasis `json:"cost_basis,omitempty"`
+	CreatedAt      time.Time                           `json:"created_at"`
+	CreatedBy      openapi_types.UUID                  `json:"created_by"`
+	CreatedByEmail string                              `json:"created_by_email"`
+	DailyCostLimit nullable.Nullable[string]           `json:"daily_cost_limit"`
 
 	// EffectiveLimits A complete limit set. Null or omitted dimensions are unlimited.
 	EffectiveLimits *EndUserLimits     `json:"effective_limits,omitempty"`
@@ -4275,6 +4518,9 @@ type BudgetGroupDetailResponse struct {
 	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// BudgetGroupDetailResponseCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type BudgetGroupDetailResponseCostBasis string
 
 // BudgetGroupListResponse defines model for BudgetGroupListResponse.
 type BudgetGroupListResponse struct {
@@ -4334,12 +4580,17 @@ type BudgetIncreasesResponse struct {
 
 // BudgetPolicy Aggregate inference cost caps. Each configured boundary applies independently. Omitted or null dimensions are unlimited.
 type BudgetPolicy struct {
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis        *BudgetPolicyCostBasis    `json:"cost_basis,omitempty"`
 	DailyCostLimit   nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
 	MonthlyCostLimit nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
 
 	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// BudgetPolicyCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type BudgetPolicyCostBasis string
 
 // BudgetSubjectKind Whose spend a budget.threshold rule watches.
 type BudgetSubjectKind string
@@ -5490,9 +5741,12 @@ type CreateApiKeyRequest struct {
 	AttributionDefaults nullable.Nullable[map[string]string] `json:"attribution_defaults,omitempty"`
 
 	// BudgetGroupId Shared budget group; must belong to the same project as the key (both may be null).
-	BudgetGroupId  nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
-	DailyCostLimit nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
-	EndUserPolicy  nullable.Nullable[EndUserPolicy]      `json:"end_user_policy,omitempty"`
+	BudgetGroupId nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
+
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis      *CreateApiKeyRequestCostBasis    `json:"cost_basis,omitempty"`
+	DailyCostLimit nullable.Nullable[string]        `json:"daily_cost_limit,omitempty"`
+	EndUserPolicy  nullable.Nullable[EndUserPolicy] `json:"end_user_policy,omitempty"`
 
 	// EndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
 	EndUserSource nullable.Nullable[CreateApiKeyRequestEndUserSource] `json:"end_user_source,omitempty"`
@@ -5533,6 +5787,9 @@ type CreateApiKeyRequest struct {
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
+// CreateApiKeyRequestCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type CreateApiKeyRequestCostBasis string
+
 // CreateApiKeyRequestEndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
 type CreateApiKeyRequestEndUserSource string
 
@@ -5548,7 +5805,9 @@ type CreateApiKeyResponse struct {
 
 // CreateBudgetGroupRequest defines model for CreateBudgetGroupRequest.
 type CreateBudgetGroupRequest struct {
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis      *CreateBudgetGroupRequestCostBasis `json:"cost_basis,omitempty"`
+	DailyCostLimit nullable.Nullable[string]          `json:"daily_cost_limit,omitempty"`
 
 	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
 	LimitTemplate    nullable.Nullable[string] `json:"limit_template,omitempty"`
@@ -5564,6 +5823,9 @@ type CreateBudgetGroupRequest struct {
 	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// CreateBudgetGroupRequestCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type CreateBudgetGroupRequestCostBasis string
 
 // CreateBudgetGroupResponse defines model for CreateBudgetGroupResponse.
 type CreateBudgetGroupResponse struct {
@@ -6026,6 +6288,8 @@ type DiscoveredModelRequest struct {
 
 // EndUserLimits A complete limit set. Null or omitted dimensions are unlimited.
 type EndUserLimits struct {
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis         *EndUserLimitsCostBasis   `json:"cost_basis,omitempty"`
 	DailyCostLimit    nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
 	MaxConcurrency    nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 	MonthlyCostLimit  nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
@@ -6035,6 +6299,9 @@ type EndUserLimits struct {
 	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// EndUserLimitsCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type EndUserLimitsCostBasis string
 
 // EndUserPolicy defines model for EndUserPolicy.
 type EndUserPolicy struct {
@@ -8931,9 +9198,12 @@ type RevokeNetworkCredentialResponse struct {
 // RotateApiKeyRequest defines model for RotateApiKeyRequest.
 type RotateApiKeyRequest struct {
 	// BudgetGroupId Omit to keep the stored group; send null to clear it.
-	BudgetGroupId    nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
-	DailyCostLimit   nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
-	MonthlyCostLimit nullable.Nullable[string]             `json:"monthly_cost_limit,omitempty"`
+	BudgetGroupId nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
+
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis        *RotateApiKeyRequestCostBasis `json:"cost_basis,omitempty"`
+	DailyCostLimit   nullable.Nullable[string]     `json:"daily_cost_limit,omitempty"`
+	MonthlyCostLimit nullable.Nullable[string]     `json:"monthly_cost_limit,omitempty"`
 
 	// OverlapSeconds Allow the previous secret for this many seconds, bounded by key expiry. Zero (default) immediately ends all prior overlaps on authority refresh. At most eight previous secrets may overlap; every version shares current policy, counters and budgets. Replay never extends an overlap.
 	OverlapSeconds *int `json:"overlap_seconds,omitempty"`
@@ -8941,6 +9211,9 @@ type RotateApiKeyRequest struct {
 	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// RotateApiKeyRequestCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type RotateApiKeyRequestCostBasis string
 
 // RotateApiKeyResponse defines model for RotateApiKeyResponse.
 type RotateApiKeyResponse struct {
@@ -10270,9 +10543,12 @@ type UpdateApiKeyRequest struct {
 	AttributionDefaults nullable.Nullable[map[string]string] `json:"attribution_defaults,omitempty"`
 
 	// BudgetGroupId Omit to keep the stored group; send null to clear it.
-	BudgetGroupId  nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
-	DailyCostLimit nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
-	EndUserPolicy  nullable.Nullable[EndUserPolicy]      `json:"end_user_policy,omitempty"`
+	BudgetGroupId nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
+
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis      *UpdateApiKeyRequestCostBasis    `json:"cost_basis,omitempty"`
+	DailyCostLimit nullable.Nullable[string]        `json:"daily_cost_limit,omitempty"`
+	EndUserPolicy  nullable.Nullable[EndUserPolicy] `json:"end_user_policy,omitempty"`
 
 	// EndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
 	EndUserSource nullable.Nullable[UpdateApiKeyRequestEndUserSource] `json:"end_user_source,omitempty"`
@@ -10310,12 +10586,17 @@ type UpdateApiKeyRequest struct {
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
+// UpdateApiKeyRequestCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type UpdateApiKeyRequestCostBasis string
+
 // UpdateApiKeyRequestEndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
 type UpdateApiKeyRequestEndUserSource string
 
 // UpdateBudgetGroupRequest Merge patch; omitted fields retain values, null clears a limit or template reference. project_id is immutable. Inline limits and a project template intersect; at least one limit or a template reference is required.
 type UpdateBudgetGroupRequest struct {
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis      *UpdateBudgetGroupRequestCostBasis `json:"cost_basis,omitempty"`
+	DailyCostLimit nullable.Nullable[string]          `json:"daily_cost_limit,omitempty"`
 
 	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
 	LimitTemplate     nullable.Nullable[string] `json:"limit_template,omitempty"`
@@ -10328,6 +10609,9 @@ type UpdateBudgetGroupRequest struct {
 	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// UpdateBudgetGroupRequestCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type UpdateBudgetGroupRequestCostBasis string
 
 // UpdateCaptureConfigurationRequest defines model for UpdateCaptureConfigurationRequest.
 type UpdateCaptureConfigurationRequest struct {

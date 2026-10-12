@@ -81,6 +81,9 @@ func validatedTemplateLimits(l AdmissionLimits) (AdmissionLimits, error) {
 }
 
 func intersectLimits(a, b AdmissionLimits) AdmissionLimits {
+	if a.CostBasis == "" {
+		a.CostBasis = b.CostBasis
+	}
 	minimum := func(a, b *int64) *int64 {
 		if a == nil || (b != nil && *b < *a) {
 			return b
@@ -101,11 +104,11 @@ func intersectLimits(a, b AdmissionLimits) AdmissionLimits {
 		}
 		return a
 	}
-	return AdmissionLimits{minimum(a.RequestsPerMinute, b.RequestsPerMinute), minimum(a.TokensPerMinute, b.TokensPerMinute), minimum(a.MaxConcurrency, b.MaxConcurrency), money(a.DailyCostLimit, b.DailyCostLimit), money(a.MonthlyCostLimit, b.MonthlyCostLimit), money(a.WeeklyCostLimit, b.WeeklyCostLimit)}
+	return AdmissionLimits{minimum(a.RequestsPerMinute, b.RequestsPerMinute), minimum(a.TokensPerMinute, b.TokensPerMinute), minimum(a.MaxConcurrency, b.MaxConcurrency), money(a.DailyCostLimit, b.DailyCostLimit), money(a.MonthlyCostLimit, b.MonthlyCostLimit), money(a.WeeklyCostLimit, b.WeeklyCostLimit), a.CostBasis}
 }
 
 func (p KeyPolicy) AdmissionLimits() AdmissionLimits {
-	return AdmissionLimits{p.RequestsPerMinute, p.TokensPerMinute, p.MaxConcurrency, p.DailyCostLimit, p.MonthlyCostLimit, p.WeeklyCostLimit}
+	return AdmissionLimits{p.RequestsPerMinute, p.TokensPerMinute, p.MaxConcurrency, p.DailyCostLimit, p.MonthlyCostLimit, p.WeeklyCostLimit, p.CostBasis}
 }
 
 func (t LimitTemplates) endUser(p *EndUserPolicy) (*EndUserPolicy, error) {
@@ -152,10 +155,11 @@ func (a *Authority) BindLimitTemplates(t LimitTemplates) error {
 	if a.ProjectEndUserPolicy, err = t.endUser(a.ProjectEndUserPolicy); err != nil {
 		return err
 	}
-	group, err := t.resolve(a.BudgetGroupTemplate, AdmissionLimits{a.BudgetGroupRPM, a.BudgetGroupTPM, a.BudgetGroupConcurrency, a.BudgetGroupDailyCostLimit, a.BudgetGroupMonthlyCostLimit, a.BudgetGroupWeeklyCostLimit})
+	group, err := t.resolve(a.BudgetGroupTemplate, AdmissionLimits{a.BudgetGroupRPM, a.BudgetGroupTPM, a.BudgetGroupConcurrency, a.BudgetGroupDailyCostLimit, a.BudgetGroupMonthlyCostLimit, a.BudgetGroupWeeklyCostLimit, a.BudgetGroupCostBasis})
 	if err != nil {
 		return err
 	}
+	a.BudgetGroupCostBasis = group.CostBasis
 	a.BudgetGroupRPM, a.BudgetGroupTPM, a.BudgetGroupConcurrency = group.RequestsPerMinute, group.TokensPerMinute, group.MaxConcurrency
 	a.BudgetGroupDailyCostLimit, a.BudgetGroupMonthlyCostLimit = group.DailyCostLimit, group.MonthlyCostLimit
 	a.BudgetGroupWeeklyCostLimit = group.WeeklyCostLimit
@@ -286,5 +290,5 @@ func (s *Server) putProjectLimitTemplates(r *http.Request, _ Principal) (Reply, 
 }
 
 func (a Authority) GroupLimits() AdmissionLimits {
-	return AdmissionLimits{RequestsPerMinute: a.BudgetGroupRPM, TokensPerMinute: a.BudgetGroupTPM, MaxConcurrency: a.BudgetGroupConcurrency, DailyCostLimit: a.BudgetGroupDailyCostLimit, WeeklyCostLimit: a.BudgetGroupWeeklyCostLimit, MonthlyCostLimit: a.BudgetGroupMonthlyCostLimit}
+	return AdmissionLimits{RequestsPerMinute: a.BudgetGroupRPM, TokensPerMinute: a.BudgetGroupTPM, MaxConcurrency: a.BudgetGroupConcurrency, DailyCostLimit: a.BudgetGroupDailyCostLimit, WeeklyCostLimit: a.BudgetGroupWeeklyCostLimit, MonthlyCostLimit: a.BudgetGroupMonthlyCostLimit, CostBasis: a.BudgetGroupCostBasis}
 }

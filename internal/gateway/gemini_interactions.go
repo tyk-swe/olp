@@ -81,7 +81,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			s.settlePinHold(r.Context(), x, p.hold, actual)
 		}
 		s.settleCaps(r.Context(), x)
-		x.recordCost()
+		s.recordCost(x)
 		settleKey(r.Context(), x.lease, x.dispatched, x.settledTokens(), s.log)
 	}()
 	fail := func(e *Error) {

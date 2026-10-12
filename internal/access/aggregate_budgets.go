@@ -13,6 +13,16 @@ type BudgetPolicy struct {
 	DailyCostLimit   *string `json:"daily_cost_limit"`
 	MonthlyCostLimit *string `json:"monthly_cost_limit"`
 	WeeklyCostLimit  *string `json:"weekly_cost_limit"`
+	// CostBasis is "cost" (the default) or "charge".
+	CostBasis string `json:"cost_basis,omitempty"`
+}
+
+// Basis reports the policy's enforced basis as the limits package knows it.
+func (p *BudgetPolicy) Basis() limits.Basis {
+	if p != nil && p.CostBasis == "charge" {
+		return limits.BasisCharge
+	}
+	return limits.BasisCost
 }
 
 func (p *BudgetPolicy) Limited() bool {
@@ -21,6 +31,9 @@ func (p *BudgetPolicy) Limited() bool {
 func (p *BudgetPolicy) Validate() error {
 	if p == nil {
 		return nil
+	}
+	if p.CostBasis != "" && p.CostBasis != "cost" && p.CostBasis != "charge" {
+		return Invalid("cost_basis", `The cost basis must be "cost" or "charge".`)
 	}
 	return (AdmissionLimits{DailyCostLimit: p.DailyCostLimit, MonthlyCostLimit: p.MonthlyCostLimit, WeeklyCostLimit: p.WeeklyCostLimit}).Validate()
 }

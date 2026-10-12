@@ -144,7 +144,9 @@ const insertFactSQL = `INSERT INTO olp.attempt_usage_facts
 // admission guarantees no other event's facts share this event identifier, and
 // numeric keeps the sum exact.
 const factTotalsSQL = `SELECT count(*), COALESCE(sum(estimated_cost) FILTER (WHERE NOT budget_exempt), 0)::text,
-        count(*) FILTER (WHERE NOT budget_exempt AND charge_status <> 'not_billable' AND unpriced)
+        count(*) FILTER (WHERE NOT budget_exempt AND charge_status <> 'not_billable' AND unpriced),
+        COALESCE(sum(charge) FILTER (WHERE NOT budget_exempt), 0)::text,
+        count(*) FILTER (WHERE NOT budget_exempt AND charge_status <> 'not_billable' AND charge IS NULL)
     FROM olp.attempt_usage_facts WHERE event_id = $1::uuid`
 
 // recomputeMarkersSQL decides, for each count scope, which attempt of a request
@@ -256,7 +258,7 @@ func PersistEventTx(ctx context.Context, tx pgx.Tx, ev *Event, payload []byte) (
 	if !validated.HasAttempts {
 		// An authenticated request that failed before any provider attempt is
 		// worth remembering, but there is no usage to price or roll up.
-		snapshots, err := applyIdentityCostDelta(ctx, tx, ev, "0", 0)
+		snapshots, err := applyIdentityCostDelta(ctx, tx, ev, "0", 0, "0", 0)
 		if err != nil {
 			return Persisted{}, err
 		}
@@ -501,14 +503,14 @@ func chargeSupply(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAt
 // billable attempts accrue no money but are counted, so an operator can see
 // that a budget is being consumed by spend nobody can price.
 func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) ([]limits.CostSnapshot, error) {
-	var facts, unpriced int64
-	var cost string
-	if err := tx.QueryRow(ctx, factTotalsSQL, ev.EventID).Scan(&facts, &cost, &unpriced); err != nil {
+	var facts, unpriced, uncharged int64
+	var cost, charge string
+	if err := tx.QueryRow(ctx, factTotalsSQL, ev.EventID).Scan(&facts, &cost, &unpriced, &charge, &uncharged); err != nil {
 		return nil, fmt.Errorf("total attempt usage facts: %w", err)
 	}
 	// Keyless requests are the installation's own: they spend from no key's
 	// or group's budget.
-	endUsers, err := applyIdentityCostDelta(ctx, tx, ev, cost, unpriced)
+	endUsers, err := applyIdentityCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged)
 	if err != nil {
 		return nil, err
 	}
@@ -516,33 +518,38 @@ func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) ([]limits.CostSna
 	if facts == 0 || ev.APIKeyID == "" {
 		return endUsers, nil
 	}
-	snapshot, err := limits.AddCostDelta(ctx, tx, ev.APIKeyID, ev.ObservedAt, cost, unpriced)
+	snapshot, err := limits.AddCostDelta(ctx, tx, ev.APIKeyID, ev.ObservedAt, cost, unpriced, charge, uncharged)
 	if err != nil {
 		return nil, fmt.Errorf("apply request metadata cost delta: %w", err)
 	}
 	// Each snapshot names the request it accounts for, so that installing it in
 	// the distributed counters also removes the cost the gateway reserved for the
-	// request when it was admitted.
-	snapshot.RequestID = ev.RequestID
-	snapshots := append([]limits.CostSnapshot{snapshot}, endUsers...)
+	// request when it was admitted. The reservation can sit under either basis,
+	// so both snapshots carry the identifier.
+	for i := range snapshot {
+		snapshot[i].RequestID = ev.RequestID
+	}
+	snapshots := append(snapshot, endUsers...)
 	if ev.BudgetGroupID != nil {
-		group, err := limits.AddGroupCostDelta(ctx, tx, *ev.BudgetGroupID, ev.ObservedAt, cost, unpriced)
+		group, err := limits.AddGroupCostDelta(ctx, tx, *ev.BudgetGroupID, ev.ObservedAt, cost, unpriced, charge, uncharged)
 		if err != nil {
 			return nil, fmt.Errorf("apply request metadata group cost delta: %w", err)
 		}
-		group.RequestID = ev.RequestID
-		snapshots = append(snapshots, group)
+		for i := range group {
+			group[i].RequestID = ev.RequestID
+		}
+		snapshots = append(snapshots, group...)
 	}
 	return snapshots, nil
 }
 
 // A refusal before dispatch still establishes the durable current-window
 // balance. It must not assume zero when this identity already has usage.
-func applyEndUserCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64) ([]limits.CostSnapshot, error) {
+func applyEndUserCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64, charge string, uncharged int64) ([]limits.CostSnapshot, error) {
 	if ev.EndUserDigest == "" || ev.APIKeyID == "" {
 		return nil, nil
 	}
-	snapshots, err := limits.AddEndUserCostDelta(ctx, tx, ev.APIKeyID, ev.EndUserDigest, ev.ObservedAt, cost, unpriced)
+	snapshots, err := limits.AddEndUserCostDelta(ctx, tx, ev.APIKeyID, ev.EndUserDigest, ev.ObservedAt, cost, unpriced, charge, uncharged)
 	if err != nil {
 		return nil, fmt.Errorf("apply end-user cost delta: %w", err)
 	}
@@ -552,8 +559,8 @@ func applyEndUserCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost strin
 	return snapshots, nil
 }
 
-func applyIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64) ([]limits.CostSnapshot, error) {
-	snapshots, err := applyEndUserCostDelta(ctx, tx, ev, cost, unpriced)
+func applyIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64, charge string, uncharged int64) ([]limits.CostSnapshot, error) {
+	snapshots, err := applyEndUserCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged)
 	if err != nil {
 		return nil, err
 	}

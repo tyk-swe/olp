@@ -979,7 +979,7 @@ func TestLeasesForwardToTheAttachedGroupLease(t *testing.T) {
 	t.Parallel()
 	var none *Lease
 	none.Attach(&Lease{})
-	none.SetActualCost("1")
+	none.SetActualCost("1", "1")
 	if none.HasCostReservation() {
 		t.Fatal("no lease reports a cost reservation")
 	}
@@ -1004,7 +1004,7 @@ func TestLeasesForwardToTheAttachedGroupLease(t *testing.T) {
 	if !key.HasCostReservation() {
 		t.Fatal("the attached group's estimate is not reported")
 	}
-	key.SetActualCost("0.5")
+	key.SetActualCost("0.5", "0.5")
 	if group.actualCost != "0.5" || key.actualCost != "0.5" || endUser.actualCost != "0.5" {
 		t.Fatalf("actual cost = %q / %q, want both leases told", key.actualCost, group.actualCost)
 	}

@@ -153,11 +153,13 @@ func (s *Server) applyProjectOrganization(ctx context.Context, tx pgx.Tx, p acce
 	// balance in Valkey has never counted. Installing the recomputed balance
 	// before gateways learn of the move keeps them from admitting against a cap
 	// that omits it; a balance is never lowered, so a rollback errs toward refusal.
-	if snapshot, ok, err := limits.ReconcileAggregateBudget(ctx, tx, "organization", desired, time.Now()); err != nil {
+	if snapshots, ok, err := limits.ReconcileAggregateBudget(ctx, tx, "organization", desired, time.Now()); err != nil {
 		return err
 	} else if ok && s.Limiter != nil {
-		if _, _, err := s.Limiter.ApplyCostSnapshot(ctx, snapshot); err != nil {
-			return access.Fail(503, "limits_unavailable", "Budget state is unavailable; retry the apply.")
+		for _, snapshot := range snapshots {
+			if _, _, err := s.Limiter.ApplyCostSnapshot(ctx, snapshot); err != nil {
+				return access.Fail(503, "limits_unavailable", "Budget state is unavailable; retry the apply.")
+			}
 		}
 	}
 	_, err := access.AdvanceAuthority(ctx, tx)

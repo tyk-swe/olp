@@ -71,6 +71,14 @@ func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *acce
 	return chain, nil
 }
 
+// budgetKind names what an owner enforces in a refusal.
+func budgetKind(basis limits.Basis) string {
+	if basis == limits.BasisCharge {
+		return "charge budget"
+	}
+	return "cost budget"
+}
+
 // Every aggregate boundary uses the same reservation and fail-closed semantics.
 // The caller attaches successful leases or refunds earlier boundaries on refusal.
 func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label, param string, increases string, policy *access.BudgetPolicy, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
@@ -88,7 +96,8 @@ func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label
 		WeeklyCostLimit:  policy.WeeklyCostLimit,
 		MonthlyCostLimit: policy.MonthlyCostLimit,
 		LeaseTTL:         ttl,
-		CostEstimate:     hold.amount,
+		CostBasis:        policy.Basis(),
+		CostEstimate:     hold.amountFor(policy.Basis()),
 		RequestID:        hold.requestID,
 	}
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
@@ -99,8 +108,8 @@ func (a *Admission) reserveCostBoundary(ctx context.Context, keyID, owner, label
 	}
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 		a.recordRejection(exceeded.Dimension)
-		failure := rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
-		failure.Message = "The " + label + " cost budget was exhausted. Unpriced attempts accrue 0."
+		failure := rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
+		failure.Message = "The " + label + " " + budgetKind(policy.Basis()) + " was exhausted. Unpriced attempts accrue 0."
 		failure.Param = &param
 		return nil, failure
 	}

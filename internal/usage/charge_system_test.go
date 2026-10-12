@@ -549,3 +549,59 @@ func TestIntegrationChargePinning(t *testing.T) {
 		t.Fatalf("card revision = %v, want %v", facts[0].cardRev, installRev)
 	}
 }
+
+// TestIntegrationChargeFallsThroughFutureRevisions: a card with no revision in
+// force is not the consumer's card — precedence continues to the next scope.
+func TestIntegrationChargeFallsThroughFutureRevisions(t *testing.T) {
+	pool := notificationPool(t)
+	owner, _ := seedParityOwner(t, pool)
+	organization, project, key := seedParityProjectKey(t, pool, owner)
+	provider := seedParityProvider(t, pool, owner)
+	observed := time.Now().UTC().Add(-time.Minute)
+	seedParityPrices(t, pool, owner, observed.Add(-time.Hour), []parityCase{
+		{model: "priced", price: Price{ProviderKind: "openai", Model: "priced",
+			Operation: "generation", InputPerMillion: rate("3"), Currency: "USD"}},
+	})
+	seedParityCard(t, pool, owner, nil, nil, "2", observed.Add(-time.Hour))
+	_, orgRev := seedParityCard(t, pool, owner, &organization, nil, "3", observed.Add(-time.Hour))
+	// The project card only schedules a revision: the organization card wins.
+	seedParityCard(t, pool, owner, nil, &project, "9", observed.Add(time.Hour))
+	event := parityEvent(t, key, provider, observed, []parityCase{
+		{model: "priced", usage: AttemptUsage{Observed: true, Complete: true, InputTokens: tokens(1000)}},
+	})
+	result, facts := persistCharge(t, pool, event)
+	if result.Outcome != PersistOutcomePersisted {
+		t.Fatalf("outcome = %v", result.Outcome)
+	}
+	// cost 0.003 x organization markup 3; a future-only project card cannot win.
+	if facts[0].charge == nil || *facts[0].charge != "0.009000000000" {
+		t.Fatalf("charge = %v, want 0.009000000000", facts[0].charge)
+	}
+	if facts[0].cardRev == nil || *facts[0].cardRev != orgRev {
+		t.Fatalf("card revision = %v, want %v", facts[0].cardRev, orgRev)
+	}
+}
+
+// TestIntegrationCommittedUnpricedCharge: commitment zeroes a priced cost —
+// an unpriced committed attempt stays unpriced and uncharged, never zero.
+func TestIntegrationCommittedUnpricedCharge(t *testing.T) {
+	pool := notificationPool(t)
+	owner, key := seedParityOwner(t, pool)
+	provider := seedCommittedProvider(t, pool, owner, "300", "day")
+	observed := time.Now().UTC().Add(-time.Minute)
+	seedParityPrices(t, pool, owner, observed.Add(-time.Hour), []parityCase{
+		{model: "priced", price: Price{ProviderKind: "openai", Model: "priced",
+			Operation: "generation", InputPerMillion: rate("3"), Currency: "USD"}},
+	})
+	seedParityCard(t, pool, owner, nil, nil, "2", observed.Add(-time.Hour))
+	event := parityEvent(t, key, provider, observed, []parityCase{
+		{model: "unpriced-model", usage: AttemptUsage{Observed: true, Complete: true, InputTokens: tokens(1000)}},
+	})
+	_, facts := persistCharge(t, pool, event)
+	if facts[0].cost != nil {
+		t.Fatalf("unpriced committed cost = %v, want NULL", facts[0].cost)
+	}
+	if facts[0].charge != nil {
+		t.Fatalf("unpriced committed charge = %v, want NULL", facts[0].charge)
+	}
+}

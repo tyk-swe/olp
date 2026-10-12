@@ -96,13 +96,16 @@ type execution struct {
 	// so accounting honours cardRevisionID exactly — including a pinned null.
 	cardPinned     bool
 	cardRevisionID *string
-	route          *runtime.Route
-	mode           string
-	attempts       []runtime.Attempt
-	budget         int
-	preferences    *runtime.Preferences
-	decisions      []runtime.Decision
-	policy         runtime.EffectivePolicy
+	// cardRev is the revision the pin names, resolved at admission so the
+	// charge bound and settlement read the same terms accounting pins.
+	cardRev     *usage.RoutingCardRevision
+	route       *runtime.Route
+	mode        string
+	attempts    []runtime.Attempt
+	budget      int
+	preferences *runtime.Preferences
+	decisions   []runtime.Decision
+	policy      runtime.EffectivePolicy
 
 	// primary is the route the caller named. Its deadline and attempt budget
 	// bound the request across every route it moves on to; route is the one
@@ -116,6 +119,7 @@ type execution struct {
 	spent          int
 	allowance      int
 	spentCost      usage.Cost
+	spentCharge    usage.Cost
 	seed           []byte
 	leg            *usage.RouteLeg
 	selector       string

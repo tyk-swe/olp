@@ -38,6 +38,7 @@
     queryKey: budgetKey,
     queryFn: ({ signal }) => getBudget(projectId, signal, organizationId)
   }));
+  let basis = $state('cost');
   let daily = $state('');
   let monthly = $state('');
   let weekly = $state('');
@@ -51,11 +52,13 @@
       ? {
           daily_cost_limit: daily || null,
           monthly_cost_limit: monthly || null,
-          weekly_cost_limit: weekly || null
+          weekly_cost_limit: weekly || null,
+          cost_basis: basis as 'cost' | 'charge'
         }
       : null;
   }
   function load(value: AggregateBudget) {
+    basis = value.policy?.cost_basis ?? 'cost';
     daily = value.policy?.daily_cost_limit ?? '';
     monthly = value.policy?.monthly_cost_limit ?? '';
     weekly = value.policy?.weekly_cost_limit ?? '';
@@ -123,6 +126,18 @@
   {:else}
     <form onsubmit={submit}>
       <fieldset disabled={busy || !editable}>
+        <div class="form-field">
+          <label for={`${prefix}-basis`}>Budget basis</label>
+          <select id={`${prefix}-basis`} bind:value={basis}>
+            <option value="cost">Provider cost</option>
+            <option value="charge">Consumer charge</option>
+          </select>
+          <small>
+            {#if (query.data?.usage as { cost_basis?: string }).cost_basis === 'charge'}
+              Enforced on consumer charge.
+            {:else}Enforced on provider cost.{/if}
+          </small>
+        </div>
         <div class="form-field">
           <label for={`${prefix}-daily`}>Daily cost limit (USD)</label>
           <input

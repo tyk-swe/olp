@@ -199,6 +199,16 @@ records `discount_pinned` and `discount_id`, which may be null — a pinned
 null prices at one, not "resolve later". Without a pin, accounting selects at
 the observed time.
 
+## Budget basis
+
+Every consumer budget — API-key, budget-group, installation, organization,
+project, route, key-route, attribution and end-user — chooses `cost_basis`:
+`cost` (the default) enforces provider cost and `charge` enforces the charge a
+rate card produces. A billable attempt whose charge is NULL counts as an
+uncharged attempt and adds zero; supply-side caps always measure provider
+cost. See [access](access.md#installation-and-project-budgets) for where each
+budget is configured.
+
 ## Rate cards and charge
 
 *Cost* is what the provider bills; *charge* is what the consumer owes. A rate
@@ -211,8 +221,10 @@ currency is the installation's.
 
 An attempt's consumer is the aggregate-ownership project: the API key's
 project, else the provider's, else the route's. The card resolved is the
-project's card, then its organization's, then the installation's, taking the
-newest revision in force at the observed time — revisions never layer.
+most specific card with a revision in force — the project's card, then its
+organization's, then the installation's — taking the newest revision in force
+at the observed time, and a card whose revisions all start in the future
+falls through to the next scope; revisions never layer.
 
 | Case | Charge |
 | --- | --- |

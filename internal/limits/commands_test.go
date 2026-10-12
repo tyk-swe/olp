@@ -807,7 +807,7 @@ func TestReleasingAnEstimateOutlastsASlowServer(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Reserve: %v", err)
 				}
-				lease.SetActualCost("0")
+				lease.SetActualCost("0", "0")
 				if err := lease.SettleCost(t.Context()); err != nil {
 					t.Fatalf("SettleCost: %v", err)
 				}
@@ -857,7 +857,7 @@ func TestSettlingToNothingIsRetriedLikeARelease(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Reserve: %v", err)
 			}
-			lease.SetActualCost(test.actual)
+			lease.SetActualCost(test.actual, test.actual)
 			if err := lease.SettleCost(t.Context()); err == nil {
 				t.Fatal("SettleCost succeeded against a server that refuses every call")
 			}
@@ -903,7 +903,7 @@ func TestSettlingACostIsOneBoundedAttempt(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Reserve: %v", err)
 			}
-			lease.SetActualCost("0.1")
+			lease.SetActualCost("0.1", "0.1")
 			err = lease.SettleCost(t.Context())
 			if (err == nil) != test.settled {
 				t.Fatalf("SettleCost = %v, want settled = %t", err, test.settled)

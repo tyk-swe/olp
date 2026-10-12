@@ -377,6 +377,16 @@ func TestRoutingCardCharge(t *testing.T) {
 	if _, ok := card2.Charge(usage, settledAt, true, nil, "openai", vendor, "other", "generation"); ok {
 		t.Fatal("unpriced cost under markup produced a charge")
 	}
+	// A zero cost — a committed attempt's — charges zero under any markup.
+	zero := Cost{}
+	charge, ok = card2.Charge(usage, settledAt, true, &zero, "openai", vendor, "other", "generation")
+	if !ok || charge.String() != "0" {
+		t.Fatalf("zero-cost charge = %v %v, want 0", charge, ok)
+	}
+	zeroBound, ok := card2.ChargeBound(0, 0, false, settledAt, Cost{}, "openai", vendor, "other", "generation")
+	if !ok || zeroBound.String() != "0" {
+		t.Fatalf("zero bound = %v %v, want 0", zeroBound, ok)
+	}
 	// The charge bound mirrors the same shapes.
 	bound, ok := card2.ChargeBound(1000, 1000, true, settledAt, cost, "openai", vendor, "other", "generation")
 	if !ok || bound.String() != "0.0045" {
@@ -391,5 +401,54 @@ func TestRoutingCardCharge(t *testing.T) {
 	want, _ := card.Prices[1].CostBound(1000, 0, false, settledAt, nil)
 	if !ok || bound.Cmp(want) != 0 {
 		t.Fatalf("explicit bound = %v, want %v", bound, want)
+	}
+}
+
+// The card a request pins is the most specific card with a revision in
+// force — input order in the slice is irrelevant, and a card whose revisions
+// all start in the future falls through to the next scope.
+func TestRoutingCardResolution(t *testing.T) {
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	projectID, organizationID := "project", "organization"
+	card := func(id string, org, proj *string, revisions ...RoutingCardRevision) RoutingRateCard {
+		return RoutingRateCard{ID: id, OrganizationID: org, ProjectID: proj, Revisions: revisions}
+	}
+	revision := func(id string, r int, effective time.Time) RoutingCardRevision {
+		return RoutingCardRevision{ID: id, Revision: r, Markup: "2",
+			EffectiveAt: effective, Prices: nil}
+	}
+	// The installation card arriving first cannot shadow a better scope.
+	inputs := &RoutingInputs{
+		RefreshedAt: now.Add(-time.Minute),
+		RateCards: []RoutingRateCard{
+			card("install", nil, nil, revision("install-r", 1, now.Add(-time.Hour))),
+			card("org", &organizationID, nil, revision("org-r", 1, now.Add(-time.Hour))),
+			card("proj", nil, &projectID, revision("proj-r", 1, now.Add(-time.Hour))),
+		},
+		ProjectOrganizations: map[string]string{projectID: organizationID},
+	}
+	found, known := inputs.RateCardRevision(&projectID, now)
+	if !known || found == nil || found.ID != "proj-r" {
+		t.Fatalf("project card resolution = %v known=%v", found, known)
+	}
+	// A project card whose only revision is future falls through to the
+	// organization card — and without that, to the installation card.
+	inputs.RateCards[2].Revisions[0].EffectiveAt = now.Add(time.Hour)
+	found, _ = inputs.RateCardRevision(&projectID, now)
+	if found == nil || found.ID != "org-r" {
+		t.Fatalf("organization fallthrough = %v", found)
+	}
+	inputs.RateCards[1].Revisions[0].EffectiveAt = now.Add(time.Hour)
+	found, _ = inputs.RateCardRevision(&projectID, now)
+	if found == nil || found.ID != "install-r" {
+		t.Fatalf("installation fallthrough = %v", found)
+	}
+	// Stale inputs cannot answer at all.
+	inputs.RefreshedAt = now.Add(-PerformanceMaxAge - time.Second)
+	if found, known = inputs.RateCardRevision(&projectID, now); known || found != nil {
+		t.Fatalf("stale inputs answered %v known=%v", found, known)
+	}
+	if found, known = (*RoutingInputs)(nil).RateCardRevision(&projectID, now); known || found != nil {
+		t.Fatalf("missing inputs answered %v known=%v", found, known)
 	}
 }

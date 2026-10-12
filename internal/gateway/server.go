@@ -565,12 +565,16 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		x.responseMetadata = authority.Policy.ResponseMetadata
 		x.authority = authority
 		// A request charged to a key resolves its consumer's rate card at
-		// admission and pins the revision for accounting.
+		// admission and pins the revision for accounting. Stale inputs leave
+		// the request unpinned so accounting resolves it at the fact time.
 		if x.authority.ProjectID != nil {
-			x.cardPinned = true
 			if inputs := s.Runtime.RoutingInputs(); inputs != nil {
-				if revision := inputs.RateCardRevision(x.authority.ProjectID, s.now()); revision != nil {
-					x.cardRevisionID = &revision.ID
+				if revision, known := inputs.RateCardRevision(x.authority.ProjectID, s.now()); known {
+					x.cardPinned = true
+					if revision != nil {
+						x.cardRevisionID = &revision.ID
+						x.cardRev = revision
+					}
 				}
 			}
 		}

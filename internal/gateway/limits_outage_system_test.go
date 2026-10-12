@@ -95,7 +95,7 @@ func TestIntegrationKeyOutageSettlesWhatTheBudgetGroupReserved(t *testing.T) {
 				t.Fatalf("the group holds %q for the admitted request, want its estimate", got)
 			}
 			// The request ends having cost less, which is what the group then holds.
-			lease.SetActualCost("0.1")
+			lease.SetActualCost("0.1", "0.1")
 			settleKey(t.Context(), lease, true, nil, slog.New(slog.DiscardHandler))
 			if got := held(); got != "0.1" {
 				t.Fatalf("the group holds %q once the request ended, want what it cost", got)

@@ -79,8 +79,9 @@ $$;
 
 -- olp.price_usage prices one attempt's usage document against one price row.
 -- `price` is the olp.prices row as jsonb, `usage` the attempt's usage document,
--- and `discount` a multiplier applied after the list cost (1 until discounts
--- exist). The attempt is complete only when every dimension it used resolves
+-- and `discount` a multiplier applied after the list cost (defaults to 1). The
+-- discount is part of the evidence when a multiplier other than one applied.
+-- The attempt is complete only when every dimension it used resolves
 -- to a rate; anything else returns complete = false with NULL amounts.
 CREATE FUNCTION olp.price_usage(price jsonb, usage jsonb, started_at timestamptz,
                                 successful boolean, discount numeric DEFAULT 1)
@@ -292,6 +293,9 @@ BEGIN
         END IF;
     END IF;
 
+    IF COALESCE(discount, 1) <> 1 THEN
+        v_comp := v_comp || 'discount'::text;
+    END IF;
     v_ok := v_ok AND COALESCE((usage->>'complete')::boolean, false);
     IF NOT v_ok THEN
         RETURN QUERY SELECT false, NULL::numeric, NULL::numeric, NULL::text[];

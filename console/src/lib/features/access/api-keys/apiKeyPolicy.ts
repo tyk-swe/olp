@@ -35,6 +35,7 @@ export type ApiKeyFormState = {
   dailyCostLimit: string;
   monthlyCostLimit: string;
   weeklyCostLimit: string;
+  costBasis: string;
   expiresAt: string;
   allowProviderState: boolean;
   responseMetadata: boolean;
@@ -75,6 +76,9 @@ export function createApiKeyFormState(
     dailyCostLimit: editing?.budget.daily.limit ?? '',
     monthlyCostLimit: editing?.budget.monthly.limit ?? '',
     weeklyCostLimit: editing?.budget.weekly?.limit ?? '',
+    costBasis:
+      (editing?.budget as { cost_basis?: string } | undefined)?.cost_basis ??
+      'cost',
     expiresAt: editing?.expires_at
       ? dateTimeLocalValue(editing.expires_at)
       : '',
@@ -144,6 +148,7 @@ export function buildApiKeyPolicyInput(
     daily_cost_limit: optionalDecimal(state.dailyCostLimit),
     monthly_cost_limit: optionalDecimal(state.monthlyCostLimit),
     weekly_cost_limit: optionalDecimal(state.weeklyCostLimit),
+    cost_basis: (state.costBasis || 'cost') as 'cost' | 'charge',
     expires_at: state.expiresAt
       ? new Date(state.expiresAt).toISOString()
       : null,
