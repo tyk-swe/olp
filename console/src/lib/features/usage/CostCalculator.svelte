@@ -40,6 +40,16 @@
   let inputTokens = $state('');
   let outputTokens = $state('');
   let cachedInputTokens = $state('');
+  let cacheWriteTokens = $state('');
+  let cacheWrite5mTokens = $state('');
+  let cacheWrite1hTokens = $state('');
+  let audioInputTokens = $state('');
+  let cachedAudioInputTokens = $state('');
+  let audioOutputTokens = $state('');
+  let imageInputTokens = $state('');
+  let cachedImageInputTokens = $state('');
+  let imageOutputTokens = $state('');
+  let toolCalls = $state<{ name: string; count: string }[]>([]);
   let mediaUnits = $state('');
   let batch = $state(false);
   let successful = $state(true);
@@ -109,11 +119,46 @@
       const tokens: [string, string][] = [
         ['input_tokens', inputTokens],
         ['output_tokens', outputTokens],
-        ['cached_input_tokens', cachedInputTokens]
+        ['cached_input_tokens', cachedInputTokens],
+        ['cache_write_input_tokens', cacheWriteTokens],
+        ['cache_write_5m_input_tokens', cacheWrite5mTokens],
+        ['cache_write_1h_input_tokens', cacheWrite1hTokens],
+        ['audio_input_tokens', audioInputTokens],
+        ['cached_audio_input_tokens', cachedAudioInputTokens],
+        ['audio_output_tokens', audioOutputTokens],
+        ['image_input_tokens', imageInputTokens],
+        ['cached_image_input_tokens', cachedImageInputTokens],
+        ['image_output_tokens', imageOutputTokens]
       ];
       for (const [key, raw] of tokens) {
         if (raw.trim()) usage[key] = Math.max(0, Math.trunc(Number(raw)));
       }
+      // Shares stay inside the totals they are part of, as events require.
+      const total = (key: string) => Number(usage[key] ?? 0);
+      const inputs =
+        total('cached_input_tokens') +
+        total('cache_write_input_tokens') +
+        total('cache_write_5m_input_tokens') +
+        total('cache_write_1h_input_tokens') +
+        total('audio_input_tokens') +
+        total('cached_audio_input_tokens') +
+        total('image_input_tokens') +
+        total('cached_image_input_tokens');
+      const outputs =
+        total('audio_output_tokens') + total('image_output_tokens');
+      if (inputs > total('input_tokens') || outputs > total('output_tokens')) {
+        quoteError =
+          'Token shares must fit inside the input and output totals.';
+        quoteBusy = false;
+        return;
+      }
+      const calls: Record<string, number> = {};
+      for (const row of toolCalls) {
+        const name = row.name.trim();
+        if (name)
+          calls[name] = Math.max(1, Math.trunc(Number(row.count || '1')));
+      }
+      if (Object.keys(calls).length) usage.tool_calls = calls;
       if (mediaUnits.trim()) usage.media_units = mediaUnits.trim();
       if (batch) usage.batch = true;
       quoteResult = await quoteUsage({
@@ -245,6 +290,86 @@
           bind:value={cachedInputTokens}
           inputmode="numeric"
         />
+        <details class="more-usage">
+          <summary>More usage</summary>
+          <label for="calc-cache-write">Cache write tokens</label><input
+            id="calc-cache-write"
+            bind:value={cacheWriteTokens}
+            inputmode="numeric"
+          />
+          <label for="calc-cache-write-5m">5-minute cache writes</label><input
+            id="calc-cache-write-5m"
+            bind:value={cacheWrite5mTokens}
+            inputmode="numeric"
+          />
+          <label for="calc-cache-write-1h">1-hour cache writes</label><input
+            id="calc-cache-write-1h"
+            bind:value={cacheWrite1hTokens}
+            inputmode="numeric"
+          />
+          <label for="calc-audio-input">Audio input tokens</label><input
+            id="calc-audio-input"
+            bind:value={audioInputTokens}
+            inputmode="numeric"
+          />
+          <label for="calc-cached-audio-input">Cached audio input tokens</label
+          ><input
+            id="calc-cached-audio-input"
+            bind:value={cachedAudioInputTokens}
+            inputmode="numeric"
+          />
+          <label for="calc-audio-output">Audio output tokens</label><input
+            id="calc-audio-output"
+            bind:value={audioOutputTokens}
+            inputmode="numeric"
+          />
+          <label for="calc-image-input">Image input tokens</label><input
+            id="calc-image-input"
+            bind:value={imageInputTokens}
+            inputmode="numeric"
+          />
+          <label for="calc-cached-image-input">Cached image input tokens</label
+          ><input
+            id="calc-cached-image-input"
+            bind:value={cachedImageInputTokens}
+            inputmode="numeric"
+          />
+          <label for="calc-image-output">Image output tokens</label><input
+            id="calc-image-output"
+            bind:value={imageOutputTokens}
+            inputmode="numeric"
+          />
+          {#each toolCalls as row, index (index)}
+            <div class="tool-call-row">
+              <label class="sr-only" for="calc-tool-name-{index}"
+                >Tool name</label
+              ><input
+                id="calc-tool-name-{index}"
+                bind:value={row.name}
+                placeholder="tool name"
+              />
+              <label class="sr-only" for="calc-tool-count-{index}">Calls</label
+              ><input
+                id="calc-tool-count-{index}"
+                bind:value={row.count}
+                inputmode="numeric"
+                placeholder="count"
+              />
+              <button
+                type="button"
+                class="link"
+                aria-label="Remove tool call"
+                onclick={() => toolCalls.splice(index, 1)}>Remove</button
+              >
+            </div>
+          {/each}
+          <button
+            type="button"
+            class="link"
+            onclick={() => toolCalls.push({ name: '', count: '1' })}
+            >Add tool call</button
+          >
+        </details>
         <label for="calc-media">Media units</label><input
           id="calc-media"
           bind:value={mediaUnits}
@@ -332,5 +457,32 @@
   }
   .table-wrap {
     overflow-x: auto;
+  }
+  .more-usage {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 12rem minmax(0, 20rem);
+    gap: 0.6rem 1rem;
+    align-items: center;
+  }
+  .more-usage summary {
+    grid-column: 1 / -1;
+    cursor: pointer;
+    color: var(--foreground-muted);
+  }
+  .tool-call-row {
+    display: contents;
+  }
+  .tool-call-row > * {
+    grid-column: auto;
+  }
+  .link {
+    width: fit-content;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    text-decoration: underline;
   }
 </style>

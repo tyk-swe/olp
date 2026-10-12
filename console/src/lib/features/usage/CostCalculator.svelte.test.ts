@@ -160,3 +160,72 @@ it('quotes usage against a provider and shows cost and charge', async () => {
     })
   );
 });
+
+it('sends every usage dimension and validates shares', async () => {
+  establish();
+  await settle();
+  const usageTab = host.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1];
+  usageTab.click();
+  flushSync();
+  const provider = host.querySelector<HTMLSelectElement>('#calc-provider')!;
+  provider.value = 'provider-1';
+  provider.dispatchEvent(new Event('change', { bubbles: true }));
+  host.querySelector<HTMLInputElement>('#calc-model')!.value = 'fixture-model';
+  host
+    .querySelector<HTMLInputElement>('#calc-model')!
+    .dispatchEvent(new Event('input', { bubbles: true }));
+  const put = (id: string, value: string) => {
+    const field = host.querySelector<HTMLInputElement>('#' + id)!;
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  put('calc-input', '100');
+  put('calc-output', '10');
+  put('calc-cached', '20');
+  put('calc-cache-write-1h', '5');
+  put('calc-audio-input', '30');
+  put('calc-image-output', '5');
+  host
+    .querySelector<HTMLDetailsElement>('.more-usage')!
+    .setAttribute('open', '');
+  // Over-total shares are refused inline.
+  put('calc-audio-input', '200');
+  flushSync();
+  Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+    .find((b) => b.textContent === 'Quote')!
+    .click();
+  flushSync();
+  await vi.waitFor(() => {
+    expect(host.textContent).toContain('shares must fit');
+  });
+  expect(quoteUsage).not.toHaveBeenCalled();
+  // Valid shares plus a tool-call row reach the quote request.
+  put('calc-audio-input', '30');
+  flushSync();
+  Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+    .find((b) => b.textContent === 'Add tool call')!
+    .click();
+  flushSync();
+  put('calc-tool-name-0', 'web_search');
+  put('calc-tool-count-0', '2');
+  flushSync();
+  Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+    .find((b) => b.textContent === 'Quote')!
+    .click();
+  flushSync();
+  await vi.waitFor(() => {
+    expect(quoteUsage).toHaveBeenCalled();
+  });
+  const body = vi.mocked(quoteUsage).mock.lastCall![0] as {
+    usage: Record<string, unknown>;
+  };
+  expect(body.usage).toMatchObject({
+    input_tokens: 100,
+    output_tokens: 10,
+    cached_input_tokens: 20,
+    cache_write_1h_input_tokens: 5,
+    audio_input_tokens: 30,
+    image_output_tokens: 5,
+    tool_calls: { web_search: 2 }
+  });
+});
