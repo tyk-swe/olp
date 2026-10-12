@@ -405,61 +405,31 @@ installation.
 
 ## Regional fleets
 
-Run one control plane and PostgreSQL primary per installation. Each region runs
-its own gateways, workers and Valkey, optionally with a local PostgreSQL read
-replica. Set `OLP_REGION` to the same name on every gateway and worker that
-shares that Valkey; use a distinct name for each regional store. Helm exposes
-this as `config.region`. All regions use the same installation UUID,
-authentication key and encryption key ring. An independent installation needs
-its own database and keys.
+Use one control plane/PostgreSQL primary and regional gateways/workers/Valkey,
+optionally local read replicas. Set a common `OLP_REGION` per shared regional
+Valkey, distinct per store. Installation UUID/HMAC/master ring are shared;
+independent installations require independent database/keys.
 
-Key RPM, TPM and concurrency counters are regional. The complete default key
-limit applies in every region. Optional `regional_limits` on a key override
-individual count limits by region; omitted fields inherit defaults. For example,
-`{"west":{"requests_per_minute":100},"east":{"max_concurrency":8}}` sets a
-western RPM override and an eastern concurrency override. Project limit
-templates continue to impose ceilings on the effective regional policy.
-Regional overrides cannot define cost limits. Route, end-user and provider
-count limits likewise use the region's Valkey. There is no automatic division
-when a region joins, leaves or fails.
+RPM/TPM/concurrency and route/end-user/provider count limits are regional. Each
+region inherits full key defaults unless `regional_limits` overrides counts,
+for example `{"west":{"requests_per_minute":100},"east":{"max_concurrency":8}}`.
+Templates still impose ceilings; overrides cannot define USD limits. Adding or
+losing regions does not divide limits automatically.
 
-Durable cost accounts and usage facts remain global in PostgreSQL. One elected
-worker in **each region** reconciles those global balances into that region's
-Valkey every minute. Workers in different regions can hold leadership
-simultaneously; workers in the same region cannot. Existing reservation and
-settlement rules protect each local budget snapshot, including costs in flight.
-These snapshots provide eventual global enforcement, rather than a global
-synchronous reservation on every request.
+Durable spend is global. One leader **per region** reconciles global facts every
+minute into local snapshots/holds, providing eventual—not synchronous global—
+enforcement. Overshoot exposure counts all cost admitted against stale snapshots,
+not just unfinished requests: two regions admitting $0.60 each against a $1
+budget can reach $1.20 before reconciliation. The envelope assumes bounded
+estimates and timely accounting; outages increase it. Use conservative estimates,
+count/concurrency caps and recovery monitoring, not an invoice guarantee.
 
-The conservative overshoot envelope is the number of regions multiplied by the
-maximum cost admitted between global reconciliations in one region. Count all
-cost admitted against an older snapshot during that interval, including requests
-that finish before the next reconciliation. For two regions admitting at most
-$0.60 each before reconciliation, the envelope is $1.20. If both start from zero
-and each admits $0.60 against a $1 budget, global spend can reach $1.20 before
-both reject additional cost after reconciliation. Bound this exposure with
-conservative request estimates, per-key count/concurrency limits and regional
-rate overrides. The envelope assumes bounded estimates and timely accounting;
-a worker outage lengthens the reconciliation interval. Apply the configured
-coordination outage policy and monitor worker recovery. Do not interpret the
-bound as only the cost of requests still running at the instant of reconciliation.
+Regional readiness/checkpoints cannot be satisfied by another region; PostgreSQL-
+only tasks and control summaries stay shared. Hard constraints/priority precede
+matching provider/model-region locality; unknown region has no preference.
 
-Readiness and worker metrics on a process with `OLP_REGION` use that region's
-metadata-consumer, cost-reconciliation and health-probe checkpoints. Success in
-another region cannot hide a silent local worker. PostgreSQL-only tasks and the
-control plane's installation-wide summary remain shared.
-
-Within a priority tier, gateways prefer providers whose configured cloud region
-(or recorded model region when no cloud region is configured) matches
-`OLP_REGION`. Hard region and privacy constraints are evaluated first, and a
-higher-priority eligible provider stays ahead of locality. Unknown regions have
-no local preference. Simulation uses the control process's configured region.
-
-Qualification uses two independent authenticated Valkey services and one
-PostgreSQL installation:
-`TestRegionalRateAndConcurrencyLimitsWithGlobalBudgetReconciliation` checks count
-overrides, regional concurrency, simultaneous regional leaders, the admitted-cost
-envelope and refusal in both regions after global reconciliation.
-`make integration` provisions both regional stores and a physical PostgreSQL
-standby; explicitly running these tests requires the corresponding
-`OLP_TEST_VALKEY_REGIONAL_URL` and `OLP_TEST_DATABASE_READ_URL` fixtures.
+`TestRegionalRateAndConcurrencyLimitsWithGlobalBudgetReconciliation` qualifies
+count overrides, local concurrency/leaders and reconciliation refusal with two
+Valkeys/one database. `make integration` provisions those and a physical standby;
+explicit selections need `OLP_TEST_VALKEY_REGIONAL_URL` and
+`OLP_TEST_DATABASE_READ_URL`.

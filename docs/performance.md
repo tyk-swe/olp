@@ -8,107 +8,37 @@ harness lives in [`tests/bench/`](../tests/bench/README.md).
 
 ## Status of the numbers
 
-**No reference results are published yet.** The harness is built and has been
-smoke-tested, but the full-rate runs on reference hardware have not been made,
-so no target that needs full scale or a comparison has been judged. The one
-target that is judged at any scale, zero lost request-metadata events, was met
-in every smoke run of S1 to S3, which says nothing about full rate. The only
-measurements in this guide are from a reduced-rate smoke run on a shared 8 vCPU
-development virtual machine ([Smoke run](#smoke-run)): OLP's scenarios S1 to S6
-at 30% of the roadmap's rates or less, and the LiteLLM comparison of S1 to S5 at
-3%, to show that the script runs end to end. They show that the harness works
-and what its output looks like. They are not reference numbers, they are not
-comparable with LiteLLM's published figures, they say nothing about whether a
-target that needs full scale or a comparison is met, and they must not be quoted
-as the performance of either gateway. LiteLLM's published figures
-appear as LiteLLM publishes them, with links; the smoke run is the only place
-this repository measures LiteLLM, and it is not a reference run.
-
-Reference results will be published under
-[Reference results](#reference-results) when they exist, with the
-[record](#record-of-a-reference-run) filled in so that anyone can reproduce
-them.
+**No full-rate reference results are published.** Historical reduced-rate runs
+on a shared 8-vCPU development VM establish harness operation, not either
+product's production performance. Do not compare them to vendor-published figures.
+Full-scale/comparative targets remain unchecked; zero metadata loss passed only
+at measured smoke rates. New reference results need the [complete record](#record-of-a-reference-run).
 
 ## Method
 
-**Open loop.** The load generator schedules request *k* at `start + k / rate`
-and never waits for the system under test. A closed-loop generator that sends
-the next request when the previous one returns slows down exactly when the
-gateway does, and so hides the queueing it should show (coordinated omission).
-Here a stalled gateway shows up in the percentiles, because every request that
-should have been sent during the stall records the wait it would have suffered.
-Sends are bounded by an in-flight cap and a backlog; a request that finds
-neither is dropped and counted, never silently delayed.
-
-**Latency from the scheduled time.** Latency is measured from the scheduled send
-time to the end of the response; for a stream, to its closing event (`[DONE]`,
-`message_stop` or the chunk with a finish reason), which is when a client has
-its answer, so whatever a gateway does after sending it and before it ends the
-response, such as settling a budget, is not charged to the stream. The
-generator still reads the response to its end, and a stream that closes without
-its event, or with an error, is a failure timed to the end of the response. Time
-to first token is the arrival of the first data frame, also from the scheduled
-time. A warmup period at the same rate precedes the measured one. The load
-generator leaves its requests out of its latency, time-to-first-token and
-error-rate figures and its other counts, but not out of everything: the sustained
-rate counts the requests that finished during the measured period, whichever
-period sent them, and the gateway's CPU, allocation and request-metadata figures
-cover the whole run, warmup included.
-
-**High-dynamic-range histograms.** Latencies are recorded in HDR histograms
-(`github.com/HdrHistogram/hdrhistogram-go`, three significant figures, from one
-microsecond to an hour), so p99 and p99.9 are not smoothed by sampling or
-bucketing, and no raw sample list grows with the run.
-
-**Baseline subtraction.** The gateway's overhead is the difference of
-percentiles between two runs of the same load in the same session: one straight
-at the mock upstream, then one through the gateway. The mock's own time to first
-token and token intervals cancel out. Each gateway gets a baseline of its own,
-run immediately before it, and a comparison prints how far the two baselines lie
-from each other, since they should not differ: the same load against the same
-mock on the same CPUs. A difference means the sessions were not alike.
-Differences of percentiles can be negative on a noisy machine, which is a sign
-the run is not good enough to judge, and the harness takes it for one: a gateway
-cannot answer faster than the upstream it calls, so an added p50 or p95 below
-zero by more than a baseline's jitter, a millisecond or a tenth of the
-baseline's figure, makes the run invalid, and no target is met by a negative
-figure at any percentile.
-
-**A deterministic upstream on its own CPUs.** The mock upstream serves OpenAI
-(Chat Completions and Responses), Anthropic and Gemini dialects with
-configurable time to first token, token interval, output length, status codes
-and mid-stream failures. It runs as a separate process, and a reference run pins
-it to CPUs the gateway and the load generator do not use.
-
-**A valid run.** A run is `valid` only if the generator delivered its schedule:
-nothing dropped or abandoned, at most 1% of sends later than 5 ms after their
-scheduled time, and at least 99% of the target rate offered. It must also have
-delivered answers: the latency of a run is that of its successful requests, so a
-gateway that fails requests quickly would look faster for it, and a run in which
-more than 0.1% of the requests of either load failed is invalid (S6 aside, whose
-streams are canceled when it ends). A gateway that shed requests, an added
-latency below zero by more than jitter, or metadata still arriving after the
-drain also makes the run invalid. A target that rests on latency is judged only
-on valid runs.
-
-**What a run records.** Added latency at p50, p95 and p99, and
-time-to-first-token overhead; sustained requests per second (those that finished
-during the measured period, so a gateway that falls behind does not report the
-offered rate), per vCPU and per CPU second; the gateway's CPU time per request
-it answered successfully, net of what it spends idle;
-resident memory before, at its peak and after; the error rate; and, for OLP,
-request-metadata completeness (events delivered against requests admitted).
-Allocations per request of the whole gateway are read from the Go runtime's
-heap allocation counters, which the release binary serves on its private
-`/metrics` listener as `go_memstats_mallocs_total` and
-`go_memstats_alloc_bytes_total`: what it allocated over the run, less what it
-allocates idle over the same time, over the requests it answered successfully.
-The `testing.B` benchmarks of the [regression gate](#regression-gate) report and
-gate the allocations per operation of individual paths.
-
-**A reference run** is one at full scale, with the gateway, the mock and the
-load generator each pinned to CPUs of their own, no two sharing one, and valid
-load runs. Everything else is a smoke run.
+- **Open loop:** schedule request `k` at `start + k/rate`, without waiting for
+  completion. In-flight/backlog bounds count drops rather than hiding delay.
+- **Scheduled latency:** measure from scheduled send to response end or validated
+  stream terminal. TTFT uses first data frame; missing terminal/error is failure.
+  Warmup is excluded from latency/error histograms, but sustained completion rate,
+  process CPU/allocations and metadata cover their declared whole-run windows.
+- **HDR:** three significant figures, one microsecond–one hour; bounded storage.
+- **Baseline subtraction:** each gateway follows its own direct-to-mock baseline
+  in the same session. Added percentiles are differences, not paired request
+  samples. Compare baseline drift. Negative p50/p95 beyond jitter (one millisecond
+  or 10% of baseline) invalidates; no negative percentile can satisfy a target.
+- **Separate peers:** deterministic OpenAI/Anthropic/Gemini mocks have controlled
+  TTFT/interval/output/errors and dedicated CPUs on reference runs.
+- **Validity:** no dropped/abandoned sends, ≤1% later than five milliseconds,
+  ≥99% offered rate and ≤0.1% failed requests for either load (S6's end-cancelled
+  held streams are separate). Shedding, excessive negative latency or unfinished
+  metadata drain invalidates; latency targets require valid loads.
+- **Evidence:** added p50/p95/p99, TTFT, completed throughput, net idle-adjusted CPU/
+  request, requests/CPU-second, RSS before/peak/after, errors and metadata delivered/
+  admitted. Runtime allocation counters estimate whole-process/request cost;
+  `testing.B` isolates individual paths.
+- **Reference:** full scale, valid loads, disjoint gateway/mock/generator CPU pins.
+  Every other run is smoke; neither a gate nor a small sample proves fleet capacity.
 
 ## Scenarios and targets
 
@@ -412,9 +342,10 @@ success rate beside it.
 
 ## Regression gate
 
-Hot-path microbenchmarks (`testing.B`) sit beside the code they measure, in the
-test files of these packages. Each iteration does the work of one request, or
-one stream, on a fixed fixture with no database or network:
+`make bench-gate` alternates merge-base/working-tree samples, compares pinned
+benchstat time/allocations and fails reproducible statistically significant >10%
+regressions. Bytes/op report without gating. Flagged names remeasure with twice
+samples before failure. CI retains samples/report as `bench-gate`.
 
 | Path | Benchmark | What an iteration does |
 | --- | --- | --- |
@@ -430,64 +361,6 @@ one stream, on a fixed fixture with no database or network:
 | Plugin signing | `internal/plugins` `BenchmarkSign` | Runs a plugin's signing hook, interpreted and compiled |
 | Request parsing | `internal/oif` `BenchmarkPlainEnd` | Finds the end of the plain run of a 405,000-byte JSON string, as the parser reads a prompt, eight bytes at a time and, beside it, one byte at a time |
 
-The gate skips four benchmarks of the encoder itself, `BenchmarkLoad`,
-`BenchmarkCount`, `BenchmarkUnbrokenPieces` and `BenchmarkMeterWorstCase`,
-whose input is chosen to be slow rather than to be what a request pays
-([tests](../tests/README.md#microbenchmarks) says why); `BENCH_SKIP` selects
-them.
-
-What they do not cover is the rest of the request: the HTTP server, the
-executor's dispatch to the upstream, usage accounting and the metadata pipeline,
-and the admission checks that reach Valkey, which need services and are measured
-by the scenarios instead. The allocations per request of the whole gateway are
-measured by the scenarios, which see everything a request touches; the gate
-gates the allocations per operation of the paths above. A feature that is not
-configured allocates nothing for a request, and `TestUnconfiguredFeaturesAddNoAllocations`
-in `internal/gateway` holds that with `testing.AllocsPerRun` as an ordinary unit
-test, so `make test` does too.
-
-`make bench-gate` (`scripts/bench-gate.sh`) runs every `internal` package that
-declares a benchmark at the pull request's merge base and at the working tree,
-one sample of each in turn so that drift on the machine hits both alike, then
-compares them with a pinned `benchstat`. `scripts/check-benchstat.mjs` fails on
-a statistically significant regression above 10% in time or allocations per
-operation. Bytes per operation are reported and never gate. The `bench` job of
-the CI workflow runs the same script on every pull request and keeps its samples
-and report as the `bench-gate` artifact. A sample of every benchmark takes about
-two minutes at the default benchtime and about 80 seconds at 500 ms on an
-8-vCPU machine. Measured with the gate's own invocation (`go test -p 1`, the
-seven packages in turn) on a shared VM at a load average of 1.5 to 2.3, a sample
-took 136 seconds of wall time at the default, 125 of them in benchmarks, and 76
-and 80 seconds at 500 ms in two runs, 65 and 68 of them in benchmarks. The
-estimate package is 26 to 29 seconds of the 500 ms sample, about two fifths of
-its benchmark time. So CI runs each for 500 ms (`BENCH_TIME`) to keep ten
-samples a side. That is about 26 minutes for the two sides before the trees are
-compiled, and a regression is measured again, alone, with twice the samples. The
-job's timeout is an hour, which leaves room for a slower runner or several
-benchmarks to confirm; if the job nears it, lower `BENCH_COUNT` (at least 6) or
-`BENCH_TIME` rather than raising the timeout.
-
-A benchmark is compared only if the base has it too, so a pull request that adds
-one is not gated by it, and its first comparison is the next pull request's.
-
-The gate is built so that it cannot pass without having compared anything:
-
-- **A regression must reproduce.** One comparison in twenty reports a change in
-  a benchmark that did not change, and the gate compares many. The benchmarks
-  that show a regression in the first comparison are measured again, alone and
-  with twice the samples, and fail the gate only if they show it again. The
-  summary lists the ones that did not as noise.
-- **Nothing compared is a failure.** A pull request that deletes or renames
-  every benchmark, or one in which the base or the head produced no benchmark
-  result, fails rather than passes, and says so in the job summary. The one
-  exception is a base that declares no benchmark at all, which has nothing to
-  regress from: the gate says that and passes.
-- **Removing a benchmark is a decision.** A benchmark of the base that the head
-  lacks is one whose regressions the gate can no longer see, so it fails the
-  gate unless the removal is allowed: set `BENCH_ALLOW_REMOVED=1`, which CI does
-  for a pull request that carries the `allow-removed-benchmarks` label (the label
-  is read when the workflow starts, so add it before pushing, or push again).
-
 | Variable | Meaning |
 | --- | --- |
 | `BENCH_BASE` | Base ref (default `origin/main`, then `main`) |
@@ -497,8 +370,19 @@ The gate is built so that it cannot pass without having compared anything:
 | `BENCH_TIME`, `BENCH_RUN`, `BENCH_FILTER` | `-benchtime`, the `-bench` pattern and a package filter |
 | `BENCH_OUT` | Output directory (`.local/bench/gate`) |
 
-The gate compares a pull request with its base. It does not replace the
-scenarios, which measure the whole gateway.
+Encoder stress benchmarks `BenchmarkLoad`, `BenchmarkCount`,
+`BenchmarkUnbrokenPieces` and `BenchmarkMeterWorstCase` are skipped through
+`BENCH_SKIP`: artificial worst cases do not represent request cost. Whole network/
+Valkey/accounting pipeline cost belongs to scenarios, not these in-memory paths.
+`TestUnconfiguredFeaturesAddNoAllocations` separately holds zero-cost disabled
+admission behavior.
+
+New names are reported, not comparable until a later base includes them. Missing
+head names fail unless reviewed `BENCH_ALLOW_REMOVED=1` (CI's
+`allow-removed-benchmarks` label). Empty output/no shared names fails; only a base
+with no benchmarks is explicitly exempt. Do not raise thresholds to clear noise.
+Use at least six samples and confirm flags. CI uses 500 ms samples and a one-hour
+job; lower duration/count within these bounds rather than extending deadlines.
 
 ## Performance budget
 
@@ -552,78 +436,31 @@ None yet.
 
 ## Smoke run
 
-**These are reduced-rate, non-reference numbers from a shared 8 vCPU virtual
-machine.** They are not reference results: the machine is a shared development
-VM without pinned reference hardware, the rates are 1% to 30% of the roadmap's,
-and the services are the development compose file's. They are not comparable
-with LiteLLM's published figures, which come from a different test on a
-different deployment. **No target that needs full scale or a comparison has been
-judged**: each is `not_checked` or `needs_comparison` in the results, and this
-guide does not judge them. The metadata target is judged at any scale and was
-`met` in every S1 to S3 run below. The figures below are copied
-from the result files that `scripts/bench.sh` wrote under `.local/` (rounded to
-two decimals, and to one for requests per CPU second and memory), to show what
-the harness produces and that it runs end to end on this tree.
+**Historical, reduced-rate, non-reference measurements.** These establish that
+harness/comparison paths ran, not that full-scale targets passed. Values are from
+single shared-machine runs, rounded; no fresh capacity claim follows from them.
 
-| | |
+| Record | Value |
 | --- | --- |
-| Run | 2026-10-03, 22:16 to 23:04 UTC, by a coding agent session, one scenario to a `scripts/bench.sh` invocation |
-| Commit | `9ef71679`, on a clean tree. The commit that records these numbers also changes the wording of S6's validity message and the README's S6 notes, which alters no measurement |
-| Host | KVM guest with 8 vCPUs (`nproc` 8), Intel Core Processor (Haswell, no TSX), 22.9 GiB and no swap, kernel 7.0.0-34-generic, Go 1.27.1, Node.js 26.8.2, Docker 29.8.2 with Compose 5.5.1. The guest exposes no CPU frequency governor. `net.ipv4.tcp_mem` is 279588 372786 559176 pages and the descriptor limit 524,288 |
-| Machine state | Before every run: no benchmark, `olp`, mock, load generator, LiteLLM or `go test` process, no container and no Docker volume. The machine was not idle: a host PostgreSQL 18, a Valkey server, the Docker daemon and some developer tooling sessions (editors, coding agents) ran beside the runs. A 3-second `vmstat` before S3 and every run after it showed 97 to 99% idle across the 8 CPUs; it was not taken before S1, S2, S4 and S5. The one-minute load average at the check was 0.73 before S1 and 1.39, 2.85 and 1.62 before S2, S4 and S5, which ran back to back and so include the scenario before. From S3 on, the script waited for it to fall below 0.8 first, and it read 0.49 to 0.79. The load the harness read when each test started, after the services and the build, is in the first table |
-| CPU pinning | Gateway CPUs 0-1, mock upstream 2-3, load generator 4-5, so the gateway had 2 vCPUs (read back from `/proc`) and `pins_disjoint` is true in every result. CPUs 6-7 were left free. The PostgreSQL and Valkey containers were not pinned, nor were the harness's other processes |
-| OLP | `olp 0.1.0` from `make build-go`, SHA-256 `ccebd834a24195f6c6f11823db8f5d8ad4c09f453672b428022657d14f4f9430`, for every run |
-| Mock upstream | Two builds of the same source. `go build -mod=readonly -trimpath -tags bench -o .local/bin/mockupstream ./tests/bench/cmd/mockupstream` (dynamically linked, SHA-256 `4b40fa6b12ef755d24f23dee602c80f40087454486b439b38b509c0943308db5`) served S1 to S5, the valid S6 run and the first default-settings S6 run. `scripts/bench-compare.sh` then replaced that file with its own static build (`CGO_ENABLED=0`, SHA-256 `fb9fed965c3bfd99d8c3b0e2732e5352657795f1cd32bfe7b0af048c2f654f5c`), which served the comparison, the two higher-rate points and the second default-settings S6 run. The results record the `olp` hash and not the mock's |
-| Services | `scripts/bench.sh`'s default (`BENCH_SERVICES=compose`): `postgres:18` (image ID `sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722`) and `valkey/valkey:9` (`sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd`, `appendonly yes`), with the development compose file's settings |
-| Gateway limits | Derived by the scenarios and recorded in each result under `gateway.derived_limits`; for example 1,032 requests in flight and a pool of 512 connections for S1, and 1,624 and 664 for S6 |
+| Initial run | 2026-10-03, clean `9ef71679`; OLP 0.1.0 binary SHA-256 `ccebd834a24195f6c6f11823db8f5d8ad4c09f453672b428022657d14f4f9430` |
+| Host | Shared 8-vCPU Haswell KVM guest, 22.9 GiB/no swap, kernel 7.0.0-34, Go 1.27.1, Node 26.8.2, Docker 29.8.2/Compose 5.5.1 |
+| Pins | Gateway 0–1, mock 2–3, generator 4–5; PostgreSQL 18/Valkey 9 AOF everysec and developer processes unpinned |
+| Timing | 10-second warmup/60-second measured unless S6 explicitly overrides |
+| Limitations | VM load varied; mock rebuilt dynamic→static for later points; results retain OLP hash, not mock hash; exact original service/build digests remain in file history |
 
-Each scenario was run once with these settings, S6 apart (below), from the
-repository root, after `make build-go` and the mock's build above had made the
-binaries:
+Representative historical commands:
 
 ```sh
 export OLP_TEST_BINARY=$PWD/.local/bin/olp OLP_BENCH_MOCK_BINARY=$PWD/.local/bin/mockupstream
 export OLP_BENCH_GATEWAY_CPUS=0-1 OLP_BENCH_MOCK_CPUS=2-3 OLP_BENCH_LOADGEN_CPUS=4-5
-
-# S1, S2, S4 and S5, one invocation each: 100 requests per second,
-# the default 10 s of warmup and 60 s measured
 OLP_BENCH_SCALE=0.1 BENCH_SCENARIOS=S1 scripts/bench.sh
-
-# S3: 30 requests per second
 OLP_BENCH_SCALE=0.01 BENCH_SCENARIOS=S3 scripts/bench.sh
-
-# S6: 150 streams, opened over 18 s
 OLP_BENCH_SCALE=0.015 OLP_BENCH_WARMUP=3s OLP_BENCH_DURATION=15s BENCH_SCENARIOS=S6 scripts/bench.sh
-
-# Two further points at higher rates, with OLP_BENCH_OUT=.local/bench-extra
-OLP_BENCH_SCALE=0.3 BENCH_SCENARIOS=S1 scripts/bench.sh    # 300 requests per second
-OLP_BENCH_SCALE=0.03 BENCH_SCENARIOS=S3 scripts/bench.sh   # 90 requests per second
-
-# S6 again at the default warmup and period, with OLP_BENCH_OUT=.local/bench-extra
-OLP_BENCH_SCALE=0.015 OLP_BENCH_KEEP_GATEWAY_LOG=1 BENCH_SCENARIOS=S6 scripts/bench.sh
+OLP_BENCH_SCALE=0.3 BENCH_SCENARIOS=S1 scripts/bench.sh
+OLP_BENCH_SCALE=0.03 BENCH_SCENARIOS=S3 scripts/bench.sh
 ```
 
-After the valid S6 run and before the comparison, `scripts/bench-compare.sh`
-rebuilt the mock upstream in place (see the table above). The last three
-invocations above, S1 at 300 requests per second, S3 at 90 and the second
-default-settings S6 run, therefore ran against the static build, and the earlier
-ones against the dynamic one. The first default-settings S6 run, which is not in
-the block, was made earlier, on the dynamic build.
-
-The scale was chosen at the start (0.1, and the smaller S3 and S6 below) and not
-searched for, so these are not the highest rates the gateway holds: in S1 to S5
-it used between 0.36 and 1.23 of its 2 CPUs, on average over each run. Every
-run below was valid at the first attempt, so no rate was lowered, apart from
-S6, whose default settings did not give a valid run at 150 streams
-([S6](#s6-held-streams)).
-
 ### S1 to S5
-
-Added latency is the difference of percentiles between the same load straight at
-the mock and through the gateway, for all requests (`added_latency_ms.all`); the
-time to first token is for the streaming scenarios. The sustained rate is what
-finished in the measured period, 60 seconds after 10 of warmup. `load` is the
-one-minute load average the harness read at the start of the test.
 
 | Scenario | Scale | Target rps | Sustained rps | Valid | Added p50 / p95 / p99 ms | TTFT overhead p50 / p95 / p99 ms | Load |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -635,12 +472,6 @@ one-minute load average the harness read at the start of the test.
 | S1 | 0.3 | 300 | 300 | yes | 1.38 / 2.03 / 4.59 | - | 2.32 |
 | S3 | 0.03 | 90 | 90.03 | yes | 8.32 / 20.58 / 27.65 | 6.62 / 17.46 / 24.30 | 2.28 |
 
-In every load of these seven runs, the gateway's and the direct-to-mock
-baseline's alike, the offered rate was 99.997% or more of the target (the lowest
-is S2's baseline, at 99.9974%, and the lowest of the gateway loads is S4's, at
-99.9982%), and none of the runs had a failed request, a dropped one or a
-negative added latency. The last two rows are the higher-rate points.
-
 | Scenario | Target rps | Gateway CPUs used (of 2) | Requests per CPU second | CPU ms per request | RSS before / peak / after MiB | Errors % | Metadata delivered | Wait for metadata after the load | Allocations per request: objects / KiB |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | S1 | 100 | 0.43 | 232.7 | 4.30 | 185.7 / 188.7 / 69.7 | 0 | 7000 of 7000 | 0.0 s | 1,063 / 86.0 |
@@ -651,47 +482,22 @@ negative added latency. The last two rows are the higher-rate points.
 | S1 | 300 | 0.64 | 470.1 | 2.13 | 185.0 / 187.6 / 71.6 | 0 | 21000 of 21000 | 68.7 s | 844 / 69.3 |
 | S3 | 90 | 0.91 | 99.4 | 10.06 | 186.2 / 186.2 / 80.5 | 0 | 6300 of 6300 | 4.6 s | 1,797 / 3,384.2 |
 
-CPU per request, requests per CPU second and allocations are over the whole run,
-warmup included, and the requests the gateway answered successfully; the
-gateway's CPU is net of what it spends idle. Metadata delivered is events in
-PostgreSQL against requests admitted, after the harness waited for them to stop
-arriving; in every run the pipeline had delivered all of them, none were dropped
-or abandoned, Valkey was healthy and `request-metadata-lost` was `met`. The wait
-shows how far behind the load the one consumer was: in the runs that had more
-than a few events to wait for, it persisted 116 to 164 events a second, and at
-300 requests per second, a rate above that, 11,288 events were still to arrive
-when the load ended.
-
-What else the results record: S3's key accrued a cost with no unpriced attempt,
-so the run did the budget work it exists for; S4's route made 7,000 attempts on
-the second target and 7 on the first, the five failures that open its circuit
-and the probes after it, with 1.001 attempts per request; S5's upstream calls were all OpenAI Chat
-Completions (7,000 of them), as the guide describes.
+Every point was valid with no drops/failures, ≥99.997% offered schedule and eventual
+complete metadata. Drain wait reveals lag, not loss: the then-current consumer
+persisted 116–164 events/s and had 11,288 pending after 300 RPS. Do not treat that
+historical implementation as current worker capacity. S3 was priced; S4 had
+7000 second-target/seven first-target attempts including circuits/probes; S5 was
+all translated OpenAI Chat upstream calls.
 
 ### S6, held streams
 
-S6 holds streams open against readers that take 8 KiB a second, so its figures
-are not those of the other scenarios: no stream finishes, and the generator
-cancels them at the end.
+Slow readers consume 8 KiB/s; end cancellation is not successful completion.
 
 | Settings | Streams the generator held | Streams the gateway held at once | Valid |
 | --- | --- | --- | --- |
 | Defaults: 10 s warmup and 60 s measured, streams opened over 70 s | 150 | 66 | NO, twice |
 | `OLP_BENCH_WARMUP=3s OLP_BENCH_DURATION=15s`, streams opened over 18 s | 150 | 150 | yes |
 | `OLP_BENCH_SCALE=0.1` at the defaults, which S6 now shortens to 18 s | 1,000 | 997 | yes, bounded by the kernel |
-
-At the default settings the gateway ended every stream at 30.2 to 30.5 seconds
-(150 of 150 `client_cancelled` records with that duration in the gateway's log
-of the second run), which is the 30-second write deadline of
-[`responseWriteTimeout`](../internal/gateway/server.go), so only the streams of
-the last 30 seconds were open at once: 66 of 150 in both runs, where the
-harness's message said to raise the length of the completions. Streams opened
-over 70 seconds and ended after 30 are never all open at once, whatever their
-number, as long as their writes block soon after they open, as these did. The
-message now names both causes. At 18 seconds all 150 were open together from
-the opening of the last until the gateway ended the first, 12 seconds later,
-and the generator canceled the rest at 33 seconds. 150 is the most streams run
-here: a larger count was not tried.
 
 | Measure | Value (valid run) |
 | --- | --- |
@@ -705,48 +511,28 @@ here: a larger count was not tried.
 | Allocations per stream held | 665,136 objects and 56.7 MiB, over the whole run and net of idle |
 | Metadata | 150 of 150 delivered |
 
-At 273 CPU milliseconds each, the 150 streams cost about 41 CPU seconds, which
-would be 2.3 CPUs if all of it fell in the 18 seconds the streams were opened
-over: more than the gateway's two, and the time to first token grew with it. That
-was not checked beyond the arithmetic. The default settings' first run, with
-streams opened over 70 seconds, spent 304.71 ms for each stream and added 2.22,
-2.90 and 11.23 ms of time to first token at p50, p95 and p99.
+Opening 150 over seventy seconds failed to hold them together because the
+30-second write deadline ended earlier streams. Eighteen-second opening held
+150/150; its CPU/TTFT/allocation costs above need independent scale qualification.
 
-After S6 began opening its streams over at most 18 seconds, it was run once at
-1,000 streams, with the same pins and `OLP_BENCH_SCALE=0.1` at the default
-warmup and period. Every stream reached the mock but 8, and the gateway held 997
-at once, so the window holds. The machine did not: the harness warned before the
-run that the held streams' socket buffers need about 6.8 GiB on loopback and the
-kernel starts limiting TCP memory at 1.4 GiB (`net.ipv4.tcp_mem`), and under
-that limit the gateway's own commands to Valkey and PostgreSQL on loopback timed
-out. Time to first token grew to 7.68, 15.61 and 19.20 seconds at p50, p95 and
-p99, 8 of the 833 measured streams failed with `502`, the gateway spent
-62.64 CPU ms for each stream (1.89 of its 2 CPUs over the 33-second run), its
-resident set peaked at 311.9 MiB, and all 1,001 metadata events were delivered.
-These figures measure the kernel's limit as much as the gateway; a larger run
-needs `tcp_mem` raised, or the generator and the mock on other hosts.
+The later 1000-stream run held 997 but was kernel-limited: about 6.8 GiB needed
+socket memory versus 1.4 GiB TCP-pressure threshold. Valkey/PostgreSQL commands
+also timed out. Eight/833 measured streams returned 502; TTFT p50/p95/p99 was
+7.68/15.61/19.20 seconds, CPU 62.64 ms/held stream, peak RSS 311.9 MiB and all
+1001 metadata events delivered. Its harness validity does not make it a capacity
+result. Larger runs need raised qualified kernel limits or remote peers.
 
 ### The comparison script
 
-`scripts/bench-compare.sh` was run for S1 to S5 on 2026-10-06, on `ed2586cb` with
-the tree of the change that batches the metadata consumer, in a result directory
-of its own, with the same pins (LiteLLM's two workers on CPUs 0-1) and these
-settings:
+Historical 2026-10-06 run at `ed2586cb` plus consumer-batching change, same CPU pins;
+S1–S5 ran at 3% with two LiteLLM workers. Shared load ranged 0.9–12.3; other tests
+ran during S2. S1 was repeated after a script edit. No full-scale comparative
+target was judged; smoke metadata target passed S1–S3.
 
 ```sh
 OLP_BENCH_SCALE=0.03 OLP_BENCH_GATEWAY_CPUS=0-1 OLP_BENCH_MOCK_CPUS=2-3 \
   OLP_BENCH_LOADGEN_CPUS=4-5 OLP_BENCH_OUT=.local/bench-compare scripts/bench-compare.sh
 ```
-
-Every scenario ran to the end against both gateways and the script wrote
-`compare.json` and `compare.md`. S1 was run a second time on its own, because
-the script it runs was edited while the first ran, and the summary was written
-again over the five scenarios with `scripts/bench-compare.mjs`. Each load ran for
-the default 60 seconds after 10 of warmup, at 30 requests a second, and S3 at
-90. The script judged none of the 14 targets that need full scale, and
-`request-metadata-lost`, the one judged at any scale, was `met` for S1 to S3.
-The load average at the start of a run ranged from 0.9 to 12.3, and Go unit
-tests pinned to CPUs 6-7 ran during S2.
 
 | Scenario | Gateway | p50 ms | p95 ms | p99 ms | TTFT p95 ms | rps/vCPU | req/cpu-s | cpu ms/req | peak MiB | errors % | Valid |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -761,38 +547,15 @@ tests pinned to CPUs 6-7 ran during S2.
 | S5 | OLP | 2.05 | 2.05 | 2.05 | 2.64 | 15.0 | 76.2 | 13.13 | 189 | 0.000 | yes |
 | S5 | LiteLLM | 31.74 | 65.54 | 101.38 | 63.55 | 15.0 | 22.1 | 45.34 | 1566 | 0.000 | yes |
 
-- **LiteLLM did not keep up with S2 and S3 on two workers.** In S2 its added
-  latency reached seconds while every request still succeeded. In S3 the
-  generator dropped 1,144 requests because 1,034 were already waiting on
-  LiteLLM, offered 60.6% of the schedule, and 47.04% of the requests that were
-  sent failed, so its run is invalid and both of S3's comparative targets read
-  "the LiteLLM run was not valid". This says what two workers did on this
-  machine at these rates, not what LiteLLM does when it is sized for them.
-- **S5's OLP latencies are one histogram step.** S5's streams last about
-  1.28 seconds, where the generator's histogram resolves about a millisecond, so
-  the gateway's and the baseline's percentiles differ by two steps at p50, p95
-  and p99 alike.
-
-LiteLLM ran as `ghcr.io/berriai/litellm:v1.103.2@sha256:f63fb81b831b170ec16851e23c36ac5bf52ef106b271406429524a2ed730bbfd`,
-in the `high-throughput` profile for S3 and `production` for the others. Its
-memory is the cgroup's, which is not the same measurement as OLP's resident set
-([reading a comparison](#reading-a-comparison)). The earlier comparison of S1
-alone at 5%, and an earlier smoke run of S2 to S5 against LiteLLM made with an
-earlier revision of the harness, are in the history of this file.
+LiteLLM S2 queued despite success; S3 offered only 60.6%, dropped 1144 and failed
+47.04%, so its comparative targets are invalid. This is two workers on this host,
+not correctly sized production LiteLLM. S5's identical OLP percentiles are HDR
+steps, not exact equal samples. Comparison uses the pinned image/profile above;
+cgroup memory versus OLP RSS is not like-for-like.
 
 ### Reading these figures
 
-- **Added latency is a difference of percentiles**, and at 100 requests per
-  second the p99 of a 60-second period rests on 60 requests. The tails of S2 and
-  S5 (p95 of 9.22 and 26.62 ms) are larger than those of the unary scenarios; S5
-  used 1.23 of the gateway's 2 CPUs on average. They were not investigated, and
-  nothing here says whether they come from the gateway, the machine or the
-  harness.
-- **CPU per request depends on the rate.** S1 cost 4.30 ms at 100 requests per
-  second and 2.13 ms at 300, and S3 11.91 ms at 30 and 10.06 at 90, so a figure
-  measured at a smoke rate is not the figure at full rate, and requests per CPU
-  second here are not what a CPU carries at the roadmap's rates.
-- **Allocations** are read from counters that trail by the objects of the
-  processors' cached spans, so at these rates they are indicative.
-- **The machine is shared**, and another tenant of the host or of the VM can
-  move any one of these figures; each was measured once.
+Percentile differences and p99 at small sample counts are noisy. S2/S5 tails were
+not investigated. CPU/request changes with offered rate; approximate allocation
+counters trail cached spans. Shared tenancy and single runs preclude production
+throughput or full-rate efficiency claims.

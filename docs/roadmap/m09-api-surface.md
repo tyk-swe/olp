@@ -27,7 +27,10 @@ inventing new cross-vendor shapes.
 
 ## Baseline
 
-| | OLP today | LiteLLM reference |
+Planning-time comparison; shipped behavior is authoritative in the
+[compatibility matrix](../compatibility.md) and [access guide](../access.md).
+
+| | Planning baseline | LiteLLM reference |
 | --- | --- | --- |
 | Retained resources | Files, batches and stored responses for OpenAI and Azure, with gateway-owned identifiers pinned to provider revision, slot and credential ([compatibility](../compatibility.md#files-batches-realtime-and-provider-retained-state)) | Files and batches across providers, [managed files](https://docs.litellm.ai/docs/proxy/litellm_managed_files) and [managed batches](https://docs.litellm.ai/docs/proxy/managed_batches) |
 | Durable jobs | Video jobs pinned to their revisions and reconciled by workers ([media](../gateway.md#media-and-durable-video-jobs)) | Background batch cost tracking (Enterprise) |

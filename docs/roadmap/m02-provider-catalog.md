@@ -23,7 +23,10 @@ catalog replaces hand-entered model facts and prices.
 
 ## Baseline
 
-| | OLP today | LiteLLM reference |
+Planning-time comparison; shipped behavior is authoritative in the
+[compatibility matrix](../compatibility.md) and [access guide](../access.md).
+
+| | Planning baseline | LiteLLM reference |
 | --- | --- | --- |
 | Connector kinds | `openai`, `openai_compatible`, `anthropic`, `gemini`, `vertex_ai`, `bedrock`, `azure_openai`, `plugin` ([`kinds.go`](../../internal/providers/kinds.go)) | [About 170 providers](https://docs.litellm.ai/docs/providers) |
 | Presets | 13 OpenAI-compatible presets ([configuration](../configuration.md#openai-compatible-provider-presets)) | Provider prefixes such as `xai/`, `ollama/`, `watsonx/` |
@@ -224,78 +227,35 @@ The catalog is advisory and never authoritative on its own:
 
 ### M2.1 Reviewed presets
 
-- The [`internal/vendors`](../../internal/vendors) table declares every
-  vendor's operations, dialects, refused and rewritten parameters, credential
-  placement, error classes and media wires once; capability rules,
-  certification eligibility, request shaping, discovery and the console read it
-  instead of their former hard-coded lists. Golden tests pinned the connector
-  matrix and onboarding catalogue before the refactor.
-- Fifty [OpenAI-compatible presets](../configuration.md#openai-compatible-provider-presets),
-  up from 13, each with a contract fixture in `tests/fixtures/vendors/`
-  transcribed from the vendor's documentation and a contract test of its URL,
-  refused parameters, usage, stream terminal and error envelope. A preset whose
-  vendor speaks a dialect exactly carries its profile, so it serves strict
-  routes as created; the console offers the profile, discovery and placeholder
-  endpoints from the preset. Candidates without a usable API are
-  [declined](#declined-candidates).
+`internal/vendors` owns reviewed wire facts; fifty compatible presets have
+contract fixtures. Defaults/certification/discovery read that table.
+[Declined candidates](#declined-candidates) remain explicit.
 
 ### M2.2 First-party profiles and codecs
 
-- The `vertex-openai` profile; the `sagemaker` kind with bearer tokens signed
-  from AWS credentials ([SageMaker AI](../providers/sagemaker.md)); the
-  `watsonx` kind with IBM Cloud IAM exchange ([watsonx.ai](../providers/watsonx.md));
-  Bedrock rerank through the Agent Runtime and Stability images through
-  InvokeModel ([Bedrock](../providers/bedrock.md)).
-- [Native generation dialects](../provider-profiles.md#native-generation-dialects):
-  `mistral-fim` and `cohere-chat-v2` at `/native/{dialect}/models/{route}`,
-  validated, metered and forwarded unchanged on strict routes, served by the
-  `mistral-fim` and composite `cohere-v2` profiles.
-- Connector hosting traits in one table, and a live-provider case for every
-  new target in `internal/connectors/live_test.go` and the live-providers
-  workflow. [Settled outcomes](#settled-during-implementation) record what
-  changed from the plan.
+Vertex OpenAI, SageMaker, watsonx, Bedrock rerank/Stability and strict native
+Mistral FIM/Cohere v2 ship with fixtures and live-test entry points.
+[Settled outcomes](#settled-during-implementation) preserve actual scope;
+compile/fixture evidence is not a paid-provider pass.
 
 ### M2.3 Media, embedding and rerank providers
 
-- A media codec registry in which a vendor's wire encodes and decodes each
-  operation, with a bounded step loop for vendors that answer
-  asynchronously: polls, uploads, cleanup, and products fetched without the
-  credential from any address the egress policy admits. Video jobs encode in
-  the wire their pinned provider revision names.
-- The vendors of [vendor media](../providers/media.md), each certified by a
-  costless authenticated request, or by its smallest real call where the
-  vendor offers none (Azure OpenAI, Vertex and Bedrock), with fixtures from
-  the vendor's documentation and an integration test through the gateway.
-- Jina, Together and Infinity rerank on a widened rerank decoder that reads
-  token usage and echoed document objects. [Settled outcomes](#settled-during-implementation-1)
-  record the declines.
+The media registry supports bounded asynchronous steps, cleanup and uncredentialed
+product fetches; each served wire has conformance fixtures and gateway tests.
+See [media](../providers/media.md) and
+[settled outcomes](#settled-during-implementation-1) for declines.
 
 ### M2.4 Reference catalog
 
-- [`internal/signing`](../../internal/signing): detached multi-key Ed25519
-  signatures over exact bytes, the `olpsign` tool, a committed development
-  key, and release builds that trust release keys alone.
-- The [reference catalog](../catalog.md): schema, canonical form, signature
-  verification before any listener opens and in `olp doctor`, and model facts,
-  prices with every unpriced component named, and lifecycle dates for the
-  vendors under [coverage](../catalog.md#coverage), each with provenance.
-- Catalog [pricing sources](../operations.md#accounting-delivery-and-shutdown)
-  with signature checks and anti-rollback; discovery suggestions accepted as
-  `catalog@<sha256>` facts that invalidate certification; deprecation and
-  retirement warnings in the models and route consoles and APIs; and
-  per-family token-estimation factors read from the catalog.
-- The release workflow signs the catalog and plugin index with the CI-held
-  key, builds with the `release` tag and publishes both documents; a weekly
-  workflow opens `catalog-drift` issues.
+[Signed catalog](../catalog.md), `internal/signing`, startup/doctor verification,
+anti-rollback pricing snapshots, provenance-tagged discovery facts and lifecycle
+warnings ship. Release builds trust release keys; development keys stay separate.
 
 ### M2.5 Plugin ecosystem
 
-- [Authoring templates](../plugin-authoring.md#templates) for OAuth 2.0
-  client credentials, signed requests and token exchange, built to WebAssembly
-  and inspected by the plugin runtime in tests.
-- The [reviewed plugin index](../plugins.md#reviewed-plugin-index), signed like
-  the catalog and browsable in the console; installing, approving and
-  permitting stay owner actions.
+Tested SDK [templates](../plugin-authoring.md#templates) and a signed
+[reviewed index](../plugins.md#reviewed-plugin-index) ship. Installation/approval/
+unconfined permission remain explicit owner actions.
 
 ## Open items
 
@@ -317,17 +277,15 @@ The catalog is advisory and never authoritative on its own:
 
 ## Exit criteria
 
-**Qualification handoff.** Implementation is complete. At the owner's request,
-long-running reference-hardware, live-provider and release qualification is
-assigned to the human PR reviewer, who will qualify and merge. Checked items
-labelled "Human qualification handoff" record that handoff, not a passing result.
-The original acceptance criteria and missing evidence remain below for review.
+Implementation and fixture evidence are complete. Paid-provider and release
+signing qualification are separate; checked implementation items do not imply
+unrun external results.
 
 - [x] Every candidate in M2.1 ships as a preset with a passing contract test, or
       is recorded in this file with the reason it was declined.
       *Evidence:* `TestEveryPresetHasReviewedEvidence` checks every preset against its
       fixture; [declined candidates](#declined-candidates) records the rest.
-- [x] **Human qualification handoff:** Every target in M2.2 is certifiable through its profile or codec and has a
+- [ ] **Live qualification pending:** Every target in M2.2 is certifiable through its profile or codec and has a
       live-provider test.
       *Done:* each target is certifiable through the profile, kind or dialect
       its [settled outcome](#settled-during-implementation) names, and has a
@@ -348,7 +306,7 @@ The original acceptance criteria and missing evidence remain below for review.
       refresh tests in `internal/usage`. The release workflow re-signs with the
       release key `release-2026a`, whose public key is in
       `internal/signing/keys.go` and whose seed is the repository's
-      `OLP_SIGNING_KEY` secret; no release has been signed with it yet.
+      `OLP_SIGNING_KEY` secret; release signing requires release-specific evidence.
 - [x] The catalog covers every model of every catalog vendor with published list
       prices, each component either priced or marked `unrepresentable`.
       *Evidence:* 714 models of 32 vendors, transcribed on 2026-10-05; the

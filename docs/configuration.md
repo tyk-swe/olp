@@ -61,8 +61,8 @@ bind.
 | `OLP_SHUTDOWN_TIMEOUT` | `30s` | Shared HTTP, metadata, delivery and worker shutdown budget (1ms–10m). |
 | `OLP_DEPENDENCY_REQUEST_TIMEOUT` | `2s` | Per-request dependency deadline (1ms–1m). |
 | `OLP_STARTUP_TIMEOUT` | `10s` | Startup and ordinary maintenance deadline (1ms–1m). |
-| `OLP_METRICS_TENANT_LABELS`                    | empty                                                           | Optional business-metric tenant labels from `project`, `key`, `end_user`. Empty keeps only the metric's route, provider kind, direction or currency labels.                                              |
-| `OLP_METRICS_SERIES_CAP`                       | `5000`                                                          | Per-process bound on active business-metric series (64–1000000); overflow is counted at `olp_metrics_series_overflow_total`.                                                                             |
+| `OLP_METRICS_TENANT_LABELS` | empty | Optional business-metric tenant labels from `project`, `key`, `end_user`. Empty keeps only the metric's route, provider kind, direction or currency labels. |
+| `OLP_METRICS_SERIES_CAP` | `5000` | Per-process bound on active business-metric series (64–1000000); overflow is counted at `olp_metrics_series_overflow_total`. |
 
 At maximum connection age the server stops admitting requests on that connection
 and sends HTTP/2 GOAWAY. Existing streams have the configured drain interval to
@@ -197,58 +197,58 @@ documentation is silent. A preset whose vendor speaks Chat Completions exactly
 selects the `compatible-chat` profile, so it can serve strict routes; choose
 **Automatic** to use parameter defaults instead.
 
-| ID                      | Provider                           | Endpoint                                                                            | Profile           |
-| ----------------------- | ---------------------------------- | ----------------------------------------------------------------------------------- | ----------------- |
-| `groq`                  | Groq                               | `https://api.groq.com/openai/v1`                                                    | `compatible-chat` |
-| `mistral`               | Mistral                            | `https://api.mistral.ai/v1`                                                         |                   |
-| `openrouter`            | OpenRouter                         | `https://openrouter.ai/api/v1`                                                      | `compatible-chat` |
-| `together`              | Together AI                        | `https://api.together.ai/v1`                                                        |                   |
-| `vllm`                  | vLLM                               | `https://vllm.example.internal/v1` (placeholder)                                    |                   |
-| `deepseek`              | DeepSeek                           | `https://api.deepseek.com`                                                          |                   |
-| `fireworks`             | Fireworks                          | `https://api.fireworks.ai/inference/v1`                                             | `compatible-chat` |
-| `deepinfra`             | DeepInfra                          | `https://api.deepinfra.com/v1/openai`                                               |                   |
-| `huggingface`           | Hugging Face                       | `https://router.huggingface.co/v1`                                                  |                   |
-| `cohere`                | Cohere                             | `https://api.cohere.ai/compatibility/v1`                                            |                   |
-| `cohere-native-v2`      | Cohere native v2                   | `https://api.cohere.ai/v2`                                                          | `cohere-v2`       |
-| `jina`                  | Jina AI                            | `https://api.jina.ai/v1`                                                            |                   |
-| `elevenlabs`            | ElevenLabs                         | `https://api.elevenlabs.io/v1`                                                      |                   |
-| `deepgram`              | Deepgram                           | `https://api.deepgram.com/v1`                                                       |                   |
-| `assemblyai`            | AssemblyAI                         | `https://api.assemblyai.com`                                                        |                   |
-| `runway`                | Runway                             | `https://api.dev.runwayml.com/v1`                                                   |                   |
-| `stability`             | Stability AI                       | `https://api.stability.ai`                                                          |                   |
-| `recraft`               | Recraft                            | `https://external.api.recraft.ai/v1`                                                |                   |
-| `bfl`                   | Black Forest Labs                  | `https://api.bfl.ai/v1`                                                             |                   |
-| `voyage`                | Voyage AI                          | `https://api.voyageai.com/v1`                                                       |                   |
-| `xai`                   | xAI                                | `https://api.x.ai/v1`                                                               | `compatible-chat` |
-| `cerebras`              | Cerebras                           | `https://api.cerebras.ai/v1`                                                        | `compatible-chat` |
-| `sambanova`             | SambaNova                          | `https://api.sambanova.ai/v1`                                                       | `compatible-chat` |
-| `nebius`                | Nebius Token Factory               | `https://api.tokenfactory.nebius.com/v1`                                            | `compatible-chat` |
-| `novita`                | Novita AI                          | `https://api.novita.ai/openai/v1`                                                   |                   |
-| `nvidia-nim`            | NVIDIA NIM                         | `https://integrate.api.nvidia.com/v1`                                               |                   |
-| `featherless`           | Featherless                        | `https://api.featherless.ai/v1`                                                     |                   |
-| `baseten`               | Baseten                            | `https://inference.baseten.co/v1`                                                   |                   |
-| `moonshot`              | Moonshot AI                        | `https://api.moonshot.ai/v1`                                                        | `compatible-chat` |
-| `moonshot-cn`           | Moonshot AI (China)                | `https://api.moonshot.cn/v1`                                                        | `compatible-chat` |
-| `dashscope`             | Alibaba Cloud Model Studio         | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`                            | `compatible-chat` |
-| `dashscope-cn`          | Alibaba Cloud Model Studio (China) | `https://dashscope.aliyuncs.com/compatible-mode/v1`                                 | `compatible-chat` |
-| `zai`                   | Z.ai                               | `https://api.z.ai/api/paas/v4`                                                      |                   |
-| `zhipu`                 | Zhipu BigModel                     | `https://open.bigmodel.cn/api/paas/v4`                                              |                   |
-| `minimax`               | MiniMax                            | `https://api.minimax.io/v1`                                                         | `compatible-chat` |
-| `minimax-cn`            | MiniMax (China)                    | `https://api.minimax.cn/v1`                                                         | `compatible-chat` |
-| `volcengine-ark`        | Volcengine Ark                     | `https://ark.cn-beijing.volces.com/api/v3`                                          | `compatible-chat` |
-| `byteplus-modelark`     | BytePlus ModelArk                  | `https://ark.ap-southeast.bytepluses.com/api/v3`                                    | `compatible-chat` |
-| `scaleway`              | Scaleway Generative APIs           | `https://api.scaleway.ai/v1`                                                        | `compatible-chat` |
-| `ovhcloud`              | OVHcloud AI Endpoints              | `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1`                                  | `compatible-chat` |
-| `nscale`                | Nscale                             | `https://inference.api.nscale.com/v1`                                               | `compatible-chat` |
-| `databricks`            | Databricks                         | `https://your-workspace.cloud.databricks.com/ai-gateway/mlflow/v1` (placeholder)    |                   |
-| `snowflake-cortex`      | Snowflake Cortex                   | `https://your-account.snowflakecomputing.com/api/v2/cortex/v1` (placeholder)        |                   |
-| `cloudflare-workers-ai` | Cloudflare Workers AI              | `https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/v1` (placeholder) |                   |
-| `vercel-ai-gateway`     | Vercel AI Gateway                  | `https://ai-gateway.vercel.sh/v1`                                                   |                   |
-| `ollama`                | Ollama                             | `https://ollama.example.internal/v1` (placeholder)                                  |                   |
-| `lmstudio`              | LM Studio                          | `https://lmstudio.example.internal/v1` (placeholder)                                |                   |
-| `llamacpp`              | llama.cpp server                   | `https://llamacpp.example.internal/v1` (placeholder)                                |                   |
-| `infinity`              | Infinity                           | `https://infinity.example.internal` (placeholder)                                   |                   |
-| `docker-model-runner`   | Docker Model Runner                | `https://model-runner.example.internal/engines/v1` (placeholder)                    |                   |
+| ID | Provider | Endpoint | Profile |
+| --- | --- | --- | --- |
+| `groq` | Groq | `https://api.groq.com/openai/v1` | `compatible-chat` |
+| `mistral` | Mistral | `https://api.mistral.ai/v1` | |
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | `compatible-chat` |
+| `together` | Together AI | `https://api.together.ai/v1` | |
+| `vllm` | vLLM | `https://vllm.example.internal/v1` (placeholder) | |
+| `deepseek` | DeepSeek | `https://api.deepseek.com` | |
+| `fireworks` | Fireworks | `https://api.fireworks.ai/inference/v1` | `compatible-chat` |
+| `deepinfra` | DeepInfra | `https://api.deepinfra.com/v1/openai` | |
+| `huggingface` | Hugging Face | `https://router.huggingface.co/v1` | |
+| `cohere` | Cohere | `https://api.cohere.ai/compatibility/v1` | |
+| `cohere-native-v2` | Cohere native v2 | `https://api.cohere.ai/v2` | `cohere-v2` |
+| `jina` | Jina AI | `https://api.jina.ai/v1` | |
+| `elevenlabs` | ElevenLabs | `https://api.elevenlabs.io/v1` | |
+| `deepgram` | Deepgram | `https://api.deepgram.com/v1` | |
+| `assemblyai` | AssemblyAI | `https://api.assemblyai.com` | |
+| `runway` | Runway | `https://api.dev.runwayml.com/v1` | |
+| `stability` | Stability AI | `https://api.stability.ai` | |
+| `recraft` | Recraft | `https://external.api.recraft.ai/v1` | |
+| `bfl` | Black Forest Labs | `https://api.bfl.ai/v1` | |
+| `voyage` | Voyage AI | `https://api.voyageai.com/v1` | |
+| `xai` | xAI | `https://api.x.ai/v1` | `compatible-chat` |
+| `cerebras` | Cerebras | `https://api.cerebras.ai/v1` | `compatible-chat` |
+| `sambanova` | SambaNova | `https://api.sambanova.ai/v1` | `compatible-chat` |
+| `nebius` | Nebius Token Factory | `https://api.tokenfactory.nebius.com/v1` | `compatible-chat` |
+| `novita` | Novita AI | `https://api.novita.ai/openai/v1` | |
+| `nvidia-nim` | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | |
+| `featherless` | Featherless | `https://api.featherless.ai/v1` | |
+| `baseten` | Baseten | `https://inference.baseten.co/v1` | |
+| `moonshot` | Moonshot AI | `https://api.moonshot.ai/v1` | `compatible-chat` |
+| `moonshot-cn` | Moonshot AI (China) | `https://api.moonshot.cn/v1` | `compatible-chat` |
+| `dashscope` | Alibaba Cloud Model Studio | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `compatible-chat` |
+| `dashscope-cn` | Alibaba Cloud Model Studio (China) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `compatible-chat` |
+| `zai` | Z.ai | `https://api.z.ai/api/paas/v4` | |
+| `zhipu` | Zhipu BigModel | `https://open.bigmodel.cn/api/paas/v4` | |
+| `minimax` | MiniMax | `https://api.minimax.io/v1` | `compatible-chat` |
+| `minimax-cn` | MiniMax (China) | `https://api.minimax.cn/v1` | `compatible-chat` |
+| `volcengine-ark` | Volcengine Ark | `https://ark.cn-beijing.volces.com/api/v3` | `compatible-chat` |
+| `byteplus-modelark` | BytePlus ModelArk | `https://ark.ap-southeast.bytepluses.com/api/v3` | `compatible-chat` |
+| `scaleway` | Scaleway Generative APIs | `https://api.scaleway.ai/v1` | `compatible-chat` |
+| `ovhcloud` | OVHcloud AI Endpoints | `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1` | `compatible-chat` |
+| `nscale` | Nscale | `https://inference.api.nscale.com/v1` | `compatible-chat` |
+| `databricks` | Databricks | `https://your-workspace.cloud.databricks.com/ai-gateway/mlflow/v1` (placeholder) | |
+| `snowflake-cortex` | Snowflake Cortex | `https://your-account.snowflakecomputing.com/api/v2/cortex/v1` (placeholder) | |
+| `cloudflare-workers-ai` | Cloudflare Workers AI | `https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/v1` (placeholder) | |
+| `vercel-ai-gateway` | Vercel AI Gateway | `https://ai-gateway.vercel.sh/v1` | |
+| `ollama` | Ollama | `https://ollama.example.internal/v1` (placeholder) | |
+| `lmstudio` | LM Studio | `https://lmstudio.example.internal/v1` (placeholder) | |
+| `llamacpp` | llama.cpp server | `https://llamacpp.example.internal/v1` (placeholder) | |
+| `infinity` | Infinity | `https://infinity.example.internal` (placeholder) | |
+| `docker-model-runner` | Docker Model Runner | `https://model-runner.example.internal/engines/v1` (placeholder) | |
 
 A preset is not provider or model certification. Creation and edits still run
 HTTPS, public-egress, SSRF, and reachability checks unless the host or address
@@ -353,112 +353,60 @@ Production Compose can generate database credentials and their encoded URL using
 
 ## Configuration promotion artifacts
 
-`GET /api/v1/configuration/export` returns a secret-free desired-state artifact
-(`openllmproxy.dev/config/v1`) and its canonical digest: SHA-256 lowercase hex
-of the canonical JSON with `exported_at` blanked and every collection sorted
-deterministically. Projects, providers, routes, and targets are identified by
-natural names — never UUIDs — and `project` carries a project name or `null` for
-installation-wide resources. Export reads the active provider revision when a
-provider is active and the current draft otherwise, the latest revision of every
-published route (including retired routes, marked `retired: true`), and the
-latest effective pricing revision. It never contains credential IDs, ciphertext,
-API keys, users, management tokens, usage, audit, request or media data,
-certification evidence, runtime IDs, or secret values. Slots that hold
-credential authority export a stable `credential_ref` of
-`provider-name/slot-name-or-default`; credentialless authentication modes export
-`null`. A plugin provider's configuration references the plugin build it pins by
-digest (`profile_revision`), never the module. Every slot of a provider that
-authenticates with a [grant](plugins.md#grant-enrollment) exports its
-`credential_ref`, enrolled or not, and no grant material: no tokens, observed
-principal or grant facts. Slot `allowed_api_keys` restrictions are not portable
-— API keys are installation-local — so export always emits an empty list and
-import rejects a non-empty one; re-establish them on the destination after
-creating keys. Apply keeps the restriction an existing destination slot already
-has.
+Export/plan/apply carry nonsecret desired state (`openllmproxy.dev/config/v1`),
+not database backups. Identity is natural names: projects/providers case-insensitive,
+routes/models/credential refs exact. SHA-256 canonical digest blanks `exported_at`
+and sorts collections. Export includes active providers (otherwise draft), latest
+published route revisions (including retired), and effective prices.
 
-Every exported route carries an explicit
-[fidelity](provider-routing.md#route-fidelity) mode. A route entry without
-fidelity, or with `null` or `{}`, is strict; plan and apply never inherit the
-destination's current mode, so an export applied elsewhere reproduces its routes
-exactly. An invalid mode fails validation on `routes.N.fidelity`, and a strict
-route with a `redact` content-policy rule fails the plan with
-`fidelity_policy_conflict`. Configuration staging never activates a strict route
-or bypasses its policy checks.
+Never export keys/users/tokens/usage/audit/media/certification/runtime IDs/secrets.
+Plugin digest/options are portable, modules/grant tokens/principals/facts are not.
+Credential authority uses stable `provider-name/slot-name-or-default` refs,
+credentialless modes null. Slot key restrictions export empty/import reject
+nonempty; existing destination restrictions survive. Re-establish local keys there.
 
-`POST /api/v1/configuration/plan` validates an artifact and reports
-`{digest, actions, conflicts, blockers}` without mutating. Validation rejects
-unknown fields, oversized collections, duplicate natural identities
-(case-insensitive for projects and providers, exact for routes, models, and
-credential references), cross-project targets, bindings for refs the artifact
-does not declare, and secrets over 64 KiB. A plugin provider pins its plugin
-profile as a saved draft does, and its endpoint follows from the profile's
-address and the provider's plugin options. A plugin build the destination can't
-use is a `plugin` blocker keyed by its digest: `plugin_not_installed` or
-`plugin_not_approved` until an owner installs and approves that build, or
-`plugin_unconfined_disabled` for an unconfined build while the deployment does
-not enable unconfined plugins. Its providers are validated against the profile
-once it is usable. A profile the build does not declare
-(`plugin_profile_unknown`) refuses the artifact. Plan reports
-`secret_binding_required` blockers for credential refs that do not already
-resolve to a current same-named slot credential of the provider's
-authentication on the destination, static plugin credentials included. A slot a
-grant backs takes no secret binding: unless it already holds a grant that the
-plugin build the artifact pins enrolled on the destination, plan reports its
-ref as an `enroll` action
-(`grant_enrollment_required`), and after applying the provider activates only
-once a grant enrollment gives each slot it serves with a credential.
+| Operation | Behavior |
+| --- | --- |
+| `GET /api/v1/configuration/export` | Artifact plus canonical digest |
+| `POST /api/v1/configuration/plan` | Validate; return digest/actions/conflicts/blockers without writes |
+| `POST /api/v1/configuration/apply` | Idempotency-Key; atomic installation-serialized staging; conflicts/blockers roll back |
 
-`POST /api/v1/configuration/apply` requires an Idempotency-Key and stages the
-desired state in one installation-serialized transaction. Destination credential
-and network bindings are assembled before the provider's ordinary draft
-configuration operation validates the boundary and invalidates old certification.
-Provider-owned staged inventory updates retain unchanged slots and pending
-enrollments, clean omitted enrollment secrets, and advance both collection and
-parent ETags. Active releases remain pinned until explicit activation:
+All need `configure` and all-project authority; global `read`/`configure` machine
+tokens can automate, assigned/project tokens cannot. Feature-specific resources
+may additionally need `access`, `keys` or other declared scopes even if unchanged.
 
-- Missing projects are created with the applying member (or the token's
-  creator) as their manager; existing case-insensitive names are reused.
-- Missing providers become drafts; existing providers get their draft
-  fields, models, and slots replaced and `draft_dirty` set — an active
-  revision is never mutated and keeps serving until local certification
-  and activation. A provider kind change is a `provider_kind_changed`
-  conflict. Imported capabilities are always stored `declared`, never
-  `certified`.
-- Routes become new or replaced non-activated drafts with their routing
-  policy staged; apply never activates or retires. A published same-slug
-  route in another project is a conflict; a lifecycle difference reports
-  `route_lifecycle_requires_activation` or
-  `route_lifecycle_requires_retirement`.
-- Pricing is a noop when the artifact's prices exactly equal the latest
-  revision; otherwise a new immutable revision is created and the runtime is
-  republished. A future `effective_at` is preserved, while a past or current
-  one is rebased to apply time (`effective_at_rebased`). Provider and route
-  drafts never alter runtime.
+Validation rejects unknown fields, oversize collections, duplicate identities,
+cross-project targets, undeclared bindings and secrets over 64 KiB. Fidelity
+omitted/null/empty means strict, never inherited; strict redaction is
+`fidelity_policy_conflict`. No artifact bypasses operation checks.
 
-`secret_bindings` maps `credential_ref` to the environment-specific secret. It
-is write-only: never echoed in responses, audited, logged, or replayed in
-plaintext — the replay fingerprint stores only the document digest plus sorted
-binding names and SHA-256 digests of their values. `expected_digest` compares
-against the destination's current export digest; a mismatch is a
-`configuration_changed` conflict. Apply returns
-`409 configuration_not_applicable` with the same plan body whenever conflicts or
-blockers remain, and rolls back every write. A successful apply records one
-`configuration.apply` audit event with the artifact digest as its resource.
+Plugin builds must be installed/approved (or unconfined permitted/enabled), else
+planning blocks. Static secrets bind via write-only `secret_bindings`; grant slots
+need same-build destination enrollment, reported as an `enroll` action. Binding
+values are neither echoed nor plaintext-replayed; fingerprint retains only digest/
+names/value hashes.
 
-All three endpoints require the `configure` operation and an all-projects
-principal, so assigned users and project-scoped machine tokens receive 403;
-all-project machine tokens with `read` and `configure` scopes can automate
-export, plan, and apply. The console exposes the workflow to global
-owner/operator sessions under **Settings → Configuration promotion**, which
-asks for the secret bindings a plan requires and forgets them whenever the
-artifact changes.
+Apply delegates provider validation/credential boundaries/certification to feature
+owners, preserves unchanged enrollment lifetimes and advances collection/parent
+ETags. Missing projects assign applying actor/creator as manager. Providers become
+dirty drafts; kind changes conflict and imported capabilities stay declared.
+Routes become non-activated drafts; cross-project slug conflicts and lifecycle
+differences need explicit activation/retirement. Active runtime stays pinned.
+
+Exact unchanged prices are noop; other prices create a revision and republish.
+Future effective times survive, past/current times rebase to apply. Feature-specific
+budget/group/calendar omission semantics are in [access](access.md), not a global
+merge rule. `expected_digest` fences destination drift; remaining blockers return
+409 with plan body, successful staging records one digest-only audit event.
+
+Console **Settings → Configuration promotion** forgets secrets on artifact changes;
+CLI [reviewed promotion](operator-cli.md#configuration-promotion),
+[GitHub Actions](configuration-actions.md) and [Terraform](terraform.md) preserve
+review/atomicity boundaries.
 
 ### Versioned provider profiles and per-connection networking
 
-Provider drafts can select explicit API/hosting profiles, operation/dialect defaults,
-semantic headers, serving bindings and secure per-connection proxy/TLS settings.
-Network secrets use provider-owned encrypted references, independently from API
-credential slots. See [provider profiles](provider-profiles.md) for the public
-configuration shape, cloud endpoint differences, inheritance rules, network bounds,
-credential lifecycle and qualification scope. A provider that omits the profile
-fields is an Automatic provider, whose endpoints follow from its provider kind.
+Provider drafts pin profile/defaults/bindings/semantic headers and proxy/TLS intent.
+Network secrets have separately sealed provider references. See
+[profiles](provider-profiles.md) for public shapes and credential destination changes;
+omitted profiles select Automatic kind-derived endpoints and transformed routes.

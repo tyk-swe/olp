@@ -72,50 +72,29 @@ revoked authority. See
 
 ## Keys, permissions, expiry, limits
 
-An API-key secret is shown once; only its HMAC digest is stored. Replace a lost
-secret. Revocation reaches gateways through authority refresh: polls run every
-five seconds and new admissions stop when authority is 60 seconds old. Already
-admitted ordinary streams may finish; realtime sessions recheck the key during
-the session. See [gateway authority](gateway.md#runtime-publication-and-authority).
+An API key is a machine principal, not a console session. Secrets are shown once
+and stored as HMAC; rotate/replace lost secrets. Authority polls every five
+seconds and refuses new work when 60 seconds stale. Admitted ordinary streams
+may finish; realtime rechecks.
 
-`inference` authorizes provider operations, including generation, token
-counting, embeddings, rerank, moderation, media, batches, and realtime.
-`models_read` authorizes model discovery. Neither scope implies the other. An
-empty route allowlist permits all routes within the key's project boundary; a
-non-empty list narrows that set. Expired keys are refused.
+`inference` and `models_read` are independent. Project, explicit route and route-
+group policy bounds access; only both route lists empty gives project-wide use.
+Expiry/revocation denies every rotated secret version.
 
-Optional limits cover requests per minute, tokens per minute, concurrency, and
-daily/monthly accrued cost. A key can also join one **budget group** in the same
-project, sharing daily/monthly spend thresholds across its member keys. Group
-and individual limits both apply. Changing membership does not reassign past
-usage: accounting retains the group captured for the request. Manage groups
-through [Access](access.md#projects-and-budget-groups).
+Independent key/group/end-user/route/project/organization/installation/attribution
+budgets must all pass. RPM/TPM uses fixed Valkey UTC minutes; monetary day/week/
+month windows use the configured IANA calendar. ISO weeks start Monday. Calendar
+changes wait for each active boundary and never reset history. Group changes
+preserve captured owners. [Access](access.md) owns templates/temporary increases.
 
-Valkey server time defines fixed UTC minute, day, and calendar-month windows,
-lease expiry, and rejection hints. Bursts across boundaries are possible. Tokens
-are estimated before dispatch and reconciled against reported usage; concurrency
-leases release on completion and expire after abandoned work. A key with a
-request or token limit sees what remains in the
-[rate-limit headers](gateway.md#rate-limit-headers) of its OpenAI and Anthropic
-responses.
-
-Cost limits compare attributed spend, plus the estimated cost of requests still
-in flight and of the request itself, with the threshold
-([cost reservation](gateway.md#cost-reservation)); work whose cost is not known
-beforehand is judged on spend alone, so the limit is not an invoice cap.
-Exhausted windows return HTTP 429
-`budget_exhausted` with `Retry-After` to the UTC boundary, or to the second
-reservation clears when in-flight requests are what stand in the way; the message
-of a refusal tells a spent budget from a request whose estimate does not fit. Missing, malformed,
-or wrong-window spend state returns HTTP 503 until an authoritative PostgreSQL
-snapshot initializes it. A key or group cost budget always fails closed.
-Unpriced attempts accrue no money and remain visible separately.
-
-For rate/concurrency-only keys, an explicit `fail_open` setting can bypass
-limits during a configured Valkey outage. See
-[gateway limits](gateway.md#limits-and-budgets) and
-[spend recovery](operations.md#spend-budget-reconciliation) for enforcement and
-initialization.
+Admission estimates tokens/applicable cost holds. Dispatched token allowance never
+refunds smaller usage; concurrency releases on settlement. Known exhausted cost
+returns 429 with boundary/hold hints; unknown balances return 503 until PostgreSQL
+reconstruction. Unpriced attempts accrue zero but remain visible. Limits are not
+invoice caps: missing usage, heuristic holds and later native work can overspend.
+Only configured rate/concurrency outages may fail open; USD/provider limits do not.
+See [limits](gateway.md#limits-and-budgets) and
+[recovery](operations.md#spend-budget-reconciliation).
 
 ## Attempts, usage, pricing
 
@@ -135,7 +114,7 @@ completeness, and pricing provenance. Cancellation closes upstream work and
 releases leases through the same completion path. Storage uniqueness prevents
 duplicate request/attempt facts. Stored background responses settle final usage
 once it is observed; see
-[stored response accounting](gateway.md#stored-response-accounting).
+[retained generation accounting](gateway.md#retained-generation-accounting).
 
 Caller attribution labels can help filter and group usage. Keys explicitly allow
 label names, and values must be bounded machine tokens. Labels never grant
@@ -163,6 +142,13 @@ batches, and opt-in stored Responses may retain content at the upstream
 provider; OLP stores their ownership mappings and accounting metadata. This is
 separate from telemetry privacy. See
 [provider-retained state](compatibility.md#files-batches-realtime-and-provider-retained-state).
+
+Native protocols retain only encrypted dependencies required for continuation.
+The qualified [Chat-to-Anthropic helper](../clients/continuation/README.md) keeps
+native reasoning/tool history inside OLP for at most 24 hours.
+These are key/route/revision/credential-bound operational state, excluded from
+request history and telemetry; revocation/expiry fails closed. See
+[retained-state security](security.md#gateway-keys).
 
 [Content policies](gateway.md#content-policy) inspect supported text in memory.
 Only `{rule_id, phase, action, outcome}` decisions persist, without matched

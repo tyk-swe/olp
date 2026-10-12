@@ -24,7 +24,10 @@ explicit, sealed, scoped and bounded exception.
 
 ## Baseline
 
-| | OLP today | LiteLLM reference |
+Planning-time comparison; shipped behavior is authoritative in the
+[compatibility matrix](../compatibility.md) and [access guide](../access.md).
+
+| | Planning baseline | LiteLLM reference |
 | --- | --- | --- |
 | Response cache | None | [Caching](https://docs.litellm.ai/docs/proxy/caching) with exact and [semantic](https://docs.litellm.ai/docs/proxy/caching_semantic) backends |
 | Controls | None | [Per-request controls](https://docs.litellm.ai/docs/proxy/caching_controls): TTL, maximum age, no-cache, no-store, namespace |

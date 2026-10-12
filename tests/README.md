@@ -162,56 +162,24 @@ files, so `make test-go` compiles them and runs none of them.
 
 ## Suite ownership
 
-Go unit tests own algorithms and protocol fixtures; internal service tests own
-database/Valkey behavior, and the external process suite owns API, SDK and
-recovery contracts. Keep distinct security, billing, concurrency, protocol,
-failure and recovery regressions at these boundaries.
+Go unit tests own algorithms/protocol fixtures; internal service tests own
+PostgreSQL/Valkey; external process suites own public API/SDK/recovery contracts.
+Keep distinct security, billing, concurrency, cancellation and failure regressions.
 
-Socket deadline tests keep real incomplete uploads, unread responses, admission
-release and keep-alive checks. Gateway writer wrappers assert the requested
-production deadlines before shortening them to 250 ms; access tests use their
-existing timeout parameter. Five-second failure guards bound stalled tests.
-Plugin fixture builds share immutable artifacts per test process, keyed by
-package, target, build flags and linker flags. Each caller gets independent
-module bytes or an executable copy; runtimes and mutable state stay isolated.
+Socket tests exercise real incomplete uploads/unread responses/admission release/
+keep-alive. Writer wrappers assert production deadlines before shortening test
+waits to 250 ms; failure guards remain bounded. Immutable plugin build artifacts
+are shared per process; callers/runtimes receive independent mutable state.
 
-Console HTTP helper tests own common problem decoding and missing/null response
-cases. Cursor helper tests own collection bounds and cursor cycles, using small
-values rather than serializing thousands of resource records. Resource API
-tests retain URL/query mapping, response adaptation and cancellation coverage.
-The 29 filesystem source-import assertions were removed: mounted components, protected
-layouts and browser deep links cover routing behavior. The bounded-writer test
-uses one slow peer fixture because the former client/provider labels exercised
-the same function. Security architecture guards and protocol fixtures remain.
+Console helpers test problem/null decoding and bounded cursors; resource tests own
+URL/query adaptation/cancellation. Mounted components, protected layouts and
+browser deep links own routing behavior; do not replace them with source-import
+assertions.
 
-Contract verification uses `./scripts/check-contracts.sh` standalone, or
-`./scripts/check-contracts.sh --already-generated` after `make check`. The latter
-compares that generation with one more pass, retaining determinism and the
-checked-in Go contract check with two total CI generation passes.
-
-### Timing comparison
-
-Measured on the same local runner with uncached Go tests (`-count=1`), normal
-Vitest settings, and one Chromium worker with no retries:
-
-| Suite | Before | After |
-| --- | ---: | ---: |
-| Container-free Go (`make test-go GO_TEST_ARGS=-count=1`) | 52.2 s | 27.5 s |
-| Console (Vitest duration) | 20.9 s, 816 tests | 20.3 s, 786 tests |
-| External process package (`-race -tags=integration,oidctest,pythonsdk -count=1`) | 26.6 min | 23.5 min |
-| Feature browsers | 11.8 min, 44 tests | 4.5 min, 24 tests |
-| Browser provisioning, build, feature/hosted journeys and replacement recovery | 17.9 min | 7.8 min |
-
-Browser comparisons use fresh databases and Valkey services; the earlier full
-feature, hosted and recovery runs covered both origins. The updated run uses
-full packaged coverage and focused Vite smoke checks. Qualification used
-disk-backed temporary directories after shared `/tmp` space exhausted a
-linker and the baseline media spool. That unchanged capacity test passed on
-retry. The external process package, all 32 selected internal service tests,
-the separate extension process, SDK smoke, and browser/recovery stages passed;
-the final browser stages were rerun separately after fixing their helpers.
-Deadline and cancellation tests additionally passed ten race-enabled repeats,
-and the concurrent log-budget fixture passed 100 repeats.
+Run `./scripts/check-contracts.sh` standalone or with `--already-generated` after
+`make check` to verify deterministic regeneration and checked-in Go artifacts.
+Historical repair evidence is [recorded separately](../docs/architecture-review.md);
+timing diaries are not current suite budgets.
 
 ## Token oracle fixtures
 
@@ -341,58 +309,28 @@ and cloud identity variables. Live calls consume provider quota.
 
 ## Client and agent qualification
 
-The SDK smoke suites check the native contracts. Client qualification checks
-the software operators actually deploy: pinned releases of Claude Code, Codex
-CLI and Gemini CLI run headless, the OpenAI Agents SDK, Vercel AI SDK, LangChain
-and LlamaIndex.TS, and the official OpenAI, Anthropic and Google Go SDKs. Each
-runs against a gateway whose upstream is a deterministic scripted fixture, and
-each test asserts both the client's own outcome and the requests the upstream
-recorded, so a client that bypasses OLP, or a gateway that mangles a request,
-fails.
+[Pinned clients](../docs/clients.md) run real headless CLIs/frameworks/Go SDKs
+against deterministic gateway/upstream fixtures, asserting client results and
+recorded requests. This does not qualify paid providers.
 
 ```sh
-pnpm install --frozen-lockfile                       # the npm clients, once
-tests/clients/run.sh                                 # every suite, in table order
-CLIENTS=claude-code,codex tests/clients/run.sh       # only these
-tests/clients/run.sh --list                          # the suite names
+pnpm install --frozen-lockfile
+tests/clients/run.sh
+tests/clients/run.sh --list
+CLIENTS=claude-code,codex tests/clients/run.sh
 ```
 
-The runner needs Go, Node.js 26, `jq` and `curl`, and no containers, database
-or Valkey: it builds `tests/clientfixture`, which hosts the gateway in-process
-with a static runtime, and starts it beside the scripted upstream. The Go SDK
-module downloads its dependencies once, before the isolation below begins. Each
-suite then runs from `env -i` with a private home and XDG tree, telemetry and
-update checks off, and a proxy that refuses everything but loopback, so a
-client that reaches past the gateway fails. A suite that cannot run, runs no
-tests, has a test file that defines none, or skips or leaves a test or a group
-of tests to do fails. A suite may be skipped only by a row of the table in
-`run.sh` with a stated reason, which the summary prints as an open item.
+Requires Go, Node 26, jq/curl, not containers/database/Valkey. Each suite gets an
+empty environment, isolated home/XDG, telemetry off and loopback-only proxy.
+Missing, skipped, empty or unfinished tests fail unless the runner table declares
+an explicit open item. Startup/suite/test deadlines default 60/900/180 seconds;
+signals stop child clients. Go SDK calls additionally have individual deadlines.
 
-`OLP_CLIENTS_READY_TIMEOUT_SECONDS` (60), `OLP_CLIENTS_SUITE_TIMEOUT_SECONDS`
-(900) and `OLP_CLIENTS_TEST_TIMEOUT_SECONDS` (180) bound the gateway start, a
-suite and a test of a Node suite. The Go SDK suite is one package that the
-toolchain bounds as a whole, so the suite timeout bounds it, and each SDK call
-in it has a deadline of its own. A signal to `run.sh` stops the running suite
-and the clients it started. The full run takes about two minutes on a developer
-machine.
-
-`make integration` runs it after the SDK smoke suites, so a client release that
-breaks compatibility fails the pull request that proposes it. `make check`
-covers what needs no client: the scripted upstream's unit tests under
-`go test ./...`, `gofmt` of the fixture and Go SDK suite, and
-`scripts/check-clients-doc.test.mjs`, which keeps
-[client compatibility](../docs/clients.md) equal to the pinned manifests, and
-`scripts/clients-run.test.mjs`, which runs the harness suite under a `TMPDIR`
-that is a symlink with a `..` in it (about fifteen seconds; it is skipped, and
-says why, where the toolchain or the client packages are missing). Root
-`go vet ./...` does not reach the Go SDK module, so `run.sh` vets it.
-
-A gateway incompatibility a client exposes is fixed in the gateway with a Go
-test beside the code, not patched around in the suite. See the
-[client qualification guide](clients/README.md) for the harness contract,
-the scripted upstream and how to add a suite, and
-[client compatibility](../docs/clients.md) for the pinned releases, each
-client's tested configuration and the open items.
+`make integration` runs these lanes. `make check` covers fixture/harness/doc-pin
+checks; the runner vets its separate Go SDK module. Fix exposed incompatibility
+in gateway behavior with a regression, not a client workaround.
+See [harness ownership](clients/README.md) and
+[client limits](../docs/clients.md#open-items).
 
 ## Contract and browser coverage
 

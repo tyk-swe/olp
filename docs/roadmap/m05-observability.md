@@ -1,7 +1,7 @@
 # M5: Observability, export and alerting
 
-| Status      | Depends on                    | Unlocks                      |
-| ----------- | ----------------------------- | ---------------------------- |
+| Status | Depends on | Unlocks |
+| --- | --- | --- |
 | Implemented | [M4](m04-tenancy-identity.md) | [M6](m06-cost-management.md) |
 
 OLP records precise, content-free facts for every request and attempt, and
@@ -27,13 +27,13 @@ content out of OLP's own storage.
 
 ## Pre-M5 baseline
 
-|               | OLP before M5                                                                                                             | LiteLLM reference                                                                                                                                                                     |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Durable facts | Requests, attempts, priced usage and gaps in PostgreSQL ([accounting](../operations.md#accounting-delivery-and-shutdown)) | Spend logs in PostgreSQL                                                                                                                                                              |
-| Export        | None                                                                                                                      | [Logging callbacks](https://docs.litellm.ai/docs/observability/callbacks) and [team logging](https://docs.litellm.ai/docs/proxy/team_logging)                                         |
-| Content       | Never captured                                                                                                            | [Opt-in prompt storage](https://docs.litellm.ai/docs/proxy/ui_logs) and content-bearing callbacks                                                                                     |
-| Telemetry     | Operational Prometheus metrics; OTLP traces with an allowlist ([tracing](../operations.md#distributed-tracing))           | [Prometheus](https://docs.litellm.ai/docs/proxy/prometheus) token, spend and budget series; [OpenTelemetry](https://docs.litellm.ai/docs/observability/opentelemetry_v2)              |
-| Alerts        | Signed webhooks for `budget.threshold` and `provider.grant.lapsed` ([notifications](../operations.md#notifications))      | [Slack, Discord, Teams](https://docs.litellm.ai/docs/proxy/alerting), [PagerDuty](https://docs.litellm.ai/docs/proxy/pagerduty) and [email](https://docs.litellm.ai/docs/proxy/email) |
+| | OLP before M5 | LiteLLM reference |
+| --- | --- | --- |
+| Durable facts | Requests, attempts, priced usage and gaps in PostgreSQL ([accounting](../operations.md#accounting-delivery-and-shutdown)) | Spend logs in PostgreSQL |
+| Export | None | [Logging callbacks](https://docs.litellm.ai/docs/observability/callbacks) and [team logging](https://docs.litellm.ai/docs/proxy/team_logging) |
+| Content | Never captured | [Opt-in prompt storage](https://docs.litellm.ai/docs/proxy/ui_logs) and content-bearing callbacks |
+| Telemetry | Operational Prometheus metrics; OTLP traces with an allowlist ([tracing](../operations.md#distributed-tracing)) | [Prometheus](https://docs.litellm.ai/docs/proxy/prometheus) token, spend and budget series; [OpenTelemetry](https://docs.litellm.ai/docs/observability/opentelemetry_v2) |
+| Alerts | Signed webhooks for `budget.threshold` and `provider.grant.lapsed` ([notifications](../operations.md#notifications)) | [Slack, Discord, Teams](https://docs.litellm.ai/docs/proxy/alerting), [PagerDuty](https://docs.litellm.ai/docs/proxy/pagerduty) and [email](https://docs.litellm.ai/docs/proxy/email) |
 
 ## Scope
 
@@ -42,14 +42,14 @@ content out of OLP's own storage.
 A sink is a destination for durable facts, scoped to the installation or to a
 project with the same authorization as notification destinations.
 
-| Field         | Contract                                                                                                   |
-| ------------- | ---------------------------------------------------------------------------------------------------------- |
-| `type`        | `otlp_logs`, `s3`, `gcs`, `azure_blob` or `https`                                                          |
-| `destination` | Endpoint, bucket or container, validated against the provider egress policy at creation and at every dial  |
-| `credential`  | Write-only, sealed under a new `sink_credential` purpose, or workload identity where the cloud supports it |
-| `streams`     | Any of `requests`, `attempts`, `usage_rollups`, `guardrail_decisions`, `audit`                             |
-| `format`      | JSON Lines for object stores; OTLP log records; JSON for HTTPS. Parquet is deferred to M6's FOCUS export.  |
-| `filter`      | Optional project, route and outcome filters                                                                |
+| Field | Contract |
+| --- | --- |
+| `type` | `otlp_logs`, `s3`, `gcs`, `azure_blob` or `https` |
+| `destination` | Endpoint, bucket or container, validated against the provider egress policy at creation and at every dial |
+| `credential` | Write-only, sealed under a new `sink_credential` purpose, or workload identity where the cloud supports it |
+| `streams` | Any of `requests`, `attempts`, `usage_rollups`, `guardrail_decisions`, `audit` |
+| `format` | JSON Lines for object stores; OTLP log records; JSON for HTTPS. Parquet is deferred to M6's FOCUS export. |
+| `filter` | Optional project, route and outcome filters |
 
 - A worker task, `export_delivery`, delivers transactional fact snapshots from
   PostgreSQL with per-sink acknowledgements and stream cursors. Late commits
@@ -127,18 +127,18 @@ A capture policy on a project or route opts into content export:
   policy.
 - **Events.**
 
-| Event                                              | Fires when                                                                                                                         |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `budget.exhausted`                                 | A key, group, project, organization or end-user budget is exhausted                                                                |
-| `key.expiring`                                     | A key expires or reaches its rotation interval within a configured lead time                                                       |
+| Event | Fires when |
+| --- | --- |
+| `budget.exhausted` | A key, group, project, organization or end-user budget is exhausted |
+| `key.expiring` | A key expires or reaches its rotation interval within a configured lead time |
 | `provider.circuit.open`, `provider.circuit.closed` | Fleet-shared health ([M3.5](m03-routing-resilience.md#m35-proactive-and-fleet-shared-health)) opens or closes a provider's circuit |
-| `provider.error_rate`                              | A provider's failure ratio exceeds a threshold over a window                                                                       |
-| `route.latency`                                    | A route's p95 latency or time to first token exceeds a threshold over a window                                                     |
-| `provider.credential.failing`                      | A credential version keeps failing authentication                                                                                  |
-| `model.retirement`                                 | A routed model approaches its [catalog](m02-provider-catalog.md#m24-reference-catalog) retirement date                             |
-| `runtime.install_failed`                           | A gateway cannot install the newest runtime generation                                                                             |
-| `worker.stale`                                     | A worker task misses its checkpoint bound                                                                                          |
-| `report.spend`                                     | A scheduled daily, weekly or monthly spend digest is due                                                                           |
+| `provider.error_rate` | A provider's failure ratio exceeds a threshold over a window |
+| `route.latency` | A route's p95 latency or time to first token exceeds a threshold over a window |
+| `provider.credential.failing` | A credential version keeps failing authentication |
+| `model.retirement` | A routed model approaches its [catalog](m02-provider-catalog.md#m24-reference-catalog) retirement date |
+| `runtime.install_failed` | A gateway cannot install the newest runtime generation |
+| `worker.stale` | A worker task misses its checkpoint bound |
+| `report.spend` | A scheduled daily, weekly or monthly spend digest is due |
 
 - Threshold events use hysteresis and a cooldown so a flapping signal does not
   page repeatedly. Delivery keeps today's guarantees: each attempt is recorded
@@ -154,13 +154,13 @@ A capture policy on a project or route opts into content export:
 
 ## Change map
 
-| Change                      | Start here                                                              |
-| --------------------------- | ----------------------------------------------------------------------- |
-| Sinks, cursors and delivery | `internal/usage/`, new `internal/export/`                               |
-| Payload capture queue       | `internal/gateway/events.go`                                            |
-| Spans and metrics           | `internal/telemetry/`, `internal/observability/`                        |
-| Channels and events         | `internal/usage/notifications.go`                                       |
-| Console                     | `console/src/lib/features/settings/`, `console/src/lib/features/usage/` |
+| Change | Start here |
+| --- | --- |
+| Sinks, cursors and delivery | `internal/usage/`, new `internal/export/` |
+| Payload capture queue | `internal/gateway/events.go` |
+| Spans and metrics | `internal/telemetry/`, `internal/observability/` |
+| Channels and events | `internal/usage/notifications.go` |
+| Console | `console/src/lib/features/settings/`, `console/src/lib/features/usage/` |
 
 ## Implementation decisions
 

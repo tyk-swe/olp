@@ -19,10 +19,10 @@ Set `OLP_DEV_API_ORIGIN` to override its default `http://127.0.0.1:8081` target.
 
 Run from the repository root after setup:
 
-| Command                     | Purpose                                            |
-| --------------------------- | -------------------------------------------------- |
+| Command | Purpose |
+| --- | --- |
 | `pnpm --dir console verify` | Formatting, Svelte/type checks, ESLint, and Vitest |
-| `pnpm --dir console build`  | Static assets and asset manifest                   |
+| `pnpm --dir console build` | Static assets and asset manifest |
 
 Management requests use the generated `openapi-fetch` client. Update
 `openapi/management.json` alongside Go handlers and run `make api`; never edit
@@ -45,10 +45,23 @@ repository-wide commands.
 
 ## Feature ownership
 
-`src/lib/features/` groups product workflows. Keep route components thin and
-shared UI in `$lib/components/`; see the [architecture map](../docs/architecture.md).
-Keep the application client-only: do not add server routes, server hooks,
-`lib/server/`, or a production Node adapter.
+`src/lib/features/` owns product workflows; shared UI lives in
+`src/lib/components/` and pages in `src/routes/`. Keep route components thin.
+The application is client-only: use the static adapter and avoid server routes,
+server hooks or `lib/server/`. See the [architecture map](../docs/architecture.md).
+
+## Design system
+
+The console is dark-only: black canvas, carbon surfaces and electric blue as the
+brand accent. Use semantic tokens from `src/app.css`, never raw colors;
+`.card-light` remaps tokens for the paper hero card. Blue means active/primary,
+green success, amber warning and red danger. Text must meet WCAG AA; browser
+suites enforce it with axe.
+
+Use CSS motion on `transform` and `opacity`, with shared keyframes and
+`--ease-out`/`--dur-*` tokens. Disable hover/entrance effects under
+`prefers-reduced-motion`; both Playwright configurations use reduced motion.
+Keep text readable on hover, preserve its wording and avoid gradients behind copy.
 
 ## Testing
 

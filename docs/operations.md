@@ -6,594 +6,222 @@ release; deployment topology is in [`deployment.md`](deployment.md).
 
 ## Objectives and monitoring
 
-Measure availability and added latency at the client-facing listener. Define
-latency objectives for representative unary and streaming workloads, and include
-accounting ingestion and recovery when measuring capacity. OLP on-call owns
-gateway availability and request-metadata completeness; provider owners own
-credentials, quotas, and model availability.
+Measure public-listener availability/added latency and accounting/recovery
+capacity. Gateway operators own availability and metadata completeness; provider
+owners own credentials, quotas and upstream model availability.
 
-Scrape each in-cluster `*-observability` Service on port 9090 every 15 seconds
-and probe `/health/live` and `/health/ready`. The public listener returns 404
-for these paths. Readiness snapshots refresh every five seconds and expensive
-rollups every fifteen. Page when readiness is absent for five minutes, events
-are dropped/abandoned, persistence is unavailable, hard-limited keys cannot
-reach Valkey, worker checkpoints are stale, or cost reconciliation cannot
-acquire leadership. Warn when request-metadata backlog exceeds its threshold for
-ten minutes. The bundled Prometheus rules and per-component ServiceMonitors
-provide starting alerts; keep control and gateway alerts separate.
+Scrape private port 9090 every 15 seconds; public health/metrics paths return 404.
+Readiness refreshes every five seconds, expensive rollups every fifteen. Page on
+five minutes without readiness, metadata loss/persistence failure, unavailable
+hard limits or stale worker/cost checkpoints. Warn on ten-minute backlog.
+Bundled Prometheus rules/ServiceMonitors are starting points, not an SLO guarantee.
 
 ### Distributed tracing
 
-Enable tracing through the
-[configuration reference](configuration.md#runtime-variables). In production,
-start with a low locally rooted sampling ratio such as `0.01`; raise it for a
-bounded investigation with known collector capacity. Keep `1.0` for local
-development or short incident windows. Disable inbound trace acceptance where a
-trust boundary must start new traces; upstream propagation is independent.
+Use [tracing configuration](configuration.md#runtime-variables) with a full
+OTLP/HTTP `/v1/traces` endpoint and private JSON header file. Start production
+sampling low (for example `0.01`); inbound trust and upstream propagation are
+independent. Observe `olp_trace_export_dropped_total`: bounded async export never
+extends provider latency. Only allowlisted content-free attributes are permitted,
+including reviewed OTel `gen_ai.*` schema 1.41.0 metadata.
 
-Supply the full OTLP/HTTP endpoint, including `/v1/traces`. Mount exporter
-headers as a JSON secret file, using mode `0600` locally or Helm's
-`tracing.headersSecretName` and `tracing.headersSecretKey`. Keep credentials out
-of values files, environment variables, tickets, and traces. See
-[deployment tracing](deployment.md#observability-and-capacity) for collector
-network access and secret mounts.
-
-Watch `olp_trace_export_dropped_total`. Export is bounded and asynchronous, so
-an unavailable collector does not extend provider latency; sustained drops mean
-the collector, network, sampling ratio, or queue budget needs attention. Request
-and attempt spans contain only the documented allowlist, which includes the
-`gen_ai.*` metadata keys of OpenTelemetry semantic conventions schema `1.41.0`
-(development status upstream); see
-[configuration](configuration.md#runtime-variables) for the exact keys. Prompt
-and response content, tool payloads, raw headers, credentials, and raw provider
-errors are prohibited even during incident debugging.
-
-For local exploration, start the development-only Jaeger all-in-one overlay:
+Development-only Jaeger:
 
 ```console
 docker compose -f deploy/compose.yaml -f deploy/compose.tracing.yaml up -d
 ```
 
-Open `http://127.0.0.1:16686`. The overlay samples every local trace, exposes
-only the UI port, and keeps traces in ephemeral memory. Stop it with the same
-two `-f` arguments followed by `down`.
+Open `http://127.0.0.1:16686`; memory-only local traces use full sampling. Stop
+with the same files and `down`. Never add bodies/tools/raw headers/errors/secrets
+to production traces or incident bundles.
 
 ### Export sinks, payload capture, and business metrics
 
-Export sinks deliver durable copies of accounted requests, attempts, hourly
-usage rollups, guardrail decisions, and audit records to HTTPS endpoints, OTLP
-log collectors, and S3, GCS, or Azure Blob object storage in JSONL form.
-Installation sinks see every project; project sinks see their own project.
-Delivery is at-least-once under an immutable event id — receivers should
-deduplicate — and object destinations reuse a stable
-`stream/YYYY-MM-DD/event_id.jsonl` key so retried writes overwrite in place.
-Each pass claims records under a two-minute lease, commits the claim before any
-network call, and retries with exponential backoff from one minute to one hour.
-A failing sink starves no other sink: passes rotate across sink and stream
-pairs and retire at `ExportPassTimeout` (20s), resuming with the next pair.
-Unacknowledged records that outlive the stream's retention are counted in
-`olp.export_gaps` and `olp_export_gap_total` rather than silently dropped — a
-gap means the record expired before its acknowledgement, not that the remote
-necessarily never received it. `olp_export_pending`,
-`olp_export_lag_seconds{sink,stream}`, and
-`olp_export_deliveries_total{sink,outcome}` report queue depth and results. A
-sink outage degrades delivery but never the export task's health; only claim,
-outcome, or checkpoint failures make the worker unhealthy.
+[Export sinks](export-sinks.md) deliver durable content-free request/attempt/usage/
+guardrail/audit events at least once. Receivers deduplicate immutable event IDs;
+object storage uses stable `stream/YYYY-MM-DD/event_id.jsonl` keys. Two-minute
+claims commit before network calls; retries back off one minute–one hour and
+20-second rotating passes prevent sink starvation. Retention expiry creates
+`olp.export_gaps`/`olp_export_gap_total`, not proof the remote never received data.
+Monitor pending, lag and delivery metrics. Remote outages do not make the task
+unhealthy; failed durable claim/outcome/checkpoint writes do.
 
-Changing a sink destination with a stored write-only credential requires an
-explicit replacement `credential` or `null`. GCS tokens are sent only to
-`storage.googleapis.com` or bucket subdomains of that host. Azure storage tokens
-are sent only to account hosts under `blob.core.windows.net`. Both require HTTPS
-on the standard port; general egress exceptions cannot broaden this trust.
+Destination changes require explicit replacement/removal of write-only credentials.
+GCS/Azure tokens stay on their respective public storage HTTPS/443 hosts; provider
+egress exceptions cannot widen these bindings.
 
-Payload capture is owner-enabled, best-effort, and memory-only. An owner first
-enables installation capture; authorized installation and project managers then
-create bounded policies that pick an installation-owned sink, an include set
-(`input`, `output`, `tool_calls`), a deterministic sample ratio, and optional
-project, route, key, and end-user selectors. Sampled requests keep up to 1 MiB per record across at most 256
-active collectors and a 64-record queue, bounded to 4 MiB per project per
-minute; any bound violation drops the whole record and is counted. Captured
-input is taken after the input content policy and output is taken from the
-already-delivered frames, so capture never bypasses configured redaction;
-custom capture redaction is rejected until that feature lands. Delivered and
-failed sends, and stale-policy drops at send time, land in the audit stream as
-metadata only — queue-bound and cache-unavailable drops are counted but not
-audited, and audit writes are best-effort when the database is unavailable.
-Captured content never enters the database, Valkey, logs, or spans; the
-`payload_captured` request flag means a record was accepted into the memory
-queue, not that it was delivered. A record's `mode` marks `unary` (final
-tool-call items) or `streaming` (ordered tool-call argument fragments,
-matching what the caller received). Regular traces are always content-free.
-Counters:
-`olp_capture_queued_total`, `olp_capture_delivered_total`,
-`olp_capture_dropped_total`, `olp_capture_failed_total`, and
-`olp_capture_redaction_failed_total`.
+Owner-enabled payload capture is best-effort and memory-only. Policies select
+sink, input/output/tool calls, deterministic sample ratio and scope selectors.
+Limits: 1 MiB/record, 256 collectors, 64 queued records, 4 MiB/project/minute;
+violations drop the whole record. Input follows content policy; output reflects
+already-delivered frames. Custom capture redaction is not implemented and refuses.
+Captured content never enters PostgreSQL/Valkey/logs/spans. `payload_captured`
+means queued, not delivered. Send/failed/stale-policy audit is metadata-only and
+best-effort; queue/cache drops are counters only. Monitor `olp_capture_*_total`.
 
-Business metrics record process-local observed usage per terminal request:
-`olp_tokens_total{route,provider_kind,direction}`, `olp_cost_total{route,currency}`
-(approximate — the durable ledger remains authoritative), and the
-`olp_time_to_first_token_seconds` and `olp_output_tokens_per_second`
-histograms for streaming requests. `OLP_METRICS_TENANT_LABELS` can add
-`project`, `key`, or `end_user` labels; `OLP_METRICS_SERIES_CAP` bounds the
-process's active series and `olp_metrics_series_overflow_total` counts
-overflow. Caller-paid budget-exempt usage still contributes cost: exemption
-changes budget charging, not observable upstream spend.
+Business metrics include tokens, approximate cost, TTFT/output rate. Optional
+project/key/end-user series labels are bounded by `OLP_METRICS_SERIES_CAP`;
+overflow is counted. Durable accounting remains authoritative and caller-paid
+exempt spend still contributes observable cost.
 
 ### Replicated worker health
 
-Workers expose the private observability listener for `/health/live`,
-`/health/ready`, and `/metrics`; they have no public management or inference
-listener. Fleet health comes from PostgreSQL checkpoints, independent of which
-replica last performed a task. With Valkey configured, `worker` and `all` run:
+Worker mode has only private observability. Production needs Valkey plus worker
+or `all`; configured capability flags do not establish live worker health.
 
-- **Media reconciliation:** claims durable video jobs, polls through pinned
-  historical credentials, checks current credential revocation before upstream
-  calls, records completion/deletion and finishes accounting. Claims survive
-  restart and hand off between workers.
-- **Grant refresh:** every five seconds, refreshes the
-  [grants](plugins.md#grant-refresh) that are due through their plugins, each
-  under its own advisory lock so a rotating refresh token is spent once. A
-  refresh that fails permanently [lapses](plugins.md#lapsed-grants) the grant,
-  and a grant that no provider configuration uses any more is
-  [retired](plugins.md#grant-refresh) instead of refreshed. A refresh the
-  upstream answered is recorded even when the worker is shutting down.
-- **Health probes:** every 15 seconds, sends each routed model of a connection
-  that enables [active probes](provider-routing.md#credential-pools-and-limits)
-  one bounded synthetic request when its interval is due, claiming the probe in
-  Valkey so the fleet probes each model once per interval. Results and the
-  circuits they open join the fleet's shared health state; probe usage is
-  accounted to the installation with origin `probe`.
-- **Request metadata consumer:** uses its own Valkey connection for blocking
-  reads. It replays its pending entries before reclaiming idle deliveries,
-  persists each event once, then acknowledges and deletes it. Events without
-  the current wire version, malformed or invalid payloads, and missing
-  deliveries become explicit gaps before drainage. An acknowledgement is not an
-  fsync guarantee. A consumer persists one event at a time, about 150 a second on
-  a development machine; a request rate above what the workers ingest leaves
-  events queued in the stream, late and not lost, until more workers or a lull
-  catches up, which `olp_request_metadata_consumer_lag_events` shows (see
-  [performance](performance.md)).
-- **Export delivery:** leases durable content-free facts from PostgreSQL, sends
-  bounded [signed HTTPS events](export-sinks.md), and records retries or expiry
-  gaps. It runs independently of Valkey and never delays inference.
-- **Gateway epoch detection:** records an unclean gateway exit as a completeness
-  gap after two confirming passes.
-- **Maintenance:** every 60 seconds, uses a detached PostgreSQL session and
-  advisory lock to roll up usage before purging facts, preserving spend
-  reconstruction. It expires requests, receipts, audit, gaps, epochs, sessions,
-  invitations, replays, and OIDC flows under stored `retention.*` settings.
-  Closing the session after each pass releases the lock.
-- **Cost reconciliation:** every 60 seconds, repairs current calendar spend windows
-  from durable facts. See [spend-budget reconciliation](#spend-budget-reconciliation)
-  for initialization, leadership and recovery.
-- **Notification delivery:** every 60 seconds under a transaction advisory
-  lock, evaluates enabled budget threshold rules against the exact accrued
-  window totals and claims each crossed threshold once per rule and window, then
-  posts every pending delivery, including [grant lapses](#notifications), to
-  its rule's notification destination. Each attempt is recorded before it is
-  made, so replicas never repeat one. Failed deliveries retry on later passes up
-  to five attempts with `2^(attempts-1)`-minute backoff. See
-  [notifications](#notifications).
+| Task | Schedule/authority |
+| --- | --- |
+| Media reconciliation | Durable claims; historical pins and live revocation; also without Valkey |
+| Plugin grant refresh | Five-second scan; per-grant advisory lock; record answered refresh during shutdown; also without Valkey |
+| Active probes | 15-second scan; fleet claim per configured interval/model; low-priority accounted system work |
+| Metadata consumer | Replay/reclaim, commit once then acknowledge/delete; dedicated blocking Valkey connection |
+| Export delivery | PostgreSQL leases, independent of Valkey |
+| Epoch detection | Two confirming passes before unclean-exit gap |
+| Maintenance | 60-second advisory-lock pass: roll up before purge; bounded resource expiry/savepoints |
+| Cost reconciliation | 60-second region-scoped leader pass |
+| Notifications | 60-second claims, durable attempt evidence, up to five retries with exponential minute backoff |
 
-Media reconciliation, grant refresh, the consumer and epoch detection become
-stale after 20 seconds without a successful checkpoint; maintenance, cost
-reconciliation, and notification delivery after 180 seconds. Media
-reconciliation and grant refresh also run without Valkey. A skipped follower
-pass does not establish leader success.
-`asynchronous_plane: healthy` requires current expected tasks, a
-healthy/backlogged consumer checkpoint, and zero request-metadata pending and
-lag counts. A current fleet with pending work is `backlogged`; missing task
-evidence is `unknown`. This is metadata drainage, not a claim that every
-upstream video job has finished.
+Media/grant/consumer/epoch checkpoints stale at 20 seconds; maintenance/cost/
+notification checkpoints at 180. Follower skips do not prove leader success.
+Healthy async status requires expected current tasks and zero pending/lag;
+backlogged is not lost, and missing evidence is unknown. Unsupported integer
+metadata versions remain pending; invalid supported formats create gaps.
 
-Runtime publication is synchronous inside the activation transaction under the
-installation row lock (`internal/runtime/publish.go`). The retained readiness
-field `runtime_outbox` is `not_configured`; there is no outbox worker, takeover,
-or backlog to drain. Monitor runtime-generation convergence and independent
-key-authority freshness instead.
+Metadata reclaim is eligible after 30 seconds, scanned every five; investigate
+if recovery has not begun by 35 seconds. Run three workers across failure domains.
+Watch pending/lag/oldest age, reclaim/duplicate counts and `olp_worker_task_*`.
+Counters are shared durable totals; unavailable summary reads are not resets.
+Restart a consumer after startup misconfiguration; there is no outer supervisor.
 
-Pending metadata is reclaimable after 30 seconds and scanned every five seconds;
-investigate if recovery has not begun within 35 seconds. Run three workers
-across failure domains in production. Use these content-free signals:
-
-- `olp_request_metadata_consumer_pending_events`, lag, and oldest-pending age;
-- reclaimed/recovered and persistence-duplicate counters;
-- `olp_worker_task_healthy{task=...}` and
-  `olp_worker_task_runs_total{task=...,outcome=...}`.
-
-Worker counters are additive PostgreSQL totals shared by replicas. When summary
-reads fail, `olp_async_worker_observability_available` is zero; missing series
-are not resets. Reclaims and duplicates show recovery, not necessarily an
-incident. Inspect advisory-lock sessions if maintenance or cost repair stalls.
-The consumer retries delivery failures internally; its outer process launcher
-has no restart supervisor. If it exits (currently only startup misconfiguration
-returns an error), correct the cause and restart the process.
-
-`GET /api/v1/auth/capabilities` reports `limits_enforced` and
-`retention_enforced` from configured Valkey, not live worker health. Configuring
-Valkey without running a worker still reports these flags as true. Use task
-checkpoints to confirm retention is running. Without Valkey, `all` starts only
-media reconciliation, grant refresh and PostgreSQL export delivery. Epoch
-detection and maintenance remain stopped, although readiness still expects their checkpoints and can stay
-degraded. Production accounting and retention require Valkey and a worker or
-`all` process.
+Runtime publication is synchronous under the installation lock. `runtime_outbox`
+is `not_configured`, not a missing worker. Monitor release convergence and
+independent authority freshness. Without Valkey, media/grants/exports run, but
+accounting/retention are not production-ready and readiness can remain degraded.
 
 ### Spend-budget reconciliation
 
-PostgreSQL is the spend authority; Valkey holds admission snapshots for each
-configured key and budget-group daily/monthly window. The terminal accounting
-consumer and the reconciliation worker publish cumulative PostgreSQL totals.
-Only these paths initialize cost hashes; admission never creates a zero counter.
+PostgreSQL facts are spend authority; Valkey holds exact-decimal admission
+snapshots across the [budget hierarchy](access.md#installation-and-project-budgets).
+Accounting/reconciliation alone initialize balances. Unknown/malformed/wrong-window
+state returns 503; known exhaustion returns 429. New budgets normally wait for
+next minute's pass. Never insert zero, remove policy or reset a valid counter to
+bypass initialization. Supply caps skip targets while unknown/exhausted.
 
-New keys, expired calendar windows, missing hashes and malformed or wrong-window
-state return `503 distributed_limits_unavailable` until an authoritative
-snapshot arrives. With a healthy worker, initialization normally waits for the
-next minute's reconciliation pass. Known exhausted windows return HTTP 429
-`budget_exhausted`. Cost budgets always fail closed, including during Valkey
-outages with `limits.valkey_unavailable=fail_open`; rate/concurrency-only keys
-keep their configured outage behavior. Never remove a budget or insert
-synthetic zero spend to bypass initialization.
+Each region has one dedicated PostgreSQL leader session, never returned while
+locked. Failure/cancellation/120-second pass deadline closes it; followers cannot
+claim leader success. Regional stores use the same durable facts, not global
+instantaneous monetary reservations; see [regional fleets](deployment.md#regional-fleets).
+Malformed hashes can be rebuilt from matching authoritative windows; valid
+inflated totals need reviewed repair. Future/stale snapshots cannot initialize
+another period. Day/week/month windows use the configured calendar.
 
-Supply-side caps on connections, credential slots and routes follow the same
-rules with their own authority, `olp.supply_cost_windows`, which accounting
-charges for each attempt the cap applied to. Publication records the declared
-caps in `olp.supply_budgets`, and the next reconciliation pass initializes
-their windows; until then, or while their state is unreadable, the capped
-connection, slot or route is skipped with a `*_budget_unavailable` plan reason
-instead of failing the request. An exhausted cap removes it from selection,
-which can start a route's `budget` fallback.
+1. Inspect consumer, database, Valkey, clocks and leader checkpoint on persistent
+   503s or unexplained spend. Revoke affected keys if continued admission is unsafe.
+2. After Valkey loss, fence budgeted traffic until checkpoint and accrued values
+   confirm reconstruction. Do not lower/delete valid counters or rate leases.
+3. Only during stopped traffic and failed reconciliation may an exact malformed
+   cost hash be removed; never use wildcard deletion.
+4. Review missing prices/usage and retained pending native work. Keep upstream
+   quotas: local [reservations](gateway.md#cost-reservation) are not invoice caps.
 
-Regional fleets read the same global PostgreSQL facts and install snapshots in
-their own Valkey stores. Leadership and local task health are region-scoped; see
-[regional fleets](deployment.md#regional-fleets) for count overrides, replica
-authority and the cost-overshoot bound.
-
-Reconciliation replaces malformed hashes (including non-integer `unpriced`
-fields or non-hash values) from matching authoritative snapshots, without
-lowering the other window's valid counter. Stale or future snapshots cannot
-initialize a different current calendar window. Daily aggregation uses
-`[daily_start, daily_end)`, so accepted clock-skewed events for tomorrow do not
-exhaust today. Inflated but otherwise valid counters require reviewed data
-repair; never reset them to zero or bypass migration-history/checksum checks.
-
-One dedicated PostgreSQL session per configured region holds its reconciliation
-advisory lock between minute ticks and performs current-period reconstruction on
-that same session. Followers record skipped passes. Error, shutdown, cancellation or the 120-second pass
-deadline closes the leader session, releasing leadership; a connection holding
-that session lock is never returned to the pool. Repeated timeouts require
-addressing scan/application load before enabling budgeted traffic. A follower's
-skip is not evidence of successful reconciliation.
-
-Monitor `olp_worker_task_healthy{task="cost_reconciliation"}` and
-`olp_worker_task_runs_total{task="cost_reconciliation",outcome=...}`. Rejections
-use `olp_key_budget_rejections_total{window="daily|monthly"}`, which counts both a
-budget that is exhausted and one whose room cannot hold the request's estimated
-cost; there is no per-key Prometheus spend gauge.
-
-1. For persistent initialization 503s or spend exceeding a limit while requests
-   continue, inspect the consumer, PostgreSQL, Valkey, their clocks, and the
-   reconciliation checkpoint. Revoke the affected key when continued admission
-   risks overspend.
-2. After Valkey loss or malformed state, keep budgeted traffic stopped until
-   a successful reconciliation checkpoint and authoritative accrued values
-   confirm recovery. Restore the worker; never lower or delete a valid counter.
-3. Only if reconciliation cannot run, remove an exact malformed cost hash while
-   traffic is stopped. Never use wildcards or delete rate/concurrency keys.
-4. Review `unpriced_attempts`. Missing usage or prices means budgets cannot
-   account for all spend; repair coverage and retain provider-side quotas.
-
-Admission measures these thresholds with exact decimal arithmetic and installation-calendar
-boundaries against accrued spend plus the estimated cost of requests in flight
-([cost reservation](gateway.md#cost-reservation)), which is not a reserved
-invoice cap: unpriced attempts accrue no money, operations whose cost is unknown
-beforehand reserve nothing, and spend can pass a limit by what the estimates
-under-counted. A reservation that accounting never removes lapses at the route
-deadline plus five minutes, and until it does it counts beside the accrued spend,
-so a stalled consumer shows as extra `429 budget_exhausted` before it shows as
-spend. Each reservation or settlement retires at most a bounded page of lapsed
-reservations, so a large backlog is worked through over the calls that follow
-and keeps counting until then; the message of a refusal says whether the budget
-is exhausted or the request's estimate does not fit beside what is spent and in
-flight. A current-window hash does not prove attribution is current; no maximum
-lag or monetary overshoot is measured. The keys that hold reservations, `cost:pending`
-and `cost:expiry`, are advisory and derived, so deleting them while traffic is
-stopped loses only the protection for requests in flight, and a reservation that
-finds one of the two without the other discards both; the accrued `cost:day`
-and `cost:month` hashes remain the authority and are never lowered or deleted
-for this. During a rolling upgrade a replica still running the previous release
-does not remove reservations made by a newer one, which then lapse on their own.
-See the [limits](../tests/integration/limits_test.go),
-[reservation](../tests/integration/limits_reservation_test.go) and
-[fleet recovery](../tests/integration/fleet_recovery_test.go) tests for evidence.
+Holds can produce 429 below displayed spend and lapse at deadline plus five
+minutes, retired in bounded pages. Damaged advisory holds cannot block accounting.
+Deleting `cost:pending`/`cost:expiry` loses in-flight protection, not accrued spend.
+No maximum ingestion lag or monetary overshoot has been qualified.
 
 ### Notifications
 
-`GET/POST /api/v1/notifications/destinations` and
-`GET/PATCH /api/v1/notifications/destinations/{id}` manage endpoints;
-`GET/POST /api/v1/notifications/rules` and
-`GET/PATCH /api/v1/notifications/rules/{id}` manage rules, and
-`GET /api/v1/notifications/deliveries` lists delivery metadata only.
+Manage destinations/rules/delivery metadata under `/api/v1/notifications`.
+Destination types: webhook, Slack, Teams, Discord, PagerDuty and SMTP email.
+Secrets are sealed/write-only; URL changes require explicit replacement/removal.
+Webhook timeout is five seconds, typed channels fifteen; PagerDuty needs 202.
+Email requires SMTPS/STARTTLS. Egress is checked at creation and every dial.
 
-Destinations support six transport types: `webhook` (URL + optional HMAC
-signing secret), `slack`, `msteams` and `discord` (channel origin URL plus a
-sealed full tokenized webhook URL — the sealed value is never returned),
-`pagerduty` (full Events API endpoint plus a sealed `routing_key`; a delivery
-requires an HTTP 202 acknowledgement), and `email` (an `smtps://` or
-`smtp+starttls://` URL, `from`/`to`/`subject_prefix`/`ca_certificate`
-configuration, and an optional sealed `{username,password}` object). The legacy
-webhook transport uses a five-second timeout; the typed channel adapters use
-fifteen seconds. Failures persist only a safe category — `timeout`, `network`,
-`http_4xx`, `http_5xx`, or `invalid_destination` — never URLs, credentials, or
-response bodies.
+Rules subscribe to immutable events: budget thresholds/exhaustion, key expiry,
+grant lapse, circuits/error rate/credentials, latency, retirement, runtime failure,
+stale workers and spend reports. [OpenAPI](../openapi/management.json) owns event
+schemas and defaults. Project events require matching project subject/destination
+and manager authority; installation events require settings authority. Missing
+fresh measurement is UNKNOWN, not recovery. Thresholds fire once per calendar
+window; key reminders deduplicate reason/date and cancel superseded pending sends;
+retired unused grants do not emit lapse.
 
-A rule subscribes a destination to one `event`, which never changes. Generic
-signal events — `budget.exhausted`, `provider.circuit.open`,
-`provider.circuit.closed`, `provider.error_rate`, `provider.credential.failing`,
-`route.latency`, `model.retirement`, `runtime.install_failed`, `worker.stale`,
-and `report.spend` — carry canonical configuration (`threshold`,
-`recovery_threshold`, `window_seconds`, `minimum_samples`, `cooldown_seconds`,
-`lead_days`, `metric` (`latency` or `ttft`), `period`, `lead_time_seconds`)
-with backend defaults when omitted. Signals are produced by the real
-measurement queries: `budget.exhausted`, `route.latency`, `model.retirement`,
-`report.spend`, `budget.threshold` and `key.expiring` are project-scoped; the
-rest are installation-wide. When a runtime-install, worker-stale or
-credential-failing incident is active and its measurement source ages out, the
-signal is UNKNOWN — no recovery is emitted; only a fresh healthy measurement
-recovers the incident. Cooldown repeats share the incident key; bodies stay
-metadata-only — no request content or credential material.
+HMAC-SHA256 webhook signatures cover exact bodies in
+`X-OLP-Signature: sha256=<hex>`. Payloads are metadata-only; failures retain safe
+categories, never response bodies/URLs/secrets. Disabled rules/destinations pause
+unsent delivery. Grant-lapse evidence identifies the affected version/slots and
+observed principal, never token material or refresh error.
 
-- `budget.threshold`: an API key's or budget group's accrued spend reached the
-  rule's `threshold_percent` of its limit in the current calendar `day`, `week` or `month`
-  window. A rule fires once per window. Installation-wide destinations and rules
-  require settings permission; project-scoped ones require project-manager
-  access, and a rule's subject and destination must belong to the same project.
-- `key.expiring`: an API key expires or is due for its declared rotation within
-  24 hours, or is overdue. The worker emits one event per rule/key/reason/date,
-  without generating or sending a credential. Superseded pending events become
-  `cancelled` before sending. See [API-key lifecycle](access.md#api-key-rotation-and-reminders).
-- `provider.grant.lapsed`: a provider plugin's [grant lapsed](plugins.md#lapsed-grants).
-  Provider events concern the whole installation: their rules take no subject,
-  window or threshold, are installation-wide with an installation-wide
-  destination, and require settings permission; a destination is subscribed to
-  them once. The worker that records a lapse enqueues, in the same transaction,
-  exactly one delivery for each enabled rule whose destination is enabled. A
-  retired grant, which nothing used, is not a lapse to notify.
-
-A destination URL change requires explicit replacement or removal of any stored
-`secret`, including PagerDuty routing keys and SMTP credentials.
-
-A destination may carry a signing secret: it is write-only, stored encrypted in
-the keyring, and never returned by any read. When configured, deliveries sign
-the exact request body with HMAC-SHA256 in `X-OLP-Signature: sha256=<hex>`.
-Destination URLs pass the egress policy at creation and again on every delivery
-dial; the transport's timeout applies and responses are drained bounded. Delivery
-failures persist only a safe category (`timeout`, `network`, `http_4xx`,
-`http_5xx`, `invalid_destination`), never response bodies or raw error text. Deliveries
-for a disabled rule or destination wait, unsent, until both are enabled again.
-
-Webhook payloads are metadata only, and the management contract documents these events
-under `webhooks`. A `budget.threshold` payload names the rule, subject, window,
-threshold, accrued, limit, and currency, never prompts, outputs, or attribution
-labels. A `key.expiring` payload contains `event`, `rule_id`, `rule_name`,
-`api_key_id`, `api_key_name`, nullable `project_id`, `due_at` and `reason`
-(`expiry` or `rotation`). A `provider.grant.lapsed` payload reports the lapse as it was when the
-grant lapsed:
-
-```json
-{
-  "event": "provider.grant.lapsed",
-  "rule_id": "0199…",
-  "rule_name": "Lapsed grants",
-  "provider_id": "0199…",
-  "provider_name": "Team account",
-  "credential_version_id": "0199…",
-  "credential_version": 3,
-  "credential_slots": [{ "id": "0199…", "name": "default" }],
-  "observed_principal": "operator@example.com",
-  "lapsed_at": "2026-09-27T12:00:00.000000+00:00"
-}
-```
-
-`credential_slots` are the provider's slots bound to the credential version in
-its draft or active revision, usually one; re-enroll their grant. The payload
-never carries secret material: no access or refresh token, grant facts, or the
-refresh failure that lapsed the grant.
-
-The delivery worker runs wherever the management plane is configured; Valkey
-is required only for limiter-dependent signals such as `provider.circuit.*`.
-`GET /api/v1/auth/capabilities` reports `notifications_active` whenever
-delivery is configured, not merely when shared state is live — monitor
-`olp_worker_task_healthy{task="notification_delivery"}` and the
-`notification_deliveries` status counters for live health.
+Notifications need Valkey only for limiter-dependent signals. Capability
+`notifications_active` means configured, not healthy; check notification task
+checkpoints and delivery status counters.
 
 ## Accounting delivery and shutdown
 
-Every startup phase uses the same producer-first cleanup as normal shutdown,
-including a listener bind failure after delivery or workers start. Authority
-stays available while requests, shadows and probes drain. Metadata intake then
-closes and flushes, delivery stops, workers stop and dependencies close against
-one shared deadline. At expiry the process explicitly closes blocking resources
-and logs incomplete task/dependency joins; those warnings are uncertainty,
-not evidence that a worker finished. There is no extra unbounded shutdown wait.
+Every caller/playground/probe terminal event is content-free. Each producing
+process has an 8192-event nonblocking buffer feeding the installation's Valkey
+stream. Overflow checkpoints local loss so other replicas can refuse incomplete
+cost admission. Never store prompts/outputs/tools/raw headers/cookies/uploads;
+provider names, route slugs and labels must also remain secret-free.
 
-Aggregate monetary ownership is evaluated per attempt: key project first,
-provider project second, route project third. Installation, organization,
-project, attribution and key/route subjects use the same rule for incremental
-facts, raw/hourly retention and Valkey reconstruction. A retry crossing provider
-projects cannot charge every attempt to its final provider. Durable commit still
-precedes stream acknowledgment; duplicate delivery does not repeat its deltas.
+Supported wire format is JSON `event`, `version: 1`. Unsupported integer versions
+stay in stream/pending for compatible consumers; malformed supported records become
+durable gaps. PostgreSQL commit precedes acknowledge/delete; replay does not
+repeat charges. Attributable attempts use key project, then provider project,
+then route project for aggregate monetary ownership, including retries/rollups.
 
-Every attributable caller request, playground call and health probe produces one
-content-free metadata event. With Valkey configured, gateway, control and worker
-processes each buffer up to 8192 events and write them to the installation stream.
-The buffer handoff is nonblocking; an overflow records local loss and performs a
-bounded loss checkpoint so other replicas can refuse admission against incomplete
-cost accounting. Events carry identifiers, timing, token counts, and per-attempt
-evidence only — never prompts, outputs, tool data, headers, credentials,
-cookies, or uploads. Provider names, route slugs and labels are metadata; keep
-secrets out of them.
-[Provider-retained content](compatibility.md#files-batches-realtime-and-provider-retained-state)
-is governed separately from diagnostics.
+Retained Response/Interaction mappings own immutable original financial events
+and pending subject projections. Newly enabled budgets cannot hide unresolved
+spend. Native completion, durable attachment and HTTP delivery are separate;
+usage survives projection/write/flush failure. Null unfinished HTTP metadata is
+not success. A detached two-second finalizer patches only receipt-qualified
+original observations without changing identities/prices/usage. Investigate
+`deferred generation HTTP outcome not recorded` warnings. Delete/expiry saves
+partial usage/uncertainty first; unsupported templates remain, with bounded
+maintenance/savepoints. See [retained accounting](gateway.md#retained-generation-accounting).
 
-The stream carries JSON in one `event` field with `version: 1`. Unsupported integer
-versions remain in the original stream and pending set for a compatible consumer;
-supported neighboring events continue to persist. Missing versions, malformed
-payloads and permanently invalid records become `malformed_stream_event` gaps
-instead of being interpreted as another format.
-See [metadata tests](../internal/usage/) for the persistence contract.
+Retained identity includes caller, immutable revisions, selected route target,
+slot and credential version. Migration 0062 backfills targets only where historical
+evidence proves a unique match; null/ambiguous pins refuse dispatch. Never repair
+using mutable current configuration. Retired budget groups retain policy-free
+historical UUIDs for late settlement; same-name replacements are distinct.
+Audio duration is recorded to microseconds; invalid duration is missing billing
+evidence, not a fabricated zero.
 
-Retained Responses and Interactions can temporarily own the original immutable
-content-free usage event. Their indexed subject projection makes pending spend
-visible to newly enabled cost budgets without guessing a dollar amount.
-Terminal observation persists the original event once; delete/expiry preserves
-partial counters and conservative uncertainty first. Submission timing stays
-separate from delayed observation time. Unsupported templates remain owned.
-Resource expiry and usage rollup each receive a bounded maintenance turn;
-per-resource savepoints keep a poison owner from starving unrelated cleanup.
-Check `resources.ExpiryFailures` and maintenance checkpoints when unresolved
-owners remain. Recorded accrual is not a promise of admission while native
-usage is pending or unpriced.
+Management exposes usage summary/breakdown/timeseries/completeness, request
+history, pricing revisions and metadata epochs. Project readers see only their
+scope. Partial boundary buckets are approximate with exclusion/gap evidence.
+Attribution filters and end-user digest breakdowns preserve raw-ID privacy.
+Estimate error compares only attempts with both estimated/reported input;
+model family/provenance breakdowns distinguish unestimated and historical unknown.
 
-Native completion and HTTP delivery are separate observations. Valid matching
-terminal usage settles before local response projection, even when that
-projection returns 502. Gemini downstream write/flush failures and original
-caller cancellation record request cancellation; they cannot reverse validated
-native consumption. Failed flush does not prove payload delivery. An active
-generation's validated native failure retains its provider-fault classification
-and sanitized native error body even when delivery fails. Retrieving a failed
-resource remains a successful read. Accepted native POSTs commit the existing
-no-retry signal before payload delivery, including with response metadata
-disabled. A caller's route timeout and a genuinely malformed native frame
-remain distinct from client cancellation.
-A deferred generation's unfinished HTTP outcome is
-stored as null until the original gateway exchange finishes. Its detached,
-two-second finalizer locks the resource and patches the pending template, or
-receipt-qualified existing request/attempt observations if settlement happened
-first. It preserves event/request/attempt identities, prices, counters and the
-receipt, and creates no early request-history row. A crash or failed finalizer
-can leave null HTTP metadata; null is not successful delivery. Check gateway
-warnings for `deferred generation HTTP outcome not recorded` when investigating
-that gap. Consumption certainty and pending monetary ownership also remain
-separate from ordinary token-rate allowance, which only grows on reconciliation.
+Managed pricing sources refresh bounded, egress-checked immutable snapshots and
+return diffs; only explicit publication affects accounting. Negotiated rates use
+publish-time overrides. `catalog` sources verify detached signatures, refuse
+catalog rollback and map supported model aliases. Bundled refresh is offline;
+remote catalog URL must serve directly with `.sig` and allowed egress. Plugin
+prices require provider scope (`provider_id`), otherwise remain unpriced.
+See [catalog](catalog.md) and the management contract for endpoints.
 
-Retained native identifiers are scoped to caller, immutable provider/route
-revisions, selected route target, slot and credential version, in addition to
-resource kind and native ID. Migration 0062 preserves existing local aliases
-and ciphertexts; it fills the selected target only when historical published
-models, slots and targets prove one match. Unknown or ambiguous historical
-sources remain null and refuse provider dispatch. Do not substitute current
-configuration to repair that identity; retain the original historical evidence.
+Shutdown and failed-startup cleanup share one `OLP_SHUTDOWN_TIMEOUT` deadline
+(default 30 seconds): drain requests/shadows/probes while authority remains,
+close/flush metadata, then stop delivery/workers/dependencies/traces. Deadline
+expiry forcibly unblocks resources and logs incomplete joins; it never adds an
+unbounded wait. Only verified drain closes the producer epoch. Forced producers
+leave it open; undelivered buffered events become explicit loss.
 
-Budget-group deletion retains a hidden, policy-free accounting identity after
-the existing member, notification and history dependency checks. Late usage
-keeps its original group UUID; a new group using the same name receives a new
-identity. Retired groups cannot be selected, edited or assigned. Migration 0061
-also retains already orphaned pending references as retired identities without
-inventing a creator, project or active policy.
-
-Transcription durations are recorded at microsecond precision to match the
-accounting tables; this does not change the native response bytes. Negative,
-nonfinite or out-of-range durations are unavailable billing evidence, rather
-than malformed values that invalidate the entire request event.
-
-Management processes serve the results: the usage summary, breakdown, time
-series, and completeness endpoints under `/api/v1/usage/`, request listing and
-detail under `/api/v1/requests`, pricing revisions under
-`/api/v1/pricing/revisions`, and gateway epochs and their acknowledgement under
-`/api/v1/request-metadata/gateway-epochs`. Reports mark a partial boundary
-bucket as approximate and report what they excluded, and carry gap evidence and
-consumer health so incompleteness stays visible after aggregation. Usage
-endpoints accept `attribution_key` with an optional `attribution_value` to
-restrict rows to labelled usage, and `dimension=attribution` groups the
-breakdown by one key's values (the key filter is required and rows without it
-are omitted). Request list and detail expose each request's stored labels.
-Project-scoped readers see only their own projects' rows in every report.
-
-`dimension=end_user` groups usage by the project-scoped HMAC digest of an
-identified end user, with `unidentified` for requests without one. Request list
-and detail expose `end_user_digest`. The digest survives hourly rollups; the
-raw identifier is never part of accounting. See [end-user identity](access.md#end-user-identity)
-for key policy, digest lookup and retention.
-
-Each attempt also records the admission estimate of its input, how it was
-produced (`tokenizer`, `calibrated` or `heuristic`) and the tokenizer family it
-was counted for; [how the gateway estimates](gateway.md#how-the-prompt-is-estimated)
-describes the three methods. Reports total `estimated_input_tokens` beside
-`reported_input_tokens` over only the attempts that had both an estimate and
-reported input usage, so the two compare directly: the estimation error is
-estimated minus reported over reported, positive when admission over-estimated.
-Routes show it through the route breakdown, and `dimension=model_family` and
-`dimension=estimate_provenance` group it by family and by method. An attempt
-that was never estimated (a stored-response call, a realtime session, a job
-poll, an upload or a video creation) has no provenance and appears under `none`,
-and it still has its model's family, so it is in the family's row without
-adding to its error; `unknown` is only the attempts recorded before families
-were. The console usage page shows the signed error in its totals and in the
-breakdown table.
-
-Pricing can also come from managed sources rather than hand-entered revisions.
-`GET/POST /api/v1/pricing/sources` and `GET/PATCH /api/v1/pricing/sources/{id}`
-register an external price document; `POST /api/v1/pricing/sources/{id}/refresh`
-fetches it through the egress policy (bounded size, JSON schema, redirect
-validation), stores an immutable SHA-256-keyed snapshot, and returns a diff
-against the latest published revision without publishing anything.
-`GET /api/v1/pricing/sources/{id}/snapshots` lists retained snapshots and
-`POST /api/v1/pricing/source-snapshots/{id}/publish` mints a new immutable
-pricing revision from one snapshot, optionally merged with scoped per-entry
-overrides. A source is advisory: negotiated rates need publish-time overrides,
-because the published revision — not the raw source document — is what
-accounting prices against. Revisions record their source name and snapshot for
-provenance, and all entries share the installation's single pricing currency.
-A source in the `catalog` format reads the signed
-[reference catalog](catalog.md): without a URL, the catalog this release ships,
-which refreshes with no network access; with one, a catalog fetched beside its
-detached signature at the same URL plus `.sig`. Refresh verifies the signature
-against the keys the binary trusts before any price is read, refuses a catalog
-older than the one this release ships or than one the source already took, and
-maps every model and alias to a vendor-scoped price. The snapshot records the
-catalog's digest, publication time and signing key, lists the components the
-catalog marks unrepresentable, and the refresh reports any price naming a
-vendor or operation this release does not know. Because the egress policy
-refuses redirects, fetch a newer catalog from a host that serves it directly,
-such as `https://raw.githubusercontent.com/tyk-swe/olp/main/internal/catalog/catalog.json`,
-and allow that host in the egress policy. `GET /api/v1/reference-catalog`
-describes the bundled catalog.
-No list price applies to a [plugin provider](plugins.md#providers-from-plugin-profiles):
-its attempts stay unpriced until a revision carries a price scoped to that
-provider, and a `plugin` price must name its `provider_id`.
-
-Shutdown stops the listeners and drains their handlers and health-probe producers
-first, then closes metadata intake and gives the writer a bounded opportunity to
-flush the buffer.
-Only afterwards are delivery and worker contexts cancelled. An expired flush
-budget records undelivered events as loss; a forced HTTP or probe shutdown leaves
-the producer epoch open for detection because requests may still emit metadata. A
-clean drain closes the epoch against what was actually delivered. HTTP,
-metadata, delivery, workers and trace flushing share `OLP_SHUTDOWN_TIMEOUT` (30
-seconds by default). Forced closure records uncertainty instead of extending the
-deployment termination budget.
-
-Delivery and replay evidence is retained for seven days plus five minutes of
-clock-skew grace. A late entry is recorded as uncertain completeness, never
-silently counted twice. Size PostgreSQL for up to
-`sustained_requests_per_second * 604800` receipt rows. During a delivery
-incident, restore/reconcile the Stream within seven days; do not extend the
-window by suspending maintenance.
+Receipts/replay evidence last seven days plus five-minute skew grace. Size receipt
+storage for `sustained_requests_per_second * 604800`; recover queues within this
+window, not by suspending retention. Late events remain uncertain, never silently
+double-counted.
 
 ### Queue durability
 
-A Valkey acknowledgement is not an fsync guarantee. Compose AOF `everysec` may
-lose roughly one second of recently acknowledged metadata on power/storage
-loss; replication and failover can add loss. Surviving epochs, gaps and pending
-counts expose known incompleteness, but cannot reconstruct lost facts from
-counters or enumerate facts lost with their evidence.
-
-Treat a suspected disaster interval as incomplete, stop budgeted traffic at the
-edge, and reconcile provider billing before declaring accounting complete. For a
-tighter RPO, qualify synchronous persistence and the actual replica/failover
-policy on the deployment's storage; changing fsync alone is not a fleet
-guarantee. See [Valkey persistence](https://valkey.io/topics/persistence/) and
-the [replica and recovery suites](../tests/integration/).
+Acknowledgment is not fsync. Compose AOF `everysec` can lose about one second on
+power/storage failure; replication adds risk. Surviving gaps/epochs expose known
+loss but cannot enumerate facts lost with their evidence. Fence budgeted traffic
+during suspected loss and reconcile provider billing. Qualify actual persistence/
+replication storage for tighter RPO; no fleet guarantee follows from fsync alone.
 
 ## Shared state in Valkey
 
@@ -601,16 +229,16 @@ Every key is prefixed with the installation namespace
 `olp:<installation>:`, so installations sharing one Valkey service never
 read, acknowledge, or reconcile one another's state.
 
-| Key                                                                      | Contents                                                                                                                                                                              |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<prefix>limits:{<lookup>}:rate`                                         | Request and token windows for one lookup.                                                                                                                                             |
-| `<prefix>limits:{<lookup>}:concurrency`                                  | Concurrency leases for one lookup.                                                                                                                                                    |
-| `<prefix>limits:{<cost owner>}:cost:day`, `:cost:week` and `:cost:month` | Current calendar spend windows for caller and supply owners; supply caps use day/month. Custom calendar hashes also contain start/end instants.                                       |
-| `<prefix>limits:{<cost owner>}:cost:pending` and `:cost:expiry`          | Cost reserved by requests in flight against that owner: a hash of each request's amount and their total, and the set of when each lapses. Advisory; absent when nothing is in flight. |
-| `<prefix>limits:provider-cooldown:<scope>`                               | Credential-version and slot cooldowns.                                                                                                                                                |
-| `<prefix>limits:health:circuits`                                         | Each provider whose circuit the fleet holds open, until when. Gateways publish transitions and read it every two seconds.                                                             |
-| `<prefix>limits:health:probes` and `:health:probe:<provider>/<model>`    | Each provider's latest active probe result, and the claim that keeps one probe per model and interval.                                                                                |
-| `<prefix>request-metadata`                                               | The request metadata stream, read by consumer group `olp:persistence`.                                                                                                                |
+| Key | Contents |
+| --- | --- |
+| `<prefix>limits:{<lookup>}:rate` | Request and token windows for one lookup. |
+| `<prefix>limits:{<lookup>}:concurrency` | Concurrency leases for one lookup. |
+| `<prefix>limits:{<cost owner>}:cost:day`, `:cost:week` and `:cost:month` | Current calendar spend windows for caller and supply owners; supply caps use day/month. Custom calendar hashes also contain start/end instants. |
+| `<prefix>limits:{<cost owner>}:cost:pending` and `:cost:expiry` | Cost reserved by requests in flight against that owner: a hash of each request's amount and their total, and the set of when each lapses. Advisory; absent when nothing is in flight. |
+| `<prefix>limits:provider-cooldown:<scope>` | Credential-version and slot cooldowns. |
+| `<prefix>limits:health:circuits` | Each provider whose circuit the fleet holds open, until when. Gateways publish transitions and read it every two seconds. |
+| `<prefix>limits:health:probes` and `:health:probe:<provider>/<model>` | Each provider's latest active probe result, and the claim that keeps one probe per model and interval. |
+| `<prefix>request-metadata` | The request metadata stream, read by consumer group `olp:persistence`. |
 
 A lookup is the key's lookup identifier, `pc_<provider uuid>` for a connection,
 `ps_<slot uuid>` for a credential slot, or `rt_<route uuid>` for a route's
@@ -626,52 +254,24 @@ is therefore safe; it costs one slower call per script.
 
 ## Routine checks
 
-1. Confirm pod readiness and one nonzero runtime generation across gateways.
-2. Check PostgreSQL replication, WAL archiving, disk headroom, and backup age;
-   check Valkey latency, memory and AOF durability (it holds metadata awaiting
-   database ingestion).
-3. Review usage completeness and pricing coverage before exporting costs.
-   Missing upstream usage is incomplete and unpriced, never zero.
-4. Review provider health, authentication, role/key changes, credential
-   rotations, and route activations in the audit stream. `GET /api/v1/audit`
-   narrows a page by `action`, `resource_type`, `resource_id`,
-   `actor_user_id`, `outcome`, `occurred_after`, and `occurred_before`, so
-   each category can be reviewed on its own. Session-driven actions also
-   record the direct peer address and a coarse user-agent family. Authentication
-   admission resolves trusted proxy headers, while audit retains the direct
-   peer. The full user-agent is never stored, and background maintenance and
-   reconciliation events leave both empty.
-5. Offboarding requires rotating or revoking installation-scoped keys;
-   deactivating a user alone does not revoke them.
-6. Keep media-spool usage below `OLP_MEDIA_SPOOL_CAPACITY_BYTES`. Watch
-   `olp_media_spool_used_bytes` against `olp_media_spool_capacity_bytes`; both
-   are also on `/health/ready` as `media_spool_used_bytes` and
-   `media_spool_capacity_bytes`. The chart budgets 1 GiB in a 2 GiB volume; do
-   not use the 64 MiB general `/tmp` mount.
-7. Watch `olp_http_admission_rejections_total{surface=...}` against admitted
-   requests/capacity. Default independent pools are 256 inference and 32
-   management requests; permits last through streaming or cancellation.
+1. Confirm readiness, release convergence and independently fresh key authority.
+2. Check PostgreSQL replication/WAL/disk/backup age and Valkey latency/memory/AOF.
+3. Review completeness/pricing before cost exports; missing usage is not zero.
+4. Review bounded `/api/v1/audit` pages for auth/role/key/credential/publication
+   changes. Direct-peer/coarse-UA metadata is not trusted forwarded identity.
+5. Revoke/rotate keys when offboarding: disabling a user does not revoke API keys.
+6. Compare spool used/capacity metrics and readiness. The chart budgets 1 GiB in a
+   2 GiB volume, separate from the 64 MiB general `/tmp` mount.
+7. Watch independent management/inference admission pools (default 32/256).
 
-During a rollout, compare the active runtime-generation ordinal and provider
-revision on every replica before comparing request latency. A healthy gateway
-may continue serving its last complete generation while a new snapshot is being
-compiled, but it must not accept a partially indexed generation. Check the audit
-stream for activation, route-permission, credential, and key changes before
-attributing a provider error to the rollout; `occurred_after` and
-`occurred_before` bound that page to the rollout window. Keep provider probe
-failures separate from gateway admission failures so an upstream outage does not
-hide a local capacity regression.
-
-Never put prompts, outputs, raw headers, credentials, sessions, proxy-key
-secrets, or master keys in tickets or diagnostic bundles.
+Separate upstream/probe failures from local admission or rollout regressions.
+Never include bodies/raw headers/credentials/session/master secrets in tickets.
 
 ### OpenAI-compatible capability certification
 
-Follow the [provider lifecycle](provider-routing.md#provider-lifecycle): review
-exact tuples, run bounded server certification, and activate only supported,
-certified capabilities. Re-certify after transport or semantic changes;
-credential rotation requires fresh validation. Keep probe failures separate from
-gateway admission failures when investigating an incident.
+[Review, certify and activate](provider-routing.md#provider-lifecycle) exact model/
+operation tuples. Re-certify transport/semantic changes and validate rotation;
+capability claims alone never qualify a provider.
 
 ## Backup and restore
 

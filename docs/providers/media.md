@@ -188,4 +188,3 @@ Vertex AI is declined too: Google's references disagree on how a finished
 operation returns its video, which arrives inside the operation itself unless
 it is written to Cloud Storage, and Veo has no deletion. Runway serves Veo 3.1
 models.
-

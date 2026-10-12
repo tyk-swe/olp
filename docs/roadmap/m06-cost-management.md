@@ -4,12 +4,10 @@
 | --- | --- | --- |
 | Planned | [M2](m02-provider-catalog.md), [M4](m04-tenancy-identity.md), [M5](m05-observability.md) | FinOps adoption |
 
-OLP's accounting is already more rigorous than most gateways: exact decimals,
-pricing revisions pinned per attempt, fail-closed budgets and explicit
-completeness evidence. Its pricing model, however, cannot express several real
-price structures, and its spend data stays inside OLP. This milestone completes
-the pricing model, adds internal chargeback, estimates cost before dispatch, and
-exports cost to FinOps and billing systems.
+OLP already has exact-decimal pinned prices, fail-closed hierarchical budgets,
+completeness evidence and M5 metadata exports. This milestone adds remaining
+price structures, chargeback, standalone cost estimates and FinOps/billing formats;
+it does not replace existing admission estimates or sink delivery.
 
 ## Outcome
 
@@ -23,7 +21,10 @@ exports cost to FinOps and billing systems.
 
 ## Baseline
 
-| | OLP today | LiteLLM reference |
+Planning-time comparison; shipped behavior is authoritative in the
+[compatibility matrix](../compatibility.md) and [access guide](../access.md).
+
+| | Planning baseline | LiteLLM reference |
 | --- | --- | --- |
 | Price components | Input, cached input, cache writes (generic, 5-minute, 1-hour), output and a unit price per revision entry ([`pricing.go`](../../internal/usage/pricing.go)) | Model cost map components, [off-peak](https://docs.litellm.ai/docs/proxy/off_peak_pricing) and [provisioned throughput](https://docs.litellm.ai/docs/proxy/ptu_flat_cost) pricing |
 | Adjustments | Publish-time overrides of source snapshots | [Discounts](https://docs.litellm.ai/docs/proxy/provider_discounts) and [margins](https://docs.litellm.ai/docs/proxy/provider_margins) |

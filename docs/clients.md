@@ -56,48 +56,15 @@ of the gateway's module and runtime inventory.
 
 ## What the suites assert
 
-Every test holds two things at once.
+Every suite checks the client's result **and** recorded upstream requests:
+path/model rewrite, provider credential (never caller key), tools/schemas/reasoning,
+usage and typed errors. Clients run with empty environment/private home, telemetry
+off and loopback-only egress; a bypass fails.
 
-- **The client's outcome.** For a coding agent, its exit status and the JSON it
-  prints: the final reply, the tools it ran, the usage that came back through
-  the gateway, the typed error of a key that may not use the route. For an SDK
-  or framework, the values, streamed events and typed errors its own API
-  returns, such as a completed tool loop or an error of the vendor's documented
-  type.
-- **What the upstream received.** The scripted upstream records every request,
-  rejected ones included. A test checks the path, that the route slug the client
-  sent reached the upstream as the upstream's own model name, that the upstream
-  saw its own credential and never the caller's key, that tool results, signed
-  thinking, reasoning items, `anthropic-beta` headers and cache markers arrived
-  intact, and that every request got the status the test expected.
-
-In the JavaScript suites a recording proxy sits between the client and the
-gateway and captures what the client really sent. The framework suites and the
-three coding agents hold that against the upstream's recording, request for
-request. Where the route keeps the client's dialect, the body must reach the
-upstream unchanged apart from the rewritten model, with one documented
-exception: the `stream_options.include_usage` the gateway adds to a streamed
-Chat Completions request. Where the route translates between dialects, the
-request is held to the same tools, token limit, temperature, text and images
-instead. The `harness` suite tests the proxy and that comparison without any
-client, against recordings altered the way a regression would alter them. The Go
-SDK suites have no proxy; they assert against the upstream's recording and the
-typed values the SDK returns.
-
-Each suite also runs from an empty environment with a private home, telemetry
-and update checks off, and a proxy that refuses everything but loopback, so a
-client that ignores its base URL reaches nothing and fails. The coding-agent
-suites add a bait test: the agent is pointed at a listener the proxy does not
-exempt and must never connect to it. The proxy it runs under is a stand-in that
-records what the agent asks it for and refuses it, and the agent must have asked
-for the listener, so an agent that fails to start for another reason is not
-taken for one that was held. The Go suites guard each SDK's HTTP client,
-or its middleware for `openai-go`, which fails any request outside the gateway.
-
-A suite that runs no tests, a test file that defines none, or a test or group of
-tests that is skipped or left to do, fails. A client that cannot run headless or
-take a base URL is an [open item](#open-items), recorded here and in the suite
-table of `tests/clients/run.sh`, never patched around.
+Fixtures model native operations deterministically, not model quality, actual
+account permission or every upstream rule. Configuration and limitations below
+remain part of qualification. See the
+[harness contract](../tests/clients/README.md#the-harness-contract).
 
 ## Tested configuration
 
@@ -347,159 +314,53 @@ the `Retry-After` the gateway relays, which the suites assert too.
 
 ## Gateway behavior that shapes client configuration
 
-The suite found these while it was built; each is how the gateway behaves today.
+- Model names are published route slugs; base URLs select native ingress.
+- `allow_provider_state` gates retained state. Translated Responses refuses `store`,
+  including false; static client fixtures have no database-backed resource store.
+- Native Gemini embeddings require strict native profiles; transformed clients use
+  `/v1/embeddings`. Missing route is 404; wrong transformed surface is 400.
+- Upstream 429 cools the slot for bounded Retry-After (default ten seconds); without
+  another eligible slot, subsequent requests receive 503 during cooldown.
+- Repeated Anthropic-Beta lines form one list; repeated Anthropic-Version refuses.
+  SDK errors expose `request-id`, matching `X-Request-Id`.
+- Translation refuses unpreservable strict tools, nonempty include/safety settings,
+  store and Gemini parallel-tool controls. Empty/default hints may be ignored.
+  Gemini JSON-schema/type spelling maps only where representable. Late system
+  messages cannot be hoisted into Anthropic/Bedrock's initial system field.
+- Anthropic requires caller output-token bound or provider `max_tokens` default;
+  OLP never invents one. Defaults cannot override explicit caller values.
+- Native OpenAI Chat streams request/relay usage. Provider-native consumption
+  remains authoritative even if projection/delivery fails.
+- Gemini functionResponse objects become JSON-text tool results across dialects;
+  framework wrappers remain. Translated embeddings report observed input usage
+  only, never invented counts.
 
-- A transformed route forwards a caller's `anthropic-beta` header to an
-  Anthropic upstream when it hands the upstream the caller's own Messages
-  request, because the fields of a beta travel with its header: Claude Code
-  sends `context_management`, `output_config.effort` and mid-conversation
-  `system` messages with theirs. A request translated from another dialect
-  carries no Anthropic semantics, so it gets no header. A strict route bound to
-  the `anthropic-messages` profile forwards the header too. The header goes
-  only to a provider that takes it: an Anthropic provider, or one whose profile
-  declares `Anthropic-Beta`, as the Vertex AI hosting of Claude does. Bedrock
-  InvokeModel declares none. A provider that publishes betas of its own in its
-  semantic headers is sent them and the caller's, each beta once, so the fields
-  of the caller's request keep their headers; a strict route refuses a caller's
-  list that differs from the published one with `semantic_header_conflict`. A
-  route with such a target refuses a header it cannot forward, one longer than
-  2048 bytes (alone or joined with a provider's published betas) or not a valid
-  header value, before any provider is called.
-- The Anthropic SDKs, and Claude Code with them, add `?beta=true` to `messages`
-  and `count_tokens` calls. The query selects no behavior, so a strict route
-  consumes it and the upstream never sees it; any other query setting still has
-  to match a setting the profile declares. Messages requests may also carry
-  `system` messages between turns, which Claude Code appends.
-- A strict Responses route refuses the provider-hosted tools Codex sends by
-  default, web search and the multi-agent namespace, with `state_carrier`,
-  because they need a lifecycle contract the gateway has not qualified. Codex
-  turns them off by configuration.
-- A strict Responses route treats an omitted `store` as `store: true`, which
-  needs the `allow_provider_state` key policy. A client that cannot send
-  `store: false` needs that policy.
-- A Responses request that carries `store`, even `store: false`, is refused when
-  the route translates it to an Anthropic or Gemini upstream, because the
-  parameter has no equivalent there.
-- `previous_response_id` and stored responses need the key policy
-  `allow_provider_state` and the gateway's database-backed resource store, which
-  the suite's static gateway does not have.
-- Native Gemini `embedContent` and `batchEmbedContents` are served only on strict
-  routes with the `gemini-generation` and `gemini-batch-embeddings` profiles. A
-  client that needs Gemini embeddings through a transformed route uses the
-  OpenAI `/v1/embeddings` endpoint.
-- An upstream `429` cools the credential slot for the upstream's `Retry-After`
-  (ten seconds when absent), so a rate-limited route answers `503` until it
-  expires.
-- The Anthropic Go SDK sends each beta as a line of its own in the
-  `Anthropic-Beta` header. The gateway reads the lines as the one
-  comma-separated list HTTP defines them to be, so a strict route accepts
-  several betas however a client frames them. A repeated `Anthropic-Version` has
-  no such reading and is still refused.
-- The native Gemini embedding methods `embedContent` and `batchEmbedContents`
-  answer `404` for a route that does not exist, as every other Gemini method
-  does, and `400` for a transformed route, naming the strict route they need.
-  The Google Go SDK sends every `EmbedContent` as one `batchEmbedContents`
-  request whose `requests` array holds one entry per content.
-- The Anthropic SDKs read the request ID of an error from the `request-id`
-  response header. The gateway sends it on the Anthropic surface beside
-  `X-Request-Id`, with the same value, so `anthropic.Error.RequestID` is the ID a
-  user quotes to support.
-- A route whose upstream speaks another dialect translates the request and
-  refuses, by name and before any provider is called, what the target cannot
-  preserve: `strict: true` tools, a non-empty `include` or `safetySettings`,
-  `store`, and `parallel_tool_calls` for Gemini. It ignores what a client only
-  spells out as a default or a delivery hint: `strict: false`, an empty
-  `include` or `safetySettings`, the `name` of a tool message, and
-  `eager_input_streaming`. It reads the JSON Schema fields `parametersJsonSchema`
-  and `responseJsonSchema` that current Google SDKs send, and gives other vendors
-  the lower-case type names of JSON Schema where Gemini's own dialect spells them
-  in capitals, with the schema's members in the order the client wrote them. In
-  the other direction a schema an OpenAI or Anthropic client wrote (`$schema`,
-  `additionalProperties`, `$ref` and the like) reaches a Gemini provider in
-  `parametersJsonSchema` or `responseJsonSchema`, which take JSON Schema as it is,
-  where Gemini's `parameters` and `responseSchema` refuse members outside their
-  OpenAPI subset; a schema within the subset goes in those, as before.
-- Anthropic requires a token limit that OpenAI and Gemini clients do not always
-  send, such as the OpenAI Agents SDK. The gateway refuses to invent one, naming
-  `max_output_tokens`, so such a client sets a limit itself or the Anthropic
-  provider sets `parameter_defaults` with `max_tokens`.
-- The gateway asks an OpenAI-dialect upstream to report usage on every streamed
-  Chat Completions request by adding `stream_options.include_usage`, and
-  relays the usage chunk that follows. Across the suites it is the only change
-  to a request that keeps its dialect, apart from the rewritten model.
-- A tool result a Gemini client sends is a `functionResponse` object, and another
-  vendor receives that object's JSON as the text of the result. The AI SDK
-  wraps the output as `{name, content}` and LangChain as `{result}`.
-- `/v1/embeddings` answered by a Gemini upstream reports as its `usage` the
-  `promptTokenCount` of the response's `usageMetadata`, which the AI SDK reports
-  as its token count. A response without one has no `usage`.
+See [compatibility](compatibility.md) for supported/refused mappings and
+[profiles](provider-profiles.md) for native/default rules.
 
 ## Open items
 
-What the suites do not yet qualify, and the client defects they found:
+- Coding agents qualify against their own dialects, not cross-vendor routes.
+  Claude cache/thinking/context/output/safeguards, Codex retained/reasoning/include
+  and Gemini topK/thinking controls can refuse translation. Semantic dropping is
+  a product decision, not a suite workaround.
+- Ordinary-route Codex continuation is history replay. Database-backed retained
+  continuation/key-limit typed 429 need service lanes; static fixtures qualify
+  upstream 429. [Code mode](features/code-mode.md) separately qualifies pinned
+  native Codex HTTP/WebSocket/compact continuation against controlled fixtures.
+- Anthropic auto-mode classifier results are not simulated: safeguards/beta request
+  relay is asserted, server safeguard-results relay is not. Slow Claude 401 retries
+  are outside this lane; route-denied 403 is the qualified refusal.
+- Framework lanes omit voice/realtime/sandbox, post-first-event stream failures and
+  image URLs. Pre-first-byte failures are covered.
+- LlamaIndex OpenAIResponses is unary-only: its streaming repeats text deltas.
+  Unconditional store fields refuse translation. Gemini needs `safetySettings: []`
+  for translated routes and retains the example's model-naming constraints.
+- AI SDK Anthropic structured-output forcing with parallel use disabled cannot map
+  to Gemini. Deprecated LlamaIndex leaf packages retain final registry releases
+  (no named successor); umbrella/workflow are separate.
 
-- None of the three coding agents runs through a route that translates to
-  another vendor, because the gateway refuses, by name and before any provider
-  is called, what the target cannot preserve, and each agent sends such fields
-  on every request. Claude Code sends `cache_control`, `thinking`,
-  `context_management`, `output_config`, `metadata` and `safeguards` to an
-  OpenAI or Gemini route. Codex sends `store`, `reasoning`, `include`,
-  `prompt_cache_key` and `client_metadata` to an Anthropic or Gemini route.
-  Gemini CLI sends `generationConfig.topK` and `thinkingConfig` to an OpenAI or
-  Anthropic route. Serving them needs a way to drop what a target cannot
-  preserve, as an operator's choice; it is not a change to this suite.
-- Codex's stored-response continuation is its history replay, which the suite
-  qualifies. Codex sends `previous_response_id` only over its Responses
-  WebSocket transport (`supports_websockets`), which the gateway does not serve,
-  and it defaults to HTTP.
-- The scripted upstream does not simulate Anthropic's server-side auto-mode
-  classifier, so Claude Code prints that the session is not eligible for
-  no-charge classifier requests. The suite asserts the `safeguards` request
-  field and its paired beta reach the upstream unchanged; the `safeguard_results`
-  the real API returns is not simulated, so its relay is not asserted.
-- Claude Code retries a `401` with backoff, so `claude -p` with an invalid key
-  takes minutes to fail. The suite qualifies the `403` for a key not allowed on
-  the route instead.
-- The framework suites cover chat, tools, structured output, images and
-  embeddings. They do not cover the OpenAI Agents SDK's voice, realtime and
-  sandbox features, a stream that fails after its first event, or an image given
-  by URL instead of inline data.
-- LlamaIndex.TS `OpenAIResponses` is qualified for unary chat and tool loops
-  only. Its streaming repeats the last text delta once for each event that
-  follows it, and the `agent` streams every step, so both return text such as
-  `fixture.fixture.fixture.fixture.fixture.`. The gateway relays the Responses
-  stream event for event, as the upstream sent it, and the AI SDK, LangChain
-  and the Agents SDK assemble the same stream correctly, so the defect is the
-  client's. The class also sends `store: false`, `metadata: {}`, `user: ""` and
-  `reasoning: {}` on every request, and a route that translates to another
-  vendor refuses `store`; the suite pins that refusal.
-- The LlamaIndex.TS `Gemini` class sends safety settings that switch the filters
-  off. A route that translates to another vendor refuses them, so the class
-  needs `safetySettings: []` there. The class and the `agent` also depend on
-  model names, as the configuration above describes.
-- The AI SDK Anthropic provider's structured output cannot reach a Gemini
-  upstream: it forces a tool call with parallel tool use disabled, which Gemini
-  cannot preserve. The gateway refuses it with `parallel_tool_calls`, and the
-  suite pins the refusal.
-- The `429` the Go SDK suites qualify is an upstream rate limit relayed by the
-  gateway. The gateway's own limits on an API key (requests, tokens,
-  concurrency and cost budgets) need the Valkey limiter, which the static
-  gateway does not have: a key with such a limit answers `503`
-  `distributed_limits_unavailable` there. The typed `429` for a key limit needs
-  a Valkey-backed qualification lane.
-- The scripted upstream fails a request before its first byte, so the suites
-  cover errors that precede a stream. A stream that fails after its first event
-  is not scripted.
-- Stored-response continuation through the gateway needs a database-backed
-  qualification lane. The scripted upstream implements `previous_response_id`,
-  and its own tests cover it.
-- The pinned LlamaIndex.TS packages, except the `llamaindex` umbrella and
-  `@llamaindex/workflow`, are marked deprecated on the npm registry as no longer
-  maintained, and the registry names no successor. The suite pins their final
-  releases.
-- Whether a translated Responses request should drop `store` is undecided. The
-  Agents SDK sends no `store` unless asked, and Codex qualifies against OpenAI
-  routes, where it is native.
+Fixture success is not live-provider or subscription qualification.
 
 ## Running the suites
 

@@ -21,7 +21,10 @@ attempt-level accounting.
 
 ## Baseline
 
-| | OLP today | LiteLLM reference |
+Planning-time comparison; shipped behavior is authoritative in the
+[compatibility matrix](../compatibility.md) and [access guide](../access.md).
+
+| | Planning baseline | LiteLLM reference |
 | --- | --- | --- |
 | MCP | None | [MCP gateway](https://docs.litellm.ai/docs/mcp) over Streamable HTTP, SSE and stdio, with [OAuth](https://docs.litellm.ai/docs/mcp_oauth), [per-user auth](https://docs.litellm.ai/docs/mcp_per_user_auth), [toolsets](https://docs.litellm.ai/docs/mcp_toolsets) and [cost tracking](https://docs.litellm.ai/docs/mcp_cost) |
 | Agents | None | [A2A gateway](https://docs.litellm.ai/docs/a2a) with [iteration budgets](https://docs.litellm.ai/docs/a2a_iteration_budgets) and a [kill switch](https://docs.litellm.ai/docs/a2a_kill_switch) |

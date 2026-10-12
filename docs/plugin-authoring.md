@@ -317,51 +317,21 @@ Classification: []plugin.FailureRule{{Status: 400, Code: "quota_exhausted", Clas
 
 ### Upstreams that serve only streams
 
-Some upstreams, such as subscription backends, accept only streaming requests.
-A profile declares one with `ForceStreaming`, as the reference plugin's
-`reference-streaming` profile does:
+`Hosting.ForceStreaming: true` supports `openai-responses` only. The inspector
+shows the prepared `stream:true`; streaming callers relay normally, unary callers
+aggregate validated terminal response plus ordered `response.output_item.done`
+items when the terminal omits them.
 
-```go
-Hosting: plugin.Hosting{
-	Address:        "https://api.example.com/streaming/v1",
-	Headers:        map[string]string{"Authorization": "Token {credential}"},
-	ForceStreaming: true,
-},
-```
-
-OLP then sends every request of the profile as a streaming one, with
-`"stream": true`, which the route inspector's effective request shows. A caller
-that streams receives the upstream's events as usual. For a caller that did not
-ask to stream, OLP reads the stream to its end and aggregates it into the
-dialect's non-streaming result, which the caller, content policy and usage
-accounting see as an ordinary response:
-
-- The result is the response the terminal event carries. An upstream may leave
-  that response's output empty and deliver each item only in
-  `response.output_item.done`; OLP then fills the output with those items, in
-  order.
-- OLP validates the stream as it does for a streaming caller. A stream that
-  fails or ends before its terminal event yields no partial result. The
-  upstream had accepted the request, so its outcome is unknown and its cost
-  uncertain, unless the stream reported usage, which is accounted as it would
-  be for a streaming caller.
-- Aggregation is bounded by the gateway's response size limit
-  (`OLP_PROVIDER_MAX_RESPONSE_BYTES`) and at most 4,096 retained completed
-  output items. Exceeding either bound fails the request with
-  `502 upstream_response_too_large`, without failing over, and the caller can
-  stream instead.
-
-OLP aggregates the `openai-responses` dialect only, and refuses a manifest that
-forces streaming in another dialect with the field
-`manifest.profiles[i].hosting.force_streaming`.
+Incomplete streams yield no partial unary result; observed consumption remains
+accounted/uncertain without failover after acceptance. Aggregation is bounded by
+`OLP_PROVIDER_MAX_RESPONSE_BYTES` and 4096 completed items; overflow returns
+`502 upstream_response_too_large`. Callers can request streaming instead.
+See the reference plugin's `reference-streaming` profile.
 
 ## Grants
 
-Some upstreams authorize an account, often with a refresh token that rotates,
-rather than issue an API key. A profile that declares `Grant` authenticates
-providers with a grant: upstream authorization the plugin obtains when an
-operator signs in, which OLP holds beneath a credential version and places
-with the profile's hosting adaptation.
+Grant profiles authenticate through `GrantEnroller`/optional `GrantRefresher`,
+not pasted static credential versions:
 
 ```go
 plugin.Profile{
@@ -374,166 +344,46 @@ plugin.Profile{
 }
 ```
 
-`Facts` names up to 16 grant facts: non-secret values the plugin reports with
-every grant, such as the upstream account, that header and query parameter
-templates use as `{grant.<name>}`. Each is 1–64 lowercase letters, digits and
-underscores, starting with a letter. A template may use only the facts its
-profile declares, and OLP refuses to install a plugin whose template names
-another. Envelope fields, which belong to the provider rather than to a
-credential version, use none.
-
-An upstream that names each account's API in its token response, such as a
-regional deployment, puts that base URL in a fact with which the address
-begins:
+Declare up to sixteen nonsecret facts (1–64 lowercase letters/digits/underscores,
+starting with a letter). Headers/query may use `{grant.<name>}`, never undeclared
+facts; provider-level envelopes cannot. One address-leading fact may hold the
+base URL, without userinfo/query/fragment and at a canonical approved origin:
 
 ```go
-Grant:   &plugin.GrantAuthentication{Facts: []string{"account", "api_base"}},
+Grant: &plugin.GrantAuthentication{Facts: []string{"account", "api_base"}},
 Hosting: plugin.Hosting{Address: "{grant.api_base}/v1", Headers: headers},
 ```
 
-Each credential version's requests then go to its own grant's base URL, with
-the rest of the address and the dialect's paths after it. The fact's value must
-be an `http` or `https` URL without credentials, query or fragment, at one of
-the manifest's `Origins`, written the same way, such as
-`https://eu.api.acme.example/accounts/7`; normalize what the upstream returns
-before reporting it. OLP checks it on every request, under the provider's
-network path and the egress policy as always, and sends nothing for a grant
-whose base URL is elsewhere: probing or certifying the provider reports why,
-and the gateway treats the attempt as a credential failure. Only one fact may
-appear in the address, and only at its start.
-
-An upstream that issues API keys rather than signing operators in sets the
-grant's `Input` to `abi.GrantInputSecret`. Its `StartGrant` returns the `URL` of
-the page that issues the key, never a device authorization; the operator pastes
-the key, which the console masks, and `ExchangeGrant` returns it as the grant's
-`AccessToken` with no `ExpiresIn` or `RefreshToken`, so it never expires and
-nothing refreshes it. Without an account identifier to observe, report a
-fingerprint of the key as the `Principal`, so another key is another account.
-OLP's code-mode plugins `plugins/opencode-go` and `plugins/zai-coding` work this
-way:
-
-```go
-Grant: &plugin.GrantAuthentication{Input: abi.GrantInputSecret},
-```
-
-A plugin with such a profile implements `plugin.GrantEnroller`; one that
-declares a grant profile without it reports no manifest, so OLP refuses to
-install it. OLP runs its steps in control when an operator enrolls a grant from
-the provider wizard, or re-enrolls a slot's grant from the credential pool, on
-behalf of the enrolling provider, so
-[`plugin.ProviderOf(ctx)`](#calls-for-a-provider) returns its option values,
-such as the tenant whose authority the operator signs in to:
+Every dispatch rechecks origin/network/egress; wrong destinations fail credentials.
+For masked pasted-key enrollment, use `Input: abi.GrantInputSecret`, StartGrant's
+key-page URL (not device flow), and return the key as AccessToken with no expiry/
+refresh. Without observed account ID, use a profile-scoped stable key fingerprint
+as Principal, as the coding-plan plugins do.
 
 ```go
 func (acme) StartGrant(ctx context.Context, start plugin.GrantStart) (plugin.GrantAuthorization, error)
 func (acme) ExchangeGrant(ctx context.Context, exchange plugin.GrantExchange) (plugin.Grant, error)
-```
-
-- `StartGrant` builds the authorization request the operator opens: its `URL`,
-  at one of the plugin's origins, with a fresh `state` and PKCE challenge, and a
-  `Session` of at most 16 KiB holding what `ExchangeGrant` needs, such as the
-  state and the PKCE verifier. OLP stores the session encrypted and hands it
-  back once.
-- `ExchangeGrant` receives the session and what the operator pasted back: the
-  whole callback URL the upstream redirected the browser to, typically a
-  loopback address where nothing listens, or the code the upstream displayed.
-  It checks the state, reporting a mismatch as an `*plugin.Error` with code
-  `abi.CodeStateMismatch`, exchanges the code with `plugin.Fetch`, and returns
-  the `Grant`: its `AccessToken` (at most 16 KiB, sendable in a header), any
-  `RefreshToken`, `ExpiresIn` seconds, the observed `Principal` (the upstream
-  account, 1–256 bytes) and a value for every declared fact.
-
-The principal is part of the provider's serving identity, so report a stable
-identifier of the account, the same at every sign-in: re-enrolling the same
-account is then a credential rotation, and another account a serving identity
-change ([grant enrollment](plugins.md#re-enrolling-and-the-observed-principal)).
-
-Report a failure the operator should see, such as the upstream refusing the
-code, as an `*plugin.Error` with a code of your own; any other error is reported
-as `internal`. OLP redacts the session and the pasted value from what the step
-logs; keep tokens the plugin receives out of its log.
-
-A plugin whose grants carry a refresh token also implements
-`plugin.GrantRefresher`. OLP's workers call it a quarter of the access token's
-lifetime before it expires (at most ten minutes before), and at once when the
-upstream refuses the access token, on behalf of the provider the grant belongs
-to:
-
-```go
 func (acme) RefreshGrant(ctx context.Context, refresh plugin.GrantRefresh) (plugin.Grant, error)
 ```
 
-`RefreshGrant` receives the grant's current `RefreshToken` and the `Facts` its
-enrollment reported, exchanges the refresh token with `plugin.Fetch`, and
-returns the new `AccessToken` and `ExpiresIn`, with the `RefreshToken` that
-replaces the spent one if the upstream rotates it; an empty one keeps the
-current token. It may report the `Principal` and `Facts` it observes, and OLP
-checks they are the grant's. OLP calls it for one grant at a time, whatever the
-number of workers, so a rotating refresh token is spent once.
+Start returns approved URL/state/PKCE plus encrypted Session ≤16 KiB. Exchange
+checks pasted callback/code state (`abi.CodeStateMismatch`) and uses `plugin.Fetch`
+to return header-safe AccessToken ≤16 KiB, optional RefreshToken/ExpiresIn,
+stable account Principal (1–256 bytes) and every declared fact. Calls receive the
+enrolling provider/options via `plugin.ProviderOf(ctx)`; session/input are one-use.
 
-Report a grant the upstream will no longer refresh, such as one whose refresh
-token was revoked or expired, as an `*plugin.Error` with code
-`abi.CodeInvalidGrant` (`invalid_grant`): OLP stops refreshing the grant, as it
-does when the refresh authorizes another principal or other facts. Any other
-failure is transient: OLP retries it with backoff when it knows the refresh
-token was not spent, and otherwise lapses the grant after its attempt deadline
-([grant refresh](plugins.md#grant-refresh)). OLP redacts the refresh token from
-what the refresh logs.
+Principal stability determines rotation versus changed serving identity. Grants
+belong to exact installed digest/profile; changing either requires enrollment.
+Refresh receives current refresh token/facts, returns new access/expiry/optional
+replacement refresh (empty preserves) and may report matching principal/facts.
+A permanently unusable token returns `abi.CodeInvalidGrant`. Only provably
+undispatched failure can retry; ambiguous dispatch lapses without token replay.
+Exact retained pins can keep an old revision's grant refreshable.
 
-The reference plugin's `reference-grant-chat` profile implements this flow
-against a fictional authority with the authorization code flow and PKCE, and
-refreshes its grants with rotating refresh tokens. It sends each account's
-requests to the API base URL its token response names.
-
-### Device authorization
-
-An upstream that authorizes a device instead, with the OAuth 2.0 device
-authorization grant (RFC 8628) or its own variant, has `StartGrant` return a
-`Device` rather than a `URL`, and the plugin implements `plugin.GrantPoller`
-too:
-
-```go
-func (acme) PollGrant(ctx context.Context, poll plugin.GrantPoll) (plugin.Grant, error)
-```
-
-- `StartGrant` requests the device authorization upstream and returns its
-  `VerificationURL`, at one of the plugin's origins, the `UserCode` the operator
-  enters there (1–64 bytes), how many seconds the code lasts in
-  `ExpiresIn`, and the polling `Interval` in seconds, at most 300 (0 means 5).
-  The `Session`, such as the device code, is handed to every poll. OLP polls
-  for as long as the user code lasts, at most 30 minutes.
-- While the operator approves the device upstream, OLP calls `PollGrant`,
-  waiting the interval between polls. It returns the `Grant` once the operator
-  approved, like `ExchangeGrant` does, and until then fails with a
-  `*plugin.Error` whose code is RFC 8628's: `abi.CodeAuthorizationPending`, or
-  `abi.CodeSlowDown` to have OLP wait 5 seconds longer from then on; and
-  `abi.CodeAccessDenied` or `abi.CodeExpiredToken` once the operator denied the
-  device or it expired, which ends the enrollment. Any other failure ends it
-  too.
-
-OLP never calls `ExchangeGrant` for a device authorization, so a plugin whose
-upstream only authorizes devices may have it report an error.
-
-An upstream's own variant maps onto the same steps. For one that answers
-polls with an HTTP 403 until the operator approves, and then with an
-authorization code to exchange, `PollGrant` reports the 403 as
-`abi.CodeAuthorizationPending`, and after the approval exchanges the code with
-`plugin.Fetch` within the same poll. The reference plugin's
-`reference-device-chat` profile implements RFC 8628 against its fictional
-authority, and places and refreshes its grants as `reference-grant-chat` does.
-
-### Fetch
-
-`plugin.Fetch` sends an HTTP request through OLP, the only way a confined plugin
-reaches the network. OLP grants it to grant enrollment steps and grant refresh,
-so pass it the call's context: `plugin.Fetch(ctx, request)`. OLP sends a request
-only to one of the plugin's approved origins, over the provider's network path
-and egress policy. It sets the framing headers itself; a plugin may not set
-`Host`, `Content-Length`, hop-by-hop or `Proxy-` headers. It returns a redirect
-rather than following it, and any response the upstream sent, whatever its
-status. Request and response bodies are at most 512 KiB. A request OLP refuses
-or can't complete fails with an `*plugin.Error`: `origin_not_approved`,
-`http_failed` or `invalid_request`.
+Return operator-visible errors as `*plugin.Error`; other errors become `internal`.
+Never log tokens or derived secrets despite host redaction. The fictional reference
+plugin demonstrates PKCE/rotating refresh/base-URL facts; production upstream use
+requires independent permission and evidence. See [grant lifecycle](plugins.md#grant-refresh).
 
 ## Route predicates
 
@@ -557,37 +407,19 @@ a timeout falls through to the route's next selector.
 
 ## What a plugin can reach
 
-OLP runs a plugin confined, within 64 MiB of memory, an 8 MiB stack and 10
-seconds per call, on WebAssembly 2.0 without reference types (the Go toolchain
-uses none). It grants only:
-
-- a clock: `time.Now` reads the host's wall and monotonic clocks;
-- randomness: `crypto/rand` reads the host's cryptographic source;
-- logging, through `plugin.Log`;
-- to grant enrollment steps and grant refresh, HTTP to the plugin's approved
-  origins, through `plugin.Fetch`.
-
-There is no filesystem, other network access, environment or argument list.
-Sleeping spends the call's time limit, including the time `Fetch` waits, so
-avoid it.
-
-OLP keeps up to four instances of a module and serves each call on an idle one,
-so package-level state may survive from one call to the next. Never rely on it:
-OLP discards an instance whenever a call on it fails other than by an error the
-plugin reports, such as by exceeding a limit or trapping, and starts new ones as
-it needs them.
+Confined calls receive clock, cryptographic randomness and logging; only grant
+steps/refresh receive `plugin.Fetch` to approved origins. No filesystem,
+environment/arguments or arbitrary network. [Runtime bounds](plugins.md#confinement-and-limits)
+include 64 MiB memory, 8 MiB stack, four instances and ten-second calls; sleep and
+HTTP wait consume that time. Package state may persist but must not be required:
+failed instances are discarded.
 
 ## Logging
 
-`plugin.Log` is a `*slog.Logger` whose records go to OLP's log. Attribute values
-travel as text, and groups flatten into dotted keys. Anything written to
-standard output or standard error is logged a line at a time as well, including
-the Go runtime's panic output.
-
-OLP redacts every secret value it handed the call, and bounds a call's output to
-16 KiB, counting 64 bytes for each record besides its text, and each message or
-attribute to 2 KiB, so a plugin can log freely without leaking what OLP gave it
-or flooding the log.
+`plugin.Log` is a slog logger; values serialize as text and groups as dotted keys.
+stdout/stderr also log through a per-call 16 KiB budget (64 bytes/record overhead,
+2 KiB/message/attribute). OLP redacts supplied secrets, but plugins must still avoid
+logging tokens/content or deriving unredactable secret representations.
 
 ## Testing
 
@@ -598,46 +430,24 @@ it compiles as a reactor.
 
 ## Unconfined plugins
 
-A deployment that enables the experimental
-[unconfined tier](plugins.md#unconfined-plugins-experimental) can run a plugin
-as a native executable in its image instead, with the operating system
-privileges of OLP's processes, once an owner permits it. The same source builds
-either way: call `plugin.Serve` from `main`, which a WASI reactor never runs.
+[Unconfined executables](plugins.md#unconfined-plugins-experimental) require
+explicit deployment enablement/owner permission and trust equal to OLP.
+The same source builds native when main serves stdio:
 
 ```go
 func main() { plugin.Serve() }
 ```
 
-Build it as a static executable, which needs no library from the deployment's
-image:
-
 ```sh
 CGO_ENABLED=0 GOOS=linux go build -o acme .
 ```
 
-`Serve` serves OLP's calls over standard input and output until OLP closes
-standard input. OLP starts the executable with no arguments and an empty
-environment, and one process serves all its calls from one OLP process. So:
-
-- calls run concurrently, each on a goroutine of its own, so package-level
-  state needs synchronization;
-- a method's context is cancelled when OLP stops waiting for its call, such as
-  when the request it signs ends or its caller's deadline passes. Return
-  promptly: a call left unanswered for 10 seconds, cancelled or not, makes OLP
-  stop the process, failing every call in flight, and start it again for the
-  next call;
-- standard output carries the ABI, so `Serve` points `os.Stdout` at standard
-  error, which OLP logs a line at a time;
-- log with the call's context, such as `plugin.Log.InfoContext(ctx, …)`, so OLP
-  attributes the record to its call and redacts the call's secret values. OLP
-  redacts a record without one, like standard error, of the secret values of
-  every call in flight or recently answered;
-- OLP runs the executable in a process group of its own and kills the group
-  when it stops the plugin, so anything the plugin starts stops with it.
-
-Nothing confines the plugin, so it reaches the network and files itself. OLP's
-capabilities remain available to it and behave as they do for a confined
-plugin, granted by call, which is why `plugin.Fetch` takes the call's context.
+One process handles concurrent calls: synchronize shared state, honor context
+cancellation and answer within ten seconds after cancellation or all calls fail.
+Use context-aware `plugin.Log`; stdout carries ABI (Serve redirects application
+stdout to stderr). Child process groups terminate with the plugin. Empty initial
+environment and capability APIs are not a sandbox: direct files/network bypass
+host policy. See the [operational limits](plugins.md#running).
 
 ### Carrying traffic
 

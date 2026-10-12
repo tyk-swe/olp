@@ -96,34 +96,19 @@ upstream.
 
 ## Documentation
 
-| Guide | Covers |
-| --- | --- |
-| [Concepts](docs/concepts.md) | Projects, routes, revisions, keys, budgets, and privacy |
-| [Provider routing](docs/provider-routing.md) | Onboarding, credential pools, model facts, and selection policy |
-| [Provider profiles](docs/provider-profiles.md) | API dialects, defaults, bindings, and connection security |
-| [Provider plugins](docs/plugins.md) | Installing, approving, and confining operator-installed plugins |
-| [Plugin authoring](docs/plugin-authoring.md) | The Go SDK, reference plugin, and plugin ABI |
-| [Compatibility](docs/compatibility.md) | Endpoints, supported providers, and translation limits |
-| [Client compatibility](docs/clients.md) | Tested coding agents, agent SDKs and frameworks, their pinned releases and configuration |
-| [Deployment](docs/deployment.md) | Database setup, topology, capacity, qualification limits, and edge routing |
-| [Configuration](docs/configuration.md) | Variables, secret files, CLI settings, and configuration promotion |
-| [Access control](docs/access.md) | Identity, projects, management tokens, and account recovery |
-| [Management clients](docs/operator-cli.md) | Contract-generated CLI commands, stale-safe configuration promotion, client setup, and scoped management MCP |
-| [Configuration Actions](docs/configuration-actions.md) | Reusable pull-request planning, review comments and merged configuration promotion |
-| [Terraform and OpenTofu](docs/terraform.md) | Individual resource automation and acceptance qualification |
-| [Named guardrails](docs/guardrails.md) | Reusable bounded policies, immutable revisions, and portable definitions |
-| [Upstream MCP servers](docs/mcp-servers.md) | Project-owned certified catalogs, immutable revisions, and sealed bearer bindings |
-| [Export sinks](docs/export-sinks.md) | Signed content-free facts, durable retries, scope isolation, and promotion |
-| [Operator console](docs/operator-console.md) | Installation identity, independent-installation bookmarks, bulk member editing, and session-scoped saved views |
-| [Model catalog](docs/model-catalog.md) | Scoped route discovery, SDK samples, and owner-controlled public catalogs |
-| [External secrets](docs/external-secrets.md) | Wrapped key rings, workload identities, pinned provider credentials, and safe rotation |
-| [Security architecture](docs/security.md) | Trust boundaries, authorization, secrets, egress, and response headers |
-| [Gateway execution](docs/gateway.md) | Admission, attempts, content policies, and durable media |
-| [Operations](docs/operations.md) | Monitoring, spend reconciliation, backups, key rotation, and versions |
-| [Performance](docs/performance.md) | Benchmark method, scenarios and targets, the LiteLLM comparison, regression gates, and how to reproduce them |
-| [Roadmap](docs/roadmap/README.md) | Milestones to LiteLLM feature parity and beyond, with the parity matrix |
-| [Contributing](CONTRIBUTING.md) | Setup, tests, architecture, and releases |
+Start with [concepts](docs/concepts.md) and the [compatibility matrix](docs/compatibility.md).
 
-OpenLLMProxy is licensed under AGPL-3.0-only. Report vulnerabilities through
-[the security policy](SECURITY.md); community participation follows the
-[Code of Conduct](CODE_OF_CONDUCT.md).
+| Task | Guides |
+| --- | --- |
+| Connect providers and publish routes | [Routing](docs/provider-routing.md), [profiles](docs/provider-profiles.md), [plugins](docs/plugins.md), [plugin SDK](docs/plugin-authoring.md) |
+| Deploy and operate | [Deployment](docs/deployment.md), [configuration](docs/configuration.md), [operations](docs/operations.md), [performance](docs/performance.md) |
+| Manage access and secrets | [Access](docs/access.md), [security](docs/security.md), [external secrets](docs/external-secrets.md) |
+| Automate management | [CLI, Go client and MCP](docs/operator-cli.md), [GitHub Actions](docs/configuration-actions.md), [Terraform/OpenTofu](docs/terraform.md) |
+| Use clients and subscription accounts | [Qualified clients](docs/clients.md), [code mode](docs/features/code-mode.md), [qualification limits](docs/qualification/code-mode.md) |
+| Configure shared resources | [Guardrails](docs/guardrails.md), [upstream MCP servers](docs/mcp-servers.md), [export sinks](docs/export-sinks.md), [model catalog](docs/model-catalog.md) |
+| Use the console | [Controls](docs/console.md), [installation tools](docs/operator-console.md) |
+| Develop the gateway and console | [Contributing](CONTRIBUTING.md), [testing](tests/README.md), [architecture](docs/architecture.md), [execution](docs/gateway.md), [console](console/README.md) |
+| Track remaining work | [Roadmap and parity](docs/roadmap/README.md) |
+
+Licensed under AGPL-3.0-only. Report vulnerabilities through the
+[security policy](SECURITY.md); participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).

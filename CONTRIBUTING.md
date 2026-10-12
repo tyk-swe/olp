@@ -59,76 +59,67 @@ make dev
 
 ## Tests and changes
 
-Keep feature types, validation, SQL, handlers and workflows together. See the
-[architecture map](docs/architecture.md) for ownership and the
-[testing guide](tests/README.md) for suite layout, focused runs, timeouts,
-coverage, and SDK/live-provider qualification.
+Keep feature types, validation, SQL, handlers and workflows together. The
+[architecture map](docs/architecture.md) identifies backend and console owners;
+[testing](tests/README.md) covers focused runs, timeouts and qualification.
 
-Run `make integration` for persistence, authentication, inference, runtime
-publication, limits, or browser changes; follow the
-[integration prerequisites](tests/README.md#integration). Preserve meaningful
-fixture expectations. Include validation and screenshots for visible console
-changes in PRs.
+Use `gofmt` and `go vet` for Go; console source uses Prettier, two spaces,
+single quotes, no trailing commas, `camelCase` helpers and `PascalCase.svelte` components. Keep
+Svelte route components thin and use the [console design system](console/README.md#design-system).
+
+Place Go unit tests beside their feature as `*_test.go`. Service tests use the
+`integration` build tag and fail when explicitly selected without prerequisites.
+Use Vitest `*.test.ts`/`*.svelte.test.ts` and Playwright `*.spec.ts` for the console.
+Cover changed behavior and preserve protocol fixtures; no coverage threshold is set.
+Run `make integration` for service or browser behavior changes.
+
+Use short imperative commit subjects and name agent-created branches `tyk/{name}`.
+Follow the [PR template](.github/PULL_REQUEST_TEMPLATE.md): describe the problem,
+resulting behavior and validation; include screenshots for visible console changes.
+Regenerate affected contracts with `make api`. Migrations are forward-only and
+sequential; update Helm values, schema and templates together.
+
+During 0.x, target the current storage, configuration and management API formats.
+Compatibility with provider protocols and official OpenAI, Anthropic and Gemini
+SDKs remains part of the product contract.
 
 ## Dependency policy
 
-Use current stable dependencies and update `go.mod`, `go.sum` and the pnpm
-workspace lockfile with the relevant package managers. Runtime dependencies,
-API-generation tools, GLIDE's native archive and native notices are inventoried
-separately. `scripts/check-dependencies.sh` checks reachable Go vulnerabilities,
-licenses and production JavaScript packages. Candidate image qualification also
-scans runtime/build-stage SBOMs and retains the native linking/license
-inventory. The token estimator embeds OpenAI's public `o200k_base` and
-`cl100k_base` rank files as data; their MIT notice is pinned beside them, ships
-in the image, and the tests check the embedded data against the SHA-256 that
-tiktoken publishes for each file. The pinned tiktoken that generates the
-estimator's oracle fixtures is a test-only Python dependency under
-`tests/fixtures/tokens`.
+Use current stable dependencies; update Go and pnpm through their package managers.
+Commit the
+corresponding lockfiles. `scripts/check-dependencies.sh` checks reachable Go
+vulnerabilities, licenses and production JavaScript packages. Image qualification
+also scans runtime/build SBOMs and retains native linking/license evidence.
 
-The client qualification packages in `tests/clients` are exact development
-dependencies, each the newest release that cleared pnpm's release-age gate, and
-their Go module has its own `go.mod`. Advance them with the relevant package
-manager and update [client compatibility](docs/clients.md), which a script test
-keeps equal to the manifests.
+GLIDE's pinned native archive needs CGO, not Rust. The embedded OpenAI token ranks
+carry their MIT notice and SHA-256 checks; oracle fixtures use test-only tiktoken
+under `tests/fixtures/tokens`.
 
-TypeScript stays on the newest 6.0 patch. The
-[TypeScript ESLint support range](https://typescript-eslint.io/users/dependency-versions/)
-excludes 7.x, and the Svelte toolchain must support the same compiler. Remove
-this exception when both support TypeScript 7 and the console passes
-`make check` and the Chromium journey. Other version exceptions require a
-concrete incompatibility or regression and a stated removal condition.
+Client qualification packages in `tests/clients` are exact development pins,
+subject to pnpm's release-age gate. Update their manifests and
+[client compatibility](docs/clients.md) together; script tests check equality.
+
+TypeScript stays on the newest 6.0 patch until both
+[typescript-eslint](https://typescript-eslint.io/users/dependency-versions/) and
+Svelte support 7.x and the console passes checks and Chromium qualification.
+Other version exceptions need a concrete incompatibility and removal condition.
 
 ## Releases
 
-Root `package.json` owns the 0.x version. The console package, the Node and
-Python SDK smoke packages and lock, the chart `version`, `appVersion` and image
-annotation, the Dockerfile version argument, the Compose image tag, the OpenAPI
-`info.version` and the release tag must agree;
-`scripts/check-release-version.mjs` enforces this. The Makefile injects the
-same version into the binary. Build images natively on amd64 and arm64.
-Dependency layers are cached independently of application source; static assets
-remain separate from the Go binary. Native GLIDE code and CA libraries ship in a
-nonroot distroless image.
+Root `package.json` owns the version. Console/SDK package versions, chart
+metadata, Docker/Compose tags, OpenAPI `info.version` and release tags must agree;
+`node scripts/check-release-version.mjs` enforces this. The Makefile injects the
+version into the binary. Build Linux amd64 and arm64 images natively; static
+console assets ship separately in the nonroot distroless image.
 
-Candidate platform digests form one multi-architecture index. Packaged browser,
-SDK and recovery qualification consumes that exact index; promotion only tags
-and attests it and never rebuilds. A manual release-workflow dispatch qualifies
-a candidate without publishing version tags. Only a `v0.*` tag push can promote
-it, publishing `:<version>` and the floating `:<major>.<minor>` tag. A missing
-platform result or missed build target keeps that candidate's release gate open.
+Platform digests form one candidate index. Packaged browser, SDK and recovery
+qualification consumes that exact index; promotion tags and attests it without
+rebuilding. A manual workflow dispatch qualifies without publishing. A `v0.*`
+tag push can publish `:<version>` and `:<major>.<minor>` only after all gates pass.
 
-A provider, protocol or media feature is not release-ready until its review
-includes native conformance, unsupported/lossy semantics, body/time/admission
-limits, pricing and missing-usage treatment, failure/cancellation behavior,
-privacy, documented SDK versions and any recovery/credential-reference impact.
-Missing evidence can block release. Preserve feature ownership and immutable
-publication; avoid speculative services, tenant abstractions, or optimization
-gates added only to satisfy a checklist.
-
-Publish the generated management OpenAPI contract with every release. During
-0.x a release may break the management API, configuration and storage; make
-such a change deliberately, update the contract and documentation, and record
-it in [the changelog](CHANGELOG.md) rather than silently updating a fixture.
-Weekly scans of the released `:<major>.<minor>` image retain a digest-specific
-vulnerability report; triage findings through [the security policy](SECURITY.md)
-and fix them in the latest 0.x release.
+Provider/protocol/media reviews must cover native conformance, refused or lossy
+semantics, body/time/admission limits, pricing and missing usage, cancellation,
+privacy, SDK pins and recovery/credential-reference effects. Publish the generated
+management OpenAPI contract and record deliberate 0.x breaking changes in the
+[changelog](CHANGELOG.md). Weekly scans retain digest-specific released-image
+reports; triage through the [security policy](SECURITY.md).

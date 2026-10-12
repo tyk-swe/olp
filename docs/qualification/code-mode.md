@@ -240,22 +240,13 @@ and the provider configuration source linked above.
 
 ### Model selection before WebSocket upgrade
 
-The official custom-provider handshake has no dynamic native-model header in
-these captures. In `core/src/client.rs`, `responses_headers()` uses model-specific
-`codex_responses_headers` only for authenticated Codex backend routes;
-`requires_openai_auth=false` and `env_key=OLP_API_KEY` do not qualify for that path.
-The generated static `http_headers` entry therefore supplies
-`X-OLP-Code-Model=<selected model>` to OLP only. The native body is untouched.
-
-`TestOfficialCodexModelSelectionHintAndOverride` proves that `-m
-gpt-5.3-codex` sends that model in the native WS body while the configured hint
-remains `gpt-5.4`. Regenerating for `gpt-5.3-codex` without `-m` is also tested:
-both the hint and body use that selected native model. Regenerate the complete
-configuration with the management endpoint's `model` query parameter before a
-new conversation. A pinned tree
-cannot acquire a different account by changing this header. Server-side
-disjoint-model selection and no-hint refusal behavior remain an integration gate
-on this followup's base, not a passing claim from the single-model corpus.
+The qualified custom-provider handshake lacks a dynamic model header. Generate
+`X-OLP-Code-Model` matching the selected native model via the management `model`
+query; bodies remain untouched. A pinned tree cannot change account through hints.
+`TestOfficialCodexModelSelectionHintAndOverride` checks matching configuration
+and deliberate `-m gpt-5.3-codex` versus `gpt-5.4` hint mismatch. Regenerate before
+new conversations. Disjoint-model/no-hint server behavior remains separate from
+this single-model corpus; custom-provider auth differs from Codex-backend headers.
 
 ### Review parent establishment
 
@@ -355,19 +346,9 @@ No browser or live credentials are used. The existing `process` helper selects
 `TestCodeQualification`; run the explicit followup command above to include this
 new corpus when not using the broader `code` integration target.
 
-Followup results on Go 1.27.1, with race detection:
-
-- The full initial `^TestCodeCLIFollowup` corpus passed in 107.941s. After
-  expanding revocation to all five authorities and both transports and adding
-  structured review output, the affected tests were rerun with
-  `-run '^TestCodeCLIFollowup(RetryRechecksAuthority|FreshReviewParentEstablishment|ReviewAfterExplicitParentTask)'`:
-  all passed in 208.174s. Recovery and file/search code was unchanged.
-- `-run '^TestCodeQualification' -count=1 -timeout=12m ./tests/integration`
-  passed in 151.161s, including public lifecycle/isolation, fleet pin races,
-  retirement, authority, cancellation and official tool/child/compaction journeys.
-- The final `./tests/codecli` command above passed in 5.638s, including matching
-  regenerated model configuration and the deliberate `-m` mismatch.
-- Route race tests, scoped vet, script syntax and whitespace checks passed.
-
-These are selected shell/process tests; they do not claim the complete
-integration/browser suite or live subscription qualification.
+Historical focused followup passed race-enabled initial/expanded authority/review
+corpora, existing CodeQualification, codecli, route tests, vet and shell checks on
+Go 1.27.1. Those selected runs did not claim whole integration/browser or live
+subscription results. Later whole-source evidence is in
+[architecture review](../architecture-review.md); remaining live/bound gates above
+are unchanged.

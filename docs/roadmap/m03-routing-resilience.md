@@ -28,7 +28,10 @@ route simulation and plan decisions.
 
 ## Baseline
 
-| | OLP today | LiteLLM reference |
+Planning-time comparison; shipped behavior is authoritative in the
+[compatibility matrix](../compatibility.md) and [access guide](../access.md).
+
+| | Planning baseline | LiteLLM reference |
 | --- | --- | --- |
 | Strategies | `weighted`, `price`, `latency`, `throughput` within priority and preferred-order tiers ([policies](../provider-routing.md#policies-and-caller-preferences)) | Weighted pick, rate-limit aware, latency, least busy, cost, custom ([routing](https://docs.litellm.ai/docs/routing)) |
 | Failover | Within a route, before commitment, for connect, timeout, rate-limit, credential, server and context-window failures ([request path](../gateway.md#request-path), [`upstream.go`](../../internal/upstream/upstream.go)) | General, context-window and content-policy fallbacks across model groups ([reliability](https://docs.litellm.ai/docs/proxy/reliability)) |
@@ -221,11 +224,8 @@ are recorded as attempts.
 
 ## Exit criteria
 
-**Qualification handoff.** Implementation is complete. At the owner's request,
-long-running reference-hardware, live-provider and release qualification is
-assigned to the human PR reviewer, who will qualify and merge. Checked items
-labelled "Human qualification handoff" record that handoff, not a passing result.
-The original acceptance criteria and missing evidence remain below for review.
+Implementation/service controls are complete. Full-scale reference-hardware
+performance remains open and is not implied by local smoke measurements.
 
 - [x] Fallbacks, selectors, templates and retry policy round-trip through route
       drafts, revisions, restore and configuration export, plan and apply.
@@ -245,14 +245,14 @@ The original acceptance criteria and missing evidence remain below for review.
 - [x] A circuit opened on one gateway is honored by another within the staleness
       bound. *Done:* `TestCircuitOpenedOnOneGatewayIsHonoredByAnother` and
       `TestActiveProbesShareTheirVerdictWithTheFleet`.
-- [x] **Human qualification handoff:** Shadow attempts never change caller-visible latency in benchmark S1 and
+- [ ] **Reference qualification pending:** Shadow attempts never change caller-visible latency in benchmark S1 and
       are excluded from key budgets. *Done:* the S1-shadow scenario mirrors
       every request and holds S1's targets at 30% of its rate on a development
       host (added latency 1.14, 1.58 and 2.26 ms at p50, p95 and p99, against
       S1's 1.20, 2.29 and 1.01 ms in the same session), and shadow requests carry
       no key (`TestShadowTargetsMirrorTrafficAccountedToTheRoute`).
       *Remaining:* a full-scale run on reference hardware, with M1's.
-- [x] **Human qualification handoff:** Every workstream meets the [performance budget](m01-measured-advantage.md#performance-budget)
+- [ ] **Reference qualification pending:** Every workstream meets the [performance budget](m01-measured-advantage.md#performance-budget)
       when unconfigured; the `capacity` strategy adds at most one Valkey round
       trip per request. *Done:* `TestUnconfiguredFeaturesAddNoAllocations`
       still holds, and `TestCapacityStrategyAddsOneValkeyRoundTrip` counts one

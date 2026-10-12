@@ -1,11 +1,8 @@
 # Client qualification
 
-Real, pinned client releases run headless against an OLP gateway whose upstream
-is a deterministic scripted fixture. Every suite asserts two things: the
-client's own outcome, and what the upstream actually received, from a recording
-of its requests. A client that bypasses OLP, or a gateway that mangles a
-request, fails. [Client compatibility](../../docs/clients.md) names the pinned
-releases and the configuration each suite tested.
+Pinned real clients run headless against a gateway/scripted upstream. Suites
+assert client outcomes and recorded requests, catching bypasses and wire damage.
+[Client compatibility](../../docs/clients.md) owns pins/configuration/limitations.
 
 ```sh
 pnpm install --frozen-lockfile        # the npm clients, once
@@ -15,16 +12,10 @@ CLIENTS=operator-env,go-sdks tests/clients/run.sh
 tests/clients/run.sh --list
 ```
 
-`run.sh` needs Go, Node.js, `jq` and `curl`. It builds and starts the gateway
-and upstream, runs each suite in table order, prints `passed`, `failed` or
-`skipped` with the reason for each, and tears everything down. It exits nonzero
-when a suite fails. `CLIENTS` names the suites to run; an unknown name is an
-error. A suite that cannot run because a toolchain or package is missing fails
-rather than skipping, and so does one that runs no tests, has a test file that
-defines none, or skips or leaves a test or a group of tests to do. The only
-skips are rows of the table in `run.sh` with a stated reason, which are visible
-open items. A signal to `run.sh` stops the running suite, its clients and the
-gateway at once. `scripts/integration.sh` runs it as part of `make integration`.
+`run.sh` needs Go, Node.js 26, jq/curl and installed pins. It builds/starts fixtures,
+runs ordered suites, reports outcomes and cleans up (also on signals).
+Unknown `CLIENTS`, missing prerequisites, empty suites or skipped/todo tests fail;
+only explicit reasoned skip rows are allowed. `make integration` invokes it.
 
 The `operator-env` suite executes actual `olp client-env` JavaScript output with
 the pinned frameworks and official SDKs, then checks authenticated gateway

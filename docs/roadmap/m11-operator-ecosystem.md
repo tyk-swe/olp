@@ -21,7 +21,10 @@ installation ownership or request-pinned serving configuration.
 
 ## Baseline
 
-| | OLP today | LiteLLM reference |
+Planning-time comparison; shipped behavior is authoritative in the
+[compatibility matrix](../compatibility.md) and [access guide](../access.md).
+
+| | Planning baseline | LiteLLM reference |
 | --- | --- | --- |
 | CLI | [Contract-generated management commands](../operator-cli.md), saved configuration plans and qualified-client environment setup, alongside process and recovery commands | [lite CLI](https://docs.litellm.ai/docs/proxy/management_cli) for models, credentials, keys, teams and users |
 | Desired state | [Export, plan and apply](../configuration.md#configuration-promotion-artifacts) with canonical digests and [twelve conditional Terraform/OpenTofu resources](../terraform.md) | [config.yaml](https://docs.litellm.ai/docs/proxy/configs) and database models |
@@ -302,26 +305,17 @@ focused race coverage.
 
 ## Final qualification
 
-The complete default `make integration` gate passes against the final
-implementation. Its Code and remaining root race suites pass in 1,131 and
-2,355 seconds, followed by the internal and extension suites, official SDKs,
-all pinned coding clients and frameworks, and all 36 packaged/Vite browser
-journeys. The packaged recovery drill passes all six fresh journeys and the
-restored journey, preserving six historical requests and recording nine after
-restored inference. Keyboard, accessibility, responsive sizing and cross-tab
-logout checks remain enabled.
+The October 10 implementation passed the default integration flow, internal/
+extension/SDK/client suites, packaged/Vite browsers and fresh/restored journeys.
+Local race/check, contract/version/build/Helm gates also passed. Later integrated
+repair evidence is recorded in [architecture review](../architecture-review.md).
+These historical results are not new validation for later changes.
 
-The local check includes uncached Go and benchmark-harness races, 134 console
-test files with 1,045 tests, 87 script tests, formatting, vet, types and lint.
-Contract drift, release-version consistency, the distribution build and Helm
-profile/Kubernetes validation also pass. The companion
-[Terraform/OpenTofu provider PR](https://github.com/tyk-swe/terraform-provider-openllmproxy/pull/1)
-has independent passing check and two-engine acceptance jobs. Reviewed
-[console](../operator-console.md), [catalog](../model-catalog.md) and
-[external-secret](../external-secrets.md) screenshots accompany the runbooks.
+The [Terraform/OpenTofu provider](https://github.com/tyk-swe/terraform-provider-openllmproxy/pull/1)
+has separate two-engine acceptance evidence. Runbooks/screenshots cover
+[operators](../operator-console.md), [catalog](../model-catalog.md) and
+[external secrets](../external-secrets.md).
 
-All 14 administration/deployment comparison rows are `Parity` or `Ahead`.
-The [LiteLLM management CLI documentation](https://docs.litellm.ai/docs/proxy/management_cli)
-and [release notes](https://docs.litellm.ai/release_notes) were reviewed at
-closure on 2026-10-10. Broader observability, guardrail execution and agent
-gateway work remains in M5, M7 and M10.
+All fourteen administration/deployment parity rows closed; LiteLLM documentation
+was reviewed 2026-10-10. M5 observability is now implemented; broader guardrail
+execution and agent-gateway work remain M7/M10.

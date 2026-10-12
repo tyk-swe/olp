@@ -1,23 +1,16 @@
 # Gateway benchmark harness
 
-Everything here carries the `bench` build tag, so `go build ./...`, `go vet ./...`
-and `make test-go` ignore it. The harness's own tests, which need no services,
-are what `make test-bench` runs, and `make test` and `make check` include it:
+The `bench` build tag excludes this harness from ordinary Go builds/tests/vet.
+Container-free instruments run in `make test-bench`, `make test` and `make check`
+(with race detection in CI). Changes to scheduling, histograms, pacing or validity
+must keep these tests passing:
 
 ```sh
 make test-bench   # go test -tags=bench -skip '^TestScenario' ./tests/bench/...
 ```
 
-They are the only guard on the instruments (open-loop scheduling, latency from
-the scheduled time, the percentiles, the mock's pacing, and what makes a run
-valid and a target judged), so a change to anything here runs them, and they
-run under `-race` in CI with the rest.
-
-The scenarios, `TestScenarioS1` to `TestScenarioS6` and `TestScenarioS1Shadow`, are the one thing `make
-test-bench` skips. They need services and fail without them, by design (a
-benchmark that silently measured nothing would be worse than one that did not
-run), so `go test -tags=bench ./tests/bench/...` with nothing skipped fails; run
-them with `make bench`.
+S1–S6/S1-shadow need services and fail without them. Run them with `make bench`;
+unfiltered `go test -tags=bench ./tests/bench/...` requires those prerequisites.
 
 | Package | Purpose |
 | --- | --- |

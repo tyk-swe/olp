@@ -35,882 +35,354 @@ maintenance commands. Local mock providers need explicit loopback and HTTP
 
 ## Runtime publication and authority
 
-Every provider or route activation compiles the complete set of active providers
-and latest route revisions into one snapshot, validates it, records its SHA-256,
-and stores it as a numbered runtime release. Gateways install the newest release
-only when it validates and every referenced credential can be decrypted; a
-release that fails either check is skipped and the previous one stays active.
-Repeated publication is harmless.
+Activation validates and records one immutable numbered runtime release with a
+SHA-256. Gateways install only complete valid releases with decryptable
+credentials; failed installation keeps the previous release.
 
-Every route revision and runtime snapshot carries an explicit
-[fidelity](provider-routing.md#route-fidelity): strict or transformed. Strict
-drafts reject redaction, and strict publication compiles each target's admitted
-interaction contract during draft validation, activation and release
-installation; a target without an admitted contract fails closed. Transformed
-routes translate between dialects, apply redaction and use Automatic providers.
-A published slug switches between strict and transformed through a new
-revision. A stored resource is served only under the fidelity it was created
-with, and its owner can always list, delete or cancel it; see
-[route fidelity](provider-routing.md#route-fidelity).
+Each route pins strict or transformed fidelity. Strict targets require admitted
+operation contracts and refuse redaction; transformed routes translate and may
+redact. New revisions switch fidelity, while retained resources keep creation
+contracts. See [route fidelity](provider-routing.md#route-fidelity).
 
-Key authority (API keys, expiry, revocation, and credential versions that are
-revoked or whose [grant lapsed](plugins.md#lapsed-grants)) is polled every five
-seconds independently of release installation. Authority older
-than 60 seconds, measured from the start of the last successful read with a
-monotonic clock, is stale: new requests are rejected with
-`503 authority_unavailable` while requests
-already admitted keep the snapshot and policy they were pinned to. Ordinary
-streams may finish; realtime sessions recheck key authority every five seconds.
-Credential-version revocation and grant lapse apply to retained releases too:
-selection refuses such a version even when the request already pins it, and
-skipping its slot spends no attempt. Records of a refused credential version
-name why, `revoked`, `lapsed` or `stale_authority`: `credential_<reason>` in
-the plan decisions of skipped credential slots (and of a target whose every slot
-was skipped for that reason), `network_credential_<reason>` for a network
-credential, `provider_credential_<reason>` when a realtime session ends, and
-`media_job_credential_<reason>` on media jobs.
-See [authority and replica tests](../tests/integration/replica_fleet_test.go).
+Key/credential authority refreshes independently every five seconds and is stale
+after 60 seconds from the start of its last successful read (monotonic time).
+New work then receives `503 authority_unavailable`. Admitted ordinary streams may
+finish; realtime rechecks. Revoked/lapsed credential versions remain denied even
+under historical releases, with no attempt spent for skipped slots.
+Plan reasons use `credential_revoked`, `credential_lapsed` or
+`credential_stale_authority`, with network/session/media-specific equivalents.
 
 ## Request path
 
-Requests authenticate with `Authorization: Bearer <key>`, Anthropic `X-Api-Key`,
-or Gemini `X-Goog-Api-Key` (the Gemini query-key form is also accepted). Bedrock
-uses `X-OLP-API-Key` or a non-SigV4 bearer key. Every inference operation needs
-`inference`; model reads need `models_read`. A key may use only routes in its
-own project; a key without a project may use only routes without a project. A
-route allowlist restricts both scopes further. An empty allowlist permits every
-route within that project boundary. The body model, or Gemini URL model, must be
-a published route slug. Model list/get expose only those routes the key may use.
+Authenticate using bearer, Anthropic `X-Api-Key`, Gemini `X-Goog-Api-Key`/query
+key, or Bedrock `X-OLP-API-Key`/non-SigV4 bearer. Inference needs `inference`;
+discovery needs `models_read`. The requested model is a published route slug
+inside the key's project and route/group allowlist.
 
-Each request receives an `X-Request-Id` (a client-supplied value is kept when it
-is a safe token; the Anthropic surface sends the same value as `request-id`,
-which the Anthropic SDKs read), a no-store cache policy, and CORS headers for explicitly
-allowed browser origins (`OLP_GATEWAY_CORS_ALLOWED_ORIGINS`). Responses also carry
-the key's [rate-limit headers](#response-headers) and, for a key that opted in,
-gateway metadata. JSON endpoint
-bodies must be `application/json`, optionally gzip-compressed, and within the
-JSON body limit before and after inflation; the media endpoints also accept raw
-and `multipart/form-data` bodies bounded by `OLP_HTTP_MAX_MEDIA_BODY_BYTES` and
-the spool's per-endpoint reservations. Uploads have a 15-second read deadline;
-incomplete bodies receive `408 request_timeout` and release their admission
-slot. The upload deadline ends when the body is read, before the route's
-inference deadline starts. The optional `X-OLP-Routing` header accepts one JSON
-object, for example
-`{"strategy":"price","allow_fallbacks":false,"max_attempts":1}`. It can narrow
-constraints and attempts within published policy, never expand access or
-deadlines. Unknown controls, invalid selectors, and budget increases are
-refused. Its `priority` chooses the request's [admission class](#priority-admission)
-up to the key's ceiling. Raw header values are never forwarded or persisted.
+Responses carry safe `X-Request-Id` (also Anthropic `request-id`), no-store and
+configured gateway CORS. JSON requires `application/json` and fits installation/
+route bounds before and after gzip inflation. Media also accepts bounded raw/
+multipart bodies. Uploads have a 15-second read deadline, separate from the
+inference deadline; timeout releases admission.
 
-The optional `X-OLP-Attribution` header attaches caller-chosen labels to a
-request's usage records, for example `{"team":"core","env":"prod"}`. Exactly one
-header is accepted, at most 4096 bytes, decoding to a single JSON object with at
-most four entries. Every unpinned caller key must appear in the API key's
-configured `allowed_attribution_keys` allowlist, and every value must be a short machine
-token (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`); nested values, numbers, nulls,
-free text, and control characters are refused with `invalid_attribution` before
-the request reaches a provider.
-[Key and project policies](access.md#attribution-requirements-and-pinned-labels)
-can require labels and add pinned defaults. Missing required labels return
-`missing_attribution`; callers cannot override pins. The resolved labels travel
-with request usage facts and hourly rollups for filtering and breakdowns.
+`X-OLP-Routing` is one local JSON object, for example
+`{"strategy":"price","allow_fallbacks":false,"max_attempts":1}`. It may narrow
+published constraints/budgets, never increase authority or deadlines.
+`priority` is bounded by the key ceiling. Raw controls are not persisted/forwarded.
+`X-OLP-Attribution` accepts one object, at most 4096 bytes/four labels with bounded
+machine-token values and key allowlist permission. Project/key requirements and
+pins apply; [end-user policy](access.md#end-user-identity) stores only HMAC identity.
 
-Keys can also require [end-user identity](access.md#end-user-identity) from
-`X-OLP-End-User` or a declared native JSON field. Only a project-scoped HMAC
-digest enters accounting. The header stays local, and strict native fields
-continue upstream unchanged.
+Attempts use priority/preferred-order tiers, selected strategy and key-stable
+weighted ordering. Each consumes the shared attempt/deadline budget and selected
+slot credential. Native calls preserve unknown fields; translation refuses
+unrepresentable extensions. Eligible pre-commit connect/timeout/rate/credential/
+server failures may retry or fail over. Typed context-window errors may use a
+larger target; message text never triggers that decision. Typed content filtering
+is terminal without health penalty. Other client/protocol/cancellation failures
+are terminal. Fallbacks share the original budget; no committed stream restarts.
+Retained resources, realtime and native Bedrock pin one provider/credential.
 
-Canonical attempts follow priority and preferred-order tiers, then the selected
-strategy. Weighted ties are seeded by the key so the same key sees a stable
-order. Each attempt consumes the budget, uses the target's timeout within the
-route's overall deadline, injects the selected slot's credential, and rewrites
-the model to the upstream identifier. Native calls preserve unknown request
-fields; translation refuses semantic extensions it cannot represent. Failover to
-the next eligible attempt happens only before any response bytes have been sent
-to the client and only for connect, timeout, rate-limit, credential, and
-upstream server failures. A route's [retry policy](provider-routing.md#retry-policy)
-may first repeat such an attempt on the same slot, within the same budget and
-deadline. Generation, token-counting, embedding, rerank, and
-moderation attempts also fail over on a typed context-window rejection, an
-upstream error code or type of `context_length_exceeded`,
-`context_window_exceeded`, `max_context_length_exceeded`, or `prompt_too_long`,
-because a target with a larger context window may serve the request; message
-text never triggers it. A typed content-filter refusal (`content_filter`,
-`content_policy_violation` and the like) is terminal within the route and never
-counts against provider health. Other upstream client errors, protocol errors,
-and cancellations are terminal. When a route's attempts end without success,
-its declared [fallback routes](provider-routing.md#fallbacks) may serve the
-request under the same deadline and attempt budget, never after a stream has
-committed. A request that ends on an upstream rejection
-returns `upstream_rejected` with the redacted upstream message, keeping an
-upstream 400, 404, 405, 409, 413, 415, or 422 status and otherwise answering
-502. A committed stream never restarts on another provider: a later failure
-is reported in-band as an error event and the stream ends without a success
-marker. Retained resources, realtime, and native Bedrock ingress pin one
-provider/credential without cross-target failover; see
-[compatibility](compatibility.md). Translation and native tool validation bound
-retained text/tool state by the event-size limit. Distinct native Chat choice
-tracking is bounded to `max(1, OLP_PROVIDER_MAX_EVENT_BYTES / 16)` entries.
-Bedrock advertised event lengths are checked before SDK allocation, and the SDK
-still verifies event CRCs.
+Upstream rejections preserve 400/404/405/409/413/415/422 or return 502, with
+credential-redacted messages. Committed failures end in-band without success.
+Event bounds cover retained tool/text state, native Chat choices and Bedrock
+advertised lengths; Bedrock SDK CRC checks still apply.
 
-Provider health is tracked per gateway and shared across the fleet: five
-counted failures within 30 seconds open a provider's circuit for 30 seconds. Connection, timeout, protocol and
-upstream server failures count; so do ambiguous ones of a strict interaction
-or of traffic a plugin carries. One half-open probe may proceed;
-credential-only failure releases it without penalizing siblings. A credential
-rejection cools that credential version for 60 seconds; a rate limit cools the
-logical slot across rotation for the upstream `Retry-After` (10 seconds when
-absent, at most 60 seconds). Each gateway publishes its circuit transitions to
-Valkey and reads the fleet's every two seconds, so a circuit one replica opens
-is honored by all of them within five seconds; [active probes](provider-routing.md#credential-pools-and-limits)
-add their verdicts to the same state. A target the fleet marks unhealthy moves
-to the end of the attempt order instead of disappearing, while a gateway's own
-open circuit still skips it, and local circuits remain in force when Valkey is
-unavailable. Client cancellation and disconnects close the
-upstream request and release admission once. Unary response writes and
-individual stream frames have a 30-second write deadline. Failed unary writes or
-flushes are recorded as cancellation; successful delivery is recorded only after
-the response has been flushed.
+Five counted failures in 30 seconds open a circuit for 30 seconds. Connection,
+timeout, protocol/server and strict/plugin ambiguous failures count. One half-open
+probe is allowed; credential-only failure does not penalize siblings. Credential
+rejection cools its version for 60 seconds; rate limiting cools the logical slot
+across rotation for Retry-After (default ten, maximum 60 seconds). Fleet circuits
+refresh through Valkey every two seconds; local evidence remains available.
 
-| Status | `error.code` | Meaning |
-| --- | --- | --- |
-| 400 | `invalid_json`, `missing_required_parameter`, `invalid_value`, `unsupported_parameter`, `unsupported_stateful_reference`, `request_exceeds_token_limit`, `content_policy_blocked`, `priority_increase_forbidden`, `content_filter` | Request envelope problems, including unsupported Responses state references, an estimate larger than the key's tokens-per-minute limit, text blocked by a route content-policy rule, a priority above the key's ceiling, or an upstream content filter's refusal. |
-| 401 | `invalid_api_key` | Missing, unknown, expired, or revoked key. |
-| 403 | `permission_denied`, `route_forbidden` | Missing scope or route outside the key's project/allowlist. |
-| 404 | `route_not_found`, `not_found` | Unknown route slug or endpoint. |
-| 408 | `request_timeout` | Request body not received within 15 seconds. |
-| 413 / 415 | `request_too_large`, `unsupported_media_type`, `unsupported_content_encoding` | Body limits and content negotiation. |
-| 422 | `content_policy_surface_unavailable`, `content_policy_streaming_requires_unary` | The request surface cannot be inspected by the route's content policy, or output rules require a buffered unary response instead of streaming. |
-| 429 | `rate_limit_exceeded`, `budget_exhausted`, `upstream_rate_limit` | The key's requests, tokens, or concurrency limit was exceeded; the key's daily or monthly cost budget is exhausted or cannot hold the request's [estimated cost](#cost-reservation); or every attempt was rate limited upstream. `Retry-After` carries whole seconds, and a limit of a key that has a request or token limit adds that key's [rate-limit headers](#rate-limit-headers). |
-| 502 | `upstream_unavailable`, `upstream_rejected`, `upstream_authentication_failed`, `upstream_permission_denied`, `provider_protocol_error`, `upstream_response_too_large` | Upstream or transport failures after the budget is spent, or a stream from an upstream that serves only streams whose aggregated non-streaming result exceeds the response size limit. |
-| 503 | `authority_unavailable`, `request_admission_overloaded`, `distributed_limits_unavailable`, `upstream_unavailable`, `supply_budget_exhausted` | Stale authority, admission limit or queue timeout, limits that cannot be enforced, no eligible target, or a connection, slot or route spend cap. |
-| 504 | `gateway_timeout` | Route deadline reached before commitment. |
+| Status | Typical refusal |
+| --- | --- |
+| 400 | Invalid controls, oversized token estimate, local content block |
+| 401/403 | Invalid key, denied scope/project/network/identity |
+| 413/422 | Body/response bound, unsupported semantics or surface |
+| 429 | Key rate/concurrency or known cost exhaustion |
+| 502 | Upstream/protocol failure |
+| 503 | Stale authority, overload, unavailable limits/budget evidence or no target |
+| 504 | Route deadline before commitment |
 
 ### Priority admission
 
-Each gateway admits at most `OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS`
-inference requests at once. By default a full pool answers `503
-request_admission_overloaded` with `Retry-After: 1`. Set
-`OLP_HTTP_ADMISSION_QUEUE_DEPTH` to queue up to that many requests instead,
-in four classes: `critical`, `high`, `normal` and `low`. A freed slot goes to the
-next class in a weighted fair order of 8:4:2:1, so lower classes are never
-starved. A queued request waits at most `OLP_HTTP_ADMISSION_QUEUE_TIMEOUT`
-(two seconds by default) and never beyond its route deadline, then receives the
-same `503`.
+`OLP_HTTP_MAX_IN_FLIGHT_INFERENCE_REQUESTS` bounds active work. A full pool returns
+`503 request_admission_overloaded`, Retry-After 1, unless a bounded
+`OLP_HTTP_ADMISSION_QUEUE_DEPTH` queue is configured. Critical/high/normal/low
+classes share slots 8:4:2:1. Queue waits end at the lower of route deadline or
+`OLP_HTTP_ADMISSION_QUEUE_TIMEOUT` (default two seconds).
 
-A key's policy sets its default `priority` (`normal` when unset) and a
-`max_priority` ceiling, which defaults to the key's priority. A request may
-choose any class up to that ceiling through `X-OLP-Routing`, for example
-`{"priority":"high"}`; a higher value is refused with `400
-priority_increase_forbidden`, like other budget increases. The same class
-selects a request's share of any [capacity shares](provider-routing.md#credential-pools-and-limits)
-its connection and slot quotas declare. Shadow traffic, classifier calls and
-probes run at `low`. `/metrics` reports `olp_admission_queue_depth{class}`,
-`olp_admission_queue_wait_seconds{class}` and
-`olp_admission_queue_rejections_total{class}`.
-
+Keys set `priority` (default normal) and `max_priority` (default the chosen class).
+A higher caller class returns `priority_increase_forbidden`. System work runs low.
+Metrics expose queue depth/wait/rejections by class.
 
 ### Per-route request sizes
 
-Ordinary and subscription routes accept `max_body_bytes` from 1 to 1,073,741,824,
-or null to inherit installation and protocol limits. Configure it in the route
-editor and publish the revision. A route can only lower an installation limit.
-Ordinary-route configuration export, plan and apply preserve the setting.
-
-JSON requests must fit both before and after decompression. Multipart requests
-include fields, file bytes, boundaries and trailing epilogue, including chunked
-uploads. Installation limits still bound parsing when the route is named inside
-the body; the route limit is checked once identified and before provider dispatch.
-Fallbacks, selector destinations and retained-resource requests cannot evade the
-bound. Internal classifier requests use their own generated body size.
-
-HTTP refusals use `413 request_too_large` (subscription endpoints retain their
-`code_` error namespace). OpenAI Realtime, Gemini Live and subscription WebSockets
-apply the lower limit to each client message; an oversized message closes with
-WebSocket status 1009. Gemini's initial setup is checked before opening the
-provider connection. Upstream response limits stay independent. Each
-request or WebSocket session keeps the body limit selected from its starting
-route revision.
-
+Published `max_body_bytes` accepts 1–1,073,741,824 or null and can only lower
+installation limits. Bounds cover decompression, multipart overhead/epilogues,
+chunked uploads, fallbacks/selectors and retained requests before dispatch.
+WebSockets apply the lower bound per message (oversize: 1009); sessions pin their
+starting revision. Responses have separate limits. Ordinary route promotion
+preserves the bound; subscription refusals use `code_` errors.
 
 ## Response headers
 
-Beside `X-Request-Id`, a response can carry two more sets of headers: the
-caller key's remaining allowance, which every key with a request or token limit
-receives, and metadata about how the gateway served the request, which only a key
-that opts in receives. Both are written before the response is committed, from
-what admission and the attempt loop already hold, so they cost no Valkey round
-trip, and a request that needs neither allocates nothing for them. The allowance
-comes with the answer of the reservation that admits the key: the rate script
-states it only to a key with a request or token limit, so a key bound by
-concurrency alone, and a provider's connection or credential quota, which is
-reserved on every attempt, are answered with the decision and no more.
+Headers are produced from existing admission/attempt evidence before commitment,
+without additional Valkey reads. Key rate allowances are automatic; upstream
+metadata requires key opt-in.
 
 ### Rate-limit headers
 
-Each surface gets the family its own SDKs already read.
-
 | Surface | Requests | Tokens |
 | --- | --- | --- |
-| OpenAI (`/v1/...`) | `x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests`, `x-ratelimit-reset-requests` | `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-tokens`, `x-ratelimit-reset-tokens` |
-| Anthropic (`/anthropic/...`) | `anthropic-ratelimit-requests-limit`, `-remaining`, `-reset` | `anthropic-ratelimit-tokens-limit`, `-remaining`, `-reset` |
+| OpenAI | `x-ratelimit-limit-requests`, `-remaining-requests`, `-reset-requests` | `x-ratelimit-limit-tokens`, `-remaining-tokens`, `-reset-tokens` |
+| Anthropic | `anthropic-ratelimit-requests-limit`, `-remaining`, `-reset` | `anthropic-ratelimit-tokens-limit`, `-remaining`, `-reset` |
 
-Gemini, Bedrock and native-operation endpoints send none: their clients read no
-such headers.
-
-- **Only what the key limits.** A key limited to requests per minute gets the
-  request headers alone, and one limited to tokens the token headers alone. A key
-  with neither limit gets none, including a key bound only by concurrency or by a
-  cost budget. So does a request admitted without a reservation, which is one that
-  failed open while Valkey was unavailable.
-- **The key's own window.** The values are what the admission reservation
-  measured in the fixed UTC minute the request was counted in. `limit` is the
-  per-minute limit and `remaining` what the limit leaves once this request's
-  reservation is counted, never below zero. The token reservation is the
-  admission estimate, a prompt plus the largest reply for every attempt the request
-  may dispatch. Settlement increases the allowance consumed when reported usage
-  is higher, and retains the local admission allowance when usage is lower.
-  Legitimate short completions therefore keep their reserved allowance until
-  the minute rolls over. Work never dispatched still receives a full refund.
-  The counts are not read again when the response is written, so a stream that
-  commits after a long wait states the window as it was admitted.
-- **Reset.** Both dimensions reset when the minute ends. OpenAI's headers give the
-  time left in the notation of a Go duration, such as `20ms`, `1s`, `8.64s` or
-  `1m0s`, counted down from the reservation to the moment the headers are written
-  and stated in whole milliseconds, rounded up.
-  Anthropic's give the instant the minute ends as an RFC 3339 time in UTC, such as
-  `2026-10-02T09:31:00Z`. The minute is Valkey's, so every replica and client
-  agrees on it whatever its own clock says.
-- **Rejections.** A request refused by the key's requests, tokens or concurrency
-  limit gets the same headers beside `Retry-After`, describing the window that
-  refused it. The refused request reserved nothing, so `remaining` is what the
-  window still holds. A concurrency refusal's `Retry-After` is the short wait for
-  a slot, while the reset is still the end of the minute. A refusal by a cost
-  budget, a provider's connection or credential quota, an upstream's rate limit or
-  admission overload states no allowance, because none of them is the key's
-  requests or tokens.
+Only key-limited dimensions appear; concurrency/cost-only keys, failed-open
+reservations, Gemini/Bedrock/native endpoints receive none. Values describe the
+admission's Valkey UTC-minute window after reservation, not a fresh read at delivery.
+Dispatched token allowance is never refunded for smaller usage; larger usage
+increases it. OpenAI reset is a duration rounded up to milliseconds; Anthropic
+reset is UTC RFC 3339. Key rate/concurrency refusals include allowance and
+Retry-After; upstream/supply/cost/overload refusals do not.
 
 ### Gateway metadata
 
-The key policy `response_metadata` (off by default; see
-[access](access.md#key-response-metadata)) adds these headers to its successful
-responses.
+Key `response_metadata` defaults off. Successful attempted operations can include:
 
-| Header | Value |
+| Header | Meaning |
 | --- | --- |
-| `X-OLP-Attempts` | The attempts the request had made when the response was committed, counting one a connection or credential quota refused locally. `2` after a failover. |
-| `X-OLP-Route-Revision` | The `revision_id` of the route revision that served the request, the identifier `GET /api/v1/routes/{route_id}/revisions/{revision_id}` takes. A call on a retained resource reports the route's current revision, not the one that created the resource, and a video job read, download, delete or list, which is answered from the jobs' own records, reports none. |
-| `X-OLP-Provider` | The vendor of the provider that served the request, as its configuration names it. A provider with no vendor, as a plugin provider has none, is not named. Callers address routes, not upstreams, so this is the one place the gateway itself names an upstream, and only for a key that opts in. The message of an upstream rejection is relayed as the upstream wrote it, with credential values redacted, and can name its vendor or model whatever the key's policy. |
-| `X-OLP-Cost` | The cost of a unary response in the installation currency, as a plain decimal such as `0.000064`. |
+| `X-OLP-Attempts` | Attempts before commitment, including local connection/slot quota refusal |
+| `X-OLP-Route-Revision` | Serving route revision; retained reads report current ingress revision, job-record operations omit it |
+| `X-OLP-Provider` | Configured serving vendor, only when known/unambiguous |
+| `X-OLP-Cost` | Unary pinned-price cost in installation currency, only with complete priced usage; explicit zero remains `0` |
 
-A stream records its serving attempt before its first frame is committed, so
-`X-OLP-Attempts` and `X-OLP-Provider` describe the attempt that is streaming, and a
-failover before the first byte is counted. A stream cannot carry a cost, since its
-usage is not known until it ends; the request history API has it afterwards.
-
-A call on one video job is its one attempt. A video list refreshes every job that
-is still queued or running with a poll of its provider, and those polls are its
-attempts: `X-OLP-Attempts` counts them all, and `X-OLP-Provider` names a provider
-only when every poll went to the same one. A list with no job to poll made no
-attempt and carries no metadata.
-
-`X-OLP-Cost` is the cost accounting will record for the request, priced from the
-gateway's pinned price list and the usage the provider reported. It is left out
-when the request would be recorded as unpriced: an attempt that was billed or may
-have been billed has no price or no rate for something it used, or a provider
-answered successfully and reported no usage. A price of zero is a cost of `0`.
-Failed attempts that reported nothing add nothing.
+Streaming headers describe the serving attempt but cannot report final cost.
+Video lists count refresh polls and name a vendor only if all agree.
+Opt-in does not scrub vendor/model names from credential-redacted upstream errors.
 
 ### Which responses carry them
 
-Every success response of an inference endpoint is covered: Chat Completions,
-Responses, Messages, Gemini generation, embeddings, rerank, moderation, token
-counting, the media endpoints, Bedrock, the native operations, and calls on
-retained provider resources (files, batches, stored responses, interactions and
-video jobs), whose one pinned attempt is counted, and a video list, whose polls
-are. Error responses carry neither set, except the rate-limit headers of a limit
-rejection, and a response that made no attempt, such as a file list answered from
-the gateway's own records, has no metadata to give. These do not carry either
-set:
-
-- WebSocket upgrades (Realtime and Gemini Live). The provider is dialled only
-  after the session is accepted, so there is no attempt to describe, and a
-  WebSocket client does not read an HTTP API's rate-limit headers.
-- A replayed or recovered continuation delivery, which is answered from stored
-  state before admission and makes no attempt.
-- Model listings, which are served without admission, and the console playground,
-  which answers a signed-in member and not a key.
-
-For browser clients, the headers above, `Retry-After`, `X-Should-Retry` and
-`X-OLP-Delivery-Replay` are listed in `Access-Control-Expose-Headers` for the
-origins in `OLP_GATEWAY_CORS_ALLOWED_ORIGINS`.
+Successful inference/media/native/retained operations are eligible. No-attempt
+local reads, model discovery, continuation replay, WebSocket upgrades and
+session-authenticated playground calls have no key attempt metadata. Errors
+omit both families except key-limit refusal allowances. Configured CORS exposes
+these headers, Retry-After, X-Should-Retry and X-OLP-Delivery-Replay.
 
 ## Content policy
 
-A route draft may carry an optional `content_policy`: an ordered list of local
-[RE2](https://github.com/google/re2/wiki/Syntax) rules validated and compiled
-inside the gateway — no external service, model, or timeout is involved. Each
-rule names a phase (`input` or `output`), an action (`block` or `redact`), a
-pattern, and an optional literal replacement (redact only; `$`-sequences are
-never expanded, so a replacement of `$1` inserts the text `$1`). Validation
-bounds the policy at 64 rules, 512 bytes per pattern, 16 KiB of combined pattern
-bytes, and rejects patterns that match the empty string. `redact` rules require
-a transformed route; strict routes accept only `block` rules. Policies publish
-with the route revision, restore with it, and travel through configuration
-export and import.
+Published `content_policy` is an ordered local RE2 rule list: input/output phase,
+block/redact action, pattern and optional literal replacement. Limits: 64 rules,
+512 bytes/pattern, 16 KiB combined patterns, no empty-string matches. Replacement
+`$` sequences are literal. Strict routes allow blocking only; redaction requires
+transformed fidelity. [Named guardrails](guardrails.md) copy policy into revisions.
 
-Input rules run before token estimation and before any provider call. The
-gateway walks only the supported textual fields of the canonical request —
-OpenAI Chat and Responses message content and instructions, Anthropic system and
-message content, Gemini contents and system instructions, embeddings and
-moderation inputs, rerank queries and documents, and the textual
-`prompt`/`input` fields of media requests. URLs, binary or base64 payloads, tool
-schemas and descriptions, and unrelated metadata are never inspected. Rules
-apply in document order: `redact` rewrites the in-memory request dispatched
-upstream, and `block` stops evaluation and answers `400 content_policy_blocked`
-without a provider call. The original client body and the transformed body are
-never logged or persisted.
+Input runs before estimation/dispatch over supported text: messages/instructions,
+embedding/moderation inputs, rerank documents/queries and media prompts. URLs,
+binary/base64, tool schemas and unrelated metadata are not inspected. Redaction
+rewrites only memory; block returns `400 content_policy_blocked` without dispatch.
 
-Output rules apply only to unary generation responses, after the upstream body
-is decoded and usage and cost are accounted, and before the response is written
-to the client. Only visible assistant text and textual refusals are inspected —
-reasoning, tool-call arguments, citations, and binary or media output are not.
-`redact` rewrites the response in the caller's OpenAI, Anthropic, or Gemini
-family format; `block` answers `400 content_policy_blocked` with no output
-payload while the provider attempt, usage, and cost remain accounted. Because
-output inspection needs the complete decoded response, a request with
-`stream: true` on a route with any output rule is rejected before dispatch with
-`422 content_policy_streaming_requires_unary`; input-only policies may stream
-after input enforcement.
+Output inspects visible unary assistant text/refusals after usage accounting,
+not reasoning/tool arguments/citations/media. Blocking still accounts upstream
+consumption. Any output rule refuses streaming with
+`422 content_policy_streaming_requires_unary`; input-only policy may stream.
+Uninspectable native/background/stateful/Files/Batch/realtime surfaces refuse
+`content_policy_surface_unavailable`, rather than bypassing policy.
 
-Surfaces where canonical text cannot be inspected refuse policy-equipped
-requests rather than bypassing the policy: raw Bedrock `InvokeModel`,
-Files/Batch JSONL, realtime events, stateful Responses, and other
-provider-native or background surfaces answer
-`422 content_policy_surface_unavailable` before dispatch. Bedrock Converse is
-inspectable only through the canonical decode path.
-
-Enforcement evidence is metadata only. Each matched rule records a
-`{rule_id, phase, action, outcome}` decision — `blocked` or `redacted` — on the
-durable request record (`requests.policy_decisions`) and the request history
-API. Matched text, offsets, patterns, replacement strings, and the request or
-response bodies are never recorded anywhere.
-
-Content policy is a deterministic text filter, not a security guarantee: it
-cannot promise universal safety, prompt-injection prevention, or coverage of
-fields a provider interprets outside the inspected surfaces.
+Evidence stores rule ID/phase/action/outcome only, never matched text, offsets,
+patterns, replacements or bodies. This bounded text filter is not a universal
+safety or prompt-injection guarantee.
 
 ## Media and durable video jobs
 
-The media endpoints — `/v1/images/generations`, `/v1/images/edits`,
-`/v1/images/variations`, `/v1/audio/speech`, `/v1/audio/transcriptions`,
-`/v1/audio/translations`, and the
-`/v1/videos` family — share the same authentication, route-slug, limits, and
-accounting contracts as generation. Multipart and raw uploads reserve capacity
-inside `OLP_HTTP_MAX_MEDIA_BODY_BYTES` and per-endpoint fractions of the spool;
-oversized bodies, excessive parts, and insufficient capacity fail predictably,
-and cancellation releases the reservation and its files. Restart cleanup never
-removes live work, and uploaded content stays inside its bounded operational
-lifetime — it never enters persistent request diagnostics.
+OpenAI image/audio/video endpoints share key, route, admission and accounting
+contracts. Raw/multipart uploads reserve bounded spool capacity; cancellation
+releases files, and restart cleanup never removes live work. Content stays outside
+persistent diagnostics. See [media providers](providers/media.md).
 
-Video creation is asynchronous: an admitted request writes a durable job record
-pinning the route, provider, slot, credential, and price revisions, so a client
-disconnect cannot erase upstream work and an ambiguous create never triggers a
-blind retry or duplicate. Jobs cannot cross API-key ownership boundaries. The
-worker plane's media reconciler polls claimed jobs to completion, resolves the
-pinned historical credential through rotation and provider changes, obeys
-explicit revocation guards, and finishes accounting. `GET /v1/videos`,
-`GET /v1/videos/{video_id}`, `GET /v1/videos/{video_id}/content`, and
-`DELETE /v1/videos/{video_id}` expose the durable record, which the management
-`/api/v1/media-jobs` reads mirror for operators. The console provides
-metadata-only list/detail views, filters, and manual refresh. It has no
-automatic polling, content download/delete controls, video cancellation
-workflow, or video playground controls. The Advanced playground provides a
-separate public audio translation upload form. Content and deletion remain
-API-key-owned inference operations; request cancellation and backend job
-reconciliation are separate from these console controls.
+Video creation durably pins route/provider/slot/credential/prices before work can
+outlive a client. Ambiguous creates never blindly retry. Worker polling resolves
+historical credentials with current revocation guards and settles original usage.
+Jobs remain key-owned. `/v1/videos` supports create/list/read/content/delete;
+management `/api/v1/media-jobs` and console expose metadata list/detail only.
+The console does not poll, download/delete/cancel videos or generate them in the
+playground; audio translation has a separate upload form.
 
 ## Limits and budgets
 
-Admission and dispatch share lightweight estimates from the effective native
-request. Full strict/profile/unary plans are bounded to four retained candidates
-after planning; an admitted attempt releases unused documents before streaming.
-An evicted target is rebuilt deterministically from its pinned source and release,
-without changing its estimate, output controls or serving identity.
+Admission requires Valkey for configured distributed limits. Without it,
+unlimited keys can serve, limited keys return `distributed_limits_unavailable`
+and quota-bound targets are skipped. Rate/concurrency-only outage policy can
+fail open; cost and provider quotas always fail closed.
 
-Pinned resource exchanges distinguish transmitted requests, accepted response
-headers, validated terminal results, durable mapping commit and downstream
-visibility. Headers alone establish neither completion nor client commitment.
-Observed generation usage is recorded before mapping or delivery that can fail;
-file/batch/retained lifecycle calls do not become new generation charges. Each
-multipart writer and both duplex forwarding tasks finish before terminal facts
-are emitted. Session cancellation cannot race an in-flight usage observation.
+After auth/parsing/routing, reserve key/group/end-user rate, tokens, concurrency
+and cost before dispatch. Token reservation includes prompt plus largest allowed
+reply (default 4096, times `n`) across permitted attempts. Estimates exceeding
+TPM return `request_exceeds_token_limit`. Leases cover the overall deadline;
+first-byte/idle timeouts do not bound stream lifetime.
 
-Enforcement needs `OLP_VALKEY_URL`. Every counter lives in Valkey and is
-evaluated by a Lua script on the server's clock, so replicas share one decision
-rather than each keeping its own. Without it there is no admission backend at
-all: a key without individual or group limits can be served; a limited key is
-refused with `503 distributed_limits_unavailable`, and a target with a
-configured quota is skipped rather than used unmetered.
-
-A request is admitted once it is authenticated, parsed, and routed, and before
-any provider is called. The gateway estimates the tokens the request may use —
-its prompt, plus the largest reply the caller allowed (`max_completion_tokens`,
-`max_tokens`, or `max_output_tokens`, 4096 by default, times `n`) — for every
-attempt the request permits, and reserves the key's requests-per-minute,
-tokens-per-minute, and concurrency windows and its cost budgets together. The
-lease is sized by the route's overall deadline; it is the backstop for a replica
-that dies mid-request, not the request deadline. An estimate larger than the
-key's tokens-per-minute limit is refused immediately with
-`400 request_exceeds_token_limit` rather than sent to retry into a window it can
-never fit. The windows each response leaves the key with are reported in its
-[rate-limit headers](#rate-limit-headers).
+Full strict/profile/unary plans retain at most four candidates; unused documents
+are released before streaming and evicted targets rebuild deterministically.
+Native usage is observed before projection, mapping or delivery can fail.
+Headers, validated completion, durable commit and client visibility are distinct;
+all multipart/duplex tasks join before terminal accounting.
 
 ### How the prompt is estimated
 
-The request is walked once into its text and its media parts: message content,
-tool calls and their results, the names and arguments a call travels with, every
-tool schema, the schema a structured output must follow (a chat
-`response_format`, a Responses `text.format`, Anthropic's
-`output_config.format`, Gemini's response schema, Bedrock's `outputConfig`), the
-tool catalogue of a Bedrock request, a Responses reasoning summary and Anthropic
-thinking text, in any of the client dialects. Each inline image costs a flat
-1,000 tokens and each audio, file or document part 2,000, whatever the bytes the
-part carries; a document given as text is counted by its text. Some of a prompt
-is not read as text: encrypted reasoning (a Responses `encrypted_content`,
-Anthropic `redacted_thinking`) and, in the Anthropic and Gemini dialects, the
-arguments of a tool call and the response of a function response, which are
-counted only where they hold text under a key the walker knows (`text`,
-`content`, `parts`, `input`, `output`). Those leave a prompt under-counted,
-which the reservation's reconciliation against the reported usage corrects after
-the attempt, and which the estimate says by being `calibrated`. The same walk
-serves every target. It keeps the first 36 KiB of the text and only the size of
-the rest, which is all a count reads, so a request of megabytes is not held
-twice while its upstream answers. What the text costs depends on the model that
-will read it, and the gateway counts it for the upstream model of each target,
-once for each family, however many attempts, credential slots or translated
-targets use that family. A route that fails over from an OpenAI model to a
-Claude model counts the prompt twice, once for each family, and a request in the
-Anthropic dialect sent to an OpenAI target is counted by OpenAI's tokenizer,
-because the family follows the target model and not the client's dialect.
+The effective request walker counts supported message/tool/schema/reasoning text,
+with 1000 tokens per inline image and 2000 per audio/file/document part. Encrypted
+content and some vendor tool renderings are unknown. Counters follow the upstream
+model family, not ingress dialect; equivalent families are counted once.
 
-| Family | Models | Counted by | Provenance |
-| --- | --- | --- | --- |
-| `openai-o200k` | GPT-4o, GPT-4.1, GPT-5, o-series, gpt-oss | OpenAI's `o200k_base` byte-pair encoding | `tokenizer` |
-| `openai-cl100k` | GPT-4, GPT-3.5 Turbo, `text-embedding-3` | OpenAI's `cl100k_base` encoding | `tokenizer` |
-| `anthropic` | Claude, including Bedrock and Vertex names | four characters per token | `heuristic` |
-| `gemini` | Gemini | four characters per token | `heuristic` |
-| `other` | everything the registry does not recognize | four characters per token | `heuristic` |
+| Family | Models | Method |
+| --- | --- | --- |
+| `openai-o200k` | GPT-4o/4.1/5, o-series, gpt-oss | Embedded `o200k_base` BPE |
+| `openai-cl100k` | GPT-4/3.5, text-embedding-3 | Embedded `cl100k_base` BPE |
+| `anthropic`, `gemini`, `other` | Remaining recognized/unknown models | Four characters/token, with catalog calibration when measured |
 
-The OpenAI encodings are in the binary, and their counts match OpenAI's own
-`tiktoken` token for token on the text of the checked-in fixtures, which are
-generated by `tiktoken` itself. The encoder reads the letter, number and space
-classes of its split patterns from Go's Unicode tables, which are newer than the
-ones the engine behind `tiktoken` was built with, so a character assigned since
-(the newest CJK ideographs, for one) can split a piece differently and cost a
-token more or less; a Go upgrade moves the tables with it. A model name decides
-the family by OpenAI's own rules (an exact name or a prefix, with a provider
-path, a `ft:` prefix or a `:` variant removed); a name that does not say, such
-as an Azure deployment name, is never assumed to be an OpenAI model, because a
-wrong tokenizer miscounts without saying so. OpenAI chat models also read each
-message's role, three tokens of framing around each message, one more for a
-name, and three that prime the reply; these are the figures of the OpenAI
-Cookbook, and an OpenAI count includes them. A request in another dialect is
-framed by what that dialect calls a message: each entry of the Anthropic,
-Bedrock or Gemini conversation, and each system prompt, and the instructions of
-a Responses request. The other families charge text only, four characters per
-token with every field rounded up, and that charge is scaled by the family's
-factor in the signed [reference catalog](catalog.md). A factor is published
-only once it is measured against the vendor's own token counts, with
-`tests/fixtures/tokens/calibrate.py`; a family without one keeps the plain
-rule.
+Opaque deployment names are not guessed as OpenAI. OpenAI counts documented
+message framing; fixtures match tiktoken, with possible Unicode-version splitting
+differences. The walker retains only the first 36 KiB of text and tail size.
 
-Each estimate carries its provenance. `tokenizer` is an exact count of the text
-and of the message framing OpenAI documents, for a prompt that is nothing else:
-a prompt with any member the count cannot read as the model does, or leaves out,
-is never `tokenizer`. `calibrated` is a count that is partly a ratio or a guess.
-A prompt past 32 KiB of text is counted exactly up to that point and the rest is
-charged at the tokens per byte the exact part measured, which keeps a
-100,000-token prompt from costing milliseconds of CPU on every request; the
-ratio is within a quarter of a percent for a prompt of one kind of text, and can
-be tens of percent off when the first 32 KiB is unlike the rest, such as a short
-instruction ahead of a long document in another script. A count that charged an
-image, document or media part at a flat rate is calibrated, because the flat
-rate is a guess next to an exact count of the text, and so is the count of a
-request with a tool catalogue, tool calls, a structured-output schema or
-reasoning, which a model reads in a rendering of its own that no provider
-documents, or with encrypted content that no count reads. `heuristic` is the
-four-characters rule. It is also the count of a long prompt whose tail came
-after less than 4 KiB of exact text, too little to measure a ratio from, and is
-charged at four bytes to a token. Requests that reach an upstream through a
-native operation contract (the embeddings, rerank, classification and
-token-counting endpoints of a strict route), and Bedrock invoke, Gemini
-interaction creation and JSON media requests (speech and image generation), are
-estimated from the size of their documents, four bytes to a token, and are
-always `heuristic`. Stored-response lifecycle calls, realtime sessions, job
-polls, multipart media uploads (image edits and variations, transcription and
-translation) and video creation read no prompt, or reserve a flat charge, and
-record no estimate; their attempts still record the family of their model.
+- `tokenizer`: exact supported text/framing only.
+- `calibrated`: media/tool/schema/encrypted/unknown fields or long-tail ratio.
+  After 32 KiB, tail bytes use the prefix's measured density; mixed-script tails
+  can differ substantially from estimates.
+- `heuristic`: four-character counting, or four bytes/token for document-size
+  native operation estimates and long tails with under 4 KiB exact prefix.
+- No estimate: lifecycle calls, realtime, job polls, multipart uploads and video
+  creation, though model-family evidence remains.
 
-Planning uses the same counts. A target whose context window cannot hold the
-estimate is excluded before any provider is called, and each target is weighed
-by the count of its own model: a prompt that is a hundred tokens to the
-four-characters rule may be three hundred to an OpenAI tokenizer, and the target
-that serves it is chosen by the second figure. Where a target is sent a request
-of its own, because a provider profile, a strict contract or a content policy
-rewrote it, the estimate is the larger of the caller's request and that one, each
-counted for the target's family, and the input the attempt records is the larger
-of the two with the less trustworthy provenance of the two counts. A request that
-reads the same as the caller's is not counted again.
+Prepared-target rewrites use the larger source/prepared estimate and less-certain
+provenance. Context selection uses the same target-family evidence. Attempts
+retain input estimate/provenance/family; reports compare only pairs with both
+estimated and reported input.
 
-Every attempt records the estimate it was admitted under: the input alone, not
-the reply the reservation also holds, its provenance, and the model family. The
-[usage reports](operations.md#accounting-delivery-and-shutdown) compare the estimate with the
-input the provider reported, by route and by model family, and
-[route simulation](provider-routing.md#explain-and-observe) shows it for each
-target.
+Each dispatched attempt also reserves connection/slot quotas. A refused slot
+refunds its connection hold; undispatched work refunds fully. Dispatched token
+allowance can only grow; settlement always releases concurrency, independently
+of client cancellation. Shared version/slot cooldowns survive rotation as applicable.
 
-Each attempt then reserves the provider connection quota and the credential slot
-quota, with concurrency leases covering the remaining overall route deadline. An
-attempt's first-byte or idle timeout does not bound a stream's total lifetime. A
-rejected slot refunds the connection reservation it already took, the attempt is
-recorded as a rate-limit failure with its `Retry-After`, and failover continues
-to the next target. When a request ends, a reservation that dispatched nothing
-is refunded in full; otherwise reported usage can increase the token charge but
-cannot refund the local admission allowance. The concurrency lease is released, and the cost
-reservation becomes the cost incurred. Settlement ignores client cancellation, so
-a caller that hangs up still returns its slot.
-
-Credential failures record a version-scoped cooldown in Valkey; rate limits
-record a logical-slot cooldown that survives rotation. Shared cooldown state is
-authoritative when available, and successful credential validation clears it.
-Without shared coordination, the gateway uses its local cooldowns. An unreadable
-shared cooldown is treated as absent.
-
-Cost budgets compare attributed spend with daily, weekly and monthly thresholds,
-using the configured budget calendar and exact decimals. A request must satisfy
-every applicable caller, aggregate and supply budget. Exhaustion returns
-`429 budget_exhausted`; so does a budget with room
-left that cannot hold the request's estimate beside what is spent and in flight,
-and its message says which it was. Missing, malformed, or
-wrong-window snapshots return `503 distributed_limits_unavailable` until
-[authoritative initialization](operations.md#spend-budget-reconciliation) completes.
-
-That wait is by design: a budget is enforced against the spend PostgreSQL has
-confirmed, and the gateway never invents a zero for a key whose spend it does not
-know. Only the worker plane's reconciliation pass, which runs every minute, and the
-accounting of a request that has finished, install the snapshot of a window. So a
-key created with a cost budget, a budget added to a key that had none, and a
-budgeted key whose day, week or month has just rolled over, refuse requests with that
-503 until the next pass, which is up to a minute and which the gateway cannot
-shorten. A client sees an ordinary retryable 503. A provisioning script or a
-benchmark that creates a key and sends traffic at once waits for the first pass,
-which the worker logs as `reconciled cost budgets`. A deployment without a running
-worker never installs one.
+Every applicable exact-decimal cost boundary checks calendar spend plus holds.
+Known exhaustion returns 429; unknown/malformed/wrong-window balances return 503
+until [reconciliation](operations.md#spend-budget-reconciliation). No synthetic
+zero initializes a budget.
 
 ### Cost reservation
 
-A budget is measured against the spend already accrued and also against what
-requests in flight may still spend, so a burst cannot all be admitted against
-the same unspent balance. A priced request reserves an estimate of its cost in the
-same Valkey call that checks the balance, and is admitted only if the accrued
-spend, plus what other requests hold, plus its own estimate, fits every window
-the key and its group have. A request that exactly fills a window is admitted.
-A rejection reserves nothing. It keeps the code `budget_exhausted` in both
-cases, but only a budget whose accrued spend has reached its limit is called
-exhausted. When the budget has room and the request's estimate does not fit
-beside the spend and the requests in flight, the message says so and names what
-helps (a lower `max_tokens`, waiting for requests in flight, or a larger
-budget); `Retry-After` is one second when waiting can admit the request, and the
-end of the window when nothing short of a larger budget can.
+Cost estimates use the pinned price list and planned token/media consumption.
+Holds lapse at route deadline plus five minutes and are retired in bounded pages;
+stalled accounting can therefore cause temporary refusals below displayed spend.
+Accrued balances are authoritative. `cost:pending`/`cost:expiry` are advisory;
+damaged holds cannot block accounting, but losing them removes in-flight protection.
 
-The estimate is the most one request could cost across the attempts it may
-dispatch, priced from the gateway's pinned price list, the revision accounting
-pins the request to. Input is charged at the highest input-side rate the price
-has, whether input, cached input or any cache write, because nothing says
-beforehand whether the provider will read or write its cache. The reply is
-charged at the output rate for the tokens the request allows, which is
-4,096 when it names no bound, times the candidates it asks for. Each division by a
-million rounds up. Settlement bills every dispatch that reports usage, so when a
-route can fail over or retry through another credential slot the estimate is the
-sum of the dispatches the request may make, not just the dearest single attempt.
+Unpriced/missing-rate attempts and price lists older than one minute reserve
+nothing. Most audio/media and lifecycle operations have no pre-dispatch estimate.
+Video create reserves requested seconds (default four); realtime/Interaction
+create reserves initial input plus 4096 output. Later turns accrue when observed.
+Background creation releases its initial hold on return while durable original
+pending ownership remains visible to newly enabled budgets.
 
-A request that ends replaces its estimate with the cost of the attempts that
-reported usage, priced exactly as accounting will price them; one that was never
-dispatched, or whose upstream reported nothing, releases it. When accounting
-records the request, it installs the spend and removes the reservation in one
-step, so the budget never counts a request twice, and delivering the same event
-again removes nothing more. Settlement ignores client cancellation, as the other
-reservations do. Replacing the estimate with a cost is a single attempt that
-gives up after 100 milliseconds, because losing it only leaves the estimate for
-accounting or the lapse to remove; giving an estimate back, for a request that
-was never dispatched or whose cost is nothing, is retried like every other
-release, since no spend is coming to remove it. A reservation that nothing
-removes, because its event was lost or accounting stalled, lapses at the route
-deadline plus five minutes, after which the budget counts accrued spend alone
-again. Lapsed reservations are retired as later reservations and settlements
-find them, a bounded page at a time, so that a backlog left by a long stall
-cannot hold Valkey while it is cleared: until a backlog has been worked through,
-what is left of it still counts, which can hold a budget back for a short while
-and never lets it overspend.
+These are admission controls, not invoice caps: heuristic counts, multiple billed
+attempts, lag, unpriced work and unreserved operations can overspend. Known pending
+native work can return `503 cost_accounting_incomplete` even at zero displayed
+spend. A hold-based refusal uses Retry-After 1; a request too large even alone
+needs a smaller reply bound or larger budget.
 
-Reservations are advisory and derived. The accrued balance is the authority and
-fails closed; a damaged reservation, including one whose two keys no longer
-agree because only one of them was deleted or evicted, is discarded rather than
-allowed to block accounting, and deleting the reservation keys loses only the
-protection for requests in flight. They live beside the balances, in `cost:pending` and
-`cost:expiry` ([Valkey keys](operations.md#shared-state-in-valkey)).
-
-What is not reserved, and is judged on accrued spend alone: an attempt whose
-model has no price, or a price without a rate the request needs; any request
-while the gateway's price list is more than a minute old; and media and audio
-requests other than a video create, a video's retrieval, content and deletion,
-Bedrock invoke and stored-response lifecycle calls, whose cost is not known
-before they run. A video create, a realtime session and a Gemini
-Interaction create run on one target, so each reserves that target's price once
-it is selected and before anything is dispatched: a video its requested seconds,
-four when it names none, and the others their input estimate plus the default
-4,096-token reply. A session holds only that first allowance; what its later turns
-spend counts when their usage arrives. A background response is reserved while its creating request runs and released when
-it returns; its spend counts when its final usage arrives. The reservation is
-therefore not an invoice cap. Its durable original accounting owner remains
-visible to applicable cost budgets until authoritative settlement: adding a
-budget while native work is pending cannot make its unknown spend disappear.
-Known pending work can return `503 cost_accounting_incomplete` even while the
-displayed accrued balance is zero. Overspend remains possible from token counts that
-are heuristic for a family without a public tokenizer, failover that bills more
-than once, accounting that lags beyond the lapse above, unpriced spend, and every
-request that reserves nothing.
-
-Because reserved cost counts, a key can be refused while its spend reads below its
-limit, and a small budget on an expensive model can be refused at zero spend
-when the request names no `max_tokens`: the default reply alone may cost more than
-the budget. A refusal for in-flight reservations carries `Retry-After: 1`; one
-for a request that could not fit even alone carries the time until the window
-ends, though no wait will admit it, so bound the reply or raise the budget.
-
-When Valkey is configured but unreachable, `limits.valkey_unavailable` controls
-rate/concurrency-only keys: `fail_closed` returns
-`503 distributed_limits_unavailable`; `fail_open` bypasses those dimensions,
-logs a warning, and increments `olp_limits_fail_open_total`. Key or group cost
-budgets always fail closed. Gateways load the setting before binding and poll
-every 15 seconds, retaining the last value on read failure. Unconfigured Valkey
-never fails open. Unreadable provider quotas skip the target; exhausting all
-targets for that reason returns `503 distributed_limits_unavailable`.
+`limits.valkey_unavailable=fail_open` bypasses only configured rate/concurrency
+when Valkey is unreachable, incrementing `olp_limits_fail_open_total`.
+Unconfigured Valkey never fails open. Settings refresh every 15 seconds;
+unreadable target quotas skip dispatch.
 
 ## Diagnostics
 
-Every request ends in exactly one terminal envelope logged as
-`inference request`: request ID, actor (key or playground user), route and
-revision, release sequence, family, mode, outcome, status, whether the response
-was committed, timing, observed usage when the upstream reported it, and one
-record per attempt with target, provider revision, slot, credential version,
-status class, and timing. Prompts, outputs, tool data, headers, and credentials
-are never included. `GET /api/v1/provider-health` summarizes the same facts per
-provider for the requested window, `GET /api/v1/health/ready` serves the cached
-readiness snapshot, and `GET /api/v1/media-jobs` lists and reads durable video
-jobs. The same envelope is the source of the durable request, attempt, and
-priced usage records described in
-[accounting delivery](operations.md#accounting-delivery-and-shutdown).
+One content-free terminal envelope records request/actor/route/release,
+commitment/outcome/status/timing, observed usage and attempt identities/classes.
+Never include prompts, outputs, tools, headers or credentials. Management serves
+provider health, readiness, request/usage history and metadata-only media jobs.
 
-Deferred retained generations are an exception to that timing correspondence:
-their durable financial event captures the accepted submission before downstream
-delivery completes. It leaves client delivery unobserved and preserves that
-capture when native usage arrives later. The immediate terminal log describes
-the actual HTTP delivery outcome; delayed usage observation does not rewrite it
-or claim that the client received the response.
-
-Readiness, worker checkpoints, metadata delivery, tracing, and shutdown are
-documented in the [operations runbook](operations.md). Keep health and metrics
-on the private listener. `olp health-probe` exits nonzero unless readiness
-passes.
-
-See [tests/README.md](../tests/README.md) for deterministic protocol, SDK,
-service, and browser checks. Paid provider qualification is separate.
+Deferred financial events capture original submission separately from actual HTTP
+delivery; delayed usage does not rewrite the immediate terminal log. See
+[accounting delivery](operations.md#accounting-delivery-and-shutdown) for durable
+completeness and shutdown. Keep health/metrics private; `olp health-probe` fails
+unless ready. Deterministic [tests](../tests/README.md) are not live-provider proof.
 
 ## Retained generation accounting
 
-Retrieving, cancelling, deleting, or listing input items for a stored response
-does not generate new usage. Background responses retain a content-free
-accounting record with the original request identity, attribution, and pricing.
-A terminal stream event, retrieval, or cancellation carrying final usage settles
-that record once, including when several replicas poll concurrently. Until final
-usage is observed, the record remains pending; clients must poll responses that
-finish after their creation connection closes.
+Response/strict Response/Interaction mappings own content-free original
+accounting with creator identity/labels/prices. Retrieval/cancel/delete/input-item
+listing creates no new generation charge. Native final usage settles once across
+replicas; clients must poll background work after disconnected creation.
 
-Observed counters remain in terminal request metadata while the durable mapping
-owns the accounting event. This observation does not emit another charge.
-Usage completeness describes billing evidence separately from validated
-transport completion: a failed non-generating file download records its protocol
-or delivery failure without creating unknown generation consumption.
+Partial observations retain one coherent snapshot, never sum incomparable views.
+Validated terminal counters replace provisional evidence, including explicit zero
+or corrected cache classification. Event kind/status/retained identity must
+validate before effects; nonterminal snapshots cannot settle. Unknown/null counts
+are not zero. Batch `pending_usage` extensions remain opaque metadata.
 
-Nonterminal GET and stream observations retain one coherent provider snapshot
-under the original mapping's lock. A dominated replay or incomparable partial
-snapshot preserves the prior evidence; counters from different snapshots are
-never combined. Validated complete native terminal counters replace provisional
-evidence authoritatively, including zero or corrected cache classification.
-Response state and accounting change in the same transaction, so stale polling
-cannot reopen settled work. Stream effects require a recognized, validated
-lifecycle event and an exact retained identity before projection or delivery.
-Nonterminal stream events may carry a currently completed resource snapshot.
-The event kind keeps accounting pending until a validated terminal event; its
-phase also seeds stored state. The native snapshot's status remains unchanged
-on the client wire. Missing or null nonterminal status is unknown rather than
-completion evidence; terminal kind/status contradictions still refuse effects.
+Gemini pending/queued/in-progress retain generation ownership; `requires_action`
+ends that generation and continuation starts another. Lifecycle reads may settle
+original owners despite newly enabled monetary budgets, while auth/revocation/
+rate/concurrency still apply. Accepted native POSTs set `X-Should-Retry: false`
+before commitment, independent of metadata opt-in.
 
-Only Response, strict Response and Interaction mappings can own pending
-generation accounting. A native Batch extension named `pending_usage` remains
-opaque provider metadata; it cannot create financial ownership or inferred
-expiry and cannot block deletion.
-
-Stored Gemini Interactions use the same narrow original-event accounting
-transaction with their own native lifecycle. Pending, queued and in-progress
-statuses retain accepted work; `requires_action` ends that generation and hands
-control to the caller, whose continuation is a new generation. Supported native
-background requests require stored state and refuse applicable unbounded-work
-budgets before dispatch. Ordinary resource GET/cancel/delete does not reserve
-new monetary inference spend, so newly enabled budgets cannot block the
-observation needed to settle their original owner; authentication, revocation,
-rate, token and concurrency checks still apply.
-
-An active Gemini generation's validated native failure remains a provider fault
-when client delivery fails. A retained GET of a failed Interaction remains a
-successful retrieval. Both paths sanitize native failure strings before local
-projection while preserving native fields, member order and numeric lexemes.
-Unary and SSE writes use bounded deadlines and require successful Flush before
-first byte or completed client visibility. Original caller cancellation is
-separate from route timeout and observed malformed native frames. Accepted
-native POSTs set `X-Should-Retry: false` before response headers commit, including
-when response metadata is disabled.
-
-Provider-reported counters are observed before projection, durable attachment
-and client delivery. Intermediate stream counters remain incomplete and
-uncertain; native terminal proof distinguishes authoritative totals from merely
-having a usage object. Explicit zero and missing counts remain different.
-Observed partial counts survive interruption while uncertain token settlement
-retains each attempt's allowance. A validated terminal count survives a failed
-write or flush without becoming unknown again.
-
-Deleting or expiring an unresolved mapping conservatively persists its original
-event as billing-uncertain before removing owned secrets and mapping. The
-original captured HTTP submission timing remains unchanged; delayed usage has
-its own observation time and is not a fictional days-long HTTP request.
-Unsupported template versions stay retained for a compatible implementation.
-Expiry uses bounded batches, row savepoints and a pass-local cursor so an
-unsettleable owner does not prevent unrelated cleanup. Known accrued balances
-exclude unsettled work; resolving or conservatively retiring a mapping can
-leave explicit unpriced uncertainty that applicable cost budgets refuse.
+Usage is observed before projection/persistence/delivery: failed writes/flushes
+cannot erase validated consumption. Partial interruption remains uncertain;
+provider failure, route timeout and caller cancellation remain distinct.
+Delete/expiry conservatively persists original partial usage/uncertainty before
+removing mappings/secrets. Unsupported templates remain retained; bounded batches
+and savepoints prevent one owner starving cleanup. Submission and later observation
+times remain separate. Non-generating resource failures are not unknown consumption.
 
 ## Caller-supplied provider credentials
 
-An operator may publish a connection with `credential_source: caller`. Its
-endpoint, connector profile, certified models, slots and network configuration
-remain operator-controlled. The ordinary secret stored with that connection is
-still used for probes and certification. The connection editor exposes this as
-**Serving credentials → Caller supplies each request**.
+Connections may use `credential_source: caller`. Operator-controlled endpoint,
+profile, models/network/slots and separately stored probe credentials remain.
+Each serving/lifecycle request supplies one nonempty
+`X-OLP-Provider-Credential`, at most 16,384 bytes, containing the connector's normal
+API key, header JSON or static AWS JSON. Ambient/token-exchange/plugin modes refuse.
+The header is removed before forwarding or retained storage.
 
-Each inference or retained-resource request supplies exactly one
-`X-OLP-Provider-Credential` header, with a nonempty value of at most 16,384 bytes.
-It carries the connector's normal API-key value, declared-header JSON object,
-or static AWS credential JSON. Ambient identities, token-exchange modes and
-plugins cannot use caller mode. The header is accepted by gateway CORS but is
-removed before forwarding, semantic-header capture or retained continuation
-storage. A caller cannot use it to choose an endpoint or change authentication
-mode.
+Secrets exist only for the request (or live realtime connection), bound to its
+provider/model. Same-target retries may reuse; another target cannot. Isolated
+HTTP transports disable keep-alive and shared auth caches. Error redaction includes
+submitted and derived signing/header values. Caller rejection never revokes or
+cools the operator probe credential. Attempts record caller source without secret,
+digest or operator credential version.
 
-The secret is held only by that request. Once consumed, it is bound to the
-provider connection and upstream model; a fallback to another target cannot
-reuse it. Retries against the same target may reuse it within the request.
-Caller-authenticated HTTP connections are created outside shared connection
-pools with keep-alives disabled; authentication modes with shared token caches
-are refused. Native realtime connections retain the secret only for their
-current connection. Error sanitization includes both the submitted secret and
-values produced by signing or declared-header placement. A caller's rejected
-credential does not revoke or cool down the operator's probe credential.
-
-Attempts carry `routing.credential_source: caller`, with no operator credential
-version ID. Usage and existing budgets apply by default. This metadata contains no
-secret or digest of the provider secret. Provider configuration, revision and
-promotion documents carry only the source choice; the operator's separately
-sealed probe credential follows its existing lifecycle.
-
-Durable video creation retains the pinned connection and operator probe
-reference, but never the caller secret. Poll, content and delete requests must
-supply the credential again. These jobs are excluded from autonomous polling
-and worker-backlog metrics: the worker cannot substitute the probe credential.
-Explicit caller-driven lifecycle operations remain accountable and bound to
-the original connection.
+Caller video jobs require resupplied credentials for poll/content/delete and are
+excluded from autonomous polling/backlog. Workers cannot substitute probes.
 
 ### Caller-paid budget policy
 
-An ordinary route may publish `caller_cost_exempt: true` (default false), using
-**Caller-paid usage** in its draft editor. Every foreground target must use
-caller credentials. Fallback and route-selector destinations must declare the
-same policy, so a transition cannot turn an operator-paid request into an
-unreserved one. Classifiers are separately admitted requests. Shadows require
-operator credentials and keep their system-work budgets; active probes use the
-operator probe credential and remain budgeted.
+Route `caller_cost_exempt: true` requires all foreground targets to use caller
+credentials and all fallback/selector destinations to match. Classifiers admit
+separately; shadows/probes stay operator-paid and budgeted. Eligible attempts
+bypass all applicable USD boundaries, not rate/token/concurrency/network/body/
+identity/authorization controls. Historical operator-paid targets cannot serve
+through exempt ingress.
 
-An eligible caller attempt bypasses USD admission at the installation,
-organization, project, budget-group, key, end-user, per-key-route, attribution,
-route, provider and slot boundaries. Request/token rates, concurrency, network
-and identity policies, body limits, provider quotas and route authorization
-still apply. A historical retained target using operator credentials cannot
-serve through a now-exempt ingress route. Repeated lifecycle operations require
-the caller credential again and use the policy pinned when that request starts.
-
-Priced usage, token/media counts and unpriced evidence remain in usage reports.
-`routing.budget_exempt` records the immutable per-attempt decision; request
-history displays both credential source and cost-budget treatment. Durable fact
-and hourly rows carry `budget_exempt` separately, and retention groups by it.
-Cost settlement, reconstruction, budget reports and threshold counters exclude
-those rows without changing invoice estimates in usage reports. Delayed Responses
-accounting preserves its original attempt evidence. Clearing the route option
-restores charging for new attempts without retroactively charging exempt history.
-
-Provider source and route exemption round-trip through configuration
-export/plan/apply and published revisions. No caller secret participates in
-promotion, cryptographic-purpose storage, quota keys or a shared authentication
-cache. Multi-step media calls reuse the request's isolated transport; credentialed
-steps must stay on the configured origin, and fetched products receive no
-credential. Both initial and follow-up errors use the collected credential
-redactions. Immediate video compensation can use the current request credential;
-background work cannot.
+Prices/usage/unpriced evidence remain in reports. Immutable per-attempt
+`routing.budget_exempt` survives facts/hourly rollups, delayed settlement and cap
+changes; budgets exclude it without hiding spend estimates. Source/exemption
+promote, secrets do not. Multi-step media retains isolated transport and same-origin
+credential boundaries; fetched products receive no credential.
 
 ### Unbounded work and incomplete accounting
 
-Batch submissions and Gemini Live sessions return `unbounded_work_budget` when
-an applicable token or cost budget cannot bound their future consumption. This
-includes key, shared group, route, end-user, project attribution, organization,
-project, installation, provider and credential-slot consumption budgets. Weekly
-cost budgets receive the same protection as daily and monthly budgets.
-Request-rate and concurrency-only controls remain supported. Live sessions
-recheck consumption budgets during authority refresh, including policies added
-to the current release after the route and target were pinned.
+Batch creation/Gemini Live refuse `unbounded_work_budget` when applicable token/
+USD ceilings cannot bound future consumption; rate/concurrency-only policy works.
+Live rechecks newly enabled budgets on authority refresh.
 
-Cost admission checks PostgreSQL for raw and hourly ingestion losses overlapping
-any active day, week or month in the configured budget calendar. A week may start
-before the current month, and a calendar transition may make the day the earliest
-window. Loss evidence lacks reliable ownership, so a gap conservatively affects
-all cost budgets, including shared, system and supply-side budgets. An unclosed
-producer epoch whose checkpoint is more than 60 seconds old also blocks cost
-admission, even when no recovery worker is running. A healthy heartbeat can clear
-this uncertainty; confirmed loss remains authoritative through hourly retention.
+Cost admission checks durable ingestion losses across every active calendar
+window and stale (>60 seconds) unclosed producer epochs. Ownership-free gaps
+conservatively affect all cost budgets, including system/supply. PostgreSQL
+unavailability fails closed; no-cost admissions skip this check. Local loss
+checkpoints immediately where possible, with periodic recovery. Startup registers
+producer epochs before any work; shutdown drains producers before metadata closes.
+Unsupported event versions stay queued for compatible consumers; malformed
+supported records become explicit loss evidence.
 
-The check is bounded and fails closed if PostgreSQL is unavailable. Admissions
-without cost budgets do not consult it. Local emitter loss
-participates immediately, and a bounded synchronous checkpoint shares the loss
-with other replicas. Periodic checkpoints recover a failed immediate write;
-startup registers the producer epoch before listeners bind or probes start.
-Control-only playground calls and worker-only health probes use the same
-delivery pipeline. Shutdown drains probe producers before closing metadata
-intake while consumers remain available to persist the delivered events; a
-forced probe shutdown leaves its epoch open. Already-admitted
-requests and replicas racing the checkpoint can still finish. This prevents
-additional admission based on incomplete evidence; it cannot reconstruct lost
-spend or guarantee a fixed recovery time.
-
-Unsupported usage-event versions stay in the original stream and pending set for
-a compatible consumer. Supported neighboring events continue to persist.
-Malformed events in the supported format still produce durable loss evidence.
+This stops additional admission based on incomplete evidence; it cannot restore
+lost spend, prevent races with checkpoints or promise fixed recovery time.

@@ -5,19 +5,11 @@ ETags and audit events come from that installation's management API.
 
 ## Installation identity
 
-Settings → Installation identity edits the name and logo shown in the console.
-An installation-wide member with the settings operation can save changes. The
-form uses its observed ETag; a conflicting edit requires reloading the current
-identity. Existing names and the default OpenLLMProxy mark remain available.
-
-Logos are embedded PNG or JPEG images, limited to 64 KiB and 512 × 512 pixels.
-OLP validates the image before storing it. The console retains its dark theme,
-semantic colors, readable text and reduced-motion behavior. A logo does not
-change the management API or inference endpoints. Branding is local to the
-installation and is not part of configuration promotion.
-
-The generated CLI and management MCP expose `get_installation_branding` and
-`update_installation_branding` with the same authority, validation and ETag rules.
+Settings → Installation identity edits the local name/logo under installation-wide
+settings authority and observed ETag. PNG/JPEG logos are validated, ≤64 KiB and
+512 × 512 pixels; theme/accessibility stay unchanged. Branding changes neither
+API endpoints nor portable configuration. Generated CLI/MCP branding operations
+use the same authority/validation/concurrency.
 
 ## Independent installations
 
@@ -40,30 +32,17 @@ are described in [deployment](deployment.md#regional-fleets).
 
 ## Bulk member editing
 
-Access → Members supports selecting members on the current page and changing
-their role, deactivating them or reactivating them. Your own account cannot be
-selected. Deactivation asks for confirmation because it revokes sessions.
-
-Each selected member is updated through the ordinary management API using its
-observed ETag. Updates run sequentially and report successful and failed members
-separately. A stale or protected member does not roll back an earlier successful
-update. Failed members stay selected so you can review them and retry with fresh
-data. Server checks, including last-owner protection and externally managed
-identity restrictions, apply to every update. Review attributed API keys after
-deactivation; those keys are not automatically revoked.
+Access → Members applies sequential current-page role/active edits with each
+observed ETag, excluding self. Deactivation confirms and revokes sessions, not
+API keys. Successes remain committed; failed rows stay selected for reviewed
+fresh-data retry. Last-owner and external-ownership checks apply per member.
 
 ## Saved views
 
-Usage and Request Explorer offer Saved views. Name the current filters, apply a
-saved view or delete it. Usage views keep the selected time window and axes;
-history views keep their metadata filters. Paging cursors and unrelated query
-parameters are excluded.
+Usage/Request Explorer save filters (Usage includes time/axes), not cursors or
+unrelated parameters. At most twenty views/page live in tab session storage,
+scoped to verified session public ID; a new session retires old views. They never
+bypass current permissions/retention. Origins keep separate browser storage.
 
-Views are limited to 20 per page, stored in browser session storage and scoped to
-the verified management session's public identifier. They survive reloads in
-that tab. A new session, including signing in as another member, starts without
-the earlier session's views and retires its stored presets. Installation origins
-have separate browser storage. Saved views never bypass current permissions or
-request-retention rules.
-
-Browser-qualified examples show [installation branding](assets/screenshots/m11-operator-identity.png) and [independent installations with session views](assets/screenshots/m11-independent-installations.png).
+Browser-qualified examples: [branding](assets/screenshots/m11-operator-identity.png)
+and [installations/views](assets/screenshots/m11-independent-installations.png).

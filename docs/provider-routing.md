@@ -171,114 +171,55 @@ connector selection.
 
 ## Credential pools and limits
 
-Each connection has a default slot, whose credential versions the
-`/api/v1/providers/{provider_id}/credentials` endpoints list and rotate. Add,
-edit, rotate, and validate additional slots under
-`/api/v1/providers/{provider_id}/credential-slots` and in the provider detail
-page. Writes use ETags and idempotency keys; secrets remain encrypted and
-write-only. A connection supports up to 64 slots including the default.
+Manage versions under `/api/v1/providers/{id}/credentials` and up to 64 slots
+(including required default) under `/credential-slots`. Secrets are sealed/
+write-only; mutations require ETags/idempotency. Individual slot ETags allow
+sibling edits; collection edits retain collection fences. Deleting a nondefault
+draft slot removes pending enrollment, not immutable published history.
 
-Individual `GET /credential-slots/{slot_id}` reads return a slot ETag.
-Individual PUT and DELETE accept it, so sibling edits preserve each other's
-preconditions. Pool edits retain the collection ETag. DELETE removes a
-nondefault draft slot and its pending enrollment state, retaining immutable
-credential versions and published revision slots. The default slot is required;
-activate the changed provider draft to publish the resulting pool.
+Slots have enabled/priority/weight and allowed model/route/key restrictions;
+empty lists are unrestricted within the connection. Lower priority then weighted
+rendezvous chooses among eligible slots. Every serving slot must validate all
+allowed enabled certified capabilities (one-minute operation, 15-second probes).
+Evidence binds credential/transport/capabilities; concurrent changes invalidate.
+Disabled/no-model slots neither serve nor block activation.
 
-Default-slot restrictions and quotas also apply to connections using no stored
-secret (`none`, ADC, or the AWS default chain).
+Rotation validates then stages a new version; active traffic keeps its old version
+until reactivation. Model certification may validate its selected usable slot;
+additional/rotated slots need their own proof. Secretless modes still honor default
+restrictions/quotas. Published options/contracts/versions and attempt price pins
+remain immutable, while new admissions use current published count quotas.
 
-A slot has enabled state, priority, weight, and optional `allowed_models`,
-`allowed_routes`, and `allowed_api_keys` restrictions. Empty restriction lists
-mean unrestricted within the published connection. Slots are ordered by lower
-priority first and weighted rendezvous within a priority. Every enabled slot
-must prove access to its allowed enabled model capabilities before activation.
-New model contracts invalidate this access evidence. Validation has a one-minute
-bound and a 15-second deadline per upstream probe. Evidence binds the credential
-version, transport configuration, and allowed enabled capabilities; edits during
-a probe invalidate its result. Model-list access alone does not prove generation
-access. Disabled slots and slots with no allowed enabled models are not selected
-and do not block activation.
-
-Rotation validates the new credential against model discovery and the default
-slot's allowed enabled capabilities before selecting it for the draft. The
-active revision keeps its original credential until reactivation. Certification
-prefers an enabled usable default slot, then another enabled usable slot;
-certifying all applicable models validates that selected slot. Additional or
-rotated pool slots need their own validation. Disabling the default does not
-prevent an independently validated named slot from serving.
-
-Set `requests_per_minute`, `tokens_per_minute`, and `max_concurrency` on a slot
-or in `configuration.options.limits` for the whole connection. Both scopes apply
-to every attempt. Valkey supplies the UTC minute and distributed concurrency
-leases. Rotation preserves the logical slot's quota identity. Tokens are
-reserved conservatively and reconciled when complete usage is available;
-cancellation releases concurrency. Configured provider quotas fail closed when
-the distributed limiter is unavailable. New requests use current published
-connection and slot quotas, including when a gateway retains an older runtime
-release.
-
-A quota may also divide itself among the admission priorities a request
-carries (see [priority admission](gateway.md#priority-admission)). Declare
-`priority_shares` with a percent for each of `critical`, `high`, `normal` and
-`low`, summing to 100, together with a `saturation_percent` from 1 to 100:
+Connection `options.limits` and slot RPM/TPM/concurrency both apply. Valkey owns UTC
+minutes/leases; configured quotas fail closed. Logical quota identity survives
+rotation. Dispatched token reservations cannot decrease; settlement releases
+concurrency. `priority_shares` sum to 100 across critical/high/normal/low, with
+`saturation_percent` 1–100. Below saturation any class borrows idle capacity;
+above it atomic shares preserve headroom across replicas:
 
 ```json
-{"max_concurrency": 40, "priority_shares": {"critical": 50, "high": 25, "normal": 20, "low": 5}, "saturation_percent": 60}
+{"max_concurrency":40,"priority_shares":{"critical":50,"high":25,"normal":20,"low":5},"saturation_percent":60}
 ```
 
-Until the quota's use reaches the saturation percent, any class may use idle
-capacity. Beyond it, each class holds at most its share of each window, so
-critical work keeps headroom that background traffic cannot take. The Valkey
-scripts enforce the shares atomically with the request, token and concurrency
-windows, so they hold across every gateway sharing the limiter. A refused
-attempt is a quota rejection that fails over like any other.
+Connection/slot day/month supply caps use exact-decimal PostgreSQL facts/Valkey
+snapshots and per-attempt holds. Unknown windows skip as
+`connection_budget_unavailable`/`slot_budget_unavailable`; exhaustion similarly
+uses `_exhausted`. No zero initialization; [reconcile](operations.md#spend-budget-reconciliation).
 
-Connections and slots also take supply-side spend caps, `daily_cost_limit` and
-`monthly_cost_limit`, in the installation currency. They use the same
-exact-decimal accounting, PostgreSQL authority and Valkey snapshots as key
-budgets ([spend reconciliation](operations.md#spend-budget-reconciliation)) and
-count spend from the moment they are declared. An exhausted cap removes the
-connection or slot from selection with the plan reason
-`connection_budget_exhausted` or `slot_budget_exhausted`; before reconciliation
-has installed a new cap's windows, about a minute after publication, or while
-Valkey cannot read them, the target is skipped as `connection_budget_unavailable`
-or `slot_budget_unavailable`, as unreadable provider quotas are. Each attempt
-reserves its cost bound against every cap it is subject to and settles the
-actual cost once it is accounted.
+Optional `health_probe.interval_seconds` (60–86400, for example 300) sends bounded
+paid synthetic work per routed model/fleet interval, thirty-second deadline.
+System/probe usage remains accounted; failing health ranks targets last rather
+than eliminating availability. Shared circuit/slot cooldown evidence distinguishes
+transport/server failures from credentials. Credential-only half-open outcomes
+let sibling slots probe. Rotation does not reset logical rate cooldown; validated
+credentials may clear it. See [gateway failure rules](gateway.md#request-path).
 
-Set `configuration.options.health_probe` to `{"interval_seconds": 300}` (60 to
-86,400) to have the `health_probes` worker task send each of the connection's
-routed models a bounded synthetic request, no more than once per interval across
-the fleet: the certification probe's minimal chat, embeddings or rerank body,
-with a 30-second deadline, through the route and its quotas. A probe whose
-upstream fails with a server, transport, timeout or protocol error marks the
-connection unhealthy for the fleet until a later probe or request succeeds.
-Probes cost money, so they are off unless a connection enables them; their usage
-is accounted to the installation under the `system` actor with origin `probe`,
-and appears in usage reports. `GET /api/v1/provider-health` reports each
-connection's latest probe and shared circuit.
+Revocation is live authority across old releases/pins. Media jobs keep exact
+original credentials and block explicit revocation until durable deletion records.
+Workers claim only runnable capacity, revalidate claims immediately before bounded
+poll/delete and yield silently on lease takeover.
 
-Activation snapshots options, model contracts, and selected secret versions. An
-attempt pins its exact slot, credential version, and pricing revision.
-Authentication failures cool down that version; HTTP 429 honors Retry-After for
-the logical slot, so rotation does not reset an account cooldown. Successful
-credential validation can clear the cooldown. Connection/transport and server
-failures affect endpoint health; a credential failure does not disable other
-slots. While an endpoint is recovering, a credential-only outcome (401, 429, a
-local slot quota) completes the half-open probe without penalizing the endpoint,
-so a sibling slot can probe immediately. Explicit credential-version revocation
-is authority, not routing: it reaches every retained release on the next
-authority poll, including a gateway that cannot install a newer release, and
-selection refuses a revoked version even when a request pins it. Media jobs
-retain their original connection and secret through rotation, restart, polling,
-and deletion. Their credentials cannot be explicitly revoked until the jobs have
-durable deletion records. Autonomous media reconciliation claims only as many
-jobs as it runs at once, revalidates its claim and bounds its lease to the route
-deadline immediately before each upstream poll or delete, and hands off silently
-when another replica has reclaimed the job.
-
-![Credential slots with validation, priority, and shared quota usage](assets/screenshots/provider-credential-pool.png)
+![Credential pool](assets/screenshots/provider-credential-pool.png)
 
 ## Scoped routing policies
 
@@ -513,52 +454,22 @@ normal route, with its own revisions, simulation and access control.
 
 ### Route fidelity
 
-A route's `fidelity` is `{"mode":"strict"}` or `{"mode":"transformed"}`. An
-omitted or `null` fidelity, and `{}`, mean strict in the management API,
-configuration plan and apply, and the console. Nothing is inherited from an
-earlier draft or revision: a draft body or configuration entry states the whole
-contract, and every stored revision and export carries an explicit mode. Any
-other mode is refused with `422 validation_failed` on the `fidelity` field
-(`routes.N.fidelity` in a configuration document).
+`fidelity` is `{"mode":"strict"}` or `{"mode":"transformed"}`. Omitted/null/empty
+means strict, never inherited; revisions/exports record explicit mode. Invalid
+values refuse 422. Every strict target compiles its native operation contract;
+Automatic/non-strict profiles, translation or redaction refuse `target_capability`/
+policy conflict. Header/auth-only plugin adaptation may be strict; envelopes,
+rewrites, forced streams or carried traffic are transformed.
 
-A strict route preserves execution, observation, permitted continuation and
-effects relative to the selected target's native invocation. Draft validation
-and activation compile an interaction contract for every target. A target on an
-Automatic provider (a provider without a provider profile), on a profile whose
-catalogue entry is not `strict`, or one that needs translation fails with
-`422 target_capability`, and the detail tells you to declare the route
-transformed. A [plugin profile](plugins.md#providers-from-plugin-profiles) that
-changes only authorization, address and declared headers is strict, including
-one whose signing hook adds headers; one whose envelope or rewrites change the
-dialect's bodies, that forces upstream streaming, or whose unconfined plugin
-[carries its traffic](plugins.md#carrying-traffic), is not. Strict routes also
-refuse `redact` content-policy rules.
+Use transformed routes for translation/redaction/Automatic providers/playground/
+Bedrock InvokeModel. Provider-owned state then retains metadata mappings only.
+New revisions change fidelity without renaming slugs; restore uses original mode.
 
-Declare a route transformed to translate between dialects, redact content, use
-Automatic providers, use the console playground, or serve Bedrock InvokeModel.
-Stored responses, files and batches on a transformed route keep only a metadata
-mapping to the provider-owned object.
-
-A published slug moves between strict and transformed through an ordinary new
-revision, so clients keep their model name. Restoring an earlier revision
-activates it with that revision's own fidelity, and revision history shows the
-fidelity of each revision.
-
-A stored response, file, batch, continuation or video job is served only under
-the fidelity it was created with:
-
-- While its route is transformed, a strict resource cannot be retrieved,
-  downloaded or recovered, and cannot start new work such as a
-  `previous_response_id` continuation or a batch. These requests fail with
-  `409 provider_resource_unavailable` before reaching the provider.
-- While its route is strict, a resource created under the transformed route
-  cannot start new work (`409 provider_resource_unavailable`). It can still be
-  retrieved as before.
-- `GET /v1/files`, `/v1/batches` and `/v1/videos` always list the owner's
-  resources. A resource the route no longer serves shows its stored state; the
-  list does not poll the provider for it.
-- The owner can always delete or cancel a stored resource, so provider-held
-  data can be removed and running upstream work stopped after a switch.
+Retained state obeys creation fidelity. Strict resources cannot be read/recovered
+or start work through transformed ingress (409); transformed resources may still
+be read through strict ingress but cannot start work. Lists show owned stored
+metadata without polling incompatible resources. Owners can delete/cancel after a
+switch. See [compatibility](compatibility.md) for operation contracts.
 
 ## Policies and caller preferences
 
@@ -636,49 +547,25 @@ nor a request an unconfined plugin carried whose outcome is unknown; see
 
 ## Explain and observe
 
-![Route preview showing two eligible credential slots and a policy exclusion](assets/screenshots/provider-routing-preview.png)
+![Route preview](assets/screenshots/provider-routing-preview.png)
 
-The route editor's dry run and playground use the execution selection engine.
-`POST /api/v1/routing/simulate` accepts a canonical operation, surface, mode,
-preferences, optional API-key ID, and seed. It returns exclusions even when
-nothing is eligible, attempt order, slot IDs, prices, and measurement freshness.
-When the simulation carries a native request, each decision also reports the
-input tokens that request has on the target's model, how they were counted
-(`estimate_provenance`: `tokenizer`, `calibrated` or `heuristic`), and the model
-family (`model_family`). That is the input estimate [planning](gateway.md#how-the-prompt-is-estimated)
-uses for the target, and each target's context window is checked against it.
-Where a target is sent a request of its own, as a strict contract prepares it,
-the count is of that request; admission's reservation also adds the reply bound
-and takes the larger of the caller's request and the provider's, which a
-simulation does not. An `estimated_input_tokens` the caller supplies stands for
-every target instead, with no provenance, and a `max_output_tokens` replaces the
-reply bound the request names.
+`POST /api/v1/routing/simulate` and draft/playground preview share the execution
+planner. Supply operation/surface/mode/preferences, optional key/seed/native request.
+Results include exclusions/order/slots/prices/measurement freshness and target-
+prepared input tokens/provenance/family. An explicit estimated count applies to
+all targets without provenance. Admission additionally reserves reply/larger
+source-prepared bounds; simulation is not a dispatch guarantee.
 
-Native source indexing is limited to 65,536 JSON values, including containers,
-in addition to byte and nesting limits. Strict simulations share an 8 MiB
-input-policy inspection budget across targets and route legs, including unary
-and media operations. Each rule charges the bytes it actually inspects,
-including recursively decoded tool arguments and schema keys, with a minimum
-of one byte per match attempt for empty strings. Targets report
-`inspection_limit` before any match that would exceed the shared budget;
-reduce the request, rules or inspected targets before retrying.
+Native source indexing is limited to 65,536 JSON values. Strict inspection shares
+8 MiB across targets/legs, including media and recursively decoded tool arguments/
+schema keys, charging at least one byte/match. Before overflow, `inspection_limit`
+refuses; reduce request/rules/targets, never bypass policy.
 
-Route draft simulation also explains the adaptive behaviors for the request:
-the trace of each selector it evaluated (with `classifier_labels` standing in
-for classifier answers, keyed by selector), the route legs a selector delegation
-or a plan-time fallback leads to, every declared fallback with whether it would
-run (`planned`), stays on `standby` for an execution failure, or would be
-skipped and why, and the session affinity the request carries (from its
-`attribution` labels or cache key). Decisions add the capacity `headroom` the
-`capacity` strategy reads, shadow targets, and targets the fleet marks
-`unhealthy`.
-The playground accepts the same preferences in its `routing` field and shows the
-resulting decision. Runtime health and available capacity can change between a
-preview and a dispatch.
+Explain traces selectors (optional `classifier_labels` substitutes), delegation/
+fallback planned/standby/skipped legs, affinity, capacity headroom, shadow and
+unhealthy targets. Selectors never use attribution; configured session affinity may.
+Capacity/authority can change between preview and serving.
 
-Request history records connection, slot/version, provider revision, policy
-digest, selected price revision, fallback failure classes, the route leg, the
-selector, the retry number and the spend caps of each attempt, the request's
-origin (`caller`, `shadow`, `classifier` or `probe`) and parent request, and
-meaningful output timing. Prompts, outputs, secret header values, and raw preference payloads are
-absent from persisted routing telemetry.
+Request history records immutable connection/slot/version/revision/policy/prices,
+retry/fallback/leg/selector/caps, caller/shadow/classifier/probe origin/parent and
+meaningful output timing. No prompts, outputs, secret headers or raw controls.

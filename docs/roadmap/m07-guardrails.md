@@ -4,15 +4,11 @@
 | --- | --- | --- |
 | Planned | [M1](m01-measured-advantage.md) | [M8](m08-caching.md), [M10](m10-agent-gateway.md), redaction for [M5.2](m05-observability.md#m52-payload-capture) |
 
-OLP's [content policy](../gateway.md#content-policy) is a deterministic RE2
-filter: block or redact rules on input and unary output, with metadata-only
-evidence. LiteLLM offers a guardrail framework with about 50 vendor
-integrations, PII masking, secret detection, tool policies and per-key
-attachment. This milestone generalizes content policy into one guardrail engine
-that keeps OLP's properties (in-process by default, bounded, fidelity-aware and
-content-free in its evidence) and reaches the long tail through a signed
-webhook contract and confined WebAssembly guardrails rather than in-process
-code.
+[Content policy](../gateway.md#content-policy) and [named regex definitions](../guardrails.md)
+already provide bounded input/unary block/redact with metadata-only evidence.
+This milestone adds broader attachments, streaming detectors, PII/secrets/tool
+policies, vendor integrations, signed webhooks and confined WASM guardrails.
+Registrations alone do not implement that execution platform.
 
 ## Outcome
 
@@ -26,7 +22,10 @@ code.
 
 ## Baseline
 
-| | OLP today | LiteLLM reference |
+Planning-time comparison; shipped behavior is authoritative in the
+[compatibility matrix](../compatibility.md) and [access guide](../access.md).
+
+| | Planning baseline | LiteLLM reference |
 | --- | --- | --- |
 | Rules | Up to 64 RE2 `block` or `redact` rules per route revision ([content policy](../gateway.md#content-policy)) | [Guardrails](https://docs.litellm.ai/docs/proxy/guardrails/quick_start) with pre-call, during-call, post-call and logging-only modes |
 | Phases | Input; output on unary responses only | Including streaming for some guardrails |

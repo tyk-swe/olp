@@ -34,6 +34,11 @@ semantic versioning and take their source from root `package.json`;
   re-enrollment; existing OIDC configurations require an owner to review and save
   discovery again. Restricted Helm deployments must configure DNS resolver CIDRs.
 
+### Changed
+
+- Condense and refresh operational/developer documentation; move repository
+  guidance into contributor/console guides and remove `AGENTS.md`.
+
 ### Added
 
 - Project-scoped code-mode accounts, explicit pools, published native-model
