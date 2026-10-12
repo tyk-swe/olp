@@ -394,7 +394,18 @@ Routes become non-activated drafts; cross-project slug conflicts and lifecycle
 differences need explicit activation/retirement. Active runtime stays pinned.
 
 Exact unchanged prices are noop; other prices create a revision and republish.
-Future effective times survive, past/current times rebase to apply. Feature-specific
+Future effective times survive, past/current times rebase to apply.
+
+Top-level `discounts` carries each scope's in-force multiplier
+(`provider_kind`, optional `vendor_id`, `provider` by name); scopes whose
+in-force multiplier is 1 are omitted. Apply publishes a new now-effective
+discount for each new or changed scope and a multiplier-1 discount for each
+in-force scope the document omits. Top-level `rate_cards` carries each card's
+in-force revision: `owner` (`kind` installation/organization/project, named
+like routes), `markup`, `prices` in the price-entry shape minus provider
+scope. Apply creates missing cards and publishes a new now-effective revision
+when the in-force revision differs; a card the document omits gets a neutral
+revision (`markup` "1", no prices) unless it is already neutral. Feature-specific
 budget/group/calendar omission semantics are in [access](access.md), not a global
 merge rule. `expected_digest` fences destination drift; remaining blockers return
 409 with plan body, successful staging records one digest-only audit event.

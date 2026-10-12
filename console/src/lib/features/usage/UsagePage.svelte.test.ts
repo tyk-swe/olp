@@ -36,12 +36,14 @@ const coverage = {
   range_complete: true
 };
 const counts = {
+  charge: null,
   complete: true,
   coverage,
   incomplete_count: 0,
   request_count: 42,
   request_metadata_consumer: consumer,
   request_metadata_gap_events: 0,
+  uncharged_attempt_count: 0,
   uncertain_request_metadata_gap_count: 0,
   unpriced_count: 0
 };

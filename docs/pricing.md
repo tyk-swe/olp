@@ -172,3 +172,64 @@ and `amount` is the commitment the bucket's latest row recorded. A report that
 fully covers a closed period allocates the whole amount; a period still open
 allocates provisionally; a period with no committed usage allocates nothing —
 idle capacity is not attributed to anyone.
+
+## Discounts
+
+A discount is an immutable, effective-dated multiplier on provider cost,
+created through `POST /api/v1/pricing/discounts`. Its scope follows the price
+rules: `provider_kind` is required, `vendor_id` narrows it to a vendor of that
+kind and `provider_id` to one provider of it (plugin providers require a
+provider). `multiplier` obeys the price decimal rule and `effective_at`
+defaults to now. Nothing is updated or deleted: ending a scope means
+publishing a new discount at `1`.
+
+At an attempt's observed time, the most specific scope in force wins —
+provider over vendor over kind-only — then the newest effective time, newest
+creation time and greatest id. The vendor derives exactly as prices do. A
+discount scales the whole usage charge inside the same rounding as window and
+batch multipliers, so `cost = round(charge × window × batch × discount, 12)`
+applies once. `list_cost` is unaffected, so commitment weights are untouched;
+a committed attempt stays zero whatever the multiplier. `discount` joins
+`pricing_components` when a multiplier other than one applied, and the fact
+keeps `discount_id`. Baseline (selector savings) pricing selects a discount
+for the baseline provider the same way.
+
+The gateway pins the discount on each planned attempt: the routing policy
+records `discount_pinned` and `discount_id`, which may be null — a pinned
+null prices at one, not "resolve later". Without a pin, accounting selects at
+the observed time.
+
+## Rate cards and charge
+
+*Cost* is what the provider bills; *charge* is what the consumer owes. A rate
+card belongs to the installation, one organization or one project — at most
+one card per owner — and publishes immutable revisions, each a whole revision
+with `markup` (a multiplier on cost) and optional explicit prices in the
+price-entry shape scoped by `provider_kind`, optional `vendor_id`, `model`
+and `operation`, never `provider_id`. Every component is allowed; the
+currency is the installation's.
+
+An attempt's consumer is the aggregate-ownership project: the API key's
+project, else the provider's, else the route's. The card resolved is the
+project's card, then its organization's, then the installation's, taking the
+newest revision in force at the observed time — revisions never layer.
+
+| Case | Charge |
+| --- | --- |
+| Card's explicit price matches (vendor-scoped first) | price_usage on the card price at discount 1 — commitments and discounts never apply |
+| No explicit match, card markup | `round(cost × markup, 12)`, NULL when cost is NULL |
+| No card | cost itself, `rate_card_revision_id` NULL |
+| Not billable | NULL |
+
+So a card can charge what the provider could not price (explicit price, NULL
+cost), and a markup card over an unpriced cost leaves the charge NULL — such
+billable attempts count toward `uncharged_attempt_count` in usage reports and
+CSV. A committed attempt has zero cost but still charges through the card:
+explicit rates price its usage normally. Facts store `charge` and
+`rate_card_revision_id`; request history, summaries, breakdowns, series, CSV
+and hourly rollups carry them.
+
+The gateway resolves the card for requests with an authority project at
+admission and pins `rate_card_pinned` and `rate_card_revision_id` — null
+included — on every attempt; keyless origins stay unpinned and accounting
+resolves the card itself.

@@ -264,7 +264,7 @@ async function establishPricing() {
   const model = host.querySelector<HTMLInputElement>('#price-model')!;
   model.value = 'chat';
   model.dispatchEvent(new Event('input', { bubbles: true }));
-  const price = host.querySelector<HTMLInputElement>('#input-price')!;
+  const price = host.querySelector<HTMLInputElement>('#price-input-price')!;
   price.value = '2.00';
   price.dispatchEvent(new Event('input', { bubbles: true }));
   edit(auditSetting.key, '30');

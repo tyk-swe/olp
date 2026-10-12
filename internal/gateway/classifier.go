@@ -128,19 +128,21 @@ func (s *Server) callClassifier(ctx context.Context, parent *execution, c *runti
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	x := &execution{
-		request:       request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.now(), release: parent.request.release},
-		actor:         parent.actor,
-		keyID:         parent.keyID,
-		budgetGroupID: parent.budgetGroupID,
-		attribution:   parent.attribution,
-		endUserDigest: parent.endUserDigest,
-		userID:        parent.userID,
-		authority:     parent.authority,
-		affinity:      []byte(parent.keyID),
-		origin:        usage.OriginClassifier,
-		parent:        parent.request.accountingID(),
-		priority:      parent.priority,
-		route:         &route,
+		request:        request{id: uuid.Must(uuid.NewV7()).String(), minted: true, clientIP: parent.request.clientIP, startedAt: s.now(), release: parent.request.release},
+		actor:          parent.actor,
+		keyID:          parent.keyID,
+		budgetGroupID:  parent.budgetGroupID,
+		attribution:    parent.attribution,
+		endUserDigest:  parent.endUserDigest,
+		userID:         parent.userID,
+		authority:      parent.authority,
+		cardPinned:     parent.cardPinned,
+		cardRevisionID: parent.cardRevisionID,
+		affinity:       []byte(parent.keyID),
+		origin:         usage.OriginClassifier,
+		parent:         parent.request.accountingID(),
+		priority:       parent.priority,
+		route:          &route,
 	}
 	defer s.settleAdmission(ctx, x)
 	var answer classification

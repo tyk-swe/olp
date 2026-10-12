@@ -53,6 +53,13 @@ func (s *Server) Register(mux *http.ServeMux) {
 	// A revision may carry thousands of rates, well past the default body cap.
 	s.Access.Route(mux, "POST /api/v1/pricing/revisions", s.createPricingRevision, access.MaxBody(1<<20))
 	s.Access.Route(mux, "GET /api/v1/reference-catalog", s.referenceCatalog)
+	s.Access.Route(mux, "GET /api/v1/pricing/discounts", s.listPricingDiscounts)
+	s.Access.Route(mux, "POST /api/v1/pricing/discounts", s.createPricingDiscount)
+	s.Access.Route(mux, "GET /api/v1/rate-cards", s.listRateCards)
+	s.Access.Route(mux, "POST /api/v1/rate-cards", s.createRateCard)
+	s.Access.Route(mux, "GET /api/v1/rate-cards/{rate_card_id}", s.getRateCard)
+	s.Access.Route(mux, "GET /api/v1/rate-cards/{rate_card_id}/revisions", s.listRateCardRevisions)
+	s.Access.Route(mux, "POST /api/v1/rate-cards/{rate_card_id}/revisions", s.createRateCardRevision)
 	s.Access.Route(mux, "GET /api/v1/pricing/sources", s.listPricingSources)
 	s.Access.Route(mux, "POST /api/v1/pricing/sources", s.createPricingSource)
 	s.Access.Route(mux, "GET /api/v1/pricing/sources/{pricing_source_id}", s.getPricingSource)

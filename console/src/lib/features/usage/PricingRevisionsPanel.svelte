@@ -2,6 +2,13 @@
   import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import PriceFields from './PriceFields.svelte';
+  import {
+    rateFieldPairs,
+    type TierRow,
+    type ToolFeeRow,
+    type WindowPeriodRow
+  } from './priceEntry';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import {
     cursorPaginationProps,
@@ -99,39 +106,28 @@
   let imageOutputPrice = $state('');
   let perRequestPrice = $state('');
   let batchMultiplier = $state('');
-  let toolFees = $state<{ name: string; fee: string }[]>([]);
-  let tiers = $state<{ threshold: string; rates: Record<string, string> }[]>(
-    []
-  );
+  let toolFees = $state<ToolFeeRow[]>([]);
+  let tiers = $state<TierRow[]>([]);
   let windowZone = $state('');
-  let windowPeriods = $state<
-    { days: number[]; start: string; end: string; multiplier: string }[]
-  >([]);
-  const weekDays = [
-    ['1', 'Mon'],
-    ['2', 'Tue'],
-    ['3', 'Wed'],
-    ['4', 'Thu'],
-    ['5', 'Fri'],
-    ['6', 'Sat'],
-    ['7', 'Sun']
-  ] as const;
+  let windowPeriods = $state<WindowPeriodRow[]>([]);
   // The per-million rate fields the entry carries decide every tier's rate
   // set: a tier names exactly the same fields.
-  const rateFields = $derived([
-    ['input_per_million', inputPrice],
-    ['cached_input_per_million', cachedInputPrice],
-    ['cache_write_input_per_million', cacheWritePrice],
-    ['cache_write_5m_input_per_million', cacheWrite5mPrice],
-    ['cache_write_1h_input_per_million', cacheWrite1hPrice],
-    ['output_per_million', outputPrice],
-    ['audio_input_per_million', audioInputPrice],
-    ['cached_audio_input_per_million', cachedAudioInputPrice],
-    ['audio_output_per_million', audioOutputPrice],
-    ['image_input_per_million', imageInputPrice],
-    ['cached_image_input_per_million', cachedImageInputPrice],
-    ['image_output_per_million', imageOutputPrice]
-  ] as const);
+  const rateFields = $derived(
+    rateFieldPairs({
+      inputPrice,
+      cachedInputPrice,
+      cacheWritePrice,
+      cacheWrite5mPrice,
+      cacheWrite1hPrice,
+      outputPrice,
+      audioInputPrice,
+      cachedAudioInputPrice,
+      audioOutputPrice,
+      imageInputPrice,
+      cachedImageInputPrice,
+      imageOutputPrice
+    })
+  );
   let currency = $state('USD');
   let effectiveAt = $state(dateTimeLocalValue(new Date()));
   let savingPrice = $state(false);
@@ -394,154 +390,29 @@
               >{/each}</select
           >
         </div>
-        <div class="form-field">
-          <label for="input-price">Input / million</label><input
-            id="input-price"
-            bind:value={inputPrice}
-            inputmode="decimal"
-            placeholder="2.50"
-            disabled={!canEditPricing}
-          />
-        </div>
-        <div class="form-field">
-          <label for="cached-input-price">Cached input / million</label><input
-            id="cached-input-price"
-            bind:value={cachedInputPrice}
-            inputmode="decimal"
-            placeholder="0.25"
-            disabled={!canEditPricing}
-          /><small
-            >Leave empty to bill cached tokens at the full input rate.</small
-          >
-        </div>
-        <div class="form-field">
-          <label for="cache-write-price">Cache write / million</label><input
-            id="cache-write-price"
-            bind:value={cacheWritePrice}
-            inputmode="decimal"
-            placeholder="3.00"
-            disabled={!canEditPricing}
-          /><small
-            >Leave empty to bill cache writes at the full input rate.</small
-          >
-        </div>
-        <div class="form-field">
-          <label for="cache-write-5m-price">Cache write 5m / million</label
-          ><input
-            id="cache-write-5m-price"
-            bind:value={cacheWrite5mPrice}
-            inputmode="decimal"
-            placeholder="3.00"
-            disabled={!canEditPricing}
-          /><small>Defaults to the cache write rate, then input.</small>
-        </div>
-        <div class="form-field">
-          <label for="cache-write-1h-price">Cache write 1h / million</label
-          ><input
-            id="cache-write-1h-price"
-            bind:value={cacheWrite1hPrice}
-            inputmode="decimal"
-            placeholder="6.00"
-            disabled={!canEditPricing}
-          /><small>Defaults to the cache write rate, then input.</small>
-        </div>
-        <div class="form-field">
-          <label for="output-price">Output / million</label><input
-            id="output-price"
-            bind:value={outputPrice}
-            inputmode="decimal"
-            placeholder="10.00"
-            disabled={!canEditPricing}
-          />
-        </div>
-        <div class="form-field">
-          <label for="unit-price">Media unit price</label><input
-            id="unit-price"
-            bind:value={unitPrice}
-            inputmode="decimal"
-            placeholder="0.04"
-            disabled={!canEditPricing}
-          />
-        </div>
-        <div class="form-field">
-          <label for="audio-input-price">Audio input / million</label><input
-            id="audio-input-price"
-            bind:value={audioInputPrice}
-            inputmode="decimal"
-            placeholder="4.00"
-            disabled={!canEditPricing}
-          />
-        </div>
-        <div class="form-field">
-          <label for="cached-audio-input-price"
-            >Cached audio input / million</label
-          ><input
-            id="cached-audio-input-price"
-            bind:value={cachedAudioInputPrice}
-            inputmode="decimal"
-            placeholder="0.50"
-            disabled={!canEditPricing}
-          /><small>Defaults to cached input, then input.</small>
-        </div>
-        <div class="form-field">
-          <label for="audio-output-price">Audio output / million</label><input
-            id="audio-output-price"
-            bind:value={audioOutputPrice}
-            inputmode="decimal"
-            placeholder="16.00"
-            disabled={!canEditPricing}
-          /><small>Defaults to the output rate.</small>
-        </div>
-        <div class="form-field">
-          <label for="image-input-price">Image input / million</label><input
-            id="image-input-price"
-            bind:value={imageInputPrice}
-            inputmode="decimal"
-            placeholder="6.00"
-            disabled={!canEditPricing}
-          /><small>Defaults to the input rate.</small>
-        </div>
-        <div class="form-field">
-          <label for="cached-image-input-price"
-            >Cached image input / million</label
-          ><input
-            id="cached-image-input-price"
-            bind:value={cachedImageInputPrice}
-            inputmode="decimal"
-            placeholder="0.75"
-            disabled={!canEditPricing}
-          /><small>Defaults to cached input, then input.</small>
-        </div>
-        <div class="form-field">
-          <label for="image-output-price">Image output / million</label><input
-            id="image-output-price"
-            bind:value={imageOutputPrice}
-            inputmode="decimal"
-            placeholder="24.00"
-            disabled={!canEditPricing}
-          /><small>Defaults to the output rate.</small>
-        </div>
-        <div class="form-field">
-          <label for="per-request-price">Per-request fee</label><input
-            id="per-request-price"
-            bind:value={perRequestPrice}
-            inputmode="decimal"
-            placeholder="0.01"
-            disabled={!canEditPricing}
-          /><small>Charged once per successful attempt.</small>
-        </div>
-        <div class="form-field">
-          <label for="batch-multiplier">Batch multiplier</label><input
-            id="batch-multiplier"
-            bind:value={batchMultiplier}
-            inputmode="decimal"
-            placeholder="0.50"
-            disabled={!canEditPricing}
-          /><small
-            >Applies to usage marked batch; batch usage without a multiplier is
-            unpriced.</small
-          >
-        </div>
+        <PriceFields
+          idPrefix="price"
+          canEdit={canEditPricing}
+          bind:inputPrice
+          bind:cachedInputPrice
+          bind:cacheWritePrice
+          bind:cacheWrite5mPrice
+          bind:cacheWrite1hPrice
+          bind:outputPrice
+          bind:unitPrice
+          bind:audioInputPrice
+          bind:cachedAudioInputPrice
+          bind:audioOutputPrice
+          bind:imageInputPrice
+          bind:cachedImageInputPrice
+          bind:imageOutputPrice
+          bind:perRequestPrice
+          bind:batchMultiplier
+          bind:toolFees
+          bind:tiers
+          bind:windowZone
+          bind:windowPeriods
+        />
         <div class="form-field full">
           <label for="currency">Currency</label><input
             id="currency"
@@ -561,164 +432,7 @@
           />
         </div>
       </div>
-      <fieldset class="extra-components" disabled={!canEditPricing}>
-        <legend>Additional components</legend>
-        <p class="muted">
-          Tool fees bill each invocation; tiers replace the per-million rate set
-          above an input threshold; windows multiply the charge by time of day.
-        </p>
-        <div class="component-rows" aria-label="Tool fees">
-          {#each toolFees as row, index (index)}
-            <div class="component-row">
-              <label class="sr-only" for={`tool-name-${index}`}>Tool name</label
-              >
-              <input
-                id={`tool-name-${index}`}
-                bind:value={row.name}
-                placeholder="web_search"
-                class="mono"
-              />
-              <label class="sr-only" for={`tool-fee-${index}`}>Fee</label>
-              <input
-                id={`tool-fee-${index}`}
-                bind:value={row.fee}
-                inputmode="decimal"
-                placeholder="0.010"
-              />
-              <button
-                type="button"
-                class="text-button"
-                onclick={() => {
-                  toolFees = toolFees.filter((_, i) => i !== index);
-                }}>Remove</button
-              >
-            </div>
-          {/each}
-          <button
-            type="button"
-            class="text-button"
-            onclick={() => {
-              toolFees = [...toolFees, { name: '', fee: '' }];
-            }}>Add tool fee</button
-          >
-        </div>
-        <div class="component-rows" aria-label="Input-token tiers">
-          {#each tiers as row, index (index)}
-            <div class="component-row tier-row">
-              <label for={`tier-threshold-${index}`}>Above input tokens</label>
-              <input
-                id={`tier-threshold-${index}`}
-                bind:value={row.threshold}
-                inputmode="numeric"
-                placeholder="1000000"
-              />
-              {#each rateFields.filter(([, value]) => value.trim() !== '') as [field, parentValue] (field)}
-                <label class="sr-only" for={`tier-${index}-${field}`}
-                  >{field.replaceAll('_', ' ')}</label
-                >
-                <input
-                  id={`tier-${index}-${field}`}
-                  bind:value={row.rates[field]}
-                  inputmode="decimal"
-                  placeholder={parentValue}
-                  title={field.replaceAll('_', ' ')}
-                />
-              {/each}
-              <button
-                type="button"
-                class="text-button"
-                onclick={() => {
-                  tiers = tiers.filter((_, i) => i !== index);
-                }}>Remove</button
-              >
-            </div>
-          {/each}
-          <button
-            type="button"
-            class="text-button"
-            onclick={() => {
-              const rates: Record<string, string> = {};
-              for (const [field, value] of rateFields)
-                if (value.trim() !== '') rates[field] = '';
-              tiers = [...tiers, { threshold: '', rates }];
-            }}>Add tier</button
-          >
-        </div>
-        <div class="component-rows" aria-label="Time windows">
-          <div class="component-row">
-            <label for="window-zone">Window time zone</label>
-            <input
-              id="window-zone"
-              bind:value={windowZone}
-              class="mono"
-              placeholder="America/New_York"
-            />
-          </div>
-          {#each windowPeriods as period, index (index)}
-            <div class="component-row window-row">
-              <div
-                class="weekday-toggles"
-                role="group"
-                aria-label={`Window ${index + 1} days`}
-              >
-                {#each weekDays as [day, label] (day)}
-                  <button
-                    type="button"
-                    class:selected={period.days.includes(Number(day))}
-                    aria-pressed={period.days.includes(Number(day))}
-                    onclick={() => {
-                      const value = Number(day);
-                      period.days = period.days.includes(value)
-                        ? period.days.filter((d) => d !== value)
-                        : [...period.days, value];
-                    }}>{label}</button
-                  >
-                {/each}
-              </div>
-              <label class="sr-only" for={`window-start-${index}`}>Start</label>
-              <input
-                id={`window-start-${index}`}
-                bind:value={period.start}
-                placeholder="00:00"
-                inputmode="numeric"
-              />
-              <label class="sr-only" for={`window-end-${index}`}>End</label>
-              <input
-                id={`window-end-${index}`}
-                bind:value={period.end}
-                placeholder="24:00"
-                inputmode="numeric"
-              />
-              <label class="sr-only" for={`window-multiplier-${index}`}
-                >Multiplier</label
-              >
-              <input
-                id={`window-multiplier-${index}`}
-                bind:value={period.multiplier}
-                inputmode="decimal"
-                placeholder="0.75"
-              />
-              <button
-                type="button"
-                class="text-button"
-                onclick={() => {
-                  windowPeriods = windowPeriods.filter((_, i) => i !== index);
-                }}>Remove</button
-              >
-            </div>
-          {/each}
-          <button
-            type="button"
-            class="text-button"
-            onclick={() => {
-              windowPeriods = [
-                ...windowPeriods,
-                { days: [], start: '', end: '', multiplier: '' }
-              ];
-            }}>Add window period</button
-          >
-        </div>
-      </fieldset>
+
       <button
         class="button button-primary"
         type="submit"

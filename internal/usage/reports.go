@@ -79,6 +79,12 @@ type Totals struct {
 	// committed attempts divide by list-cost weight. A range or filter holding
 	// no committed usage allocates nothing.
 	AllocatedCommitment string `json:"allocated_commitment"`
+	// Charge is what the attempts' consumers were billed under their rate
+	// cards, null like EstimatedCost when nothing was charged.
+	Charge *string `json:"charge"`
+	// UnchargedAttemptCount counts billable attempts no charge was resolved
+	// for, such as a rate card that could not price the usage.
+	UnchargedAttemptCount int64 `json:"uncharged_attempt_count"`
 }
 
 // Summary is the totals for a range plus everything known about how much of the
@@ -288,7 +294,8 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" COALESCE(image_input_tokens, 0)::numeric AS image_input_tokens," +
 		" COALESCE(cached_image_input_tokens, 0)::numeric AS cached_image_input_tokens," +
 		" COALESCE(image_output_tokens, 0)::numeric AS image_output_tokens," +
-		" COALESCE(media_units, 0)::numeric AS media_units, estimated_cost," +
+		" COALESCE(media_units, 0)::numeric AS media_units, estimated_cost, charge," +
+		" CASE WHEN charge_status <> 'not_billable' AND charge IS NULL THEN 1 ELSE 0 END AS uncharged_attempt_count," +
 		" CASE WHEN " + scope.unpriced + " THEN 1 ELSE 0 END::bigint AS unpriced_count," +
 		" CASE WHEN " + scope.incomplete + " THEN 1 ELSE 0 END::bigint AS incomplete_count," +
 		" currency::text AS currency," +
@@ -311,7 +318,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" cache_write_1h_input_tokens," +
 		" audio_input_tokens, cached_audio_input_tokens, audio_output_tokens," +
 		" image_input_tokens, cached_image_input_tokens, image_output_tokens," +
-		" media_units, estimated_cost, " + scope.hourlyUnpriced + ", " +
+		" media_units, estimated_cost, charge, uncharged_attempt_count, " + scope.hourlyUnpriced + ", " +
 		scope.hourlyIncomplete + ", currency::text AS currency, estimated_input_tokens," +
 		" estimate_reported_input_tokens, estimate_attempt_count, commitment_weight," +
 		" commitment_amount, commitment_period," +
@@ -384,7 +391,9 @@ const totalsColumns = "COALESCE(SUM(request_count), 0)::bigint," +
 	" COALESCE(SUM(estimated_input_tokens), 0)::text," +
 	" COALESCE(SUM(estimate_reported_input_tokens), 0)::text," +
 	" COALESCE(SUM(estimate_attempt_count), 0)::bigint," +
-	" COALESCE(SUM(allocated_commitment), 0)::text"
+	" COALESCE(SUM(allocated_commitment), 0)::text," +
+	" SUM(charge)::text," +
+	" COALESCE(SUM(uncharged_attempt_count), 0)::bigint"
 
 // scanTargets lists the destinations for totalsColumns in its column order.
 func (t *Totals) scanTargets() []any {
@@ -394,7 +403,7 @@ func (t *Totals) scanTargets() []any {
 		&t.ImageInputTokens, &t.CachedImageInputTokens, &t.ImageOutputTokens,
 		&t.MediaUnits, &t.EstimatedCost, &t.UnpricedCount, &t.IncompleteCount, &t.Currency,
 		&t.EstimatedInputTokens, &t.ReportedInputTokens, &t.EstimatedAttemptCount,
-		&t.AllocatedCommitment}
+		&t.AllocatedCommitment, &t.Charge, &t.UnchargedAttemptCount}
 }
 
 // valid rejects stored counts that cannot be true, so a corrupt aggregate

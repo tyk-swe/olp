@@ -350,13 +350,13 @@ func TestCostBoundWithComponents(t *testing.T) {
 	price.rates = parseRates(&price.Price)
 	// Below the tier: input at max(2,9)=9 and output at max(3,7)=7, plus the
 	// request fee, then the window multiplier of two, rounded up.
-	got, ok := price.CostBound(1_000_000, 1_000_000, true, settledAt)
+	got, ok := price.CostBound(1_000_000, 1_000_000, true, settledAt, nil)
 	if !ok || got.String() != "32.02" {
 		// (9 + 7 + 0.01) * 2
 		t.Fatalf("CostBound = %q, %v, want 32.02", got.String(), ok)
 	}
 	// Above the tier: input at max(5,20)=20, output at max(4,6)=6.
-	got, ok = price.CostBound(20_000_000, 1_000_000, true, settledAt)
+	got, ok = price.CostBound(20_000_000, 1_000_000, true, settledAt, nil)
 	if !ok || got.String() != "812.02" {
 		// (400 + 6 + 0.01) * 2
 		t.Fatalf("tiered CostBound = %q, %v, want 812.02", got.String(), ok)
@@ -365,7 +365,7 @@ func TestCostBoundWithComponents(t *testing.T) {
 	outside := time.Date(2025, 6, 2, 12, 0, 0, 0, time.UTC)
 	price.Windows = nil
 	price.rates = parseRates(&price.Price)
-	got, ok = price.CostBound(1_000_000, 0, false, outside)
+	got, ok = price.CostBound(1_000_000, 0, false, outside, nil)
 	if !ok || got.String() != "9.01" {
 		t.Fatalf("windowless CostBound = %q, %v, want 9.01", got.String(), ok)
 	}

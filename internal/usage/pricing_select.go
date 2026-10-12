@@ -32,6 +32,11 @@ type attemptPricing struct {
 	commitmentWeight *string
 	commitmentAmount *string
 	commitmentPeriod *string
+	// discountID is the discount the cost was priced under; charge is what
+	// the attempt's consumer was billed under the rate card revision named.
+	discountID         *string
+	charge             *string
+	rateCardRevisionID *string
 }
 
 // routingPin is the pricing provenance the gateway recorded for one attempt.
@@ -40,6 +45,12 @@ type routingPin struct {
 	providerRevisionID *string
 	pinned             bool
 	vendorID           *string
+	// The gateway also pins the discount and rate card revision it resolved
+	// at admission; a pinned null means none applies.
+	discountPinned     bool
+	discountID         *string
+	rateCardPinned     bool
+	rateCardRevisionID *string
 }
 
 // attemptRouting reads the pin out of an attempt's routing provenance. A
@@ -51,15 +62,20 @@ func attemptRouting(attempt *Attempt) (routingPin, error) {
 		return pin, nil
 	}
 	pin.pricingRevisionID = attempt.Routing.PricingRevisionID
-	revision := attempt.Routing.ProviderRevisionID
-	pin.providerRevisionID = &revision
+	if revision := attempt.Routing.ProviderRevisionID; revision != "" {
+		pin.providerRevisionID = &revision
+	}
 	pin.pinned = pin.pricingRevisionID != nil
 	if attempt.Routing.Policy == nil {
 		return pin, nil
 	}
 	var policy struct {
-		PricingPinned *bool   `json:"pricing_pinned"`
-		VendorID      *string `json:"vendor_id"`
+		PricingPinned      *bool   `json:"pricing_pinned"`
+		VendorID           *string `json:"vendor_id"`
+		DiscountPinned     *bool   `json:"discount_pinned"`
+		DiscountID         *string `json:"discount_id"`
+		RateCardPinned     *bool   `json:"rate_card_pinned"`
+		RateCardRevisionID *string `json:"rate_card_revision_id"`
 	}
 	if err := json.Unmarshal(*attempt.Routing.Policy, &policy); err != nil {
 		return routingPin{}, fmt.Errorf("%w: attempt routing policy is malformed", ErrInvalidEvent)
@@ -68,6 +84,14 @@ func attemptRouting(attempt *Attempt) (routingPin, error) {
 		pin.pinned = true
 	}
 	pin.vendorID = policy.VendorID
+	if policy.DiscountPinned != nil && *policy.DiscountPinned {
+		pin.discountPinned = true
+		pin.discountID = policy.DiscountID
+	}
+	if policy.RateCardPinned != nil && *policy.RateCardPinned {
+		pin.rateCardPinned = true
+		pin.rateCardRevisionID = policy.RateCardRevisionID
+	}
 	return pin, nil
 }
 
@@ -112,11 +136,26 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
         CASE WHEN committed.present AND priced.cost IS NOT NULL
              THEN commitment.commitment->>'amount' END AS commitment_amount,
         CASE WHEN committed.present AND priced.cost IS NOT NULL
-             THEN commitment.commitment->>'period' END AS commitment_period
+             THEN commitment.commitment->>'period' END AS commitment_period,
+        CASE WHEN priced.cost IS NOT NULL AND discount.id IS NOT NULL
+             THEN discount.id::text END AS discount_id,
+        cardrev.rate_card_revision_id::text,
+        charge.charge
     FROM olp.providers provider
     LEFT JOIN olp.provider_revisions provider_revision
         ON provider_revision.id = COALESCE($9::uuid, provider.active_revision_id)
        AND provider_revision.provider_id = provider.id
+    CROSS JOIN LATERAL (
+        SELECT COALESCE(provider_revision.configuration->>'kind', provider.kind) AS kind,
+               CASE WHEN $10::boolean THEN $11::text
+                    ELSE COALESCE(CASE WHEN provider_revision.id IS NOT NULL
+                                      THEN provider_revision.configuration->'options'->>'vendor_id'
+                                      ELSE provider.configuration->'options'->>'vendor_id' END,
+                                  CASE COALESCE(provider_revision.configuration->>'kind', provider.kind)
+                                  ` + defaultVendorCases + `
+                                  ELSE COALESCE(provider_revision.configuration->>'kind', provider.kind)
+                              END) END AS vendor
+    ) derived
     LEFT JOIN LATERAL (
         SELECT revision.id AS pricing_revision_id, to_jsonb(price) AS price_doc,
                btrim(price.currency::text) AS currency
@@ -125,22 +164,28 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
         WHERE revision.effective_at <= $4
           AND ($9::uuid IS NULL OR provider_revision.id IS NOT NULL)
           AND (NOT $10::boolean OR revision.id = $8::uuid)
-          AND price.provider_kind = COALESCE(provider_revision.configuration->>'kind', provider.kind)
-          AND (price.vendor_id IS NULL OR price.vendor_id = CASE WHEN $10::boolean THEN $11::text
-                ELSE COALESCE(CASE WHEN provider_revision.id IS NOT NULL
-                                  THEN provider_revision.configuration->'options'->>'vendor_id'
-                                  ELSE provider.configuration->'options'->>'vendor_id' END,
-                              CASE COALESCE(provider_revision.configuration->>'kind', provider.kind)
-                                  ` + defaultVendorCases + `
-                                  ELSE COALESCE(provider_revision.configuration->>'kind', provider.kind)
-                              END) END)
+          AND price.provider_kind = derived.kind
+          AND (price.vendor_id IS NULL OR price.vendor_id = derived.vendor)
           AND (price.provider_id IS NULL OR price.provider_id = provider.id)
           AND price.model = $2 AND price.operation = $3
         ORDER BY (price.provider_id IS NOT NULL) DESC, (price.vendor_id IS NOT NULL) DESC,
                  revision.effective_at DESC, revision.revision DESC
         LIMIT 1) selected ON true
+    LEFT JOIN LATERAL (
+        SELECT d.id, d.multiplier
+        FROM olp.pricing_discounts d
+        WHERE ($12::boolean AND d.id = $13::uuid)
+           OR (NOT $12::boolean
+               AND d.effective_at <= $4
+               AND d.provider_kind = derived.kind
+               AND (d.vendor_id IS NULL OR d.vendor_id = derived.vendor)
+               AND (d.provider_id IS NULL OR d.provider_id = provider.id))
+        ORDER BY (d.provider_id IS NOT NULL) DESC, (d.vendor_id IS NOT NULL) DESC,
+                 d.effective_at DESC, d.created_at DESC, d.id DESC
+        LIMIT 1) discount ON true
     CROSS JOIN LATERAL (
-        SELECT * FROM olp.price_usage(selected.price_doc, $5::jsonb, $6::timestamptz, $7::boolean)
+        SELECT * FROM olp.price_usage(selected.price_doc, $5::jsonb, $6::timestamptz, $7::boolean,
+                                      COALESCE(discount.multiplier, 1))
     ) priced
     CROSS JOIN LATERAL (
         SELECT CASE WHEN provider_revision.id IS NOT NULL
@@ -150,6 +195,48 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
     CROSS JOIN LATERAL (
         SELECT jsonb_typeof(commitment.commitment::jsonb) = 'object' AS present
     ) committed
+    CROSS JOIN LATERAL (
+        SELECT COALESCE(
+            (SELECT k.project_id FROM olp.api_keys k WHERE k.id = NULLIF($16::text,'')::uuid),
+            (SELECT p.project_id FROM olp.providers p WHERE p.id = provider.id),
+            (SELECT r.project_id FROM olp.routes r WHERE r.slug = $17)) AS project_id
+    ) consumer
+    LEFT JOIN LATERAL (
+        SELECT card.id FROM olp.rate_cards card
+        WHERE NOT $14::boolean
+          AND (card.project_id = consumer.project_id
+           OR card.organization_id = (SELECT p.organization_id FROM olp.projects p
+                                      WHERE p.id = consumer.project_id)
+           OR (card.organization_id IS NULL AND card.project_id IS NULL))
+        ORDER BY (card.project_id IS NOT NULL) DESC, (card.organization_id IS NOT NULL) DESC
+        LIMIT 1) card ON true
+    LEFT JOIN LATERAL (
+        SELECT rev.id AS rate_card_revision_id, rev.markup
+        FROM olp.rate_card_revisions rev
+        WHERE ($14::boolean AND rev.id = $15::uuid)
+           OR (NOT $14::boolean AND rev.rate_card_id = card.id AND rev.effective_at <= $4)
+        ORDER BY rev.effective_at DESC, rev.revision DESC
+        LIMIT 1) cardrev ON true
+    LEFT JOIN LATERAL (
+        SELECT to_jsonb(cp) AS doc FROM olp.rate_card_prices cp
+        WHERE cp.rate_card_revision_id = cardrev.rate_card_revision_id
+          AND cp.provider_kind = derived.kind
+          AND (cp.vendor_id IS NULL OR cp.vendor_id = derived.vendor)
+          AND cp.model = $2 AND cp.operation = $3
+        ORDER BY (cp.vendor_id IS NOT NULL) DESC
+        LIMIT 1) explicit ON true
+    CROSS JOIN LATERAL (
+        SELECT CASE
+            WHEN explicit.doc IS NOT NULL
+                THEN (SELECT c.cost FROM olp.price_usage(explicit.doc, $5::jsonb,
+                              $6::timestamptz, $7::boolean, 1) c)
+            WHEN cardrev.rate_card_revision_id IS NULL
+                THEN CASE WHEN committed.present THEN '0'::numeric ELSE priced.cost END
+            WHEN CASE WHEN committed.present THEN '0'::numeric ELSE priced.cost END IS NULL THEN NULL
+            ELSE round(CASE WHEN committed.present THEN '0'::numeric ELSE priced.cost END
+                       * cardrev.markup, 12)
+        END AS charge
+    ) charge
     WHERE provider.id = $1::uuid`
 
 // priceAttempt resolves what one attempt cost. A provider that no longer exists
@@ -201,8 +288,11 @@ func priceUsage(ctx context.Context, tx pgx.Tx, event *Event, usage AttemptUsage
 		providerID, model, event.Operation, event.ObservedAt,
 		string(document), startedAt, successful,
 		pin.pricingRevisionID, pin.providerRevisionID, pin.pinned, pin.vendorID,
+		pin.discountPinned, pin.discountID, pin.rateCardPinned, pin.rateCardRevisionID,
+		event.APIKeyID, event.RouteSlug,
 	).Scan(&pricing.pricingRevisionID, &pricing.currency, &pricing.complete, &cost,
-		&pricing.components, &pricing.commitmentWeight, &pricing.commitmentAmount, &pricing.commitmentPeriod)
+		&pricing.components, &pricing.commitmentWeight, &pricing.commitmentAmount, &pricing.commitmentPeriod,
+		&pricing.discountID, &pricing.rateCardRevisionID, &pricing.charge)
 	if err != nil {
 		return attemptPricing{}, fmt.Errorf("price attempt: %w", err)
 	}
@@ -211,6 +301,12 @@ func priceUsage(ctx context.Context, tx pgx.Tx, event *Event, usage AttemptUsage
 	} else {
 		pricing.components = nil
 		pricing.commitmentWeight, pricing.commitmentAmount, pricing.commitmentPeriod = nil, nil, nil
+		pricing.discountID = nil
+	}
+	if !usage.Complete {
+		// A charge, like a cost, is recorded only when the usage it bills is
+		// complete; an explicit rate that cannot price returns NULL either way.
+		pricing.charge = nil
 	}
 	if pricing.currency != nil {
 		currency := strings.TrimSpace(*pricing.currency)

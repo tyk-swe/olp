@@ -147,6 +147,8 @@ func (s *Server) runShadow(parent *execution, attempt runtime.Attempt) {
 		actor:           "system",
 		keyID:           parent.keyID,
 		authority:       parent.authority,
+		cardPinned:      parent.cardPinned,
+		cardRevisionID:  parent.cardRevisionID,
 		attribution:     parent.attribution,
 		affinity:        parent.affinity,
 		route:           route,

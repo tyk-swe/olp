@@ -1001,6 +1001,12 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			result.item("pricing", "pricing", "create", detail)
 		}
 	}
+	if err := s.planDiscounts(ctx, q, doc, result); err != nil {
+		return nil, err
+	}
+	if err := s.planRateCards(ctx, q, doc, result); err != nil {
+		return nil, err
+	}
 	result.sort()
 	if doc.RequireLocalMFA != nil {
 		var current bool

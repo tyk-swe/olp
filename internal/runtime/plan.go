@@ -306,6 +306,7 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 			row.decision.RequestedOutputTokens = demand.MaxOutputTokens
 		}
 		row.decision.Price = options.Inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, operation, now)
+		row.attempt.Discount = options.Inputs.Discount(provider.Kind, provider.ID, provider.VendorID, now)
 		row.decision.Performance = options.Inputs.Metrics(provider.ID, target.ProviderModel, operation, mode, now)
 		reason := ""
 		switch {

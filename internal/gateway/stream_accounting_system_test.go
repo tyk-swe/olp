@@ -64,7 +64,7 @@ func TestGeminiStreamingAccountingPreservesPartialEvidenceAndScopedAllowances(t 
 			if fact.Price == nil {
 				t.Fatal("fixture lost its native pricing scope")
 			}
-			if _, priced := fact.Price.Cost(attemptUsage(&fact, env.Operation), fact.StartedAt, attemptSuccessful(&fact)); priced != tc.complete {
+			if _, priced := fact.Price.Cost(attemptUsage(&fact, env.Operation), fact.StartedAt, attemptSuccessful(&fact), nil); priced != tc.complete {
 				t.Fatalf("native billing completeness lost: priced=%v complete=%v", priced, tc.complete)
 			}
 			f.window.mu.Lock()

@@ -564,6 +564,16 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		x.budgetGroupID = authority.BudgetGroupID
 		x.responseMetadata = authority.Policy.ResponseMetadata
 		x.authority = authority
+		// A request charged to a key resolves its consumer's rate card at
+		// admission and pins the revision for accounting.
+		if x.authority.ProjectID != nil {
+			x.cardPinned = true
+			if inputs := s.Runtime.RoutingInputs(); inputs != nil {
+				if revision := inputs.RateCardRevision(x.authority.ProjectID, s.now()); revision != nil {
+					x.cardRevisionID = &revision.ID
+				}
+			}
+		}
 		if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)

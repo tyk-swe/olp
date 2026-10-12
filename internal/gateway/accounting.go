@@ -197,7 +197,14 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 	}
 	attempt.Routing.Budgets = fact.Budgets
 	if fact.PolicyDigest != "" {
-		policy, _ := json.Marshal(map[string]any{"digest": fact.PolicyDigest, "strategy": fact.Strategy, "pricing_pinned": true, "vendor_id": fact.VendorID})
+		var discountID *string
+		if fact.Discount != nil {
+			discountID = &fact.Discount.ID
+		}
+		policy, _ := json.Marshal(map[string]any{"digest": fact.PolicyDigest, "strategy": fact.Strategy,
+			"pricing_pinned": true, "vendor_id": fact.VendorID,
+			"discount_pinned": true, "discount_id": discountID,
+			"rate_card_pinned": fact.CardPinned, "rate_card_revision_id": fact.CardRevisionID})
 		rawPolicy := json.RawMessage(policy)
 		attempt.Routing.Policy = &rawPolicy
 		if fact.Price != nil {

@@ -155,7 +155,7 @@ func (x *execution) attemptCostBound(attempt runtime.Attempt) usage.Cost {
 		if x.media.Seconds != nil {
 			seconds = *x.media.Seconds
 		}
-		bound, _ := attempt.Price.Price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, x.request.startedAt, true)
+		bound, _ := attempt.Price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, x.request.startedAt, true, attempt.Discount)
 		return bound
 	}
 	if x.parsed == nil && x.unary == nil {
@@ -165,7 +165,7 @@ func (x *execution) attemptCostBound(attempt runtime.Attempt) usage.Cost {
 		if x.operationName() == "generation" || x.operationName() == "realtime" {
 			reply = estimate.DefaultOutputTokens
 		}
-		bound, _ := attempt.Price.CostBound(input, reply, reply > 0, x.request.startedAt)
+		bound, _ := attempt.Price.CostBound(input, reply, reply > 0, x.request.startedAt, attempt.Discount)
 		return bound
 	}
 	provider, ok := x.snapshot().Providers[attempt.ProviderID]
@@ -178,7 +178,7 @@ func (x *execution) attemptCostBound(attempt runtime.Attempt) usage.Cost {
 	}
 	// Only a request with a reply to bound is a generation, whose output is
 	// priced; an embedding or a native operation is priced on its input alone.
-	bound, ok := attempt.Price.CostBound(admitted.input, admitted.reply, admitted.reply > 0, x.request.startedAt)
+	bound, ok := attempt.Price.CostBound(admitted.input, admitted.reply, admitted.reply > 0, x.request.startedAt, attempt.Discount)
 	if !ok {
 		return usage.Cost{}
 	}
@@ -218,7 +218,7 @@ func (x *execution) costOf(owner string) usage.Cost {
 		if fact.BudgetExempt || !fact.UsageObserved || fact.Price == nil || owner != "" && !slices.Contains(fact.Budgets, owner) {
 			continue
 		}
-		if cost, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact)); ok {
+		if cost, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount); ok {
 			if !x.committed(fact.ProviderID) {
 				total = total.Add(cost)
 			}
@@ -252,7 +252,7 @@ func (x *execution) responseCost() (usage.Cost, bool) {
 		if !fact.UsageObserved {
 			continue
 		}
-		cost, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact))
+		cost, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount)
 		if !ok {
 			return usage.Cost{}, false
 		}

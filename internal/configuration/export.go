@@ -222,6 +222,12 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 			doc.Pricing.Prices = append(doc.Pricing.Prices, entry)
 		}
 	}
+	if doc.Discounts, err = exportDiscounts(ctx, q); err != nil {
+		return nil, err
+	}
+	if doc.RateCards, err = exportRateCards(ctx, q); err != nil {
+		return nil, err
+	}
 	doc.MCPServers, err = exportMCPServers(ctx, q)
 	if err != nil {
 		return nil, err
@@ -355,6 +361,98 @@ func applySlotPositions(slots []SlotEntry, positions map[string]int) {
 	for i := range slots {
 		slots[i].Position = positions[slots[i].Name]
 	}
+}
+
+// exportDiscounts reads the multiplier in force for each discount scope,
+// omitting scopes whose in-force multiplier is one: a scope ended at export
+// time stays ended on apply.
+func exportDiscounts(ctx context.Context, q access.Queryer) ([]DiscountEntry, error) {
+	rows, err := q.Query(ctx, `SELECT DISTINCT ON (provider_kind,COALESCE(vendor_id,''),COALESCE(provider_id::text,''))
+ provider_kind,vendor_id,provider_id::text,multiplier::text
+ FROM olp.pricing_discounts WHERE effective_at<=now()
+ ORDER BY provider_kind,COALESCE(vendor_id,''),COALESCE(provider_id::text,''),
+ effective_at DESC,created_at DESC,id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names, err := providerNameMap(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	entries := []DiscountEntry{}
+	for rows.Next() {
+		var entry DiscountEntry
+		var providerID *string
+		if err = rows.Scan(&entry.ProviderKind, &entry.VendorID, &providerID, &entry.Multiplier); err != nil {
+			return nil, err
+		}
+		if providerID != nil {
+			name := names[*providerID]
+			entry.Provider = &name
+		}
+		if entry.Multiplier != "1" {
+			entries = append(entries, entry)
+		}
+	}
+	return entries, rows.Err()
+}
+
+// exportRateCards reads each card's in-force revision, at most one per owner.
+func exportRateCards(ctx context.Context, q access.Queryer) ([]RateCardEntry, error) {
+	rows, err := q.Query(ctx, `SELECT c.id::text,c.organization_id::text,
+ (SELECT name FROM olp.organizations WHERE id=c.organization_id),c.project_id::text,
+ (SELECT name FROM olp.projects WHERE id=c.project_id),
+ (SELECT r.id::text FROM olp.rate_card_revisions r
+  WHERE r.rate_card_id=c.id AND r.effective_at<=now()
+  ORDER BY r.effective_at DESC,r.revision DESC LIMIT 1)
+ FROM olp.rate_cards c`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type held struct{ cardID, revisionID string }
+	entries := []RateCardEntry{}
+	var pending []held
+	for rows.Next() {
+		var entry RateCardEntry
+		var cardID, organizationID, organization, projectID, project, revisionID *string
+		if err = rows.Scan(&cardID, &organizationID, &organization, &projectID, &project, &revisionID); err != nil {
+			return nil, err
+		}
+		if revisionID == nil {
+			continue
+		}
+		entry.Owner.Kind = "installation"
+		if organizationID != nil {
+			entry.Owner.Kind = "organization"
+			entry.Owner.Organization = organization
+		}
+		if projectID != nil {
+			entry.Owner.Kind = "project"
+			entry.Owner.Project = project
+		}
+		pending = append(pending, held{*cardID, *revisionID})
+		entries = append(entries, entry)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	for index, hold := range pending {
+		var markup string
+		if err = q.QueryRow(ctx, "SELECT markup::text FROM olp.rate_card_revisions WHERE id=$1::uuid", hold.revisionID).Scan(&markup); err != nil {
+			return nil, err
+		}
+		entries[index].Markup = markup
+		prices, err := usage.LoadCardPricesForExport(ctx, q, hold.revisionID)
+		if err != nil {
+			return nil, err
+		}
+		for _, price := range prices {
+			entries[index].Prices = append(entries[index].Prices, priceEntryFromUsage(price))
+		}
+	}
+	return entries, nil
 }
 
 func providerNameMap(ctx context.Context, q access.Queryer) (map[string]string, error) {

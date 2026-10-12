@@ -92,13 +92,17 @@ type execution struct {
 	userID        string
 	affinity      []byte
 	authority     access.Authority
-	route         *runtime.Route
-	mode          string
-	attempts      []runtime.Attempt
-	budget        int
-	preferences   *runtime.Preferences
-	decisions     []runtime.Decision
-	policy        runtime.EffectivePolicy
+	// cardPinned records that the request's consumer is an authority project,
+	// so accounting honours cardRevisionID exactly — including a pinned null.
+	cardPinned     bool
+	cardRevisionID *string
+	route          *runtime.Route
+	mode           string
+	attempts       []runtime.Attempt
+	budget         int
+	preferences    *runtime.Preferences
+	decisions      []runtime.Decision
+	policy         runtime.EffectivePolicy
 
 	// primary is the route the caller named. Its deadline and attempt budget
 	// bound the request across every route it moves on to; route is the one
@@ -546,6 +550,7 @@ func endpointPath(family openai.Family) string {
 func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ordinal int, pinned ...*runtime.Provider) AttemptFact {
 	fact := AttemptFact{
 		Strategy: a.Strategy, PolicyDigest: a.PolicyDigest, VendorID: a.VendorID, Price: a.Price,
+		Discount: a.Discount, CardPinned: x.cardPinned, CardRevisionID: x.cardRevisionID,
 		Ordinal:            ordinal,
 		TargetID:           a.TargetID,
 		ProviderID:         a.ProviderID,
@@ -1324,7 +1329,7 @@ func (s *Server) recordBusiness(env Envelope, x *execution) {
 		if u := fact.Usage; u != nil && fact.UsageObserved {
 			s.Business.Tokens(labels, &u.InputTokens, &u.OutputTokens)
 			if fact.Price != nil {
-				if cost, ok := fact.Price.Cost(attemptUsage(fact, env.Operation), fact.StartedAt, attemptSuccessful(fact)); ok {
+				if cost, ok := fact.Price.Cost(attemptUsage(fact, env.Operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount); ok {
 					// A committed attempt prices but owes nothing: record its
 					// zero marginal cost rather than skipping the metric.
 					if amount, err := strconv.ParseFloat(cost.String(), 64); err == nil {

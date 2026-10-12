@@ -77,16 +77,22 @@ type AttemptFact struct {
 	// Retry how many times the route's retry policy repeated it, and Budgets
 	// the capped route, connection and slot its spend counts against.
 	// Baseline is the most expensive target the selector avoided.
-	Leg                *usage.RouteLeg
-	Selector           string
-	Baseline           *usage.Baseline
-	Retry              int
-	Budgets            []string
-	FirstOutput        *time.Duration
-	Strategy           string
-	PolicyDigest       string
-	VendorID           string
-	Price              *usage.RoutingPrice
+	Leg          *usage.RouteLeg
+	Selector     string
+	Baseline     *usage.Baseline
+	Retry        int
+	Budgets      []string
+	FirstOutput  *time.Duration
+	Strategy     string
+	PolicyDigest string
+	VendorID     string
+	Price        *usage.RoutingPrice
+	// Discount is the multiplier the plan pinned on the attempt.
+	Discount *usage.RoutingDiscount
+	// CardPinned records that accounting must use CardRevisionID exactly,
+	// null included; unpinned attempts resolve the card themselves.
+	CardPinned         bool
+	CardRevisionID     *string
 	Ordinal            int
 	TargetID           string
 	ProviderID         string

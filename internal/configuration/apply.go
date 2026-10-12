@@ -286,6 +286,16 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			}
 		}
 	}
+	if err = s.applyDiscounts(ctx, tx, p, doc, providerIDs); err != nil {
+		return err
+	}
+	organizationIDs, err := organizationIDs(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if err = s.applyRateCards(ctx, tx, p, doc, organizationIDs, projectIDs); err != nil {
+		return err
+	}
 	for _, project := range doc.Projects {
 		id := projectIDs[strings.ToLower(project.Name)]
 		for _, members := range project.RouteGroups {

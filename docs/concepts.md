@@ -120,6 +120,13 @@ Caller attribution labels can help filter and group usage. Keys explicitly allow
 label names, and values must be bounded machine tokens. Labels never grant
 access or change routing; see [request attribution](gateway.md#request-path).
 
+Cost and charge are two different numbers. *Cost* is what the provider bills
+for an attempt, priced from the published price list under any committed or
+discounted terms. *Charge* is what the consumer owes for it: the rate card of
+the consumer's project, organization or installation marks up the cost, or an
+explicit card price replaces it entirely. [Pricing](pricing.md) has the exact
+selection and rounding rules.
+
 ## What is stored — and what never is
 
 Durable diagnostics contain identifiers, timing, token/media units, status,

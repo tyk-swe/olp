@@ -319,17 +319,21 @@ func scaledDecimal(text string, digits int) (*big.Int, bool) {
 // has no rate. startedAt decides which pricing window, if any, the attempt fell
 // in, and successful decides whether a per-request fee applies.
 func (p Price) Cost(u AttemptUsage, startedAt time.Time, successful bool) (Cost, bool) {
-	return parseRates(&p).cost(u, startedAt, successful)
+	return parseRates(&p).cost(u, startedAt, successful, nil)
 }
 
-// Cost prices one attempt's usage against this price. The rates are parsed once
-// when the routing inputs are loaded, so pricing a request does not parse them
-// again.
-func (p *RoutingPrice) Cost(u AttemptUsage, startedAt time.Time, successful bool) (Cost, bool) {
+// Cost prices one attempt's usage against this price under the pinned
+// discount (nil discounts nothing). The rates are parsed once when the
+// routing inputs are loaded, so pricing a request does not parse them again.
+func (p *RoutingPrice) Cost(u AttemptUsage, startedAt time.Time, successful bool, discount *RoutingDiscount) (Cost, bool) {
 	if p == nil {
 		return Cost{}, false
 	}
-	return p.parsed().cost(u, startedAt, successful)
+	var multiplier *big.Int
+	if discount != nil {
+		multiplier = discount.parsedMultiplier()
+	}
+	return p.parsed().cost(u, startedAt, successful, multiplier)
 }
 
 // parsed returns the rates of this price. A price built outside LoadRoutingInputs
@@ -346,7 +350,7 @@ func (p *RoutingPrice) parsed() *priceRates {
 // scale PostgreSQL gives its quotient, the terms are summed exactly, the window
 // and batch multipliers apply to the sum, and the total is rounded half away
 // from zero to the twelve places the column stores.
-func (r *priceRates) cost(u AttemptUsage, startedAt time.Time, successful bool) (Cost, bool) {
+func (r *priceRates) cost(u AttemptUsage, startedAt time.Time, successful bool, discount *big.Int) (Cost, bool) {
 	if !u.Complete || !r.valid {
 		return Cost{}, false
 	}
@@ -425,6 +429,10 @@ func (r *priceRates) cost(u AttemptUsage, startedAt time.Time, successful bool) 
 	}
 	if u.Batch {
 		total.Mul(total, r.batch)
+		divisorDigits += costDigits
+	}
+	if discount != nil {
+		total.Mul(total, discount)
 		divisorDigits += costDigits
 	}
 	divisor := new(big.Int).Exp(bigTen, big.NewInt(int64(divisorDigits)), nil)
@@ -640,7 +648,7 @@ func atoi(digits string) int {
 // a per-request fee and the window multiplier in force at `at`; tool fees and
 // batch terms are excluded. It is false when the price lacks a rate the request
 // needs, which is a request nobody can price.
-func (p *RoutingPrice) CostBound(input, output int64, generation bool, at time.Time) (Cost, bool) {
+func (p *RoutingPrice) CostBound(input, output int64, generation bool, at time.Time, discount *RoutingDiscount) (Cost, bool) {
 	if p == nil {
 		return Cost{}, false
 	}
@@ -670,6 +678,11 @@ func (p *RoutingPrice) CostBound(input, output int64, generation bool, at time.T
 		bound.Add(bound, new(big.Int).Sub(costUnit, big.NewInt(1)))
 		bound.Quo(bound, costUnit)
 	}
+	if discount != nil {
+		bound.Mul(bound, discount.parsedMultiplier())
+		bound.Add(bound, new(big.Int).Sub(costUnit, big.NewInt(1)))
+		bound.Quo(bound, costUnit)
+	}
 	return clampCost(bound), true
 }
 
@@ -689,4 +702,42 @@ func ceilPerMillion(tokens int64, rate *big.Int) *big.Int {
 	charge := new(big.Int).Mul(big.NewInt(tokens), rate)
 	charge.Add(charge, big.NewInt(999_999))
 	return charge.Quo(charge, perMillion)
+}
+
+// Charge resolves what one billable attempt's consumer pays: the card's
+// explicit rate when one matches the attempt's dimensions, else the attempt's
+// already-rounded cost times the card's markup, else the cost itself when no
+// card applies. Discounts and commitments never apply to explicit rates, so a
+// card's explicit price costs the usage itself. False is no charge — the
+// cost it multiplies, or the usage an explicit rate cannot price.
+func (r *RoutingCardRevision) Charge(u AttemptUsage, startedAt time.Time, successful bool,
+	cost *Cost, kind, vendor, model, operation string) (Cost, bool) {
+	if explicit := r.Explicit(kind, vendor, model, operation); explicit != nil {
+		return explicit.parsed().cost(u, startedAt, successful, nil)
+	}
+	if cost == nil {
+		return Cost{}, false
+	}
+	// Round the already-rounded cost by the markup in one half-up rounding.
+	total := new(big.Int).Mul(cost.units, r.parsedMarkup())
+	total.Add(total, new(big.Int).Quo(costUnit, big.NewInt(2)))
+	total.Quo(total, costUnit)
+	return clampCost(total), true
+}
+
+// ChargeBound is the reservation-equivalent of Charge: the explicit rate's
+// own bound, else the cost bound times markup rounded up. False when nothing
+// can bound what the consumer pays.
+func (r *RoutingCardRevision) ChargeBound(input, output int64, generation bool, at time.Time,
+	bound Cost, kind, vendor, model, operation string) (Cost, bool) {
+	if explicit := r.Explicit(kind, vendor, model, operation); explicit != nil {
+		return explicit.CostBound(input, output, generation, at, nil)
+	}
+	if bound.units == nil {
+		return Cost{}, false
+	}
+	total := new(big.Int).Mul(bound.units, r.parsedMarkup())
+	total.Add(total, new(big.Int).Sub(costUnit, big.NewInt(1)))
+	total.Quo(total, costUnit)
+	return clampCost(total), true
 }

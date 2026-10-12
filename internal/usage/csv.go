@@ -53,7 +53,7 @@ func RequestCSV(items []RequestSummary) ([]byte, error) {
 		"started_at", "completed_at", "status_code", "error_class", "total_latency_ms", "first_byte_ms", "attempt_count",
 		"input_tokens", "output_tokens", "cached_input_tokens", "cache_write_input_tokens", "cache_write_5m_input_tokens", "cache_write_1h_input_tokens",
 		"audio_input_tokens", "cached_audio_input_tokens", "audio_output_tokens", "image_input_tokens", "cached_image_input_tokens", "image_output_tokens",
-		"estimated_cost", "currency", "unpriced", "usage_complete", "end_user_digest", "session_id", "payload_captured",
+		"estimated_cost", "charge", "currency", "unpriced", "usage_complete", "end_user_digest", "session_id", "payload_captured",
 	}); err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func RequestCSV(items []RequestSummary) ([]byte, error) {
 			csvOptional(item.CacheWrite5MInputTokens), csvOptional(item.CacheWrite1HInputTokens),
 			csvOptional(item.AudioInputTokens), csvOptional(item.CachedAudioInputTokens), csvOptional(item.AudioOutputTokens),
 			csvOptional(item.ImageInputTokens), csvOptional(item.CachedImageInputTokens), csvOptional(item.ImageOutputTokens),
-			csvOptional(item.EstimatedCost), csvOptional(item.Currency),
+			csvOptional(item.EstimatedCost), csvOptional(item.Charge), csvOptional(item.Currency),
 			csvOptional(item.Unpriced), csvOptional(item.UsageComplete), item.EndUserDigest, item.Attribution["session"], strconv.FormatBool(item.PayloadCaptured),
 		}
 		for i, value := range row {
@@ -98,7 +98,7 @@ func UsageCSV(filters Filters, dimension string, summary Summary, breakdown Brea
 		"media_units", "estimated_cost", "currency",
 		"unpriced_count", "incomplete_count", "range_complete", "approximate", "excluded_partial_aggregate_boundaries", "complete",
 		"request_metadata_gap_events", "uncertain_request_metadata_gap_count", "estimated_input_tokens", "reported_input_tokens", "estimated_attempt_count",
-		"allocated_commitment",
+		"allocated_commitment", "charge", "uncharged_attempt_count",
 	}); err != nil {
 		return nil, err
 	}
@@ -117,6 +117,7 @@ func UsageCSV(filters Filters, dimension string, summary Summary, breakdown Brea
 			strconv.FormatBool(coverage.Approximate), strconv.Itoa(coverage.ExcludedBoundaries), strconv.FormatBool(summary.Complete),
 			strconv.FormatInt(summary.GapEvents, 10), strconv.FormatInt(summary.UncertainGapCount, 10), totals.EstimatedInputTokens, totals.ReportedInputTokens,
 			strconv.FormatInt(totals.EstimatedAttemptCount, 10), totals.AllocatedCommitment,
+			csvOptional(totals.Charge), strconv.FormatInt(totals.UnchargedAttemptCount, 10),
 		}
 		for i, value := range row {
 			row[i] = csvCell(value)

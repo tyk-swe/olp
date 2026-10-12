@@ -472,6 +472,23 @@
       >
     </article>
     <article class="card metric-card">
+      <p>Charge</p>
+      <small
+        >What consumers are billed under the applicable rate card; identical to
+        cost when no card applies.</small
+      >
+      <strong class:unpriced={usage.data.summary.charge == null}
+        >{formatCost(
+          usage.data.summary.charge,
+          usage.data.summary.currency
+        )}</strong
+      >
+      {#if usage.data.summary.uncharged_attempt_count > 0}<span
+          class="badge warning"
+          >{usage.data.summary.uncharged_attempt_count} uncharged</span
+        >{/if}
+    </article>
+    <article class="card metric-card">
       <p>Estimated cost</p>
       <small
         >Estimate from recorded, priced usage. Review delivery and coverage
@@ -563,6 +580,13 @@
                 ><td>{formatCost(row.allocated_commitment, row.currency)}</td
                 ><td>{rowEstimate.comparison}</td><td>{rowEstimate.error}</td
                 ><td>{formatCost(row.estimated_cost, row.currency)}</td><td
+                  >{formatCost(
+                    row.charge,
+                    row.currency
+                  )}{#if row.uncharged_attempt_count > 0}&nbsp;<span
+                      class="badge warning">{row.uncharged_attempt_count}</span
+                    >{/if}</td
+                ><td
                   >{#if row.incomplete_count > 0}<span class="badge danger"
                       >{row.incomplete_count} incomplete</span
                     >{:else if row.unpriced_count > 0}<span

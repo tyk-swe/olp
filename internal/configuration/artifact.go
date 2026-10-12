@@ -39,6 +39,12 @@ type Document struct {
 	Routes             []RouteEntry          `json:"routes"`
 	Templates          []TemplateEntry       `json:"templates,omitempty"`
 	Pricing            *PricingEntry         `json:"pricing"`
+	// Discounts are the scopes the document prices under; omitted in-force
+	// scopes are ended with a multiplier-one discount on apply.
+	Discounts []DiscountEntry `json:"discounts,omitempty"`
+	// RateCards are each owner's charge terms; an omitted card gets a neutral
+	// revision on apply rather than being removed.
+	RateCards []RateCardEntry `json:"rate_cards,omitempty"`
 }
 
 type ProjectEntry struct {
@@ -196,6 +202,29 @@ type PriceEntry struct {
 type PricingEntry struct {
 	EffectiveAt string       `json:"effective_at"`
 	Prices      []PriceEntry `json:"prices"`
+}
+
+// DiscountEntry is one discount scope in the document; providers are named,
+// as prices scope them.
+type DiscountEntry struct {
+	ProviderKind string  `json:"provider_kind"`
+	VendorID     *string `json:"vendor_id,omitempty"`
+	Provider     *string `json:"provider,omitempty"`
+	Multiplier   string  `json:"multiplier"`
+}
+
+// RateCardEntry is the in-force revision of one owner's card.
+type RateCardEntry struct {
+	Owner  CardOwnerEntry `json:"owner"`
+	Markup string         `json:"markup"`
+	Prices []PriceEntry   `json:"prices,omitempty"`
+}
+
+// CardOwnerEntry references a card owner by kind and name.
+type CardOwnerEntry struct {
+	Kind         string  `json:"kind"`
+	Organization *string `json:"organization,omitempty"`
+	Project      *string `json:"project,omitempty"`
 }
 
 // priceEntryFromUsage carries one stored price into the configuration document.

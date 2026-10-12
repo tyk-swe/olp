@@ -158,7 +158,7 @@ func TestIntegrationPricingParity(t *testing.T) {
 // settled. The stored cost is gated on usage completeness separately.
 func parityRated(p *Price, u AttemptUsage) bool {
 	u.Complete = true
-	_, ok := parseRates(p).cost(u, time.Time{}, true)
+	_, ok := parseRates(p).cost(u, time.Time{}, true, nil)
 	return ok
 }
 

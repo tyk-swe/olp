@@ -71,6 +71,7 @@ type RequestSummary struct {
 	CachedImageInputTokens  *int64                   `json:"cached_image_input_tokens"`
 	ImageOutputTokens       *int64                   `json:"image_output_tokens"`
 	EstimatedCost           *string                  `json:"estimated_cost"`
+	Charge                  *string                  `json:"charge"`
 	Currency                *string                  `json:"currency"`
 	Unpriced                *bool                    `json:"unpriced"`
 	UsageComplete           *bool                    `json:"usage_complete"`
@@ -123,6 +124,9 @@ type AttemptDetail struct {
 	CommitmentWeight        *string          `json:"commitment_weight"`
 	CommitmentAmount        *string          `json:"commitment_amount"`
 	CommitmentPeriod        *string          `json:"commitment_period"`
+	DiscountID              *string          `json:"discount_id"`
+	Charge                  *string          `json:"charge"`
+	RateCardRevisionID      *string          `json:"rate_card_revision_id"`
 }
 
 // RequestDetail is one request with its attempt timeline.
@@ -141,7 +145,7 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
         u.cache_write_input_tokens, u.cache_write_5m_input_tokens, u.cache_write_1h_input_tokens,
         u.audio_input_tokens, u.cached_audio_input_tokens, u.audio_output_tokens,
         u.image_input_tokens, u.cached_image_input_tokens, u.image_output_tokens,
-        u.estimated_cost, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions, r.end_user_digest,
+        u.estimated_cost, u.charge, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions, r.end_user_digest,
         r.origin, r.parent_request_id::text, r.budget_boundary, r.payload_captured
     FROM olp.requests r LEFT JOIN LATERAL (
       SELECT SUM(f.input_tokens)::bigint AS input_tokens,
@@ -157,6 +161,7 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
              SUM(f.cached_image_input_tokens)::bigint AS cached_image_input_tokens,
              SUM(f.image_output_tokens)::bigint AS image_output_tokens,
              SUM(f.estimated_cost)::text AS estimated_cost,
+             SUM(f.charge)::text AS charge,
              btrim(MAX(f.currency)) AS currency, BOOL_OR(f.unpriced) AS unpriced,
              BOOL_AND(f.charge_status = 'not_billable' OR f.usage_complete) AS usage_complete
         FROM olp.attempt_usage_facts f
@@ -171,7 +176,7 @@ func (s *RequestSummary) scanTargets() []any {
 		&s.CacheWriteInputTokens, &s.CacheWrite5MInputTokens, &s.CacheWrite1HInputTokens,
 		&s.AudioInputTokens, &s.CachedAudioInputTokens, &s.AudioOutputTokens,
 		&s.ImageInputTokens, &s.CachedImageInputTokens, &s.ImageOutputTokens,
-		&s.EstimatedCost, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions, &s.EndUserDigest,
+		&s.EstimatedCost, &s.Charge, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions, &s.EndUserDigest,
 		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary, &s.PayloadCaptured}
 }
 
@@ -315,7 +320,8 @@ const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider
         f.media_units::text, f.tool_calls::text, f.batch, f.pricing_components,
         f.estimated_cost::text, btrim(f.currency), f.unpriced,
         f.pricing_revision_id::text, f.commitment_weight::text,
-        f.commitment_amount::text, f.commitment_period
+        f.commitment_amount::text, f.commitment_period,
+        f.discount_id::text, f.charge::text, f.rate_card_revision_id::text
     FROM olp.attempts a JOIN olp.providers p ON p.id = a.provider_id
     LEFT JOIN olp.attempt_usage_facts f ON f.request_id = a.request_id
         AND f.request_started_at = a.request_started_at AND f.attempt_ordinal = a.ordinal
@@ -355,7 +361,8 @@ func GetRequest(ctx context.Context, q access.Queryer, id string) (RequestDetail
 			&attempt.MediaUnits, &attemptToolCalls, &attempt.Batch, &attempt.PricingComponents,
 			&attempt.EstimatedCost,
 			&attempt.Currency, &attempt.Unpriced, &attempt.PricingRevisionID,
-			&attempt.CommitmentWeight, &attempt.CommitmentAmount, &attempt.CommitmentPeriod); err != nil {
+			&attempt.CommitmentWeight, &attempt.CommitmentAmount, &attempt.CommitmentPeriod,
+			&attempt.DiscountID, &attempt.Charge, &attempt.RateCardRevisionID); err != nil {
 			return RequestDetail{}, fmt.Errorf("read request attempts: %w", err)
 		}
 		if attemptToolCalls != nil {

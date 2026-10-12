@@ -92,6 +92,9 @@
       <strong class:unpriced={detail.data.unpriced}
         >{formatCost(detail.data.estimated_cost, detail.data.currency)}</strong
       >
+      {#if detail.data.charge != null}<small
+          >Charge {formatCost(detail.data.charge, detail.data.currency)}</small
+        >{/if}
       {#if detail.data.unpriced}<small class="unpriced"
           >Unpriced — no published price covered part of this request.</small
         >{/if}
@@ -529,6 +532,30 @@
                         ? 'Not applicable'
                         : 'Not recorded')}
                   </dd>
+                </div>
+                <div>
+                  <dt>Charge</dt>
+                  <dd>
+                    {attempt.charge != null
+                      ? formatCost(attempt.charge, attempt.currency)
+                      : attempt.charge_status === 'not_billable'
+                        ? 'Not applicable'
+                        : 'Not recorded'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Rate card revision</dt>
+                  <dd class="mono">
+                    {attempt.rate_card_revision_id ??
+                      (attempt.charge != null &&
+                      attempt.rate_card_revision_id == null
+                        ? 'No card'
+                        : 'Not recorded')}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Discount</dt>
+                  <dd class="mono">{attempt.discount_id ?? 'None'}</dd>
                 </div>
               </dl>
             {/if}

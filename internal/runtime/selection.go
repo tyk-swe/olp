@@ -24,7 +24,10 @@ type Attempt struct {
 	PolicyDigest       string
 	VendorID           string
 	Price              *usage.RoutingPrice
-	Performance        *usage.Performance
+	// Discount is the multiplier pinned at plan time; accounting prices the
+	// attempt under exactly it.
+	Discount    *usage.RoutingDiscount
+	Performance *usage.Performance
 	// Slots, when set, are the credential slots live supply state left the
 	// attempt, in the order it ranked them. Without supply state the gateway
 	// orders the target's slots itself, exactly as the plan did.
