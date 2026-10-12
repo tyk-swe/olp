@@ -131,7 +131,7 @@ type execution struct {
 	// costExcluded records that a planned leg refused a non-shadow target for
 	// its maximum cost; it turns the request's final refusal into a 400.
 	costExcluded bool
-	fallbacks      []runtime.FallbackStep
+	fallbacks    []runtime.FallbackStep
 	// caps are the supply-side spend caps the request holds reservations
 	// against, settled with its key reservation.
 	caps []capHold

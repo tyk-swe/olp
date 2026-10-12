@@ -2,7 +2,7 @@ import { manage, provisionGenerationRoute } from '../helpers/management';
 import { signInGatewayOwner as signIn } from '../gateway/signIn';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '../playwright';
-import { takeSecret, waitForRoutePublication } from '../journeys/fixtures';
+import { waitForRoutePublication } from '../journeys/fixtures';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -156,7 +156,7 @@ test('publish a discount, a rate card revision, and a tiered, windowed price', a
 test('the cost calculator bounds routes and quotes usage', async ({
   page
 }, info) => {
-  const secret = await provision(page);
+  await provision(page);
 
   // Route mode: the published route's target reports min/max bounds.
   await page.goto('/usage');
