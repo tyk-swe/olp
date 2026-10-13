@@ -97,7 +97,7 @@
       multiplier = '';
       providerId = '';
       await queryClient.invalidateQueries({
-        queryKey: ['pricing-discounts']
+        queryKey: discountKeys.all
       });
     } catch (problem) {
       error = errorMessage(problem);

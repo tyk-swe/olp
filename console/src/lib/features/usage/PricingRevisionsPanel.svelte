@@ -4,7 +4,7 @@
   import CursorPagination from '$lib/components/CursorPagination.svelte';
   import PriceFields from './PriceFields.svelte';
   import {
-    rateFieldPairs,
+    priceEntryFields,
     type TierRow,
     type ToolFeeRow,
     type WindowPeriodRow
@@ -33,13 +33,6 @@
     type PricingRevision
   } from './api/pricing';
   import { pricingKeys } from './pricingKeys';
-  import {
-    decimalText,
-    optionalDecimal,
-    tierRows,
-    toolFeeRows,
-    windowsDraft
-  } from './pricingValidation';
 
   const createIntent = useMutationIntent();
 
@@ -110,24 +103,6 @@
   let tiers = $state<TierRow[]>([]);
   let windowZone = $state('');
   let windowPeriods = $state<WindowPeriodRow[]>([]);
-  // The per-million rate fields the entry carries decide every tier's rate
-  // set: a tier names exactly the same fields.
-  const rateFields = $derived(
-    rateFieldPairs({
-      inputPrice,
-      cachedInputPrice,
-      cacheWritePrice,
-      cacheWrite5mPrice,
-      cacheWrite1hPrice,
-      outputPrice,
-      audioInputPrice,
-      cachedAudioInputPrice,
-      audioOutputPrice,
-      imageInputPrice,
-      cachedImageInputPrice,
-      imageOutputPrice
-    })
-  );
   let currency = $state('USD');
   let effectiveAt = $state(dateTimeLocalValue(new Date()));
   let savingPrice = $state(false);
@@ -203,39 +178,7 @@
         provider_id: submitted.providerId || null,
         model: submitted.model.trim(),
         operation: submitted.operation,
-        input_per_million: optionalDecimal(submitted.inputPrice),
-        cached_input_per_million: optionalDecimal(submitted.cachedInputPrice),
-        cache_write_input_per_million: optionalDecimal(
-          submitted.cacheWritePrice
-        ),
-        cache_write_5m_input_per_million: optionalDecimal(
-          submitted.cacheWrite5mPrice
-        ),
-        cache_write_1h_input_per_million: optionalDecimal(
-          submitted.cacheWrite1hPrice
-        ),
-        output_per_million: optionalDecimal(submitted.outputPrice),
-        unit_price: optionalDecimal(submitted.unitPrice),
-        audio_input_per_million: optionalDecimal(submitted.audioInputPrice),
-        cached_audio_input_per_million: optionalDecimal(
-          submitted.cachedAudioInputPrice
-        ),
-        audio_output_per_million: optionalDecimal(submitted.audioOutputPrice),
-        image_input_per_million: optionalDecimal(submitted.imageInputPrice),
-        cached_image_input_per_million: optionalDecimal(
-          submitted.cachedImageInputPrice
-        ),
-        image_output_per_million: optionalDecimal(submitted.imageOutputPrice),
-        per_request: optionalDecimal(submitted.perRequestPrice),
-        batch_multiplier: optionalDecimal(submitted.batchMultiplier),
-        tool_calls: toolFeeRows(submitted.toolFees),
-        tiers: tierRows(
-          submitted.tiers,
-          rateFields
-            .filter(([, value]) => decimalText(value) != null)
-            .map(([key]) => key)
-        ),
-        windows: windowsDraft(submitted.windowZone, submitted.windowPeriods),
+        ...priceEntryFields(submitted),
         currency: submitted.currency.trim().toUpperCase()
       };
       if (

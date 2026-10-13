@@ -1,3 +1,5 @@
+import type { components } from '$lib/api/schema';
+
 export function optionalDecimal(value: string): string | null {
   const decimal = value.trim();
   if (!decimal) return null;
@@ -5,12 +7,6 @@ export function optionalDecimal(value: string): string | null {
     throw new Error('Enter a non-negative decimal number.');
   }
   return decimal;
-}
-
-import type { components } from '$lib/api/schema';
-
-export function decimalText(value: string): string | null {
-  return optionalDecimal(value);
 }
 
 const toolNamePattern = /^[a-z][a-z0-9_]{0,63}$/;

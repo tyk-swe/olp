@@ -481,37 +481,15 @@ var reconciliationGroupSnapshotsSQL = reconcileCostWindowsSQL(costOwnerGroup, fa
 // capped supply owner, and returns the snapshots to install in Valkey. It
 // writes, so it must run on the connection that holds the reconciliation lock.
 func ReconciliationSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time) ([]CostSnapshot, error) {
-	rows, err := conn.Query(ctx, reconciliationSnapshotsSQL, now.UTC())
+	snapshots, err := querySnapshots(ctx, conn, reconciliationSnapshotsSQL, now.UTC())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var snapshots []CostSnapshot
-	for rows.Next() {
-		snapshot, err := scanSnapshots(rows)
-		if err != nil {
-			return nil, err
-		}
-		snapshots = append(snapshots, snapshot...)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	groupRows, err := conn.Query(ctx, reconciliationGroupSnapshotsSQL, now.UTC())
+	groups, err := querySnapshots(ctx, conn, reconciliationGroupSnapshotsSQL, now.UTC())
 	if err != nil {
 		return nil, err
 	}
-	defer groupRows.Close()
-	for groupRows.Next() {
-		snapshot, err := scanSnapshots(groupRows)
-		if err != nil {
-			return nil, err
-		}
-		snapshots = append(snapshots, snapshot...)
-	}
-	if err := groupRows.Err(); err != nil {
-		return nil, err
-	}
+	snapshots = append(snapshots, groups...)
 	supply, err := supplySnapshots(ctx, conn, now)
 	if err != nil {
 		return nil, err
@@ -529,16 +507,27 @@ func ReconciliationSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time)
 	return append(snapshots, aggregates...), nil
 }
 
-// scanSnapshot reads the fourteen columns all budget statements project. A NULL in
-// any of them means the statement did not produce both windows, which must fail
-// rather than install a partial balance.
-// scanSnapshots reads one delta/snapshot row's totals as the pair Valkey
-// installs: the cost basis, then the charge basis. The charge snapshot carries
-// the uncharged-attempt count in the slot the cost snapshot keeps its
-// unpriced-attempt count in — the stored shape is identical.
-// scanSnapshots reads the eighteen columns consumer budget statements
-// project — the cost snapshot's columns followed by their charge mirrors —
-// and validates both before either is installed.
+func querySnapshots(ctx context.Context, conn *pgx.Conn, query string, args ...any) ([]CostSnapshot, error) {
+	rows, err := conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var snapshots []CostSnapshot
+	for rows.Next() {
+		snapshot, err := scanSnapshots(rows)
+		if err != nil {
+			return nil, err
+		}
+		snapshots = append(snapshots, snapshot...)
+	}
+	return snapshots, rows.Err()
+}
+
+// scanSnapshots reads one delta/snapshot row's eighteen columns as the pair
+// Valkey installs: the cost basis followed by the charge basis. The charge
+// snapshot carries the uncharged-attempt count in the slot the cost snapshot
+// keeps its unpriced-attempt count in — the stored shape is identical.
 func scanSnapshots(row pgx.Row) ([]CostSnapshot, error) {
 	var snapshot CostSnapshot
 	if err := row.Scan(&snapshot.CostOwnerID, &snapshot.DailyWindowID, &snapshot.DailyAccrued, &snapshot.DailyCharged,
@@ -571,6 +560,9 @@ func scanSnapshots(row pgx.Row) ([]CostSnapshot, error) {
 	}}, nil
 }
 
+// scanSnapshot reads the fourteen columns supply budget statements project. A
+// NULL in any of them means the statement did not produce both windows, which
+// must fail rather than install a partial balance.
 func scanSnapshot(row pgx.Row) (CostSnapshot, error) {
 	var snapshot CostSnapshot
 	if err := row.Scan(&snapshot.CostOwnerID, &snapshot.DailyWindowID, &snapshot.DailyAccrued,

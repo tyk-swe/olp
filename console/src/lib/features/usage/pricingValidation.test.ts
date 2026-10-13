@@ -1,5 +1,10 @@
 import { expect, it } from 'vitest';
-import { optionalDecimal } from './pricingValidation';
+import {
+  optionalDecimal,
+  tierRows,
+  toolFeeRows,
+  windowsDraft
+} from './pricingValidation';
 
 it('keeps exact decimal strings and missing prices distinct from zero', () => {
   expect(optionalDecimal(' 0.00012500 ')).toBe('0.00012500');
@@ -17,8 +22,6 @@ it.each(['-1', '1e2', 'NaN', 'Infinity', '1,000', '.5', '1.'])(
     expect(() => optionalDecimal(value)).toThrow('non-negative decimal');
   }
 );
-
-import { tierRows, toolFeeRows, windowsDraft } from './pricingValidation';
 
 it('turns tool fee rows into a tool_calls map, skipping blank rows', () => {
   expect(

@@ -308,24 +308,9 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
 			rows.Close()
 			return nil, err
 		}
-		if toolCalls != nil {
-			if err = json.Unmarshal([]byte(*toolCalls), &p.ToolCalls); err != nil {
-				rows.Close()
-				return nil, err
-			}
-		}
-		if tiers != nil {
-			if err = json.Unmarshal([]byte(*tiers), &p.Tiers); err != nil {
-				rows.Close()
-				return nil, err
-			}
-		}
-		if windows != nil {
-			p.Windows = &PriceWindows{}
-			if err = json.Unmarshal([]byte(*windows), p.Windows); err != nil {
-				rows.Close()
-				return nil, err
-			}
+		if err = unmarshalPriceComponents(&p.Price, toolCalls, tiers, windows, "routing"); err != nil {
+			rows.Close()
+			return nil, err
 		}
 		p.rates = parseRates(&p.Price)
 		in.Prices = append(in.Prices, p)
@@ -527,24 +512,9 @@ func loadRoutingRateCards(ctx context.Context, q access.Queryer, now time.Time, 
 			rows.Close()
 			return err
 		}
-		if toolCalls != nil {
-			if err = json.Unmarshal([]byte(*toolCalls), &p.ToolCalls); err != nil {
-				rows.Close()
-				return err
-			}
-		}
-		if tiers != nil {
-			if err = json.Unmarshal([]byte(*tiers), &p.Tiers); err != nil {
-				rows.Close()
-				return err
-			}
-		}
-		if windows != nil {
-			p.Windows = &PriceWindows{}
-			if err = json.Unmarshal([]byte(*windows), p.Windows); err != nil {
-				rows.Close()
-				return err
-			}
+		if err = unmarshalPriceComponents(&p.Price, toolCalls, tiers, windows, "routing rate card"); err != nil {
+			rows.Close()
+			return err
 		}
 		p.rates = parseRates(&p.Price)
 		if revision, ok := revisions[revisionID]; ok {

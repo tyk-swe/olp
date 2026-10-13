@@ -2,7 +2,6 @@ package usage
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -167,14 +166,8 @@ func scanCardRevision(row interface{ Scan(...any) error }) (CardRevision, error)
 	return r, err
 }
 
-// LoadCardPricesForExport reads one card revision's explicit rates; the
-// configuration exporter uses the same shape a snapshot carries.
-func LoadCardPricesForExport(ctx context.Context, q access.Queryer, revisionID string) ([]Price, error) {
-	return loadCardPrices(ctx, q, revisionID)
-}
-
 func loadCardPrices(ctx context.Context, q access.Queryer, revisionID string) ([]Price, error) {
-	byRevision, err := loadCardPricesByRevisions(ctx, q, []string{revisionID})
+	byRevision, err := LoadCardPricesByRevisions(ctx, q, []string{revisionID})
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +178,9 @@ func loadCardPrices(ctx context.Context, q access.Queryer, revisionID string) ([
 	return prices, nil
 }
 
-func loadCardPricesByRevisions(ctx context.Context, q access.Queryer, revisionIDs []string) (map[string][]Price, error) {
+// LoadCardPricesByRevisions reads the explicit rates of each named card
+// revision; the configuration exporter and revision listings share it.
+func LoadCardPricesByRevisions(ctx context.Context, q access.Queryer, revisionIDs []string) (map[string][]Price, error) {
 	if len(revisionIDs) == 0 {
 		return nil, nil
 	}
@@ -217,21 +212,8 @@ func loadCardPricesByRevisions(ctx context.Context, q access.Queryer, revisionID
 			&toolCalls, &tiers, &windows, &p.Currency); err != nil {
 			return nil, err
 		}
-		if toolCalls != nil {
-			if err = json.Unmarshal([]byte(*toolCalls), &p.ToolCalls); err != nil {
-				return nil, fmt.Errorf("stored rate card tool fees are invalid")
-			}
-		}
-		if tiers != nil {
-			if err = json.Unmarshal([]byte(*tiers), &p.Tiers); err != nil {
-				return nil, fmt.Errorf("stored rate card tiers are invalid")
-			}
-		}
-		if windows != nil {
-			p.Windows = &PriceWindows{}
-			if err = json.Unmarshal([]byte(*windows), p.Windows); err != nil {
-				return nil, fmt.Errorf("stored rate card windows are invalid")
-			}
+		if err = unmarshalPriceComponents(&p, toolCalls, tiers, windows, "rate card"); err != nil {
+			return nil, err
 		}
 		byRevision[revisionID] = append(byRevision[revisionID], p)
 	}
@@ -510,7 +492,7 @@ func (s *Server) listRateCardRevisions(r *http.Request, _ access.Principal) (acc
 	for i := range items {
 		revisionIDs[i] = items[i].ID
 	}
-	pricesByRevision, err := loadCardPricesByRevisions(r.Context(), s.Access.Pool, revisionIDs)
+	pricesByRevision, err := LoadCardPricesByRevisions(r.Context(), s.Access.Pool, revisionIDs)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -559,19 +541,6 @@ func (s *Server) createRateCardRevision(r *http.Request, _ access.Principal) (ac
 	if !exists {
 		return access.Reply{}, access.Fail(http.StatusNotFound, "rate_card_not_found", "No such rate card.")
 	}
-	markup, err := normalizeDecimal(*input.Markup)
-	if err != nil {
-		return access.Reply{}, access.Invalid("markup", "Use a non-negative decimal.")
-	}
-	var currency string
-	if err = tx.QueryRow(r.Context(),
-		"SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton), 'USD')").Scan(&currency); err != nil {
-		return access.Reply{}, err
-	}
-	prices, err := cardPrices(r.Context(), tx, input.Prices, currency, s.VendorKind)
-	if err != nil {
-		return access.Reply{}, err
-	}
 	effectiveAt := time.Now().UTC()
 	if input.EffectiveAt != nil {
 		effectiveAt = input.EffectiveAt.UTC()
@@ -580,7 +549,12 @@ func (s *Server) createRateCardRevision(r *http.Request, _ access.Principal) (ac
 				"Choose an effective time now or in the future.")
 		}
 	}
-	revision, err := createCardRevision(r.Context(), tx, principal.UserID(), cardID, markup, effectiveAt, prices)
+	var currency string
+	if err = tx.QueryRow(r.Context(),
+		"SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton), 'USD')").Scan(&currency); err != nil {
+		return access.Reply{}, err
+	}
+	revision, err := CreateCardRevision(r.Context(), tx, principal.UserID(), cardID, *input.Markup, effectiveAt, input.Prices, currency, s.VendorKind)
 	if err != nil {
 		return access.Reply{}, err
 	}

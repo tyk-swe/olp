@@ -86,18 +86,5 @@ var endUserSnapshotsSQL = reconcileCostWindowsSQL(costOwnerEndUser, true, `accou
 )`)
 
 func endUserSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time) ([]CostSnapshot, error) {
-	rows, err := conn.Query(ctx, endUserSnapshotsSQL, now, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var snapshots []CostSnapshot
-	for rows.Next() {
-		snapshot, err := scanSnapshots(rows)
-		if err != nil {
-			return nil, err
-		}
-		snapshots = append(snapshots, snapshot...)
-	}
-	return snapshots, rows.Err()
+	return querySnapshots(ctx, conn, endUserSnapshotsSQL, now, nil)
 }

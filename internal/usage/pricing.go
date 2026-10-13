@@ -322,6 +322,26 @@ func priceJSON(value any) (any, error) {
 	return string(data), nil
 }
 
+func unmarshalPriceComponents(p *Price, toolCalls, tiers, windows *string, label string) error {
+	if toolCalls != nil {
+		if err := json.Unmarshal([]byte(*toolCalls), &p.ToolCalls); err != nil {
+			return fmt.Errorf("stored %s tool fees are invalid", label)
+		}
+	}
+	if tiers != nil {
+		if err := json.Unmarshal([]byte(*tiers), &p.Tiers); err != nil {
+			return fmt.Errorf("stored %s tiers are invalid", label)
+		}
+	}
+	if windows != nil {
+		p.Windows = &PriceWindows{}
+		if err := json.Unmarshal([]byte(*windows), p.Windows); err != nil {
+			return fmt.Errorf("stored %s windows are invalid", label)
+		}
+	}
+	return nil
+}
+
 // validatePrices checks one revision as a whole and returns the normalized
 // rates plus the revision currency.
 func validatePrices(prices []Price, vendorKind func(vendor string) (string, bool)) ([]Price, string, error) {
@@ -712,21 +732,8 @@ func ListRevisions(ctx context.Context, q access.Queryer, beforeRevision *int, l
 			&price.UnitPrice, &currency); err != nil {
 			return nil, nil, fmt.Errorf("list pricing revisions: %w", err)
 		}
-		if toolCalls != nil {
-			if err = json.Unmarshal([]byte(*toolCalls), &price.ToolCalls); err != nil {
-				return nil, nil, errors.New("stored tool call fees are invalid")
-			}
-		}
-		if tiers != nil {
-			if err = json.Unmarshal([]byte(*tiers), &price.Tiers); err != nil {
-				return nil, nil, errors.New("stored pricing tiers are invalid")
-			}
-		}
-		if windows != nil {
-			price.Windows = &PriceWindows{}
-			if err = json.Unmarshal([]byte(*windows), price.Windows); err != nil {
-				return nil, nil, errors.New("stored pricing windows are invalid")
-			}
+		if err = unmarshalPriceComponents(&price, toolCalls, tiers, windows, "pricing"); err != nil {
+			return nil, nil, err
 		}
 		if len(items) == 0 || items[len(items)-1].ID != revision.ID {
 			revision.EffectiveAt = revision.EffectiveAt.UTC()

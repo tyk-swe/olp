@@ -26,17 +26,9 @@
   import { rateCardKeys } from '$lib/features/usage/discountKeys';
   import PriceFields from './PriceFields.svelte';
   import {
-    decimalText,
-    optionalDecimal,
-    tierRows,
-    toolFeeRows,
-    windowsDraft
-  } from './pricingValidation';
-  import {
-    rateFieldPairs,
-    type TierRow,
-    type ToolFeeRow,
-    type WindowPeriodRow
+    emptyPriceFields,
+    priceEntryFields,
+    type PriceFieldValues
   } from './priceEntry';
   import { operationKinds } from './history/api';
 
@@ -61,55 +53,18 @@
   let markup = $state('');
   let effectiveAt = $state('');
   let publishing = $state(false);
-  type PriceRow = {
+  type PriceRow = PriceFieldValues & {
     providerKind: string;
     vendorId: string;
     model: string;
     operation: string;
-    inputPrice: string;
-    cachedInputPrice: string;
-    cacheWritePrice: string;
-    cacheWrite5mPrice: string;
-    cacheWrite1hPrice: string;
-    outputPrice: string;
-    unitPrice: string;
-    audioInputPrice: string;
-    cachedAudioInputPrice: string;
-    audioOutputPrice: string;
-    imageInputPrice: string;
-    cachedImageInputPrice: string;
-    imageOutputPrice: string;
-    perRequestPrice: string;
-    batchMultiplier: string;
-    toolFees: ToolFeeRow[];
-    tiers: TierRow[];
-    windowZone: string;
-    windowPeriods: WindowPeriodRow[];
   };
   const emptyRow = (): PriceRow => ({
     providerKind: providerKinds.data?.[0]?.kind ?? '',
     vendorId: '',
     model: '',
     operation: 'generation',
-    inputPrice: '',
-    cachedInputPrice: '',
-    cacheWritePrice: '',
-    cacheWrite5mPrice: '',
-    cacheWrite1hPrice: '',
-    outputPrice: '',
-    unitPrice: '',
-    audioInputPrice: '',
-    cachedAudioInputPrice: '',
-    audioOutputPrice: '',
-    imageInputPrice: '',
-    cachedImageInputPrice: '',
-    imageOutputPrice: '',
-    perRequestPrice: '',
-    batchMultiplier: '',
-    toolFees: [],
-    tiers: [],
-    windowZone: '',
-    windowPeriods: []
+    ...emptyPriceFields()
   });
   let rows = $state<PriceRow[]>([]);
 
@@ -166,7 +121,7 @@
       await createRateCard(submission.input, submission.requestId);
       createIntent.reset();
       notice = 'Rate card created. Publish a revision to charge with it.';
-      await queryClient.invalidateQueries({ queryKey: ['rate-cards'] });
+      await queryClient.invalidateQueries({ queryKey: rateCardKeys.all });
     } catch (problem) {
       error = errorMessage(problem);
     } finally {
@@ -176,40 +131,13 @@
 
   function rowDraft(row: PriceRow): CardPriceDraft | null {
     if (!row.providerKind || !row.model.trim()) return null;
-    const price: CardPriceDraft = {
+    return {
       provider_kind: row.providerKind as CardPriceDraft['provider_kind'],
       vendor_id: row.vendorId || null,
       model: row.model.trim(),
       operation: row.operation as CardPriceDraft['operation'],
-      input_per_million: optionalDecimal(row.inputPrice),
-      cached_input_per_million: optionalDecimal(row.cachedInputPrice),
-      cache_write_input_per_million: optionalDecimal(row.cacheWritePrice),
-      cache_write_5m_input_per_million: optionalDecimal(row.cacheWrite5mPrice),
-      cache_write_1h_input_per_million: optionalDecimal(row.cacheWrite1hPrice),
-      output_per_million: optionalDecimal(row.outputPrice),
-      unit_price: optionalDecimal(row.unitPrice),
-      audio_input_per_million: optionalDecimal(row.audioInputPrice),
-      cached_audio_input_per_million: optionalDecimal(
-        row.cachedAudioInputPrice
-      ),
-      audio_output_per_million: optionalDecimal(row.audioOutputPrice),
-      image_input_per_million: optionalDecimal(row.imageInputPrice),
-      cached_image_input_per_million: optionalDecimal(
-        row.cachedImageInputPrice
-      ),
-      image_output_per_million: optionalDecimal(row.imageOutputPrice),
-      per_request: optionalDecimal(row.perRequestPrice),
-      batch_multiplier: optionalDecimal(row.batchMultiplier),
-      tool_calls: toolFeeRows(row.toolFees),
-      tiers: tierRows(
-        row.tiers,
-        rateFieldPairs(row)
-          .filter(([, value]) => decimalText(value) != null)
-          .map(([key]) => key)
-      ),
-      windows: windowsDraft(row.windowZone, row.windowPeriods)
+      ...priceEntryFields(row)
     };
-    return price;
   }
 
   async function publishRevision(event: SubmitEvent) {
@@ -242,7 +170,7 @@
       publishCardId = '';
       rows = [];
       markup = '';
-      await queryClient.invalidateQueries({ queryKey: ['rate-cards'] });
+      await queryClient.invalidateQueries({ queryKey: rateCardKeys.all });
     } catch (problem) {
       error = errorMessage(problem);
     } finally {

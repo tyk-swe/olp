@@ -82,21 +82,16 @@ func (s *Server) costReservation(x *execution, authority access.Authority) costR
 // an unpinned request keeps the cost bound, as accounting will charge it the
 // same amount it costs.
 func (s *Server) routeChargeBound(x *execution) usage.Cost {
-	var bound usage.Cost
-	attempts := x.attempts
-	if retryDispatches(x.route) > 1 {
-		attempts = slices.Clone(attempts)
-		slices.SortStableFunc(attempts, func(a, b runtime.Attempt) int {
-			return x.attemptChargeBound(b, x.attemptCostBound(b)).Cmp(x.attemptChargeBound(a, x.attemptCostBound(a)))
-		})
-	}
-	s.walkDispatchable(x, attempts, func(attempt runtime.Attempt) {
-		bound = bound.Add(x.attemptChargeBound(attempt, x.attemptCostBound(attempt)))
+	return s.routeBound(x, func(attempt runtime.Attempt) usage.Cost {
+		return x.attemptChargeBound(attempt, x.attemptCostBound(attempt))
 	})
-	return bound
 }
 
 func (s *Server) routeCostBound(x *execution) usage.Cost {
+	return s.routeBound(x, x.attemptCostBound)
+}
+
+func (s *Server) routeBound(x *execution, boundOf func(runtime.Attempt) usage.Cost) usage.Cost {
 	var bound usage.Cost
 	attempts := x.attempts
 	if retryDispatches(x.route) > 1 {
@@ -105,12 +100,12 @@ func (s *Server) routeCostBound(x *execution) usage.Cost {
 		// Price the dearest possible dispatches first to cover either path.
 		attempts = slices.Clone(attempts)
 		slices.SortStableFunc(attempts, func(a, b runtime.Attempt) int {
-			return x.attemptCostBound(b).Cmp(x.attemptCostBound(a))
+			return boundOf(b).Cmp(boundOf(a))
 		})
 	}
 	s.walkDispatchable(x, attempts, func(attempt runtime.Attempt) {
 		// Each visit is a dispatch that may be billed on its own.
-		bound = bound.Add(x.attemptCostBound(attempt))
+		bound = bound.Add(boundOf(attempt))
 	})
 	return bound
 }
@@ -213,21 +208,18 @@ func (x *execution) attemptChargeBound(attempt runtime.Attempt, costBound usage.
 		return costBound
 	}
 	if x.media != nil {
-		if x.media.Op != media.OpVideoCreate {
+		u, ok := videoCreateUsage(x.media)
+		if !ok {
 			return costBound
-		}
-		seconds := "4"
-		if x.media.Seconds != nil {
-			seconds = *x.media.Seconds
 		}
 		var priced *usage.Cost
 		if attempt.Price != nil {
-			if _, ok := attempt.Price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, x.request.startedAt, true, attempt.Discount); ok {
+			if _, ok := attempt.Price.Cost(u, x.request.startedAt, true, attempt.Discount); ok {
 				c := costBound
 				priced = &c
 			}
 		}
-		bound, _ := rev.Charge(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, x.request.startedAt, true, priced,
+		bound, _ := rev.Charge(u, x.request.startedAt, true, priced,
 			provider.Kind, provider.VendorID, attempt.UpstreamModel, x.operationName())
 		return bound
 	}
@@ -263,14 +255,11 @@ func (x *execution) targetCostBound(provider runtime.Provider, target runtime.Ta
 		return usage.Cost{}, true
 	}
 	if x.media != nil {
-		if x.media.Op != media.OpVideoCreate {
+		u, ok := videoCreateUsage(x.media)
+		if !ok {
 			return usage.Cost{}, false
 		}
-		seconds := "4"
-		if x.media.Seconds != nil {
-			seconds = *x.media.Seconds
-		}
-		return price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, x.request.startedAt, true, discount)
+		return price.Cost(u, x.request.startedAt, true, discount)
 	}
 	if x.parsed == nil && x.unary == nil {
 		input, reply := max(resourceEstimate, x.estimate), int64(0)
@@ -284,6 +273,17 @@ func (x *execution) targetCostBound(provider runtime.Provider, target runtime.Ta
 		return usage.Cost{}, false
 	}
 	return price.CostBound(admitted.input, admitted.reply, admitted.reply > 0, x.request.startedAt, discount)
+}
+
+func videoCreateUsage(m *media.Request) (usage.AttemptUsage, bool) {
+	if m == nil || m.Op != media.OpVideoCreate {
+		return usage.AttemptUsage{}, false
+	}
+	seconds := "4"
+	if m.Seconds != nil {
+		seconds = *m.Seconds
+	}
+	return usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, true
 }
 
 // committed reports whether the attempt's provider settled under provisioned

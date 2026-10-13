@@ -49,17 +49,10 @@ func scanDiscount(row interface{ Scan(...any) error }) (Discount, error) {
 	return d, err
 }
 
-// normalizeDiscount applies the same scoping rules prices do: a known
+// NormalizeDiscount applies the same scoping rules prices do: a known
 // connector kind, a vendor that matches it, a provider of the declared kind,
 // and plugin providers priced only at their own scope.
-// NormalizeDiscount applies the discount validation rules, resolving the
-// vendor catalogue and provider reference inside the caller's transaction.
 func NormalizeDiscount(ctx context.Context, tx pgx.Tx, input DiscountInput,
-	vendorKind func(vendor string) (string, bool)) (Discount, error) {
-	return normalizeDiscount(ctx, tx, input, vendorKind)
-}
-
-func normalizeDiscount(ctx context.Context, tx pgx.Tx, input DiscountInput,
 	vendorKind func(vendor string) (string, bool)) (Discount, error) {
 	var d Discount
 	d.ProviderKind = strings.TrimSpace(input.ProviderKind)
@@ -179,7 +172,7 @@ func (s *Server) createPricingDiscount(r *http.Request, _ access.Principal) (acc
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
-	discount, err := normalizeDiscount(r.Context(), tx, input, s.VendorKind)
+	discount, err := NormalizeDiscount(r.Context(), tx, input, s.VendorKind)
 	if err != nil {
 		return access.Reply{}, err
 	}

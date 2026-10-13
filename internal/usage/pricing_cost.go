@@ -199,25 +199,50 @@ type priceRates struct {
 	windows    []parsedWindow
 }
 
-func parseRates(p *Price) *priceRates {
-	r := &priceRates{valid: true}
-	fail := func() *priceRates { return &priceRates{} }
+func parseRateSet(dst *rateSet, input, cached, cacheWrite, cacheWrite5m, cacheWrite1h, output,
+	audioInput, cachedAudioInput, audioOutput, imageInput, cachedImageInput, imageOutput *string) bool {
 	for _, field := range [...]struct {
 		text *string
 		into **big.Int
 	}{
-		{p.InputPerMillion, &r.input},
-		{p.CachedInputPerMillion, &r.cached},
-		{p.CacheWriteInputPerMillion, &r.cacheWrite},
-		{p.CacheWrite5MInputPerMillion, &r.cacheWrite5m},
-		{p.CacheWrite1HInputPerMillion, &r.cacheWrite1h},
-		{p.OutputPerMillion, &r.output},
-		{p.AudioInputPerMillion, &r.audioInput},
-		{p.CachedAudioInputPerMillion, &r.cachedAudioInput},
-		{p.AudioOutputPerMillion, &r.audioOutput},
-		{p.ImageInputPerMillion, &r.imageInput},
-		{p.CachedImageInputPerMillion, &r.cachedImageInput},
-		{p.ImageOutputPerMillion, &r.imageOutput},
+		{input, &dst.input},
+		{cached, &dst.cached},
+		{cacheWrite, &dst.cacheWrite},
+		{cacheWrite5m, &dst.cacheWrite5m},
+		{cacheWrite1h, &dst.cacheWrite1h},
+		{output, &dst.output},
+		{audioInput, &dst.audioInput},
+		{cachedAudioInput, &dst.cachedAudioInput},
+		{audioOutput, &dst.audioOutput},
+		{imageInput, &dst.imageInput},
+		{cachedImageInput, &dst.cachedImageInput},
+		{imageOutput, &dst.imageOutput},
+	} {
+		if field.text == nil {
+			continue
+		}
+		scaled, ok := scaledDecimal(*field.text, costDigits)
+		if !ok {
+			return false
+		}
+		*field.into = scaled
+	}
+	return true
+}
+
+func parseRates(p *Price) *priceRates {
+	r := &priceRates{valid: true}
+	fail := func() *priceRates { return &priceRates{} }
+	if !parseRateSet(&r.rateSet, p.InputPerMillion, p.CachedInputPerMillion, p.CacheWriteInputPerMillion,
+		p.CacheWrite5MInputPerMillion, p.CacheWrite1HInputPerMillion, p.OutputPerMillion,
+		p.AudioInputPerMillion, p.CachedAudioInputPerMillion, p.AudioOutputPerMillion,
+		p.ImageInputPerMillion, p.CachedImageInputPerMillion, p.ImageOutputPerMillion) {
+		return fail()
+	}
+	for _, field := range [...]struct {
+		text *string
+		into **big.Int
+	}{
 		{p.UnitPrice, &r.unit},
 		{p.PerRequest, &r.perRequest},
 		{p.BatchMultiplier, &r.batch},
@@ -243,31 +268,11 @@ func parseRates(p *Price) *priceRates {
 	}
 	for _, tier := range p.Tiers {
 		parsed := parsedTier{above: tier.AboveInputTokens}
-		for _, field := range [...]struct {
-			text *string
-			into **big.Int
-		}{
-			{tier.InputPerMillion, &parsed.rates.input},
-			{tier.CachedInputPerMillion, &parsed.rates.cached},
-			{tier.CacheWriteInputPerMillion, &parsed.rates.cacheWrite},
-			{tier.CacheWrite5MInputPerMillion, &parsed.rates.cacheWrite5m},
-			{tier.CacheWrite1HInputPerMillion, &parsed.rates.cacheWrite1h},
-			{tier.OutputPerMillion, &parsed.rates.output},
-			{tier.AudioInputPerMillion, &parsed.rates.audioInput},
-			{tier.CachedAudioInputPerMillion, &parsed.rates.cachedAudioInput},
-			{tier.AudioOutputPerMillion, &parsed.rates.audioOutput},
-			{tier.ImageInputPerMillion, &parsed.rates.imageInput},
-			{tier.CachedImageInputPerMillion, &parsed.rates.cachedImageInput},
-			{tier.ImageOutputPerMillion, &parsed.rates.imageOutput},
-		} {
-			if field.text == nil {
-				continue
-			}
-			scaled, ok := scaledDecimal(*field.text, costDigits)
-			if !ok {
-				return fail()
-			}
-			*field.into = scaled
+		if !parseRateSet(&parsed.rates, tier.InputPerMillion, tier.CachedInputPerMillion, tier.CacheWriteInputPerMillion,
+			tier.CacheWrite5MInputPerMillion, tier.CacheWrite1HInputPerMillion, tier.OutputPerMillion,
+			tier.AudioInputPerMillion, tier.CachedAudioInputPerMillion, tier.AudioOutputPerMillion,
+			tier.ImageInputPerMillion, tier.CachedImageInputPerMillion, tier.ImageOutputPerMillion) {
+			return fail()
 		}
 		r.tiers = append(r.tiers, parsed)
 	}

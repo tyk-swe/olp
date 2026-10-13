@@ -437,35 +437,41 @@ func (d *Document) canonicalize() {
 		if d.Pricing.Prices == nil {
 			d.Pricing.Prices = []PriceEntry{}
 		}
-		for i := range d.Pricing.Prices {
-			p := &d.Pricing.Prices[i]
-			p.Model = strings.TrimSpace(p.Model)
-			p.Currency = strings.ToUpper(strings.TrimSpace(p.Currency))
-			if p.VendorID != nil {
-				v := strings.TrimSpace(*p.VendorID)
-				p.VendorID = &v
-			}
-		}
-		slices.SortFunc(d.Pricing.Prices, func(a, b PriceEntry) int {
-			key := func(p *PriceEntry) string {
-				return p.ProviderKind + "\x00" + lower(p.Provider) + "\x00" + lower(p.VendorID) + "\x00" + p.Model + "\x00" + p.Operation
-			}
-			return strings.Compare(key(&a), key(&b))
-		})
+		normalizePriceEntries(d.Pricing.Prices, "")
 	}
 	slices.SortFunc(d.Discounts, func(a, b DiscountEntry) int {
 		return strings.Compare(discountScope(a.ProviderKind, a.Provider, a.VendorID), discountScope(b.ProviderKind, b.Provider, b.VendorID))
 	})
 	for i := range d.RateCards {
-		slices.SortFunc(d.RateCards[i].Prices, func(a, b PriceEntry) int {
-			key := func(p *PriceEntry) string {
-				return p.ProviderKind + "\x00" + lower(p.VendorID) + "\x00" + p.Model + "\x00" + p.Operation
-			}
-			return strings.Compare(key(&a), key(&b))
-		})
+		sortPriceEntries(d.RateCards[i].Prices)
 	}
 	slices.SortFunc(d.RateCards, func(a, b RateCardEntry) int {
 		return strings.Compare(cardKey(a.Owner), cardKey(b.Owner))
+	})
+}
+
+func normalizePriceEntries(prices []PriceEntry, defaultCurrency string) {
+	for i := range prices {
+		p := &prices[i]
+		p.Model = strings.TrimSpace(p.Model)
+		p.Currency = strings.ToUpper(strings.TrimSpace(p.Currency))
+		if p.Currency == "" {
+			p.Currency = defaultCurrency
+		}
+		if p.VendorID != nil {
+			v := strings.TrimSpace(*p.VendorID)
+			p.VendorID = &v
+		}
+	}
+	sortPriceEntries(prices)
+}
+
+func sortPriceEntries(prices []PriceEntry) {
+	slices.SortFunc(prices, func(a, b PriceEntry) int {
+		key := func(p *PriceEntry) string {
+			return p.ProviderKind + "\x00" + lower(p.Provider) + "\x00" + lower(p.VendorID) + "\x00" + p.Model + "\x00" + p.Operation
+		}
+		return strings.Compare(key(&a), key(&b))
 	})
 }
 

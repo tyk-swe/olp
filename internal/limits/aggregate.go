@@ -157,20 +157,7 @@ func ReconcileAggregateBudget(ctx context.Context, tx pgx.Tx, level, subject str
 }
 
 func aggregateSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time) ([]CostSnapshot, error) {
-	rows, err := conn.Query(ctx, aggregateSnapshotsSQL, now, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var snapshots []CostSnapshot
-	for rows.Next() {
-		s, err := scanSnapshots(rows)
-		if err != nil {
-			return nil, err
-		}
-		snapshots = append(snapshots, s...)
-	}
-	return snapshots, rows.Err()
+	return querySnapshots(ctx, conn, aggregateSnapshotsSQL, now, nil)
 }
 
 // AggregateBudgetSQL reports authoritative live and retained spend. The project

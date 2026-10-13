@@ -287,13 +287,17 @@ func inForceCards(ctx context.Context, q access.Queryer) (map[string]RateCardEnt
 		return nil, nil, err
 	}
 	rows.Close()
+	revisionIDs := make([]string, 0, len(load))
+	for _, hold := range load {
+		revisionIDs = append(revisionIDs, hold.revisionID)
+	}
+	pricesByRevision, err := usage.LoadCardPricesByRevisions(ctx, q, revisionIDs)
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, hold := range load {
 		entry := entries[hold.key]
-		prices, err := usage.LoadCardPricesForExport(ctx, q, hold.revisionID)
-		if err != nil {
-			return nil, nil, err
-		}
-		for _, price := range prices {
+		for _, price := range pricesByRevision[hold.revisionID] {
 			entry.Prices = append(entry.Prices, priceEntryFromUsage(price))
 		}
 		entries[hold.key] = entry
@@ -322,24 +326,9 @@ func cardEntryEqual(desired, current RateCardEntry, currency string) bool {
 	normalize := func(prices []PriceEntry) []PriceEntry {
 		out := slices.Clone(prices)
 		for i := range out {
-			price := &out[i]
-			price.Model = strings.TrimSpace(price.Model)
-			price.Currency = strings.ToUpper(strings.TrimSpace(price.Currency))
-			if price.Currency == "" {
-				price.Currency = currency
-			}
-			if price.VendorID != nil {
-				v := strings.TrimSpace(*price.VendorID)
-				price.VendorID = &v
-			}
-			price.Provider = nil
+			out[i].Provider = nil
 		}
-		slices.SortFunc(out, func(a, b PriceEntry) int {
-			key := func(p *PriceEntry) string {
-				return p.ProviderKind + "\x00" + lower(p.VendorID) + "\x00" + p.Model + "\x00" + p.Operation
-			}
-			return strings.Compare(key(&a), key(&b))
-		})
+		normalizePriceEntries(out, currency)
 		return out
 	}
 	want := normalize(desired.Prices)
