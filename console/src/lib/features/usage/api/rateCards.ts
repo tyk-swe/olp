@@ -18,12 +18,15 @@ export async function listRateCards(
   return unwrapPage({ data, error, response });
 }
 
-export async function createRateCard(owner: {
-  kind: 'installation' | 'organization' | 'project';
-  id?: string | null;
-}): Promise<RateCard> {
+export async function createRateCard(
+  owner: {
+    kind: 'installation' | 'organization' | 'project';
+    id?: string | null;
+  },
+  requestId: string
+): Promise<RateCard> {
   const { data, error, response } = await apiClient.POST('/api/v1/rate-cards', {
-    params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+    params: { header: { 'Idempotency-Key': requestId } },
     body: { owner }
   });
   return unwrap({ data, error, response });

@@ -40,6 +40,7 @@
   } from './priceEntry';
   import { operationKinds } from './history/api';
 
+  const createIntent = useMutationIntent();
   const publishIntent = useMutationIntent();
   const queryClient = useQueryClient();
   const access = useRole();
@@ -86,7 +87,7 @@
     windowPeriods: WindowPeriodRow[];
   };
   const emptyRow = (): PriceRow => ({
-    providerKind: '',
+    providerKind: providerKinds.data?.[0]?.kind ?? '',
     vendorId: '',
     model: '',
     operation: 'generation',
@@ -159,9 +160,11 @@
       error = `Choose the ${ownerKind} this card belongs to.`;
       return;
     }
+    const submission = createIntent.prepare(owner);
     creating = true;
     try {
-      await createRateCard(owner);
+      await createRateCard(submission.input, submission.requestId);
+      createIntent.reset();
       notice = 'Rate card created. Publish a revision to charge with it.';
       await queryClient.invalidateQueries({ queryKey: ['rate-cards'] });
     } catch (problem) {
@@ -217,18 +220,18 @@
       error = 'A revision needs a markup.';
       return;
     }
-    const prices = rows
-      .map(rowDraft)
-      .filter((price): price is CardPriceDraft => price != null);
-    const submission = publishIntent.prepare({
-      effective_at: effectiveAt
-        ? new Date(effectiveAt).toISOString()
-        : undefined,
-      markup: markup.trim(),
-      prices: prices.length ? prices : undefined
-    });
     publishing = true;
     try {
+      const prices = rows
+        .map(rowDraft)
+        .filter((price): price is CardPriceDraft => price != null);
+      const submission = publishIntent.prepare({
+        effective_at: effectiveAt
+          ? new Date(effectiveAt).toISOString()
+          : undefined,
+        markup: markup.trim(),
+        prices: prices.length ? prices : undefined
+      });
       await createRateCardRevision(
         publishCardId,
         submission.input,

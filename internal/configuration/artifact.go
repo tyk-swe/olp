@@ -39,11 +39,11 @@ type Document struct {
 	Routes             []RouteEntry          `json:"routes"`
 	Templates          []TemplateEntry       `json:"templates,omitempty"`
 	Pricing            *PricingEntry         `json:"pricing"`
-	// Discounts are the scopes the document prices under; omitted in-force
-	// scopes are ended with a multiplier-one discount on apply.
+	// Discounts are the scopes the document prices under; scopes the document
+	// omits are left untouched on apply.
 	Discounts []DiscountEntry `json:"discounts,omitempty"`
-	// RateCards are each owner's charge terms; an omitted card gets a neutral
-	// revision on apply rather than being removed.
+	// RateCards are each owner's charge terms; cards the document omits are
+	// left untouched on apply.
 	RateCards []RateCardEntry `json:"rate_cards,omitempty"`
 }
 
@@ -388,6 +388,12 @@ func (d *Document) canonicalize() {
 	}
 
 	slices.SortFunc(d.WorkloadIssuers, func(a, b WorkloadIssuerEntry) int { return strings.Compare(a.Issuer, b.Issuer) })
+	slices.SortFunc(d.Organizations, func(a, b OrganizationEntry) int {
+		if c := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
 	if d.Projects == nil {
 		d.Projects = []ProjectEntry{}
 	}
@@ -447,6 +453,20 @@ func (d *Document) canonicalize() {
 			return strings.Compare(key(&a), key(&b))
 		})
 	}
+	slices.SortFunc(d.Discounts, func(a, b DiscountEntry) int {
+		return strings.Compare(discountScope(a.ProviderKind, a.Provider, a.VendorID), discountScope(b.ProviderKind, b.Provider, b.VendorID))
+	})
+	for i := range d.RateCards {
+		slices.SortFunc(d.RateCards[i].Prices, func(a, b PriceEntry) int {
+			key := func(p *PriceEntry) string {
+				return p.ProviderKind + "\x00" + lower(p.VendorID) + "\x00" + p.Model + "\x00" + p.Operation
+			}
+			return strings.Compare(key(&a), key(&b))
+		})
+	}
+	slices.SortFunc(d.RateCards, func(a, b RateCardEntry) int {
+		return strings.Compare(cardKey(a.Owner), cardKey(b.Owner))
+	})
 }
 
 func Digest(d *Document) (string, error) {

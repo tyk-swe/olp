@@ -138,6 +138,8 @@ func (s *Server) callClassifier(ctx context.Context, parent *execution, c *runti
 		authority:      parent.authority,
 		cardPinned:     parent.cardPinned,
 		cardRevisionID: parent.cardRevisionID,
+		cardRev:        parent.cardRev,
+		routingInputs:  parent.routingInputs,
 		affinity:       []byte(parent.keyID),
 		origin:         usage.OriginClassifier,
 		parent:         parent.request.accountingID(),

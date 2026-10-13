@@ -29,26 +29,22 @@ func validateBudgetGroup(input *budgetGroupInput) error {
 		return err
 	}
 	input.Name = strings.TrimSpace(input.Name)
-	for field, value := range map[string]*string{"daily_cost_limit": input.DailyCostLimit, "monthly_cost_limit": input.MonthlyCostLimit, "weekly_cost_limit": input.WeeklyCostLimit} {
-		if value != nil {
-			amount := strings.TrimSpace(*value)
-			if !decimal.MatchString(amount) || !strings.ContainsAny(amount, "123456789") {
-				return Invalid(field, "Use a positive decimal amount with at most 12 integer and 12 fractional digits.")
-			}
-			*value = amount
-		}
-	}
-	if input.CostBasis != "" && input.CostBasis != "cost" && input.CostBasis != "charge" {
-		return Invalid("cost_basis", `The cost basis must be "cost" or "charge".`)
-	}
-	if input.CostBasis == "" {
-		input.CostBasis = "cost"
-	}
 	if err := validTemplateName(input.LimitTemplate); err != nil {
 		return err
 	}
-	if err := (AdmissionLimits{RequestsPerMinute: input.RequestsPerMinute, TokensPerMinute: input.TokensPerMinute, MaxConcurrency: input.MaxConcurrency}).Validate(); err != nil {
+	if err := (AdmissionLimits{
+		RequestsPerMinute: input.RequestsPerMinute,
+		TokensPerMinute:   input.TokensPerMinute,
+		MaxConcurrency:    input.MaxConcurrency,
+		DailyCostLimit:    input.DailyCostLimit,
+		MonthlyCostLimit:  input.MonthlyCostLimit,
+		WeeklyCostLimit:   input.WeeklyCostLimit,
+		CostBasis:         input.CostBasis,
+	}).Validate(); err != nil {
 		return err
+	}
+	if input.CostBasis == "" {
+		input.CostBasis = "cost"
 	}
 	if input.LimitTemplate == nil && input.RequestsPerMinute == nil && input.TokensPerMinute == nil && input.MaxConcurrency == nil && input.DailyCostLimit == nil && input.MonthlyCostLimit == nil && input.WeeklyCostLimit == nil {
 		return Invalid("daily_cost_limit", "Set at least one limit or reference a template.")

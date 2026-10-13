@@ -718,3 +718,70 @@ func TestApplySlotPositionsKeepsExportedPositionsUnique(t *testing.T) {
 		})
 	}
 }
+
+func TestChargeCanonicalizationValidationAndInheritedCurrencyEquality(t *testing.T) {
+	first := testDocument()
+	first.Pricing.EffectiveAt = "2026-10-01T00:00:00Z"
+	first.Organizations = []OrganizationEntry{{Name: "Beta"}, {Name: "Alpha"}}
+	first.Discounts = []DiscountEntry{
+		{ProviderKind: "openai_compatible", Provider: ptr("acme"), Multiplier: "0.9"},
+		{ProviderKind: "openai", Multiplier: "0.8"},
+	}
+	first.RateCards = []RateCardEntry{
+		{Owner: CardOwnerEntry{Kind: "project", Project: ptr("Edge")}, Markup: "1.2"},
+		{Owner: CardOwnerEntry{Kind: "installation"}, Markup: "1.1", Prices: []PriceEntry{
+			{ProviderKind: "openai_compatible", Model: "gpt-b", Operation: "generation", InputPerMillion: ptr("2")},
+			{ProviderKind: "openai_compatible", Model: "gpt-a", Operation: "generation", InputPerMillion: ptr("1")},
+		}},
+	}
+	second := testDocument()
+	second.Pricing.EffectiveAt = first.Pricing.EffectiveAt
+	second.Organizations = []OrganizationEntry{{Name: "Alpha"}, {Name: "Beta"}}
+	second.Discounts = []DiscountEntry{
+		{ProviderKind: "openai", Multiplier: "0.8"},
+		{ProviderKind: "openai_compatible", Provider: ptr("acme"), Multiplier: "0.9"},
+	}
+	second.RateCards = []RateCardEntry{
+		{Owner: CardOwnerEntry{Kind: "installation"}, Markup: "1.1", Prices: []PriceEntry{
+			{ProviderKind: "openai_compatible", Model: "gpt-a", Operation: "generation", InputPerMillion: ptr("1")},
+			{ProviderKind: "openai_compatible", Model: "gpt-b", Operation: "generation", InputPerMillion: ptr("2")},
+		}},
+		{Owner: CardOwnerEntry{Kind: "project", Project: ptr("Edge")}, Markup: "1.2"},
+	}
+	d1, err := Digest(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2, err := Digest(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d1 != d2 {
+		t.Fatalf("reordered organizations, discounts or rate cards changed digest: %s != %s", d1, d2)
+	}
+
+	desired := RateCardEntry{
+		Owner:  CardOwnerEntry{Kind: "installation"},
+		Markup: "1.5",
+		Prices: []PriceEntry{{ProviderKind: "openai", Model: "gpt-x", Operation: "generation", InputPerMillion: ptr("5")}},
+	}
+	stored := RateCardEntry{
+		Owner:  CardOwnerEntry{Kind: "installation"},
+		Markup: "1.500000000000",
+		Prices: []PriceEntry{{ProviderKind: "openai", Model: "gpt-x", Operation: "generation", InputPerMillion: ptr("5.000000000000"), Currency: "USD"}},
+	}
+	if !cardEntryEqual(desired, stored, "USD") {
+		t.Fatal("inherited currency and padded decimal scale made identical rate cards differ")
+	}
+
+	invalid := testDocument()
+	invalid.RateCards = []RateCardEntry{{
+		Owner:  CardOwnerEntry{Kind: "installation"},
+		Markup: "1.2",
+		Prices: []PriceEntry{{ProviderKind: "openai", Provider: ptr("acme"), Model: "gpt-x", Operation: "generation", InputPerMillion: ptr("1")}},
+	}}
+	var problem *access.Problem
+	if _, err := testServer().validateDocument(t.Context(), mapQueryer{t: t}, invalid); !errors.As(err, &problem) || problem.Field != "rate_cards.0.prices.0.provider" {
+		t.Fatalf("expected rate_cards.0.prices.0.provider error, got %v", err)
+	}
+}

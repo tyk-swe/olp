@@ -60,7 +60,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/rate-cards", s.createRateCard)
 	s.Access.Route(mux, "GET /api/v1/rate-cards/{rate_card_id}", s.getRateCard)
 	s.Access.Route(mux, "GET /api/v1/rate-cards/{rate_card_id}/revisions", s.listRateCardRevisions)
-	s.Access.Route(mux, "POST /api/v1/rate-cards/{rate_card_id}/revisions", s.createRateCardRevision)
+	s.Access.Route(mux, "POST /api/v1/rate-cards/{rate_card_id}/revisions", s.createRateCardRevision, access.MaxBody(1<<20))
 	s.Access.Route(mux, "GET /api/v1/pricing/sources", s.listPricingSources)
 	s.Access.Route(mux, "POST /api/v1/pricing/sources", s.createPricingSource)
 	s.Access.Route(mux, "GET /api/v1/pricing/sources/{pricing_source_id}", s.getPricingSource)

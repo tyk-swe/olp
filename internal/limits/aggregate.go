@@ -120,8 +120,7 @@ func AddAggregateCostDelta(ctx context.Context, tx pgx.Tx, eventID, keyID string
 	return snapshots, nil
 }
 
-var aggregateSnapshotsSQL = `WITH budget_calendar AS MATERIALIZED (SELECT * FROM olp.budget_windows($1::timestamptz)),
-accounts AS (
+var aggregateSnapshotsSQL = reconcileCostWindowsSQL(costOwnerAggregate, true, `accounts AS (
  SELECT a.* FROM olp.aggregate_budget_accounts a
  WHERE $1::timestamptz IS NOT NULL AND ($2::uuid IS NULL OR a.id=$2::uuid)
 ), usage AS (
@@ -133,7 +132,7 @@ accounts AS (
  LEFT JOIN olp.api_keys k ON k.id=f.api_key_id
  LEFT JOIN olp.providers p ON p.id=f.provider_id
  LEFT JOIN olp.routes r ON r.slug=f.route_slug
- WHERE ` + aggregateOwnershipSQL("a", "COALESCE(k.project_id,p.project_id,r.project_id)", "f.api_key_id", "f.route_slug", "f.attribution") + `
+ WHERE `+aggregateOwnershipSQL("a", "COALESCE(k.project_id,p.project_id,r.project_id)", "f.api_key_id", "f.route_slug", "f.attribution")+`
    AND f.observed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND f.observed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
  UNION ALL
  SELECT a.id,h.budget_bucket,COALESCE(h.estimated_cost,0)::numeric,COALESCE(h.charge,0)::numeric,h.unpriced_attempt_count,h.uncharged_attempt_count
@@ -141,45 +140,9 @@ accounts AS (
  LEFT JOIN olp.api_keys k ON k.id=h.api_key_id
  LEFT JOIN olp.providers p ON p.id=h.provider_id
  LEFT JOIN olp.routes r ON r.slug=h.route_slug
- WHERE ` + aggregateOwnershipSQL("a", "COALESCE(k.project_id,p.project_id,r.project_id)", "h.api_key_id", "h.route_slug", "h.attribution") + `
+ WHERE `+aggregateOwnershipSQL("a", "COALESCE(k.project_id,p.project_id,r.project_id)", "h.api_key_id", "h.route_slug", "h.attribution")+`
    AND h.budget_bucket >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND h.budget_bucket < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
-), totals AS (
- SELECT a.id,
-  COALESCE(SUM(u.cost) FILTER (WHERE u.observed_at >= (SELECT daily_start FROM budget_calendar) AND u.observed_at < (SELECT daily_end FROM budget_calendar)),0) AS daily_accrued,
-  COALESCE(SUM(u.cost) FILTER(WHERE u.observed_at >= (SELECT monthly_start FROM budget_calendar) AND u.observed_at < (SELECT monthly_end FROM budget_calendar)),0) AS monthly_accrued,
- COALESCE(SUM(u.cost) FILTER(WHERE u.observed_at >= (SELECT weekly_start FROM budget_calendar) AND u.observed_at < (SELECT weekly_end FROM budget_calendar)),0) AS weekly_accrued,
-  COALESCE(SUM(u.unpriced_attempts) FILTER(WHERE u.observed_at >= (SELECT monthly_start FROM budget_calendar) AND u.observed_at < (SELECT monthly_end FROM budget_calendar)),0)::bigint AS unpriced_attempts,
-  COALESCE(SUM(u.charge) FILTER (WHERE u.observed_at >= (SELECT daily_start FROM budget_calendar) AND u.observed_at < (SELECT daily_end FROM budget_calendar)),0) AS daily_charged,
-  COALESCE(SUM(u.charge) FILTER(WHERE u.observed_at >= (SELECT monthly_start FROM budget_calendar) AND u.observed_at < (SELECT monthly_end FROM budget_calendar)),0) AS monthly_charged,
- COALESCE(SUM(u.charge) FILTER(WHERE u.observed_at >= (SELECT weekly_start FROM budget_calendar) AND u.observed_at < (SELECT weekly_end FROM budget_calendar)),0) AS weekly_charged,
-  COALESCE(SUM(u.uncharged_attempts) FILTER(WHERE u.observed_at >= (SELECT monthly_start FROM budget_calendar) AND u.observed_at < (SELECT monthly_end FROM budget_calendar)),0)::bigint AS uncharged_attempts
- FROM accounts a LEFT JOIN usage u ON u.id=a.id GROUP BY a.id
-), pruned AS (
- DELETE FROM olp.aggregate_cost_windows
- WHERE ($2::uuid IS NULL OR account_id=$2::uuid)
-   AND ((window_kind='day' AND window_id<(SELECT daily_id FROM budget_calendar)) OR (window_kind='month' AND window_id<(SELECT monthly_id FROM budget_calendar)) OR (window_kind='week' AND window_id<(SELECT weekly_id FROM budget_calendar))) RETURNING 1
-), desired AS (
- SELECT id,'day'::text AS window_kind,(SELECT daily_id FROM budget_calendar) AS window_id,daily_accrued AS accrued,0::bigint AS unpriced_attempts,daily_charged AS charged,0::bigint AS uncharged_attempts FROM totals
- UNION ALL
- SELECT id,'month',(SELECT monthly_id FROM budget_calendar),monthly_accrued,unpriced_attempts,monthly_charged,uncharged_attempts FROM totals
- UNION ALL SELECT id,'week',(SELECT weekly_id FROM budget_calendar),weekly_accrued,0,weekly_charged,0 FROM totals
-), reconciled AS (
- INSERT INTO olp.aggregate_cost_windows (account_id,window_kind,window_id,accrued,unpriced_attempts,charged,uncharged_attempts,weekly_complete)
- SELECT id,window_kind,window_id,accrued,unpriced_attempts,charged,uncharged_attempts,true FROM desired
- ON CONFLICT (account_id,window_kind,window_id) DO UPDATE SET weekly_complete=true,
-  accrued=GREATEST(olp.aggregate_cost_windows.accrued,EXCLUDED.accrued),
-  unpriced_attempts=GREATEST(olp.aggregate_cost_windows.unpriced_attempts,EXCLUDED.unpriced_attempts),
-  charged=GREATEST(olp.aggregate_cost_windows.charged,EXCLUDED.charged),
-  uncharged_attempts=GREATEST(olp.aggregate_cost_windows.uncharged_attempts,EXCLUDED.uncharged_attempts)
- RETURNING account_id,window_kind,window_id,accrued,unpriced_attempts,charged,uncharged_attempts
-) SELECT account_id::text,(SELECT daily_id FROM budget_calendar),
- MAX(accrued) FILTER (WHERE window_kind='day')::text,MAX(charged) FILTER (WHERE window_kind='day')::text,(SELECT monthly_id FROM budget_calendar),
- MAX(accrued) FILTER (WHERE window_kind='month')::text,MAX(charged) FILTER (WHERE window_kind='month')::text,
- MAX(unpriced_attempts) FILTER (WHERE window_kind='month')::bigint,
- MAX(uncharged_attempts) FILTER (WHERE window_kind='month')::bigint,
- (SELECT weekly_id FROM budget_calendar),MAX(accrued) FILTER(WHERE window_kind='week')::text,MAX(charged) FILTER(WHERE window_kind='week')::text
- , (SELECT daily_start FROM budget_calendar), (SELECT daily_end FROM budget_calendar), (SELECT monthly_start FROM budget_calendar), (SELECT monthly_end FROM budget_calendar), (SELECT weekly_start FROM budget_calendar), (SELECT weekly_end FROM budget_calendar)
-FROM reconciled GROUP BY account_id ORDER BY account_id`
+)`)
 
 // ReconcileAggregateBudget recomputes one aggregate account's current spend
 // from the usage history tx sees, including a project tx has just placed under

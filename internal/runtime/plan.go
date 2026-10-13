@@ -423,9 +423,12 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 				input := demand.EstimatedInputTokens
 				row.decision.EstimatedInputTokens = &input
 				row.decision.RequestedOutputTokens = demand.MaxOutputTokens
+				if options.EstimateCost && options.WorstCost != nil {
+					row.decision.EstimatedCost = estimatedCost(provider, row.decision.Price, row.attempt.Discount, demand, now, options.WorstCost, target)
+				}
 			}
 		}
-		if reason == "" && policy.MaxCost != nil && options.WorstCost != nil {
+		if reason == "" && policy.MaxCost != nil && options.WorstCost != nil && provider.Commitment == nil {
 			bound, ok := options.WorstCost(provider, target, row.decision.Price, row.attempt.Discount)
 			if !ok || !lessOrEqual(strptr(bound.String()), policy.MaxCost) {
 				reason = "cost_limit_exceeded"

@@ -66,6 +66,9 @@ func (s *Server) costReservation(x *execution, authority access.Authority) costR
 	if !x.costBudgeted(authority) {
 		return costReservation{}
 	}
+	if x.routingInputs == nil && s.Runtime != nil {
+		x.routingInputs = s.Runtime.RoutingInputs()
+	}
 	bound := s.routeCostBound(x)
 	charge := s.routeChargeBound(x)
 	if bound.IsZero() && charge.IsZero() {
@@ -80,7 +83,14 @@ func (s *Server) costReservation(x *execution, authority access.Authority) costR
 // same amount it costs.
 func (s *Server) routeChargeBound(x *execution) usage.Cost {
 	var bound usage.Cost
-	s.walkDispatchable(x, x.attempts, func(attempt runtime.Attempt) {
+	attempts := x.attempts
+	if retryDispatches(x.route) > 1 {
+		attempts = slices.Clone(attempts)
+		slices.SortStableFunc(attempts, func(a, b runtime.Attempt) int {
+			return x.attemptChargeBound(b, x.attemptCostBound(b)).Cmp(x.attemptChargeBound(a, x.attemptCostBound(a)))
+		})
+	}
+	s.walkDispatchable(x, attempts, func(attempt runtime.Attempt) {
 		bound = bound.Add(x.attemptChargeBound(attempt, x.attemptCostBound(attempt)))
 	})
 	return bound
@@ -124,6 +134,9 @@ func (s *Server) reserveFallbackCost(ctx context.Context, x *execution) *Error {
 // A session admits apart from choosing its target, so the hold follows the
 // selection, before the provider is dialled.
 func (s *Server) reserveSessionCost(ctx context.Context, x *execution, authority access.Authority, attempt runtime.Attempt, ttl time.Duration) *Error {
+	if x.routingInputs == nil && s.Runtime != nil {
+		x.routingInputs = s.Runtime.RoutingInputs()
+	}
 	hold := x.attemptCostReservation(authority, attempt)
 	if x.lease == nil || hold.amount == "" {
 		return nil
@@ -169,41 +182,16 @@ func (x *execution) attemptCostBound(attempt runtime.Attempt) usage.Cost {
 		// reserved for it.
 		return usage.Cost{}
 	}
-	if x.media != nil {
-		if x.media.Op != media.OpVideoCreate {
+	var provider runtime.Provider
+	if snapshot := x.snapshot(); snapshot != nil {
+		var ok bool
+		if provider, ok = snapshot.Providers[attempt.ProviderID]; !ok && (x.parsed != nil || x.unary != nil) {
 			return usage.Cost{}
 		}
-		seconds := "4"
-		if x.media.Seconds != nil {
-			seconds = *x.media.Seconds
-		}
-		bound, _ := attempt.Price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, x.request.startedAt, true, attempt.Discount)
-		return bound
-	}
-	if x.parsed == nil && x.unary == nil {
-		// Pinned native requests use the resource input estimate and the
-		// ordinary default reply allowance when no canonical request exists.
-		input, reply := max(resourceEstimate, x.estimate), int64(0)
-		if x.operationName() == "generation" || x.operationName() == "realtime" {
-			reply = estimate.DefaultOutputTokens
-		}
-		bound, _ := attempt.Price.CostBound(input, reply, reply > 0, x.request.startedAt, attempt.Discount)
-		return bound
-	}
-	provider, ok := x.snapshot().Providers[attempt.ProviderID]
-	if !ok {
+	} else if x.parsed != nil || x.unary != nil {
 		return usage.Cost{}
 	}
-	admitted, err := x.attemptEstimate(&provider, attempt.UpstreamModel)
-	if err != nil {
-		return usage.Cost{}
-	}
-	// Only a request with a reply to bound is a generation, whose output is
-	// priced; an embedding or a native operation is priced on its input alone.
-	bound, ok := attempt.Price.CostBound(admitted.input, admitted.reply, admitted.reply > 0, x.request.startedAt, attempt.Discount)
-	if !ok {
-		return usage.Cost{}
-	}
+	bound, _ := x.targetCostBound(provider, runtime.Target{ProviderModel: attempt.UpstreamModel}, attempt.Price, attempt.Discount)
 	return bound
 }
 
@@ -216,13 +204,32 @@ func (x *execution) attemptChargeBound(attempt runtime.Attempt, costBound usage.
 	if x.callerCostExempt() {
 		return usage.Cost{}
 	}
-	rev := x.cardRev
-	if rev == nil || x.media != nil {
+	rev := x.attemptCardRevision(attempt.ProviderID, x.request.startedAt)
+	if rev == nil {
 		return costBound
 	}
 	provider, ok := x.snapshot().Providers[attempt.ProviderID]
 	if !ok {
-		return usage.Cost{}
+		return costBound
+	}
+	if x.media != nil {
+		if x.media.Op != media.OpVideoCreate {
+			return costBound
+		}
+		seconds := "4"
+		if x.media.Seconds != nil {
+			seconds = *x.media.Seconds
+		}
+		var priced *usage.Cost
+		if attempt.Price != nil {
+			if _, ok := attempt.Price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, x.request.startedAt, true, attempt.Discount); ok {
+				c := costBound
+				priced = &c
+			}
+		}
+		bound, _ := rev.Charge(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, x.request.startedAt, true, priced,
+			provider.Kind, provider.VendorID, attempt.UpstreamModel, x.operationName())
+		return bound
 	}
 	var input, reply int64
 	generation := false
@@ -282,9 +289,6 @@ func (x *execution) targetCostBound(provider runtime.Provider, target runtime.Ta
 // committed reports whether the attempt's provider settled under provisioned
 // capacity, whose usage has a price but no marginal cost.
 func (x *execution) committed(providerID string) bool {
-	if x.request.release == nil && x.historicalSnapshot == nil {
-		return false
-	}
 	snapshot := x.snapshot()
 	if snapshot == nil {
 		return false
@@ -374,7 +378,7 @@ func (s *Server) settleAdmission(ctx context.Context, x *execution) {
 }
 
 // settledCharge is what the request's consumers owe from the attempts that
-// reported usage, priced under the card the request pinned exactly as
+// reported usage, priced under the card each attempt resolved exactly as
 // accounting will charge it: an unpriced or uncharged attempt adds nothing.
 // Commitment zeroes a priced cost before the card sees it — a marked-up zero is
 // zero, and a fact with no card charges its zero cost — while an explicit card
@@ -388,22 +392,24 @@ func (s *Server) settledCharge(x *execution) usage.Cost {
 			continue
 		}
 		var cost usage.Cost
+		var costPtr *usage.Cost
 		if fact.Price != nil {
 			if priced, ok := fact.Price.Cost(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), fact.Discount); ok {
 				cost = priced
+				if x.committed(fact.ProviderID) {
+					cost = usage.Cost{}
+				}
+				costPtr = &cost
 			}
 		}
-		if x.committed(fact.ProviderID) {
-			cost = usage.Cost{}
-		}
-		rev := s.factCardRevision(x, fact)
+		rev := fact.cardRev
 		if rev == nil {
 			// No card: the charge is the cost itself.
 			total = total.Add(cost)
 			continue
 		}
 		provider := x.snapshot().Providers[fact.ProviderID]
-		if charge, ok := rev.Charge(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), &cost,
+		if charge, ok := rev.Charge(attemptUsage(fact, operation), fact.StartedAt, attemptSuccessful(fact), costPtr,
 			provider.Kind, provider.VendorID, fact.UpstreamModel, operation); ok {
 			total = total.Add(charge)
 		}
@@ -411,30 +417,28 @@ func (s *Server) settledCharge(x *execution) usage.Cost {
 	return total
 }
 
-// factCardRevision resolves the card a fact charges under: the request's own
-// pin first, else the provider-project card when the inputs are fresh, else
-// no card — which is what accounting records too.
-func (s *Server) factCardRevision(x *execution, fact *AttemptFact) *usage.RoutingCardRevision {
+func (x *execution) attemptCardRevision(providerID string, at time.Time) *usage.RoutingCardRevision {
 	if x.cardPinned {
 		return x.cardRev
 	}
-	// The consumer is the aggregate-ownership project: the provider's, else
-	// the route's — the same precedence accounting applies.
-	var project *string
-	if provider, ok := x.snapshot().Providers[fact.ProviderID]; ok {
-		project = provider.ProjectID
+	inputs := x.routingInputs
+	if inputs == nil {
+		return nil
+	}
+	// The consumer is the aggregate-ownership project: the key's, then the
+	// provider's, then the route's — the same precedence accounting applies.
+	project := x.authority.ProjectID
+	if project == nil {
+		if snapshot := x.snapshot(); snapshot != nil {
+			if provider, ok := snapshot.Providers[providerID]; ok {
+				project = provider.ProjectID
+			}
+		}
 	}
 	if project == nil && x.route != nil {
 		project = x.route.ProjectID
 	}
-	if s.Runtime == nil {
-		return nil
-	}
-	inputs := s.Runtime.RoutingInputs()
-	if inputs == nil {
-		return nil
-	}
-	if revision, known := inputs.RateCardRevision(project, fact.StartedAt); known && revision != nil {
+	if revision, known := inputs.RateCardRevision(project, at); known && revision != nil {
 		return revision
 	}
 	return nil

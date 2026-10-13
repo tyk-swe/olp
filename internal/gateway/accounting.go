@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -251,21 +252,33 @@ func attemptSuccessful(fact *AttemptFact) bool {
 // cost, so what the budget holds for a request and what accounting later records
 // for it are one reading of the same attempt.
 func attemptUsage(fact *AttemptFact, operation string) usage.AttemptUsage {
-	evidence := usage.AttemptUsage{
-		Observed:         fact.UsageObserved,
-		Complete:         fact.UsageComplete,
-		BillingUncertain: fact.BillingUncertain,
-	}
-	if fact.UsageObserved {
-		evidence.InputTokens, evidence.OutputTokens, evidence.CachedInputTokens = accountingTokens(fact)
-		evidence.CacheWriteInputTokens, evidence.CacheWrite5MInputTokens, evidence.CacheWrite1HInputTokens = accountingCacheWrites(fact)
-		evidence.MediaUnits = accountingMediaUnits(fact)
-		evidence.AudioInputTokens, evidence.CachedAudioInputTokens, evidence.AudioOutputTokens,
-			evidence.ImageInputTokens, evidence.CachedImageInputTokens, evidence.ImageOutputTokens,
-			evidence.ToolCalls = accountingModality(fact)
-		if operation == "embeddings" {
-			evidence.OutputTokens = nil
+	if !fact.UsageObserved {
+		return usage.AttemptUsage{
+			Observed:         false,
+			Complete:         fact.UsageComplete,
+			BillingUncertain: fact.BillingUncertain,
 		}
+	}
+	evidence := observedAttemptUsage(fact.Usage, fact.UsageComplete, operation)
+	evidence.BillingUncertain = fact.BillingUncertain
+	return evidence
+}
+
+func observedAttemptUsage(u *openai.Usage, complete bool, operation string) usage.AttemptUsage {
+	fact := AttemptFact{Usage: u, UsageObserved: true, UsageComplete: complete}
+	evidence := usage.AttemptUsage{
+		Observed:         true,
+		Complete:         complete,
+		BillingUncertain: !complete,
+	}
+	evidence.InputTokens, evidence.OutputTokens, evidence.CachedInputTokens = accountingTokens(&fact)
+	evidence.CacheWriteInputTokens, evidence.CacheWrite5MInputTokens, evidence.CacheWrite1HInputTokens = accountingCacheWrites(&fact)
+	evidence.MediaUnits = accountingMediaUnits(&fact)
+	evidence.AudioInputTokens, evidence.CachedAudioInputTokens, evidence.AudioOutputTokens,
+		evidence.ImageInputTokens, evidence.CachedImageInputTokens, evidence.ImageOutputTokens,
+		evidence.ToolCalls = accountingModality(&fact)
+	if operation == "embeddings" {
+		evidence.OutputTokens = nil
 	}
 	sanitizeUsageEvidence(&evidence)
 	return evidence

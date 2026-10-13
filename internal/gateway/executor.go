@@ -98,14 +98,15 @@ type execution struct {
 	cardRevisionID *string
 	// cardRev is the revision the pin names, resolved at admission so the
 	// charge bound and settlement read the same terms accounting pins.
-	cardRev     *usage.RoutingCardRevision
-	route       *runtime.Route
-	mode        string
-	attempts    []runtime.Attempt
-	budget      int
-	preferences *runtime.Preferences
-	decisions   []runtime.Decision
-	policy      runtime.EffectivePolicy
+	cardRev       *usage.RoutingCardRevision
+	routingInputs *usage.RoutingInputs
+	route         *runtime.Route
+	mode          string
+	attempts      []runtime.Attempt
+	budget        int
+	preferences   *runtime.Preferences
+	decisions     []runtime.Decision
+	policy        runtime.EffectivePolicy
 
 	// primary is the route the caller named. Its deadline and attempt budget
 	// bound the request across every route it moves on to; route is the one
@@ -570,6 +571,12 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 		Selector:           x.selector,
 		Baseline:           x.baseline,
 	}
+	if !x.cardPinned && s.Runtime != nil {
+		// A retry can outlive the inputs used to plan the request. Resolve
+		// its consumer's card from current inputs and retain it on the fact.
+		x.routingInputs = s.Runtime.RoutingInputs()
+	}
+	fact.cardRev = x.attemptCardRevision(a.ProviderID, fact.StartedAt)
 	provider, known := x.snapshot().Providers[a.ProviderID]
 	if len(pinned) != 0 && pinned[0] != nil {
 		provider, known = *pinned[0], true

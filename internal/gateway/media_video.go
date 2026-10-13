@@ -85,11 +85,7 @@ func (s *Server) videoCreate(w http.ResponseWriter, r *http.Request) {
 		s.mediaFail(x, w, e)
 		return
 	}
-	defer func() {
-		s.settleCaps(ctx, x)
-		s.recordCost(x)
-		settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
-	}()
+	defer s.settleAdmission(ctx, x)
 
 	deadline, _ := ctx.Deadline()
 	hold, slot, e := s.admitVideoSlot(ctx, x, attempt, &provider, slots, deadline)

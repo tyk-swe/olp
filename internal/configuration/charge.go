@@ -2,7 +2,6 @@ package configuration
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"slices"
@@ -32,6 +31,121 @@ func neutralMultiplier(multiplier string) bool {
 // (name for documents, id for stored rows), vendor.
 func discountScope(kind string, provider, vendor *string) string {
 	return kind + "\x00" + lower(provider) + "\x00" + lower(vendor)
+}
+
+func installationCurrency(ctx context.Context, q access.Queryer) string {
+	currency := "USD"
+	_ = q.QueryRow(ctx, "SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton), 'USD')").Scan(&currency)
+	if currency == "" {
+		currency = "USD"
+	}
+	return currency
+}
+
+func (s *Server) validateCharges(ctx context.Context, q access.Queryer, doc *Document, docProviders map[string]*ProviderEntry) error {
+	if len(doc.Discounts) == 0 && len(doc.RateCards) == 0 {
+		return nil
+	}
+	var destinationProviders map[string]bool
+	seenDiscounts := make(map[string]bool, len(doc.Discounts))
+	for i, entry := range doc.Discounts {
+		field := "discounts." + strconv.Itoa(i)
+		if entry.Provider != nil {
+			name := strings.ToLower(*entry.Provider)
+			if _, ok := docProviders[name]; !ok {
+				if destinationProviders == nil {
+					names, err := providerNameMap(ctx, q)
+					if err != nil {
+						return err
+					}
+					destinationProviders = make(map[string]bool, len(names))
+					for _, n := range names {
+						destinationProviders[strings.ToLower(n)] = true
+					}
+				}
+				if !destinationProviders[name] {
+					return access.Invalid(field+".provider", "Discount "+strconv.Itoa(i)+" names a provider neither the document nor this installation declares.")
+				}
+			}
+		} else if entry.ProviderKind == "plugin" {
+			return access.Invalid(field+".provider", "Scope a plugin provider's discount to that provider.")
+		}
+		key := discountScope(entry.ProviderKind, entry.Provider, entry.VendorID)
+		if seenDiscounts[key] {
+			return access.Invalid(field, "The document scopes this discount twice.")
+		}
+		seenDiscounts[key] = true
+		if !decimalEqual(entry.Multiplier, entry.Multiplier) || strings.HasPrefix(entry.Multiplier, "-") {
+			return access.Invalid(field+".multiplier", "Use a non-negative decimal.")
+		}
+	}
+
+	docOrgs := make(map[string]bool, len(doc.Organizations))
+	for _, o := range doc.Organizations {
+		docOrgs[strings.ToLower(o.Name)] = true
+	}
+	docProjects := make(map[string]bool, len(doc.Projects))
+	for _, p := range doc.Projects {
+		docProjects[strings.ToLower(p.Name)] = true
+	}
+	var destinationOrgs map[string]string
+	seenCards := make(map[string]bool, len(doc.RateCards))
+	for i, entry := range doc.RateCards {
+		field := "rate_cards." + strconv.Itoa(i)
+		if entry.Markup == "" || !decimalEqual(entry.Markup, entry.Markup) || strings.HasPrefix(entry.Markup, "-") {
+			return access.Invalid(field+".markup", "A rate card needs a markup.")
+		}
+		switch entry.Owner.Kind {
+		case "installation":
+			if entry.Owner.Organization != nil || entry.Owner.Project != nil {
+				return access.Invalid(field+".owner", "The installation card takes no owner name.")
+			}
+		case "organization":
+			name := strings.ToLower(deref(entry.Owner.Organization))
+			if name == "" {
+				return access.Invalid(field+".owner.organization", "Name the organization.")
+			}
+			if !docOrgs[name] {
+				if destinationOrgs == nil {
+					var err error
+					destinationOrgs, err = organizationIDs(ctx, q)
+					if err != nil {
+						return err
+					}
+				}
+				if _, ok := destinationOrgs[name]; !ok {
+					return access.Invalid("rate_cards.owner.organization", "The card names an organization neither the document nor this installation declares.")
+				}
+			}
+		case "project":
+			name := strings.ToLower(deref(entry.Owner.Project))
+			if name == "" {
+				return access.Invalid(field+".owner.project", "Name the project.")
+			}
+			if !docProjects[name] {
+				var exists bool
+				if err := q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.projects WHERE lower(name)=lower($1))", name).Scan(&exists); err != nil {
+					return err
+				}
+				if !exists {
+					return access.Invalid("rate_cards.owner.project", "The card names a project neither the document nor this installation declares.")
+				}
+			}
+		default:
+			return access.Invalid("rate_cards.owner.kind", "Use installation, organization or project.")
+		}
+		key := cardKey(entry.Owner)
+		if seenCards[key] {
+			return access.Invalid(field+".owner", "The document owns this card twice.")
+		}
+		seenCards[key] = true
+		for j, price := range entry.Prices {
+			if price.Provider != nil {
+				return access.Invalid(field+".prices."+strconv.Itoa(j)+".provider", "Rate card prices cannot scope a provider.")
+			}
+		}
+	}
+	return nil
 }
 
 // inForceDiscounts reads the newest in-force multiplier per stored scope.
@@ -66,10 +180,6 @@ func (s *Server) applyDiscounts(ctx context.Context, tx pgx.Tx, p access.Princip
 		return err
 	}
 	desired := map[string]usage.Discount{}
-	names := map[string]string{}
-	for name, id := range providerIDs {
-		names[id] = name
-	}
 	for i, entry := range doc.Discounts {
 		field := "discounts." + strconv.Itoa(i)
 		var providerID *string
@@ -104,6 +214,9 @@ func (s *Server) applyDiscounts(ctx context.Context, tx pgx.Tx, p access.Princip
 			// anyway changes nothing.
 			continue
 		}
+		if err := p.Authorize(access.Settings); err != nil {
+			return err
+		}
 		if _, err := s.storeDiscount(ctx, tx, p, d); err != nil {
 			return err
 		}
@@ -121,15 +234,19 @@ func (s *Server) storeDiscount(ctx context.Context, tx pgx.Tx, p access.Principa
 	return usage.CreateDiscount(ctx, tx, p.UserID(), normalized)
 }
 
-// inForceCards reads each card's id, owner and in-force revision for diffs.
+// inForceCards reads each card's id, owner and in-force revision for diffs and export.
 func inForceCards(ctx context.Context, q access.Queryer) (map[string]RateCardEntry, map[string]string, error) {
 	rows, err := q.Query(ctx, `SELECT c.id::text,
  (SELECT name FROM olp.organizations WHERE id=c.organization_id),
  (SELECT name FROM olp.projects WHERE id=c.project_id),
- (SELECT r.id::text FROM olp.rate_card_revisions r
+ rev.id::text, rev.markup::text
+ FROM olp.rate_cards c
+ LEFT JOIN LATERAL (
+  SELECT r.id, r.markup FROM olp.rate_card_revisions r
   WHERE r.rate_card_id=c.id AND r.effective_at<=now()
-  ORDER BY r.effective_at DESC,r.revision DESC LIMIT 1)
- FROM olp.rate_cards c`)
+  ORDER BY r.effective_at DESC,r.revision DESC LIMIT 1
+ ) rev ON true
+ ORDER BY c.id`)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -140,8 +257,8 @@ func inForceCards(ctx context.Context, q access.Queryer) (map[string]RateCardEnt
 	var load []pending
 	for rows.Next() {
 		var cardID string
-		var organization, project, revisionID *string
-		if err = rows.Scan(&cardID, &organization, &project, &revisionID); err != nil {
+		var organization, project, revisionID, markup *string
+		if err = rows.Scan(&cardID, &organization, &project, &revisionID, &markup); err != nil {
 			return nil, nil, err
 		}
 		var entry RateCardEntry
@@ -157,6 +274,9 @@ func inForceCards(ctx context.Context, q access.Queryer) (map[string]RateCardEnt
 			entry.Owner.Project = project
 			key = "project\x00" + strings.ToLower(*project)
 		}
+		if markup != nil {
+			entry.Markup = *markup
+		}
 		cardIDs[key] = cardID
 		if revisionID != nil {
 			load = append(load, pending{key, *revisionID})
@@ -166,11 +286,9 @@ func inForceCards(ctx context.Context, q access.Queryer) (map[string]RateCardEnt
 	if err = rows.Err(); err != nil {
 		return nil, nil, err
 	}
+	rows.Close()
 	for _, hold := range load {
 		entry := entries[hold.key]
-		if err = q.QueryRow(ctx, "SELECT markup::text FROM olp.rate_card_revisions WHERE id=$1::uuid", hold.revisionID).Scan(&entry.Markup); err != nil {
-			return nil, nil, err
-		}
 		prices, err := usage.LoadCardPricesForExport(ctx, q, hold.revisionID)
 		if err != nil {
 			return nil, nil, err
@@ -195,35 +313,47 @@ func cardKey(owner CardOwnerEntry) string {
 	}
 }
 
-// cardEntryEqual reports whether the desired entry repeats the in-force one.
-func cardEntryEqual(desired, current RateCardEntry) bool {
-	if !decimalEqual(desired.Markup, current.Markup) {
+// cardEntryEqual reports whether the desired entry repeats the in-force one,
+// resolving inherited installation currency and comparing decimal rates by value.
+func cardEntryEqual(desired, current RateCardEntry, currency string) bool {
+	if !decimalEqual(desired.Markup, current.Markup) || len(desired.Prices) != len(current.Prices) {
 		return false
 	}
-	render := func(e RateCardEntry) string {
-		copy := e
-		copy.Owner.Kind = ""
-		copy.Markup = ""
-		for i := range copy.Prices {
-			price := &copy.Prices[i]
+	normalize := func(prices []PriceEntry) []PriceEntry {
+		out := slices.Clone(prices)
+		for i := range out {
+			price := &out[i]
 			price.Model = strings.TrimSpace(price.Model)
 			price.Currency = strings.ToUpper(strings.TrimSpace(price.Currency))
+			if price.Currency == "" {
+				price.Currency = currency
+			}
 			if price.VendorID != nil {
 				v := strings.TrimSpace(*price.VendorID)
 				price.VendorID = &v
 			}
 			price.Provider = nil
 		}
-		slices.SortFunc(copy.Prices, func(a, b PriceEntry) int {
+		slices.SortFunc(out, func(a, b PriceEntry) int {
 			key := func(p *PriceEntry) string {
 				return p.ProviderKind + "\x00" + lower(p.VendorID) + "\x00" + p.Model + "\x00" + p.Operation
 			}
 			return strings.Compare(key(&a), key(&b))
 		})
-		data, _ := json.Marshal(copy)
-		return string(data)
+		return out
 	}
-	return render(desired) == render(current)
+	want := normalize(desired.Prices)
+	have := normalize(current.Prices)
+	for i := range want {
+		if want[i].ProviderKind != have[i].ProviderKind ||
+			lower(want[i].VendorID) != lower(have[i].VendorID) ||
+			want[i].Model != have[i].Model ||
+			want[i].Operation != have[i].Operation ||
+			!usage.SamePrice(want[i].usagePrice(), have[i].usagePrice()) {
+			return false
+		}
+	}
+	return true
 }
 
 // organizationIDs resolves organization references in card owners.
@@ -254,6 +384,7 @@ func (s *Server) applyRateCards(ctx context.Context, tx pgx.Tx, p access.Princip
 		return err
 	}
 	desired := map[string]RateCardEntry{}
+	cardIndex := map[string]int{}
 	for i, entry := range doc.RateCards {
 		field := "rate_cards." + strconv.Itoa(i)
 		if entry.Markup == "" {
@@ -264,15 +395,23 @@ func (s *Server) applyRateCards(ctx context.Context, tx pgx.Tx, p access.Princip
 			return access.Invalid(field+".owner", "The document owns this card twice.")
 		}
 		desired[key] = entry
+		cardIndex[key] = i
 	}
 	keys := make([]string, 0, len(desired))
 	for key := range desired {
 		keys = append(keys, key)
 	}
 	slices.Sort(keys)
+	currency := installationCurrency(ctx, tx)
 	for _, key := range keys {
 		entry := desired[key]
 		cardID, exists := cardIDs[key]
+		if exists && cardEntryEqual(entry, inForce[key], currency) {
+			continue
+		}
+		if err := p.Authorize(access.Settings); err != nil {
+			return err
+		}
 		if !exists {
 			var organizationID, projectID *string
 			switch entry.Owner.Kind {
@@ -299,17 +438,10 @@ func (s *Server) applyRateCards(ctx context.Context, tx pgx.Tx, p access.Princip
 				return fmt.Errorf("store rate card: %w", err)
 			}
 		}
-		if exists && cardEntryEqual(entry, inForce[key]) {
-			continue
-		}
-		currency := ""
-		if err = tx.QueryRow(ctx, "SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton), 'USD')").Scan(&currency); err != nil {
-			return err
-		}
 		prices := make([]usage.Price, 0, len(entry.Prices))
-		for i, price := range entry.Prices {
+		for j, price := range entry.Prices {
 			if price.Provider != nil {
-				return access.Invalid("rate_cards."+strconv.Itoa(i)+".prices.provider", "Rate card prices cannot scope a provider.")
+				return access.Invalid("rate_cards."+strconv.Itoa(cardIndex[key])+".prices."+strconv.Itoa(j)+".provider", "Rate card prices cannot scope a provider.")
 			}
 			prices = append(prices, price.usagePrice())
 		}
@@ -335,9 +467,12 @@ func (s *Server) planDiscounts(ctx context.Context, q access.Queryer, doc *Docum
 	if err != nil {
 		return err
 	}
-	names, err := providerNameMap(ctx, q)
-	if err != nil {
-		return err
+	var names map[string]string
+	if len(inForce) > 0 {
+		names, err = providerNameMap(ctx, q)
+		if err != nil {
+			return err
+		}
 	}
 	desired := map[string]DiscountEntry{}
 	for _, entry := range doc.Discounts {
@@ -379,6 +514,7 @@ func (s *Server) planRateCards(ctx context.Context, q access.Queryer, doc *Docum
 	if err != nil {
 		return err
 	}
+	currency := installationCurrency(ctx, q)
 	desired := map[string]RateCardEntry{}
 	for _, entry := range doc.RateCards {
 		desired[cardKey(entry.Owner)] = entry
@@ -387,7 +523,7 @@ func (s *Server) planRateCards(ctx context.Context, q access.Queryer, doc *Docum
 		entry, declared := desired[key]
 		switch {
 		case !declared:
-		case cardEntryEqual(entry, current):
+		case cardEntryEqual(entry, current, currency):
 			result.item("rate_card", key, "noop", "")
 		default:
 			result.item("rate_card", key, "revision", "")

@@ -84,10 +84,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 		fail(e)
 		return
 	}
-	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
-	x.endUserDigest = authority.EndUserDigest
-	x.budgetGroupID = authority.BudgetGroupID
-	x.responseMetadata = authority.Policy.ResponseMetadata
+	s.bindAuthority(x, authority)
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		fail(e)
 		return
@@ -142,6 +139,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 	defer func() {
 		actual := x.settledTokens()
 		s.settlePinHold(r.Context(), x, p.hold, actual)
+		s.recordCost(x)
 		settleKey(r.Context(), x.lease, x.dispatched, actual, s.log)
 	}()
 	overall := time.Duration(route.OverallTimeout) * time.Millisecond
@@ -151,6 +149,10 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family ope
 	}
 	ctx, cancel := s.stateDeadline(r.Context(), &route)
 	defer cancel()
+	if e := s.reserveFallbackCost(ctx, x); e != nil {
+		fail(e)
+		return
+	}
 	endpoint := strings.TrimRight(p.provider.Endpoint, "/") + "/model/" + url.PathEscape(p.provider.Connector().Model(p.model)) + "/" + upstreamOp
 	if _, err := s.egress.ValidateEndpoint(endpoint); err != nil {
 		fail(serverError(http.StatusBadGateway, "upstream_error", "The provider address is not permitted by egress policy."))
