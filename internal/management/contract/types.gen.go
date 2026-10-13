@@ -8902,7 +8902,9 @@ type RateCardPriceEntry struct {
 	// CachedInputPerMillion Rate for the cached share of the input tokens. Omit to bill cached
 	// tokens at the full input rate.
 	CachedInputPerMillion nullable.Nullable[string] `json:"cached_input_per_million,omitempty"`
-	Currency              string                    `json:"currency"`
+
+	// Currency Installation currency. Omit to use the configured installation currency.
+	Currency *string `json:"currency,omitempty"`
 
 	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image input at the input rate.
 	ImageInputPerMillion nullable.Nullable[string] `json:"image_input_per_million,omitempty"`

@@ -22795,7 +22795,8 @@
             ]
           },
           "currency": {
-            "type": "string"
+            "type": "string",
+            "description": "Installation currency. Omit to use the configured installation currency."
           },
           "input_per_million": {
             "type": [
@@ -22934,8 +22935,7 @@
         "required": [
           "provider_kind",
           "model",
-          "operation",
-          "currency"
+          "operation"
         ],
         "type": "object"
       },
