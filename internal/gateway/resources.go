@@ -247,10 +247,7 @@ func (s *Server) stateBegin(w http.ResponseWriter, r *http.Request, family opena
 		s.stateFail(x, w, e, family)
 		return x, access.Authority{}, true
 	}
-	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
-	x.endUserDigest = authority.EndUserDigest
-	x.budgetGroupID = authority.BudgetGroupID
-	x.responseMetadata = authority.Policy.ResponseMetadata
+	s.bindAuthority(x, authority)
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		s.release(r.Context())
 		s.stateFail(x, w, e, family)

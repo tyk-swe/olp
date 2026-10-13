@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
+
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 // AdmissionLimits is a complete limit set. Nil dimensions are unlimited.
@@ -67,12 +70,27 @@ func (a Authority) AllowsEndUser(digest string) bool {
 }
 
 func (policy AdmissionLimits) Validate() error {
-	return validateKey(keyInput{Name: "end-user policy", KeyPolicy: KeyPolicy{
-		Scopes: []string{"inference"}, AllowedRoutes: []string{},
-		RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute,
-		MaxConcurrency: policy.MaxConcurrency, DailyCostLimit: policy.DailyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
-		CostBasis: policy.CostBasis,
-	}}, false)
+	for field, value := range map[string]*int64{"requests_per_minute": policy.RequestsPerMinute, "max_concurrency": policy.MaxConcurrency} {
+		if value != nil && (*value < 1 || *value > 2147483647) {
+			return Invalid(field, "Use a positive integer of at most 2147483647.")
+		}
+	}
+	if policy.TokensPerMinute != nil && (*policy.TokensPerMinute < 1 || *policy.TokensPerMinute > limits.MaxCounter) {
+		return Invalid("tokens_per_minute", "Use a positive integer of at most 9007199254740991.")
+	}
+	if policy.CostBasis != "" && policy.CostBasis != "cost" && policy.CostBasis != "charge" {
+		return Invalid("cost_basis", `The cost basis must be "cost" or "charge".`)
+	}
+	for field, value := range map[string]*string{"daily_cost_limit": policy.DailyCostLimit, "monthly_cost_limit": policy.MonthlyCostLimit, "weekly_cost_limit": policy.WeeklyCostLimit} {
+		if value != nil {
+			amount := strings.TrimSpace(*value)
+			if !decimal.MatchString(amount) || !strings.ContainsAny(amount, "123456789") {
+				return Invalid(field, "Use a positive decimal amount with at most 12 integer and 12 fractional digits.")
+			}
+			*value = amount
+		}
+	}
+	return nil
 }
 
 func (p *EndUserPolicy) validate() error {

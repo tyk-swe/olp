@@ -47,6 +47,9 @@ func (x *execution) snapshot() *runtime.Snapshot {
 	if x.historicalSnapshot != nil {
 		return x.historicalSnapshot
 	}
+	if x.request.release == nil {
+		return nil
+	}
 	return x.request.release.Snapshot
 }
 func continuationError(code, message string) *Error {
@@ -280,7 +283,6 @@ func (s *Server) recoverContinuation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.release(r.Context())
-	x.authority = authority
 	if values := r.Header.Values(continuationHeader); len(values) != 1 || values[0] != interaction.ContinuationV1 {
 		s.stateFail(x, w, invalidRequest("state_carrier", "Recovery requires the tested chat-anthropic-tools-v1 client contract.", nil), x.family)
 		return

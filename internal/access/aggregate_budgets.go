@@ -32,10 +32,7 @@ func (p *BudgetPolicy) Validate() error {
 	if p == nil {
 		return nil
 	}
-	if p.CostBasis != "" && p.CostBasis != "cost" && p.CostBasis != "charge" {
-		return Invalid("cost_basis", `The cost basis must be "cost" or "charge".`)
-	}
-	return (AdmissionLimits{DailyCostLimit: p.DailyCostLimit, MonthlyCostLimit: p.MonthlyCostLimit, WeeklyCostLimit: p.WeeklyCostLimit}).Validate()
+	return (AdmissionLimits{DailyCostLimit: p.DailyCostLimit, MonthlyCostLimit: p.MonthlyCostLimit, WeeklyCostLimit: p.WeeklyCostLimit, CostBasis: p.CostBasis}).Validate()
 }
 
 func (s *Server) projectBudget(r *http.Request, p Principal) (Reply, error) {

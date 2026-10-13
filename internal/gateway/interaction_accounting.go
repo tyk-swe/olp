@@ -13,10 +13,7 @@ import (
 func (s *Server) observeGeminiInteraction(ctx context.Context, owner, localID, status string, object oif.Value) (usage.Persisted, error) {
 	evidence := usage.AttemptUsage{BillingUncertain: true}
 	if observed := geminiInteractionUsage(object); observed != nil {
-		complete := geminilifecycle.InteractionTurnFinished(status)
-		evidence = usage.AttemptUsage{Observed: true, Complete: complete, BillingUncertain: !complete,
-			InputTokens: &observed.InputTokens, OutputTokens: &observed.OutputTokens,
-			CachedInputTokens: observed.CachedInputTokens}
+		evidence = observedAttemptUsage(observed, geminilifecycle.InteractionTurnFinished(status), "generation")
 	}
 	result, err := s.Resources.ObserveInteraction(ctx, owner, localID, status, evidence, s.now())
 	if err != nil {

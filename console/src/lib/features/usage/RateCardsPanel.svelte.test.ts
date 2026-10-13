@@ -158,9 +158,12 @@ it('lists cards and creates an installation card', async () => {
   const form = host.querySelector<HTMLFormElement>('form')!;
   submit(form);
   await vi.waitFor(() =>
-    expect(vi.mocked(createRateCard)).toHaveBeenCalledWith({
-      kind: 'installation'
-    })
+    expect(vi.mocked(createRateCard)).toHaveBeenCalledWith(
+      {
+        kind: 'installation'
+      },
+      expect.any(String)
+    )
   );
 });
 
@@ -171,10 +174,13 @@ it('creates a project card for the chosen owner', async () => {
   edit('card-project', 'project-1');
   submit(host.querySelector<HTMLFormElement>('form')!);
   await vi.waitFor(() =>
-    expect(vi.mocked(createRateCard)).toHaveBeenCalledWith({
-      kind: 'project',
-      id: 'project-1'
-    })
+    expect(vi.mocked(createRateCard)).toHaveBeenCalledWith(
+      {
+        kind: 'project',
+        id: 'project-1'
+      },
+      expect.any(String)
+    )
   );
 });
 
@@ -215,4 +221,31 @@ it('publishes a revision with markup and an explicit price', async () => {
     model: 'model-a',
     input_per_million: '5.000'
   });
+});
+
+it('reports inline validation errors when an explicit price rate is malformed', async () => {
+  establish();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Publish revision')
+  );
+  const buttons = [...host.querySelectorAll('button')].filter(
+    (b) => b.textContent === 'Publish revision'
+  );
+  buttons[0].dispatchEvent(new Event('click', { bubbles: true }));
+  flushSync();
+  await vi.waitFor(() => expect(field('markup-card-1')).toBeTruthy());
+  edit('markup-card-1', '1.5');
+  const add = [...host.querySelectorAll('button')].find(
+    (b) => b.textContent === 'Add explicit price'
+  )!;
+  add.dispatchEvent(new Event('click', { bubbles: true }));
+  flushSync();
+  await vi.waitFor(() => expect(field('card-model-0')).toBeTruthy());
+  edit('card-model-0', 'model-a');
+  edit('card-0-input-price', 'not-a-decimal');
+  submit(host.querySelector<HTMLFormElement>('.revision-form')!);
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Enter a non-negative decimal number.')
+  );
+  expect(vi.mocked(createRateCardRevision)).not.toHaveBeenCalled();
 });

@@ -575,9 +575,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
-	x.endUserDigest = authority.EndUserDigest
-	x.budgetGroupID = authority.BudgetGroupID
+	s.bindAuthority(x, authority)
 	attributionValues := r.Header.Values(usage.AttributionHeader)
 	if len(attributionValues) == 0 {
 		attributionValues = r.URL.Query()["attribution"]

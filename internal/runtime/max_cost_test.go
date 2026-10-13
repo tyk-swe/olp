@@ -78,6 +78,19 @@ func TestMaxCostNarrowsAcrossScopes(t *testing.T) {
 	}) {
 		t.Fatalf("unbounded target admitted: %+v", plan.Decisions)
 	}
+
+	// A committed provider has zero marginal cost, so it stays eligible under max_cost.
+	committed := s.Providers[ids[0]]
+	committed.Commitment = &Commitment{Amount: "100", Period: "month"}
+	s.Providers[ids[0]] = committed
+	options.Preferences = &Preferences{MaxCost: ptr("0.000000000001")}
+	options.WorstCost = func(Provider, Target, *usage.RoutingPrice, *usage.RoutingDiscount) (usage.Cost, bool) {
+		return bound, true
+	}
+	plan, err = PlanRequest(&s, slug, "generation", "openai", "unary", []byte("seed"), options)
+	if err != nil || len(plan.Attempts) == 0 {
+		t.Fatalf("committed target excluded by max_cost: %v %+v", err, plan.Decisions)
+	}
 }
 
 func TestEstimatedCostRecordsBounds(t *testing.T) {

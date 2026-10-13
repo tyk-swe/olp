@@ -338,7 +338,6 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retain
 		s.stateFail(x, w, serverError(http.StatusInternalServerError, "internal_error", "The stored response could not be read."), x.family)
 		return
 	}
-	x.authority = authority
 	p, route, e := s.admitStoredResponse(r.Context(), x, authority, res, contract, use)
 	if e != nil {
 		s.stateFail(x, w, e, x.family)

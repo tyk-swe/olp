@@ -172,10 +172,7 @@ func (s *Server) mediaBegin(w http.ResponseWriter, r *http.Request) (*execution,
 		s.mediaFail(x, w, e)
 		return x, access.Authority{}, true
 	}
-	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
-	x.endUserDigest = authority.EndUserDigest
-	x.budgetGroupID = authority.BudgetGroupID
-	x.responseMetadata = authority.Policy.ResponseMetadata
+	s.bindAuthority(x, authority)
 	if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 		s.release(r.Context())
 		s.mediaFail(x, w, e)
@@ -218,10 +215,7 @@ func (s *Server) serveMedia(ctx context.Context, w http.ResponseWriter, x *execu
 		s.mediaFail(x, w, e)
 		return
 	}
-	defer func() {
-		s.settleCaps(ctx, x)
-		settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
-	}()
+	defer s.settleAdmission(ctx, x)
 
 	out := s.executeMedia(ctx, w, x)
 	if out.err != nil {

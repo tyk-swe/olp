@@ -98,14 +98,15 @@ type execution struct {
 	cardRevisionID *string
 	// cardRev is the revision the pin names, resolved at admission so the
 	// charge bound and settlement read the same terms accounting pins.
-	cardRev     *usage.RoutingCardRevision
-	route       *runtime.Route
-	mode        string
-	attempts    []runtime.Attempt
-	budget      int
-	preferences *runtime.Preferences
-	decisions   []runtime.Decision
-	policy      runtime.EffectivePolicy
+	cardRev       *usage.RoutingCardRevision
+	routingInputs *usage.RoutingInputs
+	route         *runtime.Route
+	mode          string
+	attempts      []runtime.Attempt
+	budget        int
+	preferences   *runtime.Preferences
+	decisions     []runtime.Decision
+	policy        runtime.EffectivePolicy
 
 	// primary is the route the caller named. Its deadline and attempt budget
 	// bound the request across every route it moves on to; route is the one

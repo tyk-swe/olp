@@ -301,6 +301,45 @@ func normalizeDocument(doc *Document) {
 			}
 		}
 	}
+	for i := range doc.Discounts {
+		d := &doc.Discounts[i]
+		d.ProviderKind = strings.TrimSpace(d.ProviderKind)
+		d.Multiplier = strings.TrimSpace(d.Multiplier)
+		if d.VendorID != nil {
+			v := strings.TrimSpace(*d.VendorID)
+			d.VendorID = &v
+		}
+		if d.Provider != nil {
+			v := strings.TrimSpace(*d.Provider)
+			d.Provider = &v
+		}
+	}
+	for i := range doc.RateCards {
+		c := &doc.RateCards[i]
+		c.Owner.Kind = strings.TrimSpace(c.Owner.Kind)
+		c.Markup = strings.TrimSpace(c.Markup)
+		if c.Owner.Organization != nil {
+			v := strings.TrimSpace(*c.Owner.Organization)
+			c.Owner.Organization = &v
+		}
+		if c.Owner.Project != nil {
+			v := strings.TrimSpace(*c.Owner.Project)
+			c.Owner.Project = &v
+		}
+		for j := range c.Prices {
+			p := &c.Prices[j]
+			p.Model = strings.TrimSpace(p.Model)
+			p.Currency = strings.ToUpper(strings.TrimSpace(p.Currency))
+			if p.VendorID != nil {
+				v := strings.TrimSpace(*p.VendorID)
+				p.VendorID = &v
+			}
+			if p.Provider != nil {
+				v := strings.TrimSpace(*p.Provider)
+				p.Provider = &v
+			}
+		}
+	}
 }
 
 // validateDocument refuses an artifact that is invalid anywhere, and pins the
@@ -659,6 +698,9 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 				return nil, access.Invalid("pricing.prices."+strconv.Itoa(i)+".provider", "Price "+strconv.Itoa(i)+" names a provider neither the document nor this installation declares.")
 			}
 		}
+	}
+	if err := s.validateCharges(ctx, q, doc, docProviders); err != nil {
+		return nil, err
 	}
 	return unavailable, nil
 }
@@ -1045,9 +1087,13 @@ func (s *Server) pricingChanged(ctx context.Context, q access.Queryer, doc *Docu
 		current.Prices = append(current.Prices, entry)
 	}
 	desired := *doc.Pricing
-	normalizePricing := func(p *PricingEntry) string {
-		for i := range p.Prices {
-			e := &p.Prices[i]
+	if len(desired.Prices) != len(current.Prices) {
+		return true, nil
+	}
+	normalizePrices := func(prices []PriceEntry) []PriceEntry {
+		copied := slices.Clone(prices)
+		for i := range copied {
+			e := &copied[i]
 			e.Model = strings.TrimSpace(e.Model)
 			e.Currency = strings.ToUpper(strings.TrimSpace(e.Currency))
 			if e.VendorID != nil {
@@ -1055,22 +1101,31 @@ func (s *Server) pricingChanged(ctx context.Context, q access.Queryer, doc *Docu
 				e.VendorID = &v
 			}
 			if e.Provider != nil {
-				v := strings.ToLower(*e.Provider)
+				v := strings.ToLower(strings.TrimSpace(*e.Provider))
 				e.Provider = &v
 			}
 		}
-		slices.SortFunc(p.Prices, func(a, b PriceEntry) int {
+		slices.SortFunc(copied, func(a, b PriceEntry) int {
 			key := func(p *PriceEntry) string {
 				return p.ProviderKind + "\x00" + lower(p.Provider) + "\x00" + lower(p.VendorID) + "\x00" + p.Model + "\x00" + p.Operation
 			}
 			return strings.Compare(key(&a), key(&b))
 		})
-		data, _ := json.Marshal(p)
-		return string(data)
+		return copied
 	}
-	desired.EffectiveAt = ""
-	current.EffectiveAt = ""
-	return normalizePricing(&desired) != normalizePricing(&current), nil
+	want := normalizePrices(desired.Prices)
+	have := normalizePrices(current.Prices)
+	for i := range want {
+		if want[i].ProviderKind != have[i].ProviderKind ||
+			lower(want[i].Provider) != lower(have[i].Provider) ||
+			lower(want[i].VendorID) != lower(have[i].VendorID) ||
+			want[i].Model != have[i].Model ||
+			want[i].Operation != have[i].Operation ||
+			!usage.SamePrice(want[i].usagePrice(), have[i].usagePrice()) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func canonicalEqualProvider(desired, current *ProviderEntry) bool {

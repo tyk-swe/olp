@@ -642,6 +642,12 @@ func dimensionSortKey(dimensions map[string]string) string {
 	return strings.Join(parts, "\x00")
 }
 
+// SamePrice reports whether two prices carry the same currency and rates across
+// every component, comparing decimals by numeric value.
+func SamePrice(a, b Price) bool {
+	return samePrice(a, b)
+}
+
 func samePrice(a, b Price) bool {
 	rates := [][2]*string{
 		{a.InputPerMillion, b.InputPerMillion},

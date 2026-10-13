@@ -40,6 +40,9 @@ func setPendingUsage(event *usage.Event, evidence usage.AttemptUsage) {
 	event.InputTokens, event.OutputTokens = evidence.InputTokens, evidence.OutputTokens
 	event.CachedInputTokens, event.CacheWriteInputTokens = evidence.CachedInputTokens, evidence.CacheWriteInputTokens
 	event.CacheWrite5MInputTokens, event.CacheWrite1HInputTokens = evidence.CacheWrite5MInputTokens, evidence.CacheWrite1HInputTokens
+	event.AudioInputTokens, event.CachedAudioInputTokens, event.AudioOutputTokens = evidence.AudioInputTokens, evidence.CachedAudioInputTokens, evidence.AudioOutputTokens
+	event.ImageInputTokens, event.CachedImageInputTokens, event.ImageOutputTokens = evidence.ImageInputTokens, evidence.CachedImageInputTokens, evidence.ImageOutputTokens
+	event.ToolCalls, event.Batch = evidence.ToolCalls, evidence.Batch
 	event.MediaUnits, event.UsageComplete = evidence.MediaUnits, evidence.Complete
 }
 
@@ -48,11 +51,20 @@ func setPendingUsage(event *usage.Event, evidence usage.AttemptUsage) {
 // explicit zero remains evidence. This comparison never changes either tuple.
 func usageSnapshotDominates(next, previous usage.AttemptUsage) bool {
 	nextCounts := [...]*int64{next.InputTokens, next.OutputTokens, next.CachedInputTokens,
-		next.CacheWriteInputTokens, next.CacheWrite5MInputTokens, next.CacheWrite1HInputTokens}
+		next.CacheWriteInputTokens, next.CacheWrite5MInputTokens, next.CacheWrite1HInputTokens,
+		next.AudioInputTokens, next.CachedAudioInputTokens, next.AudioOutputTokens,
+		next.ImageInputTokens, next.CachedImageInputTokens, next.ImageOutputTokens}
 	previousCounts := [...]*int64{previous.InputTokens, previous.OutputTokens, previous.CachedInputTokens,
-		previous.CacheWriteInputTokens, previous.CacheWrite5MInputTokens, previous.CacheWrite1HInputTokens}
+		previous.CacheWriteInputTokens, previous.CacheWrite5MInputTokens, previous.CacheWrite1HInputTokens,
+		previous.AudioInputTokens, previous.CachedAudioInputTokens, previous.AudioOutputTokens,
+		previous.ImageInputTokens, previous.CachedImageInputTokens, previous.ImageOutputTokens}
 	for index, before := range previousCounts {
 		if before != nil && (nextCounts[index] == nil || *nextCounts[index] < *before) {
+			return false
+		}
+	}
+	for tool, count := range previous.ToolCalls {
+		if next.ToolCalls[tool] < count {
 			return false
 		}
 	}

@@ -249,22 +249,6 @@ func (i *RoutingInputs) RateCardRevision(projectID *string, now time.Time) (revi
 	return nil, true
 }
 
-// CardRevision returns the revision the given id names, for a gateway that
-// pinned it at admission.
-func (i *RoutingInputs) CardRevision(id string) *RoutingCardRevision {
-	if i == nil {
-		return nil
-	}
-	for index := range i.RateCards {
-		for j := range i.RateCards[index].Revisions {
-			if i.RateCards[index].Revisions[j].ID == id {
-				return &i.RateCards[index].Revisions[j]
-			}
-		}
-	}
-	return nil
-}
-
 // Explicit is the card revision's rate for one attempt's dimensions, the
 // vendor-scoped entry winning over the unscoped one.
 func (r *RoutingCardRevision) Explicit(kind, vendor, model, operation string) *RoutingPrice {
@@ -428,9 +412,10 @@ func loadRoutingDiscounts(ctx context.Context, q access.Queryer, now time.Time, 
 	return nil
 }
 
-// loadRoutingRateCards reads every card with its revisions and prices plus
-// the organization of every project a card may resolve through.
-func loadRoutingRateCards(ctx context.Context, q access.Queryer, _ time.Time, in *RoutingInputs) error {
+// loadRoutingRateCards reads every card with its in-force and scheduled
+// revisions and their prices, plus the organization of every project a card
+// may resolve through.
+func loadRoutingRateCards(ctx context.Context, q access.Queryer, now time.Time, in *RoutingInputs) error {
 	in.ProjectOrganizations = map[string]string{}
 	rows, err := q.Query(ctx, `SELECT id::text,organization_id::text FROM olp.projects
  WHERE organization_id IS NOT NULL`)
@@ -474,8 +459,15 @@ func loadRoutingRateCards(ctx context.Context, q access.Queryer, _ time.Time, in
 	}
 	revisions := map[string]*RoutingCardRevision{}
 	cardRevisions := map[string][]*RoutingCardRevision{}
+	revisionIDs := []string{}
 	rows, err = q.Query(ctx, `SELECT id::text,rate_card_id::text,revision,markup::text,effective_at
- FROM olp.rate_card_revisions`)
+ FROM (
+  (SELECT DISTINCT ON (rate_card_id) *
+   FROM olp.rate_card_revisions WHERE effective_at<=$1
+   ORDER BY rate_card_id,effective_at DESC,revision DESC)
+  UNION ALL
+  (SELECT * FROM olp.rate_card_revisions WHERE effective_at>$1)
+ ) active ORDER BY rate_card_id,revision DESC LIMIT 100001`, now)
 	if err != nil {
 		return err
 	}
@@ -490,6 +482,7 @@ func loadRoutingRateCards(ctx context.Context, q access.Queryer, _ time.Time, in
 			revision.markup = units
 		}
 		revisions[revision.ID] = revision
+		revisionIDs = append(revisionIDs, revision.ID)
 		if _, ok := cards[cardID]; ok {
 			cardRevisions[cardID] = append(cardRevisions[cardID], revision)
 		}
@@ -497,6 +490,9 @@ func loadRoutingRateCards(ctx context.Context, q access.Queryer, _ time.Time, in
 	rows.Close()
 	if err = rows.Err(); err != nil {
 		return err
+	}
+	if len(revisionIDs) > 100000 {
+		return errors.New("routing rate card revision catalogue exceeds bounded capacity")
 	}
 	if len(revisions) == 0 {
 		for _, id := range order {
@@ -511,11 +507,13 @@ func loadRoutingRateCards(ctx context.Context, q access.Queryer, _ time.Time, in
  audio_output_per_million::text,image_input_per_million::text,cached_image_input_per_million::text,
  image_output_per_million::text,unit_price::text,per_request::text,batch_multiplier::text,
  tool_calls::text,tiers::text,windows::text,btrim(currency)
- FROM olp.rate_card_prices`)
+ FROM olp.rate_card_prices WHERE rate_card_revision_id=ANY($1::uuid[]) LIMIT 100001`, revisionIDs)
 	if err != nil {
 		return err
 	}
+	priceCount := 0
 	for rows.Next() {
+		priceCount++
 		var revisionID string
 		var p RoutingPrice
 		var toolCalls, tiers, windows *string
@@ -556,6 +554,9 @@ func loadRoutingRateCards(ctx context.Context, q access.Queryer, _ time.Time, in
 	rows.Close()
 	if err = rows.Err(); err != nil {
 		return err
+	}
+	if priceCount > 100000 {
+		return errors.New("routing rate card price catalogue exceeds bounded capacity")
 	}
 	for _, id := range order {
 		for _, revision := range cardRevisions[id] {

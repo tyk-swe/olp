@@ -629,3 +629,43 @@ func TestSettledChargeExplicitForProviderUnpriced(t *testing.T) {
 		t.Fatalf("provider-unpriced explicit settled charge = %s, want 0.01", got)
 	}
 }
+
+func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
+	cheap := runtime.Attempt{UpstreamModel: "cheap", Price: &usage.RoutingPrice{Price: usage.Price{
+		Model: "cheap", Operation: "generation",
+		InputPerMillion: costText("1"), OutputPerMillion: costText("1"),
+	}}}
+	dear := runtime.Attempt{UpstreamModel: "dear", Price: &usage.RoutingPrice{Price: usage.Price{
+		Model: "dear", Operation: "generation",
+		InputPerMillion: costText("1"), OutputPerMillion: costText("1"),
+	}}}
+	x := costExecution(t, `{"model":"team-chat","max_tokens":1000,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 2, cheap, dear)
+	x.route.Retry = runtime.Retry{classRateLimit: {MaxRetries: 1}}
+	x.cardPinned = true
+	x.cardRev = &usage.RoutingCardRevision{Markup: "1", Prices: []usage.RoutingPrice{{Price: usage.Price{
+		Model: "dear", Operation: "generation",
+		InputPerMillion: costText("100"), OutputPerMillion: costText("100"),
+	}}}}
+	s := &Server{}
+	got := s.routeChargeBound(x)
+	want := x.attemptChargeBound(x.attempts[1], x.attemptCostBound(x.attempts[1]))
+	want = want.Add(want)
+	if got.String() != want.String() {
+		t.Fatalf("routeChargeBound = %s, want %s (two dispatches of dearest explicit rate)", got, want)
+	}
+
+	seconds := "5"
+	videoAttempt := runtime.Attempt{ProviderID: x.attempts[0].ProviderID, UpstreamModel: "sora-2",
+		Price: &usage.RoutingPrice{Price: usage.Price{Model: "sora-2", Operation: "video_create", UnitPrice: costText("0.2")}}}
+	videoExec := &execution{
+		family:             openai.Family("video_create"),
+		media:              &media.Request{Op: media.OpVideoCreate, Seconds: &seconds},
+		request:            request{id: "video-charge", minted: true},
+		historicalSnapshot: x.historicalSnapshot,
+		cardPinned:         true,
+		cardRev:            &usage.RoutingCardRevision{Markup: "1.5"},
+	}
+	if hold := videoExec.attemptCostReservation(budgeted(), videoAttempt); hold.amount != "1" || hold.charge != "1.5" {
+		t.Fatalf("video attemptCostReservation = %+v, want amount=1 charge=1.5", hold)
+	}
+}

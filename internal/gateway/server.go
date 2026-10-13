@@ -577,25 +577,8 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 			writeError(w, e)
 			return
 		}
-		x.keyID, x.affinity, x.mirrors = authority.ID, []byte(authority.ID), true
-		x.endUserDigest = authority.EndUserDigest
-		x.budgetGroupID = authority.BudgetGroupID
-		x.responseMetadata = authority.Policy.ResponseMetadata
-		x.authority = authority
-		// A request charged to a key resolves its consumer's rate card at
-		// admission and pins the revision for accounting. Stale inputs leave
-		// the request unpinned so accounting resolves it at the fact time.
-		if x.authority.ProjectID != nil {
-			if inputs := s.Runtime.RoutingInputs(); inputs != nil {
-				if revision, known := inputs.RateCardRevision(x.authority.ProjectID, s.now()); known {
-					x.cardPinned = true
-					if revision != nil {
-						x.cardRevisionID = &revision.ID
-						x.cardRev = revision
-					}
-				}
-			}
-		}
+		s.bindAuthority(x, authority)
+		x.mirrors = true
 		if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
@@ -990,6 +973,31 @@ func WriteAdmissionOverload(w http.ResponseWriter, r *http.Request) {
 // answers in the envelope the surface's other errors use.
 func WriteNotFound(w http.ResponseWriter, r *http.Request, surface string) {
 	writeSurfaceError(w, notFoundError("not_found", "Unknown endpoint "+r.Method+" "+r.URL.Path+"."), surface)
+}
+
+// bindAuthority attaches the authenticated caller's authority to x and pins
+// its consumer rate card when the routing inputs are fresh. Stale inputs leave
+// the request unpinned so accounting resolves the card at fact time.
+func (s *Server) bindAuthority(x *execution, authority access.Authority) {
+	x.authority = authority
+	x.keyID, x.affinity = authority.ID, []byte(authority.ID)
+	x.endUserDigest = authority.EndUserDigest
+	x.budgetGroupID = authority.BudgetGroupID
+	x.responseMetadata = authority.Policy.ResponseMetadata
+	if s.Runtime == nil {
+		return
+	}
+	inputs := s.Runtime.RoutingInputs()
+	x.routingInputs = inputs
+	if authority.ProjectID != nil && inputs != nil {
+		if revision, known := inputs.RateCardRevision(authority.ProjectID, s.now()); known {
+			x.cardPinned = true
+			if revision != nil {
+				x.cardRevisionID = &revision.ID
+				x.cardRev = revision
+			}
+		}
+	}
 }
 
 func writeJSON(w http.ResponseWriter, body any) {

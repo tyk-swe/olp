@@ -163,25 +163,8 @@ func validateKey(input keyInput, expirationChanged bool) error {
 		}
 		seen[key] = true
 	}
-	for field, value := range map[string]*int64{"requests_per_minute": input.RequestsPerMinute, "max_concurrency": input.MaxConcurrency} {
-		if value != nil && (*value < 1 || *value > 2147483647) {
-			return Invalid(field, "Use a positive integer of at most 2147483647.")
-		}
-	}
-	if input.TokensPerMinute != nil && (*input.TokensPerMinute < 1 || *input.TokensPerMinute > limits.MaxCounter) {
-		return Invalid("tokens_per_minute", "Use a positive integer of at most 9007199254740991.")
-	}
-	if input.CostBasis != "" && input.CostBasis != "cost" && input.CostBasis != "charge" {
-		return Invalid("cost_basis", `The cost basis must be "cost" or "charge".`)
-	}
-	for field, value := range map[string]*string{"daily_cost_limit": input.DailyCostLimit, "monthly_cost_limit": input.MonthlyCostLimit, "weekly_cost_limit": input.WeeklyCostLimit} {
-		if value != nil {
-			amount := strings.TrimSpace(*value)
-			if !decimal.MatchString(amount) || !strings.ContainsAny(amount, "123456789") {
-				return Invalid(field, "Use a positive decimal amount with at most 12 integer and 12 fractional digits.")
-			}
-			*value = amount
-		}
+	if err := input.KeyPolicy.AdmissionLimits().Validate(); err != nil {
+		return err
 	}
 	for field, value := range map[string]*string{"priority": input.Priority, "max_priority": input.MaxPriority} {
 		if value != nil && PriorityRank(*value) < 0 {

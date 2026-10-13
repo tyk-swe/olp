@@ -45,11 +45,7 @@ func (s *Server) beginGeminiInteraction(w http.ResponseWriter, r *http.Request, 
 	}
 	authority, e := s.authenticate(r, "inference")
 	if e == nil {
-		x.authority = authority
-		x.keyID, x.affinity = authority.ID, []byte(authority.ID)
-		x.endUserDigest = authority.EndUserDigest
-		x.budgetGroupID = authority.BudgetGroupID
-		x.responseMetadata = authority.Policy.ResponseMetadata
+		s.bindAuthority(x, authority)
 		x.attribution, e = s.parseAttribution(r, authority)
 	}
 	if e != nil {
@@ -80,9 +76,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			}
 			s.settlePinHold(r.Context(), x, p.hold, actual)
 		}
-		s.settleCaps(r.Context(), x)
-		s.recordCost(x)
-		settleKey(r.Context(), x.lease, x.dispatched, x.settledTokens(), s.log)
+		s.settleAdmission(r.Context(), x)
 	}()
 	fail := func(e *Error) {
 		x.failure, status = e, e.Status

@@ -156,14 +156,9 @@ func (s *Server) reconcileResponse(ctx context.Context, localID string, body []b
 }
 
 func (s *Server) applyResponseObservation(ctx context.Context, localID string, observation openai.ResponseUsageObservation) *Error {
-	tokens := observation.Usage
 	evidence := usage.AttemptUsage{Observed: false, Complete: false, BillingUncertain: true}
-	if tokens != nil {
-		evidence = usage.AttemptUsage{Observed: true, Complete: observation.Complete, BillingUncertain: !observation.Complete,
-			InputTokens: &tokens.InputTokens, OutputTokens: &tokens.OutputTokens,
-			CachedInputTokens: tokens.CachedInputTokens, CacheWriteInputTokens: tokens.CacheWriteInputTokens,
-			CacheWrite5MInputTokens: tokens.CacheWrite5MInputTokens, CacheWrite1HInputTokens: tokens.CacheWrite1HInputTokens,
-			MediaUnits: tokens.MediaUnits}
+	if observation.Usage != nil {
+		evidence = observedAttemptUsage(observation.Usage, observation.Complete, "generation")
 	}
 	result, err := s.Resources.ObserveResponseUsage(ctx, localID, observation.Status, evidence, s.now())
 	if err != nil {

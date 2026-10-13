@@ -116,10 +116,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		var authority access.Authority
 		authority, e = s.authenticateRequest(r, token, "inference")
 		if e == nil {
-			x.authority = authority
-			x.keyID, x.affinity = authority.ID, []byte(authority.ID)
-			x.endUserDigest = authority.EndUserDigest
-			x.budgetGroupID = authority.BudgetGroupID
+			s.bindAuthority(x, authority)
 			x.attribution, e = s.parseAttribution(r, authority)
 		}
 	}

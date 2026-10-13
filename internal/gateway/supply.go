@@ -200,7 +200,8 @@ func (x *execution) spendCaps(owners []string, attempt runtime.Attempt) {
 func (s *Server) settleCaps(ctx context.Context, x *execution) {
 	for _, hold := range x.caps {
 		if hold.dispatched && hold.lease.HasCostReservation() {
-			hold.lease.SetActualCost(x.costOf(hold.owner).String(), x.costOf(hold.owner).String())
+			actual := x.costOf(hold.owner).String()
+			hold.lease.SetActualCost(actual, actual)
 		}
 		settleKey(ctx, hold.lease, hold.dispatched, nil, s.log)
 	}

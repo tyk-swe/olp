@@ -10,10 +10,12 @@ import (
 // selectionOptions supplies the shared routing authority and measurements.
 // Each operation adds its own source demand and semantic preparation.
 func (s *Server) selectionOptions(ctx context.Context, x *execution) runtime.SelectionOptions {
+	inputs := s.Runtime.RoutingInputs()
+	x.routingInputs = inputs
 	options := runtime.SelectionOptions{
 		Region: s.cfg.Region,
 		KeyID:  x.keyID, Preferences: x.legPreferences(),
-		Inputs: s.Runtime.RoutingInputs(), Now: s.now(),
+		Inputs: inputs, Now: s.now(),
 		CheckSlots: true, CredentialEligibility: s.Runtime.Eligibility,
 		UnconfinedPlugins: s.cfg.UnconfinedPlugins, Context: ctx,
 	}

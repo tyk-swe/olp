@@ -14,17 +14,6 @@ func (a *Admission) reserveRouteLimits(ctx context.Context, authority *access.Au
 	if !policy.Limited() {
 		return nil, nil
 	}
-	if policy.CostBudgeted() {
-		if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
-			return nil, e
-		}
-	}
-	if !a.ready() {
-		return nil, limitsUnavailable()
-	}
-	if policy.TokensPerMinute != nil && estimate > *policy.TokensPerMinute {
-		return nil, invalidRequest("request_exceeds_token_limit", "This request exceeds the API key token limit for this route.", nil)
-	}
 	owner := limits.KeyRouteBudgetID(authority.ID, route)
 	request := limits.Request{
 		CostOwnerID: owner, CostIncreases: authority.BudgetIncreases[owner], LookupID: limits.AggregateBudgetLookup(owner),
@@ -33,7 +22,19 @@ func (a *Admission) reserveRouteLimits(ctx context.Context, authority *access.Au
 		CostBasis: limits.Basis(policy.CostBasis), RequestedTokens: estimate, LeaseTTL: ttl,
 	}
 	if policy.CostBudgeted() {
+		if e := a.checkCostAccountingOnce(ctx, costChecked); e != nil {
+			return nil, e
+		}
+		if e := a.checkPendingCostAccounting(ctx, owner); e != nil {
+			return nil, e
+		}
 		request.CostEstimate, request.RequestID = hold.amountFor(request.CostBasis), hold.requestID
+	}
+	if !a.ready() {
+		return nil, limitsUnavailable()
+	}
+	if policy.TokensPerMinute != nil && estimate > *policy.TokensPerMinute {
+		return nil, invalidRequest("request_exceeds_token_limit", "This request exceeds the API key token limit for this route.", nil)
 	}
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()

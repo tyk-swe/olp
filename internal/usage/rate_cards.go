@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/tyk-swe/olp/internal/access"
 )
@@ -166,15 +167,6 @@ func scanCardRevision(row interface{ Scan(...any) error }) (CardRevision, error)
 	return r, err
 }
 
-const cardPriceColumns = `SELECT provider_kind, vendor_id, model, operation,
-        input_per_million::text, cached_input_per_million::text, cache_write_input_per_million::text,
-        cache_write_5m_input_per_million::text, cache_write_1h_input_per_million::text,
-        output_per_million::text, audio_input_per_million::text, cached_audio_input_per_million::text,
-        audio_output_per_million::text, image_input_per_million::text, cached_image_input_per_million::text,
-        image_output_per_million::text, unit_price::text, per_request::text, batch_multiplier::text,
-        tool_calls::text, tiers::text, windows::text, btrim(currency)
-    FROM olp.rate_card_prices`
-
 // LoadCardPricesForExport reads one card revision's explicit rates; the
 // configuration exporter uses the same shape a snapshot carries.
 func LoadCardPricesForExport(ctx context.Context, q access.Queryer, revisionID string) ([]Price, error) {
@@ -182,17 +174,41 @@ func LoadCardPricesForExport(ctx context.Context, q access.Queryer, revisionID s
 }
 
 func loadCardPrices(ctx context.Context, q access.Queryer, revisionID string) ([]Price, error) {
-	rows, err := q.Query(ctx, cardPriceColumns+
-		" WHERE rate_card_revision_id=$1::uuid ORDER BY provider_kind, vendor_id, model, operation", revisionID)
+	byRevision, err := loadCardPricesByRevisions(ctx, q, []string{revisionID})
+	if err != nil {
+		return nil, err
+	}
+	prices := byRevision[revisionID]
+	if prices == nil {
+		return []Price{}, nil
+	}
+	return prices, nil
+}
+
+func loadCardPricesByRevisions(ctx context.Context, q access.Queryer, revisionIDs []string) (map[string][]Price, error) {
+	if len(revisionIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := q.Query(ctx, `SELECT rate_card_revision_id::text, provider_kind, vendor_id, model, operation,
+        input_per_million::text, cached_input_per_million::text, cache_write_input_per_million::text,
+        cache_write_5m_input_per_million::text, cache_write_1h_input_per_million::text,
+        output_per_million::text, audio_input_per_million::text, cached_audio_input_per_million::text,
+        audio_output_per_million::text, image_input_per_million::text, cached_image_input_per_million::text,
+        image_output_per_million::text, unit_price::text, per_request::text, batch_multiplier::text,
+        tool_calls::text, tiers::text, windows::text, btrim(currency)
+    FROM olp.rate_card_prices
+    WHERE rate_card_revision_id = ANY($1::uuid[])
+    ORDER BY rate_card_revision_id, provider_kind, vendor_id, model, operation`, revisionIDs)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	prices := []Price{}
+	byRevision := make(map[string][]Price, len(revisionIDs))
 	for rows.Next() {
+		var revisionID string
 		var p Price
 		var toolCalls, tiers, windows *string
-		if err = rows.Scan(&p.ProviderKind, &p.VendorID, &p.Model, &p.Operation,
+		if err = rows.Scan(&revisionID, &p.ProviderKind, &p.VendorID, &p.Model, &p.Operation,
 			&p.InputPerMillion, &p.CachedInputPerMillion, &p.CacheWriteInputPerMillion,
 			&p.CacheWrite5MInputPerMillion, &p.CacheWrite1HInputPerMillion,
 			&p.OutputPerMillion, &p.AudioInputPerMillion, &p.CachedAudioInputPerMillion,
@@ -217,9 +233,9 @@ func loadCardPrices(ctx context.Context, q access.Queryer, revisionID string) ([
 				return nil, fmt.Errorf("stored rate card windows are invalid")
 			}
 		}
-		prices = append(prices, p)
+		byRevision[revisionID] = append(byRevision[revisionID], p)
 	}
-	return prices, rows.Err()
+	return byRevision, rows.Err()
 }
 
 // CreateCardRevision stores one validated revision inside the caller's
@@ -274,40 +290,6 @@ func createCardRevision(ctx context.Context, tx pgx.Tx, actor, cardID, markup st
 	return revision, nil
 }
 
-// neutralCardRevision is the "no charge terms" revision a card left behind by
-// a configuration document gets: markup one, no explicit prices.
-func neutralCardRevision(ctx context.Context, tx pgx.Tx, actor, cardID string) error {
-	inForce, err := cardInForce(ctx, tx, cardID, time.Now())
-	if err != nil {
-		return err
-	}
-	if inForce != nil && inForce.Markup == "1" && len(inForce.Prices) == 0 {
-		return nil
-	}
-	_, err = createCardRevision(ctx, tx, actor, cardID, "1", time.Now().UTC(), nil)
-	return err
-}
-
-// cardInForce reads the newest revision of a card in force at a time, with
-// its prices.
-func cardInForce(ctx context.Context, q access.Queryer, cardID string, at time.Time) (*CardRevision, error) {
-	revision, err := scanCardRevision(q.QueryRow(ctx, cardRevisionColumns+
-		" WHERE r.rate_card_id=$1::uuid AND r.effective_at <= $2 ORDER BY r.effective_at DESC, r.revision DESC LIMIT 1",
-		cardID, at))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	prices, err := loadCardPrices(ctx, q, revision.ID)
-	if err != nil {
-		return nil, err
-	}
-	revision.Prices = prices
-	return &revision, nil
-}
-
 func (s *Server) listRateCards(r *http.Request, _ access.Principal) (access.Reply, error) {
 	page, err := access.Page(r)
 	if err != nil {
@@ -331,10 +313,18 @@ func (s *Server) listRateCards(r *http.Request, _ access.Principal) (access.Repl
 	if err = rows.Err(); err != nil {
 		return access.Reply{}, err
 	}
-	for index := range items {
-		items[index].Revisions, err = loadCardRevisionSummaries(r.Context(), s.Access.Pool, items[index].ID)
-		if err != nil {
-			return access.Reply{}, err
+	cardIDs := make([]string, len(items))
+	for i := range items {
+		cardIDs[i] = items[i].ID
+	}
+	summaries, err := loadCardRevisionSummariesByCards(r.Context(), s.Access.Pool, cardIDs)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	for i := range items {
+		items[i].Revisions = summaries[items[i].ID]
+		if items[i].Revisions == nil {
+			items[i].Revisions = []CardRevision{}
 		}
 	}
 	return access.ListReplyBy(items, page, func(c RateCard) string { return c.ID }), nil
@@ -343,25 +333,39 @@ func (s *Server) listRateCards(r *http.Request, _ access.Principal) (access.Repl
 // loadCardRevisionSummaries lists a card's in-force and latest revisions
 // without their price rows.
 func loadCardRevisionSummaries(ctx context.Context, q access.Queryer, cardID string) ([]CardRevision, error) {
+	summaries, err := loadCardRevisionSummariesByCards(ctx, q, []string{cardID})
+	if err != nil {
+		return nil, err
+	}
+	if revisions := summaries[cardID]; revisions != nil {
+		return revisions, nil
+	}
+	return []CardRevision{}, nil
+}
+
+func loadCardRevisionSummariesByCards(ctx context.Context, q access.Queryer, cardIDs []string) (map[string][]CardRevision, error) {
+	if len(cardIDs) == 0 {
+		return nil, nil
+	}
 	rows, err := q.Query(ctx, cardRevisionColumns+
-		` WHERE r.rate_card_id=$1::uuid
+		` WHERE r.rate_card_id = ANY($1::uuid[])
 		  AND (r.revision=(SELECT MAX(revision) FROM olp.rate_card_revisions WHERE rate_card_id=r.rate_card_id)
 		   OR r.revision=(SELECT MAX(revision) FROM olp.rate_card_revisions
 		                  WHERE rate_card_id=r.rate_card_id AND effective_at <= now()))
-		  ORDER BY r.revision DESC`, cardID)
+		  ORDER BY r.rate_card_id, r.revision DESC`, cardIDs)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	revisions := []CardRevision{}
+	byCard := make(map[string][]CardRevision, len(cardIDs))
 	for rows.Next() {
 		revision, err := scanCardRevision(rows)
 		if err != nil {
 			return nil, err
 		}
-		revisions = append(revisions, revision)
+		byCard[revision.RateCardID] = append(byCard[revision.RateCardID], revision)
 	}
-	return revisions, rows.Err()
+	return byCard, rows.Err()
 }
 
 func (s *Server) createRateCard(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -420,8 +424,8 @@ func (s *Server) createRateCard(r *http.Request, _ access.Principal) (access.Rep
 	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.rate_cards
         (id, organization_id, project_id, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)`,
 		id, organizationID, projectID, principal.UserID()); err != nil {
-		var constraint = strings.Contains(fmt.Sprintf("%v", err), "rate_cards_owner_key")
-		if constraint {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" || strings.Contains(err.Error(), "rate_cards_owner_key") {
 			return access.Reply{}, access.Fail(http.StatusConflict, "rate_card_exists",
 				"The owner already has a rate card.")
 		}
@@ -496,17 +500,25 @@ func (s *Server) listRateCardRevisions(r *http.Request, _ access.Principal) (acc
 	if err = rows.Err(); err != nil {
 		return access.Reply{}, err
 	}
-	for index := range items {
-		items[index].Prices, err = loadCardPrices(r.Context(), s.Access.Pool, items[index].ID)
-		if err != nil {
-			return access.Reply{}, err
-		}
-	}
 	var next *string
 	if len(items) > limit {
 		items = items[:limit]
 		cursor := fmt.Sprint(items[len(items)-1].Revision)
 		next = &cursor
+	}
+	revisionIDs := make([]string, len(items))
+	for i := range items {
+		revisionIDs[i] = items[i].ID
+	}
+	pricesByRevision, err := loadCardPricesByRevisions(r.Context(), s.Access.Pool, revisionIDs)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	for i := range items {
+		items[i].Prices = pricesByRevision[items[i].ID]
+		if items[i].Prices == nil {
+			items[i].Prices = []Price{}
+		}
 	}
 	return access.OK(list{Items: items, NextCursor: next}), nil
 }

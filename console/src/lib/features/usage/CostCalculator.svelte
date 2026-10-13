@@ -75,6 +75,13 @@
     queryFn: ({ signal }) => listProjects(signal)
   }));
 
+  $effect(() => {
+    if (!route && routes.data?.[0]) route = routes.data[0].slug;
+  });
+  $effect(() => {
+    if (!providerId && providers.data?.[0]) providerId = providers.data[0].id;
+  });
+
   async function simulate() {
     routeError = '';
     routeResult = null;

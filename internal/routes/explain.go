@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -151,6 +152,19 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, runtime.Pla
 		// caller's cost ceiling to the same worst case.
 		EstimateCost: true,
 		WorstCost: func(provider runtime.Provider, target runtime.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
+			if provider.Commitment != nil {
+				return usage.Cost{}, true
+			}
+			if mediaRequest != nil {
+				if mediaRequest.Op != media.OpVideoCreate {
+					return usage.Cost{}, false
+				}
+				seconds := "4"
+				if mediaRequest.Seconds != nil {
+					seconds = *mediaRequest.Seconds
+				}
+				return price.Cost(usage.AttemptUsage{Complete: true, MediaUnits: &seconds}, now, true, discount)
+			}
 			d := counted.fixed
 			if demand := counted.sourceDemand(); demand != nil {
 				d = demand(provider, target)
