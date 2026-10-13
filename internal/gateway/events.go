@@ -91,8 +91,11 @@ type AttemptFact struct {
 	Discount *usage.RoutingDiscount
 	// CardPinned records that accounting must use CardRevisionID exactly,
 	// null included; unpinned attempts resolve the card themselves.
-	CardPinned         bool
-	CardRevisionID     *string
+	CardPinned     bool
+	CardRevisionID *string
+	// cardRev retains the terms resolved when this attempt started, even if
+	// later routing inputs no longer contain that revision. Nil means no card.
+	cardRev            *usage.RoutingCardRevision
 	Ordinal            int
 	TargetID           string
 	ProviderID         string

@@ -78,26 +78,51 @@ func usageSnapshotDominates(next, previous usage.AttemptUsage) bool {
 			return false
 		}
 	}
-	// Compare only explicitly known partitions. For example, a rising input
-	// total and cache total can still report fewer noncached input tokens.
-	for _, partition := range [][]int{{0, 2}, {0, 3}, {0, 2, 3}, {3, 4}, {3, 5}, {3, 4, 5}} {
-		before, after := int64(0), int64(0)
-		known := true
-		for offset, index := range partition {
-			if previousCounts[index] == nil || nextCounts[index] == nil {
-				known = false
-				break
-			}
-			if offset == 0 {
-				before, after = *previousCounts[index], *nextCounts[index]
-			} else {
-				before -= *previousCounts[index]
-				after -= *nextCounts[index]
-			}
+	// Subtract the same known shares from each total. Every share must also
+	// be nondecreasing, so preserving this residual preserves the residual
+	// for every subset of those shares. Newly reported shares remain unknown
+	// in the earlier observation and cannot narrow that comparison.
+	nextPartitions, previousPartitions := usagePartitions(next), usagePartitions(previous)
+	for index, partition := range previousPartitions {
+		if partition[0] == nil {
+			continue
 		}
-		if known && after < before {
+		before, after := *partition[0], *nextPartitions[index][0]
+		for share := 1; share < len(partition); share++ {
+			if partition[share] == nil {
+				continue
+			}
+			if nextPartitions[index][share] == nil {
+				return false
+			}
+			before -= *partition[share]
+			after -= *nextPartitions[index][share]
+		}
+		if after < before {
 			return false
 		}
 	}
 	return true
+}
+
+// Each row is a total followed by disjoint shares. The residuals cover text,
+// cached text, noncached audio/image, and cache writes without a known lifetime.
+func usagePartitions(u usage.AttemptUsage) [7][5]*int64 {
+	noncached := func(total, cached *int64) *int64 {
+		if total == nil || cached == nil {
+			return nil
+		}
+		value := *total - *cached
+		return &value
+	}
+	return [7][5]*int64{
+		{u.InputTokens, u.CachedInputTokens, u.CacheWriteInputTokens,
+			noncached(u.AudioInputTokens, u.CachedAudioInputTokens), noncached(u.ImageInputTokens, u.CachedImageInputTokens)},
+		{u.InputTokens, u.AudioInputTokens, u.ImageInputTokens},
+		{u.CachedInputTokens, u.CachedAudioInputTokens, u.CachedImageInputTokens},
+		{u.OutputTokens, u.AudioOutputTokens, u.ImageOutputTokens},
+		{u.AudioInputTokens, u.CachedAudioInputTokens},
+		{u.ImageInputTokens, u.CachedImageInputTokens},
+		{u.CacheWriteInputTokens, u.CacheWrite5MInputTokens, u.CacheWrite1HInputTokens},
+	}
 }

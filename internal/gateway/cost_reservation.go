@@ -378,7 +378,7 @@ func (s *Server) settleAdmission(ctx context.Context, x *execution) {
 }
 
 // settledCharge is what the request's consumers owe from the attempts that
-// reported usage, priced under the card the request pinned exactly as
+// reported usage, priced under the card each attempt resolved exactly as
 // accounting will charge it: an unpriced or uncharged attempt adds nothing.
 // Commitment zeroes a priced cost before the card sees it — a marked-up zero is
 // zero, and a fact with no card charges its zero cost — while an explicit card
@@ -402,7 +402,7 @@ func (s *Server) settledCharge(x *execution) usage.Cost {
 				costPtr = &cost
 			}
 		}
-		rev := s.factCardRevision(x, fact)
+		rev := fact.cardRev
 		if rev == nil {
 			// No card: the charge is the cost itself.
 			total = total.Add(cost)
@@ -415,16 +415,6 @@ func (s *Server) settledCharge(x *execution) usage.Cost {
 		}
 	}
 	return total
-}
-
-// factCardRevision resolves the card a fact charges under: the request's own
-// pin first, else the consumer project card when the inputs are fresh, else
-// no card — which is what accounting records too.
-func (s *Server) factCardRevision(x *execution, fact *AttemptFact) *usage.RoutingCardRevision {
-	if x.routingInputs == nil && s.Runtime != nil {
-		x.routingInputs = s.Runtime.RoutingInputs()
-	}
-	return x.attemptCardRevision(fact.ProviderID, fact.StartedAt)
 }
 
 func (x *execution) attemptCardRevision(providerID string, at time.Time) *usage.RoutingCardRevision {

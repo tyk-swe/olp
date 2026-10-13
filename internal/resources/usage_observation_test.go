@@ -166,3 +166,94 @@ func TestPendingUsageRejectsInvalidDiscardedObservations(t *testing.T) {
 		}
 	}
 }
+
+func TestPendingUsagePreservesModalityPartitions(t *testing.T) {
+	previous := partialUsage(100, 50)
+	previous.CachedInputTokens, previous.CacheWriteInputTokens = usageCount(20), usageCount(10)
+	previous.AudioInputTokens, previous.CachedAudioInputTokens = usageCount(20), usageCount(5)
+	previous.ImageInputTokens, previous.CachedImageInputTokens = usageCount(10), usageCount(4)
+	previous.AudioOutputTokens, previous.ImageOutputTokens = usageCount(10), usageCount(5)
+	for _, test := range []struct {
+		name    string
+		change  func(*usage.AttemptUsage)
+		advance bool
+	}{
+		{"noncached audio", func(u *usage.AttemptUsage) { u.CachedAudioInputTokens = usageCount(6) }, false},
+		{"noncached image", func(u *usage.AttemptUsage) { u.CachedImageInputTokens = usageCount(5) }, false},
+		{"cached text", func(u *usage.AttemptUsage) {
+			u.InputTokens, u.AudioInputTokens, u.CachedAudioInputTokens = usageCount(101), usageCount(21), usageCount(6)
+		}, false},
+		{"noncached text", func(u *usage.AttemptUsage) {
+			u.InputTokens, u.CachedInputTokens, u.AudioInputTokens = usageCount(101), usageCount(21), usageCount(21)
+		}, false},
+		{"text input", func(u *usage.AttemptUsage) { u.AudioInputTokens = usageCount(21) }, false},
+		{"text output with audio", func(u *usage.AttemptUsage) { u.AudioOutputTokens = usageCount(11) }, false},
+		{"text output with image", func(u *usage.AttemptUsage) { u.ImageOutputTokens = usageCount(6) }, false},
+		{"combined output shares", func(u *usage.AttemptUsage) {
+			u.OutputTokens, u.AudioOutputTokens, u.ImageOutputTokens = usageCount(51), usageCount(11), usageCount(6)
+		}, false},
+		{"all shares advance", func(u *usage.AttemptUsage) {
+			u.InputTokens, u.OutputTokens = usageCount(110), usageCount(53)
+			u.CachedInputTokens, u.CacheWriteInputTokens = usageCount(23), usageCount(11)
+			u.AudioInputTokens, u.CachedAudioInputTokens = usageCount(22), usageCount(6)
+			u.ImageInputTokens, u.CachedImageInputTokens = usageCount(12), usageCount(5)
+			u.AudioOutputTokens, u.ImageOutputTokens = usageCount(11), usageCount(6)
+		}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			next := previous
+			test.change(&next)
+			for _, terminal := range []bool{false, true} {
+				event := pendingUsageEvent(previous)
+				if err := observePendingUsage(event, next, terminal); err != nil {
+					t.Fatal(err)
+				}
+				want := previous
+				if test.advance {
+					want = next
+				}
+				if !reflect.DeepEqual(event, pendingUsageEventWithIdentity(event, want)) {
+					t.Fatalf("terminal=%t retained incompatible modality snapshot: %+v", terminal, event.Attempts[0].Usage)
+				}
+			}
+			// Complete native evidence remains authoritative even when a
+			// derived partition is lower than the provisional observation.
+			next.Complete, next.BillingUncertain = true, false
+			event := pendingUsageEvent(previous)
+			if err := observePendingUsage(event, next, true); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(*event.Attempts[0].Usage, next) || !event.UsageComplete {
+				t.Fatal("complete terminal evidence lost its authority")
+			}
+		})
+	}
+}
+
+func pendingUsageEventWithIdentity(event *usage.Event, evidence usage.AttemptUsage) *usage.Event {
+	want := *event
+	want.Attempts = append([]usage.Attempt(nil), event.Attempts...)
+	setPendingUsage(&want, evidence)
+	return &want
+}
+
+func TestPendingUsageModalityPartitionsPreserveUnknownAndZero(t *testing.T) {
+	for _, cached := range []*int64{nil, usageCount(0)} {
+		previous := partialUsage(100, 0)
+		previous.CachedInputTokens, previous.AudioInputTokens = usageCount(20), usageCount(10)
+		previous.CachedAudioInputTokens = cached
+		next := previous
+		next.CachedAudioInputTokens = usageCount(10)
+		event := pendingUsageEvent(previous)
+		if err := observePendingUsage(event, next, false); err != nil {
+			t.Fatal(err)
+		}
+		want := previous
+		if cached == nil {
+			want = next
+		}
+		if !reflect.DeepEqual(*event.Attempts[0].Usage, want) {
+			t.Fatalf("cached=%v selected incompatible snapshot: %+v", cached, event.Attempts[0].Usage)
+		}
+	}
+}

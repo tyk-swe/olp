@@ -571,6 +571,12 @@ func (s *Server) newFact(x *execution, a runtime.Attempt, slot runtime.Slot, ord
 		Selector:           x.selector,
 		Baseline:           x.baseline,
 	}
+	if !x.cardPinned && s.Runtime != nil {
+		// A retry can outlive the inputs used to plan the request. Resolve
+		// its consumer's card from current inputs and retain it on the fact.
+		x.routingInputs = s.Runtime.RoutingInputs()
+	}
+	fact.cardRev = x.attemptCardRevision(a.ProviderID, fact.StartedAt)
 	provider, known := x.snapshot().Providers[a.ProviderID]
 	if len(pinned) != 0 && pinned[0] != nil {
 		provider, known = *pinned[0], true

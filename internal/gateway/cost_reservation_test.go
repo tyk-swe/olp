@@ -600,6 +600,7 @@ func TestSettledChargeHonoursCommitment(t *testing.T) {
 	}
 	x.cardPinned = true
 	x.cardRev = &usage.RoutingCardRevision{Markup: "2"}
+	x.facts[0].cardRev = x.cardRev
 	if got := (&Server{}).settledCharge(x); !got.IsZero() {
 		t.Fatalf("committed markup settled charge = %s, want 0", got)
 	}
@@ -607,6 +608,7 @@ func TestSettledChargeHonoursCommitment(t *testing.T) {
 		ProviderKind: provider.Kind, Model: "model-a", Operation: x.operationName(),
 		InputPerMillion: costText("100"), OutputPerMillion: costText("0"),
 	}}}}
+	x.facts[0].cardRev = x.cardRev
 	if got := (&Server{}).settledCharge(x); got.String() != "0.01" {
 		t.Fatalf("committed explicit-rate settled charge = %s, want 0.01", got)
 	}
@@ -623,7 +625,7 @@ func TestSettledChargeExplicitForProviderUnpriced(t *testing.T) {
 		ProviderKind: provider.Kind, Model: "model-a", Operation: x.operationName(),
 		InputPerMillion: costText("100"), OutputPerMillion: costText("0"),
 	}}}}
-	x.facts = []AttemptFact{{UsageObserved: true, UsageComplete: true,
+	x.facts = []AttemptFact{{UsageObserved: true, UsageComplete: true, cardRev: x.cardRev,
 		ProviderID: provider.ID, UpstreamModel: "model-a", Usage: &openai.Usage{InputTokens: 100}}}
 	if got := (&Server{}).settledCharge(x); got.String() != "0.01" {
 		t.Fatalf("provider-unpriced explicit settled charge = %s, want 0.01", got)
@@ -667,5 +669,99 @@ func TestRouteChargeBoundSortsDearestRetriesAndVideoCard(t *testing.T) {
 	}
 	if hold := videoExec.attemptCostReservation(budgeted(), videoAttempt); hold.amount != "1" || hold.charge != "1.5" {
 		t.Fatalf("video attemptCostReservation = %+v, want amount=1 charge=1.5", hold)
+	}
+}
+
+func TestSettledChargeRetainsEachAttemptCardRevision(t *testing.T) {
+	for _, owner := range []string{"provider", "route", "installation", "authority"} {
+		t.Run(owner, func(t *testing.T) {
+			now := time.Now().UTC()
+			x := costExecution(t, `{"model":"team-chat","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 3,
+				runtime.Attempt{Price: costPrice()})
+			x.request.startedAt = now
+			project := uuid.NewString()
+			authority := access.Authority{}
+			card := usage.RoutingRateCard{ProjectID: &project, Revisions: []usage.RoutingCardRevision{{
+				ID: uuid.NewString(), Markup: "2", EffectiveAt: now.Add(-time.Hour),
+			}}}
+			provider := x.snapshot().Providers[x.attempts[0].ProviderID]
+			switch owner {
+			case "provider":
+				provider.ProjectID = &project
+				x.snapshot().Providers[provider.ID] = provider
+			case "route":
+				x.route.ProjectID = &project
+			case "installation":
+				card.ProjectID = nil
+			case "authority":
+				authority.ProjectID = &project
+			}
+			rt := &fakeRuntime{inputs: &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{card}}}
+			s := &Server{Runtime: rt, now: func() time.Time { return now }, fleet: &fleetHealth{}}
+			s.bindAuthority(x, authority)
+			dispatch := func() {
+				fact := s.newFact(x, x.attempts[0], provider.Slots[0], len(x.facts)+1)
+				fact.Class, fact.UsageObserved, fact.UsageComplete = classSuccess, true, true
+				fact.Usage = &openai.Usage{InputTokens: 100, OutputTokens: 50}
+				x.facts = append(x.facts, fact)
+			}
+			dispatch()
+
+			// A retry outlives the original inputs while the runtime refreshes.
+			now = now.Add(usage.PerformanceMaxAge + time.Second)
+			rt.inputs = &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{card}}
+			dispatch()
+
+			// Replanning sees only the new in-force revision. Earlier facts
+			// must retain their original terms even if their first settlement
+			// happens after that revision is pruned.
+			now = now.Add(usage.PerformanceMaxAge + time.Second)
+			card.Revisions = []usage.RoutingCardRevision{{ID: uuid.NewString(), Markup: "3", EffectiveAt: now}}
+			rt.inputs = &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{card}}
+			s.selectionOptions(context.Background(), x)
+			if got := s.settledCharge(x).String(); got != "0.0024" {
+				t.Fatalf("charge after replan = %s, want 0.0024", got)
+			}
+			dispatch()
+			want := "0.0042"
+			if owner == "authority" {
+				want = "0.0036" // The authority's admission pin covers every attempt.
+			}
+			if got := s.settledCharge(x).String(); got != want {
+				t.Fatalf("charge with new revision = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+func TestSettledChargeRetainsAttemptWithoutCard(t *testing.T) {
+	for _, state := range []string{"absent", "stale", "pinned null"} {
+		t.Run(state, func(t *testing.T) {
+			now := time.Now().UTC()
+			x := costExecution(t, `{"model":"team-chat","messages":[{"role":"user","content":"hello"}]}`, openai.FamilyChat, 1,
+				runtime.Attempt{Price: costPrice()})
+			inputs := &usage.RoutingInputs{RefreshedAt: now}
+			authority := access.Authority{}
+			if state == "stale" {
+				inputs.RefreshedAt = now.Add(-usage.PerformanceMaxAge - time.Second)
+				inputs.RateCards = []usage.RoutingRateCard{{Revisions: []usage.RoutingCardRevision{{Markup: "2"}}}}
+			} else if state == "pinned null" {
+				authority.ProjectID = costText(uuid.NewString())
+			}
+			rt := &fakeRuntime{inputs: inputs}
+			s := &Server{Runtime: rt, now: func() time.Time { return now }, fleet: &fleetHealth{}}
+			s.bindAuthority(x, authority)
+			fact := s.newFact(x, x.attempts[0], runtime.Slot{}, 1)
+			fact.Class, fact.UsageObserved, fact.UsageComplete = classSuccess, true, true
+			fact.Usage = &openai.Usage{InputTokens: 100, OutputTokens: 50}
+			x.facts = []AttemptFact{fact}
+			rt.inputs = &usage.RoutingInputs{RefreshedAt: now, RateCards: []usage.RoutingRateCard{{
+				Revisions: []usage.RoutingCardRevision{{Markup: "2"}},
+			}}}
+			s.selectionOptions(context.Background(), x)
+			if got := s.settledCharge(x).String(); got != "0.0006" {
+				t.Fatalf("charge = %s, want original no-card cost 0.0006", got)
+			}
+		})
 	}
 }
