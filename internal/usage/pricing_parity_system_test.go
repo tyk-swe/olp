@@ -3,6 +3,7 @@
 package usage
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"strings"
@@ -33,9 +34,16 @@ func TestIntegrationPricingParity(t *testing.T) {
 	owner, key := seedParityOwner(t, pool)
 	provider := seedParityProvider(t, pool, owner)
 	cases := parityCases(2400)
+	// A tier rate stored as a canonical string in jsonb has no declared scale;
+	// the function casts it to numeric(24,12) so a quotient past the 100M scale
+	// keeps the same decimals the Go mirror keeps.
+	cases = append(cases, parityCase{model: "parity-tier-scale",
+		price: Price{ProviderKind: "openai", Model: "parity-tier-scale", Operation: "generation",
+			InputPerMillion: rate("7.500000000001"), Currency: "USD",
+			Tiers: []PriceTier{{AboveInputTokens: 1, InputPerMillion: rate("7.500000000001")}}},
+		usage: AttemptUsage{Observed: true, Complete: true, InputTokens: tokens(123456789012345)}})
 	observed := time.Now().UTC().Add(-time.Minute)
 	seedParityPrices(t, pool, owner, observed.Add(-time.Hour), cases)
-
 	t.Run("priceAttemptSQL", func(t *testing.T) {
 		tx, err := pool.Begin(t.Context())
 		if err != nil {
@@ -46,13 +54,15 @@ func TestIntegrationPricingParity(t *testing.T) {
 		var pricedCases, unpricedCases int
 		for index, c := range cases {
 			usage := c.usage
-			attempt := ValidatedAttempt{Attempt: &Attempt{ProviderID: provider, UpstreamModel: c.model}, Usage: usage}
+			status := int32(200)
+			attempt := ValidatedAttempt{Attempt: &Attempt{ProviderID: provider, UpstreamModel: c.model,
+				StartedAt: observed.Add(-time.Second)}, StatusCode: &status, Usage: usage}
 			got, err := priceAttempt(t.Context(), tx, event, attempt)
 			if err != nil {
 				t.Fatalf("case %d: %v", index, err)
 			}
-			want, ok := c.price.Cost(usage)
-			rated := parseRates(&c.price).rated(usage)
+			want, ok := c.price.Cost(usage, observed.Add(-time.Second), true)
+			rated := parityRated(&c.price, usage)
 			if got.complete != rated {
 				t.Fatalf("case %d: SQL complete = %v, Go rated = %v\nprice %s\nusage %s", index, got.complete, rated, describePrice(c.price), describe(usage))
 			}
@@ -83,7 +93,11 @@ func TestIntegrationPricingParity(t *testing.T) {
 	// validated, so only the SQL above ever sees one.
 	var accountable []parityCase
 	for _, c := range cases {
-		if c.usage.InputTokens != nil || c.usage.CachedInputTokens == nil {
+		if c.usage.InputTokens != nil || (c.usage.CachedInputTokens == nil &&
+			c.usage.CacheWriteInputTokens == nil && c.usage.CacheWrite5MInputTokens == nil &&
+			c.usage.CacheWrite1HInputTokens == nil && c.usage.AudioInputTokens == nil &&
+			c.usage.CachedAudioInputTokens == nil && c.usage.ImageInputTokens == nil &&
+			c.usage.CachedImageInputTokens == nil) {
 			accountable = append(accountable, c)
 		}
 	}
@@ -96,7 +110,7 @@ func TestIntegrationPricingParity(t *testing.T) {
 			if result.Outcome != PersistOutcomePersisted {
 				t.Fatalf("case %d: outcome %v", index, result.Outcome)
 			}
-			want, ok := c.price.Cost(c.usage)
+			want, ok := c.price.Cost(c.usage, observed.Add(-time.Second), true)
 			if (stored[0].cost != nil) != ok {
 				t.Fatalf("case %d: stored cost present = %v, Go priced = %v", index, stored[0].cost != nil, ok)
 			}
@@ -117,7 +131,7 @@ func TestIntegrationPricingParity(t *testing.T) {
 			var want Cost
 			for index := range attempts {
 				attempts[index] = accountable[rng.IntN(len(accountable))]
-				if cost, ok := attempts[index].price.Cost(attempts[index].usage); ok {
+				if cost, ok := attempts[index].price.Cost(attempts[index].usage, observed.Add(-time.Second), true); ok {
 					want = want.Add(cost)
 				}
 			}
@@ -125,8 +139,8 @@ func TestIntegrationPricingParity(t *testing.T) {
 			own := seedParityKey(t, pool, owner)
 			accounted := parityEvent(t, own, provider, observed, attempts)
 			result, _ := persistParity(t, pool, accounted)
-			if len(result.CostSnapshots) != 1 {
-				t.Fatalf("event %d: %d snapshots, want one", event, len(result.CostSnapshots))
+			if len(result.CostSnapshots) != 2 {
+				t.Fatalf("event %d: %d snapshots, want the cost and charge pair", event, len(result.CostSnapshots))
 			}
 			snapshot := result.CostSnapshots[0]
 			if got := parityCost(t, snapshot.DailyAccrued); got.Cmp(want) != 0 {
@@ -137,6 +151,15 @@ func TestIntegrationPricingParity(t *testing.T) {
 			}
 		}
 	})
+}
+
+// parityRated is the fact table's completeness question in Go: whether every
+// dimension the usage reports has a rate, regardless of whether the usage is
+// settled. The stored cost is gated on usage completeness separately.
+func parityRated(p *Price, u AttemptUsage) bool {
+	u.Complete = true
+	_, ok := parseRates(p).cost(u, time.Time{}, true, nil)
+	return ok
 }
 
 func describePrice(p Price) string {
@@ -210,6 +233,22 @@ func parityRate(rng *rand.Rand, magnitude int) *string {
 	return &text
 }
 
+// mirrorRate gives a tier its own value for a field the entry carries, or nil
+// for a field it does not.
+func mirrorRate(rate *string, rng *rand.Rand, magnitude int) *string {
+	if rate == nil {
+		return nil
+	}
+	return parityRate(rng, magnitude)
+}
+
+func valOrZero(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
 // parityCases generates prices and usage across the regimes the SQL treats
 // differently: rates from a fraction of a cent to billions per million, so the
 // numerator's weight and the quotient scale vary, sparse tiers that fall back to
@@ -234,7 +273,44 @@ func parityCases(n int) []parityCase {
 		}
 		price.CachedInputPerMillion, price.CacheWriteInputPerMillion = sometimes(2), sometimes(2)
 		price.CacheWrite5MInputPerMillion, price.CacheWrite1HInputPerMillion = sometimes(3), sometimes(3)
-		price.UnitPrice = sometimes(4)
+		price.AudioInputPerMillion, price.CachedAudioInputPerMillion = sometimes(3), sometimes(3)
+		price.AudioOutputPerMillion, price.ImageInputPerMillion = sometimes(3), sometimes(3)
+		price.CachedImageInputPerMillion, price.ImageOutputPerMillion = sometimes(3), sometimes(3)
+		price.UnitPrice, price.PerRequest, price.BatchMultiplier = sometimes(4), sometimes(3), sometimes(4)
+		tools := []string{"web_search", "file_search", "code_interpreter"}
+		if rng.IntN(3) == 0 {
+			price.ToolCalls = map[string]string{tools[rng.IntN(len(tools))]: *parityRate(rng, 1)}
+		}
+		if rng.IntN(4) == 0 {
+			// An always-on window keeps the multiplier exercised regardless of
+			// when the suite runs.
+			price.Windows = &PriceWindows{TimeZone: "UTC", Periods: []PriceWindowPeriod{{
+				Days: []int{1, 2, 3, 4, 5, 6, 7}, Start: "00:00", End: "24:00",
+				Multiplier: *parityRate(rng, 1)}}}
+		}
+		if rng.IntN(4) == 0 {
+			// Tiers name exactly the per-million fields the entry names.
+			tier := PriceTier{AboveInputTokens: 1 + rng.Int64N(1_000_000),
+				InputPerMillion:             mirrorRate(price.InputPerMillion, rng, magnitude),
+				CachedInputPerMillion:       mirrorRate(price.CachedInputPerMillion, rng, magnitude),
+				CacheWriteInputPerMillion:   mirrorRate(price.CacheWriteInputPerMillion, rng, magnitude),
+				CacheWrite5MInputPerMillion: mirrorRate(price.CacheWrite5MInputPerMillion, rng, magnitude),
+				CacheWrite1HInputPerMillion: mirrorRate(price.CacheWrite1HInputPerMillion, rng, magnitude),
+				OutputPerMillion:            mirrorRate(price.OutputPerMillion, rng, magnitude),
+				AudioInputPerMillion:        mirrorRate(price.AudioInputPerMillion, rng, magnitude),
+				CachedAudioInputPerMillion:  mirrorRate(price.CachedAudioInputPerMillion, rng, magnitude),
+				AudioOutputPerMillion:       mirrorRate(price.AudioOutputPerMillion, rng, magnitude),
+				ImageInputPerMillion:        mirrorRate(price.ImageInputPerMillion, rng, magnitude),
+				CachedImageInputPerMillion:  mirrorRate(price.CachedImageInputPerMillion, rng, magnitude),
+				ImageOutputPerMillion:       mirrorRate(price.ImageOutputPerMillion, rng, magnitude)}
+			if rng.IntN(2) == 0 {
+				upper := tier
+				upper.AboveInputTokens += 1 + rng.Int64N(1_000_000)
+				price.Tiers = []PriceTier{tier, upper}
+			} else {
+				price.Tiers = []PriceTier{tier}
+			}
+		}
 		limit := []int64{10, 1000, 100_000, 10_000_000, 2_000_000_000}[rng.IntN(5)]
 		usage := AttemptUsage{Observed: true, Complete: rng.IntN(12) > 0}
 		input := rng.Int64N(limit + 1)
@@ -257,9 +333,39 @@ func parityCases(n int) []parityCase {
 				usage.CacheWrite1HInputTokens = count(split)
 			}
 		}
+		if rng.IntN(3) == 0 {
+			// Modality shares stay inside the totals: cached is the cached
+			// remainder, audio and image split what is left after writes.
+			budget := remaining - valOrZero(usage.CacheWriteInputTokens)
+			if rng.IntN(2) == 0 {
+				usage.AudioInputTokens = count(budget)
+				budget -= *usage.AudioInputTokens
+				usage.CachedAudioInputTokens = count(min(*usage.AudioInputTokens,
+					valOrZero(usage.CachedInputTokens)))
+			}
+			if rng.IntN(2) == 0 {
+				usage.ImageInputTokens = count(budget)
+				usage.CachedImageInputTokens = count(min(*usage.ImageInputTokens,
+					valOrZero(usage.CachedInputTokens)-valOrZero(usage.CachedAudioInputTokens)))
+			}
+		}
 		if rng.IntN(5) > 0 {
 			usage.OutputTokens = count(limit)
+			if rng.IntN(3) == 0 {
+				usage.AudioOutputTokens = count(*usage.OutputTokens)
+				usage.ImageOutputTokens = count(*usage.OutputTokens - *usage.AudioOutputTokens)
+			}
 		}
+		if price.ToolCalls != nil && rng.IntN(2) == 0 {
+			usage.ToolCalls = map[string]int64{}
+			for tool := range price.ToolCalls {
+				usage.ToolCalls[tool] = rng.Int64N(4)
+			}
+			if rng.IntN(5) == 0 {
+				usage.ToolCalls["unpriced_tool"] = rng.Int64N(3) + 1
+			}
+		}
+		usage.Batch = rng.IntN(5) == 0
 		if rng.IntN(8) == 0 {
 			media := fmt.Sprintf("%d.%03d", rng.IntN(1000), rng.IntN(1000))
 			usage.MediaUnits = &media
@@ -269,14 +375,18 @@ func parityCases(n int) []parityCase {
 			// Cached tokens that never said what they were cached out of.
 			usage.InputTokens, usage.CacheWriteInputTokens = nil, nil
 			usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens = nil, nil
+			usage.AudioInputTokens, usage.CachedAudioInputTokens = nil, nil
+			usage.ImageInputTokens, usage.CachedImageInputTokens = nil, nil
 			if usage.CachedInputTokens == nil {
 				usage.CachedInputTokens = count(10)
 			}
 		case 1:
 			usage.InputTokens, usage.CachedInputTokens, usage.CacheWriteInputTokens = nil, nil, nil
 			usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens = nil, nil
+			usage.AudioInputTokens, usage.CachedAudioInputTokens = nil, nil
+			usage.ImageInputTokens, usage.CachedImageInputTokens = nil, nil
 		}
-		if cost, ok := price.Cost(usage); ok && cost.Cmp(MaxCost()) >= 0 {
+		if cost, ok := price.Cost(usage, time.Now(), true); ok && cost.Cmp(MaxCost()) >= 0 {
 			// PostgreSQL refuses an amount the column cannot hold; admission
 			// saturates instead, and that is not what is compared here.
 			continue
@@ -340,14 +450,45 @@ func seedParityPrices(t *testing.T, pool *pgxpool.Pool, owner string, effective 
 	batch := &pgx.Batch{}
 	for _, c := range cases {
 		p := c.price
+		var toolCalls, tiers, windows any
+		if len(p.ToolCalls) > 0 {
+			data, err := json.Marshal(p.ToolCalls)
+			if err != nil {
+				t.Fatalf("marshal tool calls: %v", err)
+			}
+			toolCalls = string(data)
+		}
+		if len(p.Tiers) > 0 {
+			data, err := json.Marshal(p.Tiers)
+			if err != nil {
+				t.Fatalf("marshal tiers: %v", err)
+			}
+			tiers = string(data)
+		}
+		if p.Windows != nil {
+			data, err := json.Marshal(p.Windows)
+			if err != nil {
+				t.Fatalf("marshal windows: %v", err)
+			}
+			windows = string(data)
+		}
 		batch.Queue(`INSERT INTO olp.prices
 		        (pricing_revision_id, provider_kind, model, operation, input_per_million, output_per_million,
 		         cached_input_per_million, cache_write_input_per_million, cache_write_5m_input_per_million,
-		         cache_write_1h_input_per_million, unit_price, currency)
+		         cache_write_1h_input_per_million, unit_price, currency,
+		         audio_input_per_million, cached_audio_input_per_million, audio_output_per_million,
+		         image_input_per_million, cached_image_input_per_million, image_output_per_million,
+		         per_request, batch_multiplier, tool_calls, tiers, windows)
 		    VALUES ($1::uuid, 'openai', $2, 'generation', $3::text::numeric, $4::text::numeric, $5::text::numeric,
-		            $6::text::numeric, $7::text::numeric, $8::text::numeric, $9::text::numeric, 'USD')`,
+		            $6::text::numeric, $7::text::numeric, $8::text::numeric, $9::text::numeric, 'USD',
+		            $10::text::numeric, $11::text::numeric, $12::text::numeric, $13::text::numeric,
+		            $14::text::numeric, $15::text::numeric, $16::text::numeric, $17::text::numeric,
+		            $18::jsonb, $19::jsonb, $20::jsonb)`,
 			revision, p.Model, p.InputPerMillion, p.OutputPerMillion, p.CachedInputPerMillion,
-			p.CacheWriteInputPerMillion, p.CacheWrite5MInputPerMillion, p.CacheWrite1HInputPerMillion, p.UnitPrice)
+			p.CacheWriteInputPerMillion, p.CacheWrite5MInputPerMillion, p.CacheWrite1HInputPerMillion, p.UnitPrice,
+			p.AudioInputPerMillion, p.CachedAudioInputPerMillion, p.AudioOutputPerMillion,
+			p.ImageInputPerMillion, p.CachedImageInputPerMillion, p.ImageOutputPerMillion,
+			p.PerRequest, p.BatchMultiplier, toolCalls, tiers, windows)
 	}
 	results := pool.SendBatch(t.Context(), batch)
 	for range cases {

@@ -186,6 +186,7 @@ func (s *Server) holdCaps(ctx context.Context, x *execution, attempt runtime.Att
 func (x *execution) spendCaps(owners []string, attempt runtime.Attempt) {
 	bound := x.attemptCostBound(attempt)
 	x.spentCost = x.spentCost.Add(bound)
+	x.spentCharge = x.spentCharge.Add(x.attemptChargeBound(attempt, bound))
 	for i := range x.caps {
 		if slices.Contains(owners, x.caps[i].owner) {
 			x.caps[i].dispatched = true
@@ -199,7 +200,7 @@ func (x *execution) spendCaps(owners []string, attempt runtime.Attempt) {
 func (s *Server) settleCaps(ctx context.Context, x *execution) {
 	for _, hold := range x.caps {
 		if hold.dispatched && hold.lease.HasCostReservation() {
-			hold.lease.SetActualCost(x.costOf(hold.owner).String())
+			hold.lease.SetActualCost(x.costOf(hold.owner).String(), x.costOf(hold.owner).String())
 		}
 		settleKey(ctx, hold.lease, hold.dispatched, nil, s.log)
 	}

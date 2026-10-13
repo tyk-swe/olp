@@ -81,7 +81,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 			s.settlePinHold(r.Context(), x, p.hold, actual)
 		}
 		s.settleCaps(r.Context(), x)
-		x.recordCost()
+		s.recordCost(x)
 		settleKey(r.Context(), x.lease, x.dispatched, x.settledTokens(), s.log)
 	}()
 	fail := func(e *Error) {
@@ -186,6 +186,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		}
 		x.pinnedSlot = &p.slot
 		p.attempt.Price = s.Runtime.RoutingInputs().Price(p.provider.Kind, p.provider.ID, p.provider.VendorID, p.model, "generation", s.now())
+		p.attempt.Discount = s.Runtime.RoutingInputs().Discount(p.provider.Kind, p.provider.ID, p.provider.VendorID, s.now())
 		deadline, _ := ctx.Deadline()
 		gate := s.gateAttempt(ctx, x, p.attempt, &p.provider, &p.slot, x.estimate, deadline)
 		if gate.verdict != gateAdmitted {
@@ -889,12 +890,16 @@ func geminiInteractionUsage(object oif.Value) *openai.Usage {
 		return nil
 	}
 	var native struct {
-		Input    *int64 `json:"total_input_tokens"`
-		Output   *int64 `json:"total_output_tokens"`
-		Cached   *int64 `json:"total_cached_tokens"`
-		Thoughts *int64 `json:"total_thought_tokens"`
-		ToolUse  *int64 `json:"total_tool_use_tokens"`
-		Total    *int64 `json:"total_tokens"`
+		Input            *int64                            `json:"total_input_tokens"`
+		Output           *int64                            `json:"total_output_tokens"`
+		Cached           *int64                            `json:"total_cached_tokens"`
+		Thoughts         *int64                            `json:"total_thought_tokens"`
+		ToolUse          *int64                            `json:"total_tool_use_tokens"`
+		Total            *int64                            `json:"total_tokens"`
+		PromptDetails    []geminilifecycle.LiveUsageDetail `json:"prompt_tokens_details"`
+		CacheDetails     []geminilifecycle.LiveUsageDetail `json:"cache_tokens_details"`
+		CandidateDetails []geminilifecycle.LiveUsageDetail `json:"candidates_tokens_details"`
+		ResponseDetails  []geminilifecycle.LiveUsageDetail `json:"response_tokens_details"`
 	}
 	if json.Unmarshal(usageValue.Bytes(), &native) != nil || native.Input == nil || native.Output == nil || *native.Input < 0 || *native.Output < 0 || native.Cached != nil && (*native.Cached < 0 || *native.Cached > *native.Input) {
 		return nil
@@ -902,6 +907,38 @@ func geminiInteractionUsage(object oif.Value) *openai.Usage {
 	usage := geminiExtendedUsage(*native.Input, *native.Output, native.Cached, native.Thoughts, native.ToolUse, native.Total)
 	if usage == nil {
 		return nil
+	}
+	if audio, image := geminiUsageDetails(native.PromptDetails); audio > 0 || image > 0 {
+		if audio > 0 {
+			usage.AudioInputTokens = &audio
+		}
+		if image > 0 {
+			usage.ImageInputTokens = &image
+		}
+	}
+	if audio, image := geminiUsageDetails(native.CacheDetails); audio > 0 || image > 0 {
+		if audio > 0 {
+			usage.CachedAudioInputTokens = &audio
+		}
+		if image > 0 {
+			usage.CachedImageInputTokens = &image
+		}
+	}
+	if audio, image := geminiUsageDetails(native.CandidateDetails); audio > 0 || image > 0 {
+		if audio > 0 {
+			usage.AudioOutputTokens = &audio
+		}
+		if image > 0 {
+			usage.ImageOutputTokens = &image
+		}
+	}
+	if audio, image := geminiUsageDetails(native.ResponseDetails); audio > 0 || image > 0 {
+		if audio > 0 {
+			usage.AudioOutputTokens = &audio
+		}
+		if image > 0 {
+			usage.ImageOutputTokens = &image
+		}
 	}
 	return usage
 }

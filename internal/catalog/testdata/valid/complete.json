@@ -1,5 +1,5 @@
 {
-  "api_version": "openllmproxy.dev/catalog/v1",
+  "api_version": "openllmproxy.dev/catalog/v2",
   "published_at": "2026-10-05T12:00:00Z",
   "currency": "USD",
   "estimation": [
@@ -57,14 +57,60 @@
               "cache_write_5m_input_per_million": "3.75",
               "cache_write_1h_input_per_million": "6",
               "output_per_million": "15",
+              "audio_input_per_million": "40",
+              "audio_output_per_million": "80",
+              "image_input_per_million": "10",
+              "image_output_per_million": "120",
+              "per_request": "0.02",
+              "tool_calls": {
+                "file_search": "0.0025",
+                "web_search": "0.01"
+              },
+              "tiers": [
+                {
+                  "above_input_tokens": 200000,
+                  "input_per_million": "6",
+                  "cached_input_per_million": "0.6",
+                  "cache_write_5m_input_per_million": "7.5",
+                  "cache_write_1h_input_per_million": "12",
+                  "output_per_million": "22.5",
+                  "audio_input_per_million": "80",
+                  "audio_output_per_million": "160",
+                  "image_input_per_million": "20",
+                  "image_output_per_million": "240"
+                }
+              ],
+              "windows": {
+                "time_zone": "America/New_York",
+                "periods": [
+                  {
+                    "days": [
+                      1,
+                      2,
+                      3,
+                      4,
+                      5
+                    ],
+                    "start": "00:00",
+                    "end": "07:00",
+                    "multiplier": "0.8"
+                  },
+                  {
+                    "days": [
+                      6,
+                      7
+                    ],
+                    "start": "00:00",
+                    "end": "24:00",
+                    "multiplier": "0.5"
+                  }
+                ]
+              },
+              "batch_multiplier": "0.5",
               "unrepresentable": [
                 {
-                  "component": "batch_multiplier",
-                  "detail": "Batch requests are billed at 50% of these rates."
-                },
-                {
-                  "component": "tiers",
-                  "detail": "Input over 200,000 tokens: 6 per million input, 22.5 per million output."
+                  "component": "service_tier",
+                  "detail": "A priority tier is billed at 1.5x these rates."
                 }
               ],
               "provenance": {

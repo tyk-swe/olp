@@ -35,6 +35,7 @@
 
   let createName = $state('');
   let createProjectId = $state('');
+  let createBasis = $state('cost');
   let createDaily = $state('');
   let createMonthly = $state('');
   let createWeekly = $state('');
@@ -56,6 +57,7 @@
   let editingId = $state('');
   let editingGroup = $state.raw<BudgetGroup | null>(null);
   let editName = $state('');
+  let editBasis = $state('cost');
   let editDaily = $state('');
   let editMonthly = $state('');
   let editWeekly = $state('');
@@ -98,6 +100,7 @@
     editingId = group.id;
     editName = group.name;
     editDaily = group.daily_cost_limit ?? '';
+    editBasis = group.cost_basis ?? 'cost';
     editMonthly = group.monthly_cost_limit ?? '';
     editWeekly = group.weekly_cost_limit ?? '';
     editTemplate = group.limit_template ?? '';
@@ -121,6 +124,7 @@
     const validation =
       limitsError({
         ...createRates,
+        cost_basis: createBasis as 'cost' | 'charge',
         daily_cost_limit: createDaily,
         weekly_cost_limit: createWeekly,
         monthly_cost_limit: createMonthly
@@ -200,6 +204,7 @@
     const validation =
       limitsError({
         ...editRates,
+        cost_basis: editBasis as 'cost' | 'charge',
         daily_cost_limit: editDaily,
         weekly_cost_limit: editWeekly,
         monthly_cost_limit: editMonthly
@@ -321,6 +326,15 @@
               bind:value={createMonthly}
             />
           </div>
+          <div class="form-field">
+            <label for="group-basis">Budget basis</label><select
+              id="group-basis"
+              bind:value={createBasis}
+              ><option value="cost">Provider cost</option><option value="charge"
+                >Consumer charge</option
+              ></select
+            >
+          </div>
         </div>
         <div class="form-actions">
           <button
@@ -354,8 +368,8 @@
             ><th scope="col">Name</th><th scope="col">Project</th><th
               scope="col">Daily</th
             ><th scope="col">Weekly</th><th scope="col">Monthly</th><th
-              scope="col">Unpriced</th
-            >{#if canManage}<th scope="col"
+              scope="col">Basis</th
+            ><th scope="col">Unpriced</th>{#if canManage}<th scope="col"
                 ><span class="sr-only">Actions</span></th
               >{/if}</tr
           ></thead
@@ -392,6 +406,15 @@
                     bind:value={editMonthly}
                     disabled={editBusy}
                   /></td
+                ><td
+                  ><select
+                    aria-label="Budget basis"
+                    bind:value={editBasis}
+                    disabled={editBusy}
+                    ><option value="cost">Provider cost</option><option
+                      value="charge">Consumer charge</option
+                    ></select
+                  ></td
                 ><td>{formatInteger(group.budget.unpriced_attempts)}</td><td
                   ><button
                     class="text-button"
@@ -449,6 +472,10 @@
                   /><small
                     >resets {formatDate(group.budget.monthly.reset_at)}</small
                   ></td
+                ><td
+                  >{group.budget.cost_basis === 'charge'
+                    ? 'Charge'
+                    : 'Cost'}</td
                 ><td>{formatInteger(group.budget.unpriced_attempts)}</td
                 >{#if canManage}<td
                     ><button

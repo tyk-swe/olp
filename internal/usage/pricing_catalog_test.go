@@ -60,7 +60,7 @@ func TestCatalogMappingSkipsWhatThisBuildCannotStore(t *testing.T) {
 	three := catalog.Decimal("3")
 	model := func(id string, operation string) catalog.Model {
 		return catalog.Model{ID: id, Aliases: []string{id + "-snapshot"}, InputModalities: []string{"text"}, OutputModalities: []string{"text"}, Provenance: provenance,
-			Prices: []catalog.Price{{Operation: operation, InputPerMillion: &three, Unrepresentable: []catalog.Unrepresentable{{Component: "tiers", Detail: "Over 200k: 6"}}, Provenance: provenance}}}
+			Prices: []catalog.Price{{Operation: operation, InputPerMillion: &three, Unrepresentable: []catalog.Unrepresentable{{Component: "service_tier", Detail: "Priority is 1.5x."}}, Provenance: provenance}}}
 	}
 	c := &catalog.Catalog{APIVersion: catalog.APIVersion, PublishedAt: observed, Currency: "USD", Vendors: []catalog.Vendor{
 		{ID: "anthropic", Name: "Anthropic", Models: []catalog.Model{model("known", "generation"), model("future-operation", "teleportation")}},
@@ -73,7 +73,7 @@ func TestCatalogMappingSkipsWhatThisBuildCannotStore(t *testing.T) {
 	if len(skipped) != 2 || skipped[0].Model != "future-operation" || skipped[1].VendorID != "future-vendor" {
 		t.Fatalf("skipped = %+v", skipped)
 	}
-	if len(doc.Unrepresentable) != 1 || doc.Unrepresentable[0].Component != "tiers" {
+	if len(doc.Unrepresentable) != 1 || doc.Unrepresentable[0].Component != "service_tier" {
 		t.Fatalf("unrepresentable = %+v", doc.Unrepresentable)
 	}
 }

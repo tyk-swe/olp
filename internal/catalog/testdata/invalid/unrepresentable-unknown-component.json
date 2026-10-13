@@ -1,5 +1,5 @@
 {
-  "api_version": "openllmproxy.dev/catalog/v1",
+  "api_version": "openllmproxy.dev/catalog/v2",
   "published_at": "2026-10-05T12:00:00Z",
   "currency": "USD",
   "estimation": [
@@ -59,15 +59,15 @@
               "output_per_million": "15",
               "unrepresentable": [
                 {
-                  "component": "batch_multiplier",
+                  "component": "mystery_component",
                   "detail": "Batch requests are billed at 50% of these rates."
                 },
                 {
-                  "component": "tiers",
+                  "component": "mystery_component",
                   "detail": "Input over 200,000 tokens: 6 per million input, 22.5 per million output."
                 },
                 {
-                  "component": "surcharge",
+                  "component": "mystery_component",
                   "detail": "x"
                 }
               ],

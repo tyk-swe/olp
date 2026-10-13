@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 	"time"
@@ -62,6 +63,31 @@ func normalizeModels(models []Model) []Model {
 		m.Prices = slices.Clone(m.Prices)
 		for j := range m.Prices {
 			p := &m.Prices[j]
+			slices.SortFunc(p.Tiers, func(a, b Tier) int {
+				return cmp.Compare(a.AboveInputTokens, b.AboveInputTokens)
+			})
+			if p.Windows != nil {
+				windows := *p.Windows
+				windows.Periods = slices.Clone(windows.Periods)
+				for k := range windows.Periods {
+					windows.Periods[k].Days = slices.Clone(windows.Periods[k].Days)
+					slices.Sort(windows.Periods[k].Days)
+				}
+				slices.SortFunc(windows.Periods, func(a, b WindowPeriod) int {
+					ad, bd := 0, 0
+					if len(a.Days) > 0 {
+						ad = a.Days[0]
+					}
+					if len(b.Days) > 0 {
+						bd = b.Days[0]
+					}
+					if ad != bd {
+						return ad - bd
+					}
+					return strings.Compare(a.Start, b.Start)
+				})
+				p.Windows = &windows
+			}
 			p.Unrepresentable = slices.Clone(p.Unrepresentable)
 			if p.Unrepresentable == nil {
 				p.Unrepresentable = []Unrepresentable{}

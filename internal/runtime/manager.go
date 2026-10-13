@@ -386,14 +386,14 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 	if err = budgetRows.Err(); err != nil {
 		return err
 	}
-	rows, err := tx.Query(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text,g.weekly_cost_limit::text,p.end_user_policy,COALESCE(p.attribution_policy,'{}'::jsonb),COALESCE(k.limit_lookup_id,k.lookup_id),g.limit_template,g.requests_per_minute,g.tokens_per_minute,g.max_concurrency,k.workload_issuer_id::text,COALESCE(k.workload_digest,''),COALESCE(k.workload_mapping,'') FROM olp.api_keys k LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id LEFT JOIN olp.projects p ON p.id=k.project_id")
+	rows, err := tx.Query(ctx, "SELECT k.id::text,k.lookup_id,k.created_by::text,k.project_id::text,k.digest,k.policy,k.expires_at,k.revoked_at,k.budget_group_id::text,g.daily_cost_limit::text,g.monthly_cost_limit::text,g.weekly_cost_limit::text,p.end_user_policy,COALESCE(p.attribution_policy,'{}'::jsonb),COALESCE(k.limit_lookup_id,k.lookup_id),g.limit_template,g.requests_per_minute,g.tokens_per_minute,g.max_concurrency,COALESCE(g.cost_basis,'cost'),k.workload_issuer_id::text,COALESCE(k.workload_digest,''),COALESCE(k.workload_mapping,'') FROM olp.api_keys k LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id LEFT JOIN olp.projects p ON p.id=k.project_id")
 	if err != nil {
 		return fmt.Errorf("authority: %w", err)
 	}
 	for rows.Next() {
 		var policy []byte
 		record := keyRecord{}
-		if err = rows.Scan(&record.authority.ID, &record.authority.LookupID, &record.authority.Issuer, &record.authority.ProjectID, &record.digest, &policy, &record.authority.ExpiresAt, &record.authority.RevokedAt, &record.authority.BudgetGroupID, &record.authority.BudgetGroupDailyCostLimit, &record.authority.BudgetGroupMonthlyCostLimit, &record.authority.BudgetGroupWeeklyCostLimit, &record.authority.ProjectEndUserPolicy, &record.authority.ProjectAttributionPolicy, &record.authority.LimitLookupID, &record.authority.BudgetGroupTemplate, &record.authority.BudgetGroupRPM, &record.authority.BudgetGroupTPM, &record.authority.BudgetGroupConcurrency, &record.authority.WorkloadIssuerID, &record.authority.WorkloadDigest, &record.authority.WorkloadMapping); err != nil {
+		if err = rows.Scan(&record.authority.ID, &record.authority.LookupID, &record.authority.Issuer, &record.authority.ProjectID, &record.digest, &policy, &record.authority.ExpiresAt, &record.authority.RevokedAt, &record.authority.BudgetGroupID, &record.authority.BudgetGroupDailyCostLimit, &record.authority.BudgetGroupMonthlyCostLimit, &record.authority.BudgetGroupWeeklyCostLimit, &record.authority.ProjectEndUserPolicy, &record.authority.ProjectAttributionPolicy, &record.authority.LimitLookupID, &record.authority.BudgetGroupTemplate, &record.authority.BudgetGroupRPM, &record.authority.BudgetGroupTPM, &record.authority.BudgetGroupConcurrency, &record.authority.BudgetGroupCostBasis, &record.authority.WorkloadIssuerID, &record.authority.WorkloadDigest, &record.authority.WorkloadMapping); err != nil {
 			rows.Close()
 			return fmt.Errorf("authority: %w", err)
 		}

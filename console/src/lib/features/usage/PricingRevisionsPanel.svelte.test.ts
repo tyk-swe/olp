@@ -148,18 +148,18 @@ function createButton() {
 async function ready() {
   await vi.waitFor(() => expect(field('provider-kind').value).toBe('openai'));
   edit('price-model', ' model-a ');
-  edit('input-price', ' 0.00012500 ');
+  edit('price-input-price', ' 0.00012500 ');
   edit('effective-at', '2026-09-15T09:30');
 }
 
 it('submits exact decimals, zero and null rates, then refreshes revisions', async () => {
   establish();
   await ready();
-  edit('cached-input-price', '0');
-  edit('cache-write-price', '0.004500');
-  edit('cache-write-5m-price', '0.006');
-  edit('cache-write-1h-price', '0.012');
-  edit('output-price', '10.00');
+  edit('price-cached-input-price', '0');
+  edit('price-cache-write-price', '0.004500');
+  edit('price-cache-write-5m-price', '0.006');
+  edit('price-cache-write-1h-price', '0.012');
+  edit('price-output-price', '10.00');
   edit('currency', 'eur');
   submit();
   await vi.waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
@@ -179,6 +179,17 @@ it('submits exact decimals, zero and null rates, then refreshes revisions', asyn
         cache_write_1h_input_per_million: '0.012',
         output_per_million: '10.00',
         unit_price: null,
+        audio_input_per_million: null,
+        cached_audio_input_per_million: null,
+        audio_output_per_million: null,
+        image_input_per_million: null,
+        cached_image_input_per_million: null,
+        image_output_per_million: null,
+        per_request: null,
+        batch_multiplier: null,
+        tool_calls: null,
+        tiers: null,
+        windows: null,
         currency: 'EUR'
       }
     ],
@@ -191,7 +202,7 @@ it('submits exact decimals, zero and null rates, then refreshes revisions', asyn
   });
   expect(listPricing).toHaveBeenCalledTimes(2);
   expect(field('price-model').value).toBe('');
-  expect(field('input-price').value).toBe('');
+  expect(field('price-input-price').value).toBe('');
   expect(host.textContent).toContain('0.00012500');
   expect(host.textContent).toContain('Billed as input');
 });
@@ -202,7 +213,7 @@ it.each([
 ])('reports invalid price %s without submitting', async (value, error) => {
   establish();
   await ready();
-  edit('input-price', value);
+  edit('price-input-price', value);
   submit();
   expect(createPricingRevision).not.toHaveBeenCalled();
   expect(onFeedback).toHaveBeenLastCalledWith({ status: '', error });
@@ -219,16 +230,16 @@ it('keeps later edits while a submission is pending and refuses duplicate submis
   expect(onBusyChange).toHaveBeenLastCalledWith(true);
   expect(createButton().disabled).toBe(true);
   edit('price-model', 'model-b');
-  edit('input-price', '2.000');
-  edit('cached-input-price', '0.20');
+  edit('price-input-price', '2.000');
+  edit('price-cached-input-price', '0.20');
   edit('effective-at', '2026-09-16T10:00');
   submit();
   expect(createPricingRevision).toHaveBeenCalledTimes(1);
   pending.resolve(revision);
   await vi.waitFor(() => expect(createButton().disabled).toBe(false));
   expect(field('price-model').value).toBe('model-b');
-  expect(field('input-price').value).toBe('2.000');
-  expect(field('cached-input-price').value).toBe('0.20');
+  expect(field('price-input-price').value).toBe('2.000');
+  expect(field('price-cached-input-price').value).toBe('0.20');
   expect(field('effective-at').value).toBe('2026-09-16T10:00');
 });
 
@@ -247,7 +258,7 @@ it('reports a submission failure, preserves the form, and releases the save lock
   );
   expect(onBusyChange).toHaveBeenLastCalledWith(false);
   expect(field('price-model').value).toBe(' model-a ');
-  expect(field('input-price').value).toBe(' 0.00012500 ');
+  expect(field('price-input-price').value).toBe(' 0.00012500 ');
   expect(createButton().disabled).toBe(false);
   expect(listPricing).toHaveBeenCalledTimes(1);
 });
@@ -308,7 +319,7 @@ it('gates queries on installation capabilities and preserves edits while hidden'
   client.setQueryData(sessionKeys.serviceCapabilities, capabilities);
   await vi.waitFor(() => expect(host.textContent).toContain('Revision 2'));
   expect(field('price-model').value).toBe(' model-a ');
-  expect(field('input-price').value).toBe(' 0.00012500 ');
+  expect(field('price-input-price').value).toBe(' 0.00012500 ');
   expect(createButton().disabled).toBe(false);
 });
 
@@ -405,4 +416,112 @@ it('shows the created revision on the first page after paging away', async () =>
       pricingKeys.page('older-page')
     )?.items[0]?.revision
   ).toBe(1);
+});
+
+it('submits modality rates, request fee, batch multiplier, tools, tiers and windows', async () => {
+  establish();
+  await ready();
+  edit('price-audio-input-price', '4.00');
+  edit('price-cached-audio-input-price', '0.50');
+  edit('price-audio-output-price', '16.00');
+  edit('price-image-input-price', '6.00');
+  edit('price-image-output-price', '24.00');
+  edit('price-per-request-price', '0.01');
+  edit('price-batch-multiplier', '0.50');
+  // One tool fee row.
+  host
+    .querySelectorAll<HTMLButtonElement>('.component-rows button')
+    .forEach((button) => {
+      if (button.textContent?.includes('Add tool fee')) button.click();
+    });
+  flushSync();
+  edit('price-tool-name-0', 'web_search');
+  edit('price-tool-fee-0', '0.010');
+  // A tier mirrors every per-million rate the entry fills.
+  host
+    .querySelectorAll<HTMLButtonElement>('.component-rows button')
+    .forEach((button) => {
+      if (button.textContent?.includes('Add tier')) button.click();
+    });
+  flushSync();
+  edit('price-tier-threshold-0', '1000000');
+  edit('price-tier-0-input_per_million', '3.00');
+  edit('price-tier-0-audio_input_per_million', '8.00');
+  edit('price-tier-0-cached_audio_input_per_million', '1.00');
+  edit('price-tier-0-audio_output_per_million', '32.00');
+  edit('price-tier-0-image_input_per_million', '12.00');
+  edit('price-tier-0-image_output_per_million', '48.00');
+  // A window across every weekday.
+  edit('price-window-zone', 'America/New_York');
+  host
+    .querySelectorAll<HTMLButtonElement>('.component-rows button')
+    .forEach((button) => {
+      if (button.textContent?.includes('Add window period')) button.click();
+    });
+  flushSync();
+  host
+    .querySelectorAll('.weekday-toggles button')
+    .forEach((button) =>
+      button.dispatchEvent(new Event('click', { bubbles: true }))
+    );
+  flushSync();
+  edit('price-window-start-0', '09:00');
+  edit('price-window-end-0', '24:00');
+  edit('price-window-multiplier-0', '0.75');
+  submit();
+  await vi.waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
+  const submitted = vi.mocked(createPricingRevision).mock.calls[0]?.[1]?.[0];
+  expect(submitted).toMatchObject({
+    audio_input_per_million: '4.00',
+    cached_audio_input_per_million: '0.50',
+    audio_output_per_million: '16.00',
+    image_input_per_million: '6.00',
+    image_output_per_million: '24.00',
+    cached_image_input_per_million: null,
+    per_request: '0.01',
+    batch_multiplier: '0.50',
+    tool_calls: { web_search: '0.010' },
+    tiers: [
+      {
+        above_input_tokens: 1000000,
+        input_per_million: '3.00',
+        audio_input_per_million: '8.00',
+        cached_audio_input_per_million: '1.00',
+        audio_output_per_million: '32.00',
+        image_input_per_million: '12.00',
+        image_output_per_million: '48.00'
+      }
+    ],
+    windows: {
+      time_zone: 'America/New_York',
+      periods: [
+        {
+          days: [1, 2, 3, 4, 5, 6, 7],
+          start: '09:00',
+          end: '24:00',
+          multiplier: '0.75'
+        }
+      ]
+    }
+  });
+});
+
+it('rejects a tool name that cannot price', async () => {
+  establish();
+  await ready();
+  host
+    .querySelectorAll<HTMLButtonElement>('.component-rows button')
+    .forEach((button) => {
+      if (button.textContent?.includes('Add tool fee')) button.click();
+    });
+  flushSync();
+  edit('price-tool-name-0', 'Web Search');
+  edit('price-tool-fee-0', '0.010');
+  submit();
+  expect(createPricingRevision).not.toHaveBeenCalled();
+  expect(onFeedback).toHaveBeenLastCalledWith({
+    status: '',
+    error:
+      'Tool names are lowercase letters, digits and underscores, starting with a letter.'
+  });
 });

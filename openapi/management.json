@@ -41,6 +41,18 @@
           },
           "weekly": {
             "$ref": "#/components/schemas/ApiKeyBudgetWindowResponse"
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ]
+          },
+          "uncharged_attempts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         },
         "required": [
@@ -402,6 +414,14 @@
               "$ref": "#/components/schemas/RegionalRateLimits"
             },
             "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
           }
         },
         "required": [
@@ -655,6 +675,127 @@
           "usage_observed": {
             "type": [
               "boolean",
+              "null"
+            ]
+          },
+          "audio_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cached_audio_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "audio_output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "image_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cached_image_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "image_output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tool_calls": {
+            "additionalProperties": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Metered server-side tool invocations by tool name.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "batch": {
+            "description": "The attempt's usage was produced at batch terms.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "pricing_components": {
+            "description": "The price components the attempt was charged through.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "commitment_weight": {
+            "description": "The list-cost weight the committed attempt divides its commitment period's amount by.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commitment_amount": {
+            "description": "The commitment amount the attempt's provider owes per period.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commitment_period": {
+            "description": "The UTC calendar period the commitment amount covers, when the attempt's provider is committed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discount_id": {
+            "description": "The discount the attempt was priced under, when one applied.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "charge": {
+            "description": "What the attempt's consumer was billed, an exact decimal string.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rate_card_revision_id": {
+            "description": "The rate card revision the charge came from, when a card applied.",
+            "format": "uuid",
+            "type": [
+              "string",
               "null"
             ]
           }
@@ -974,6 +1115,18 @@
           },
           "weekly": {
             "$ref": "#/components/schemas/BudgetGroupBudgetWindowResponse"
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ]
+          },
+          "uncharged_attempts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         },
         "required": [
@@ -1130,6 +1283,14 @@
               "null"
             ],
             "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
           }
         },
         "required": [
@@ -1627,7 +1788,10 @@
               "stage",
               "enroll",
               "conflict",
-              "blocker"
+              "blocker",
+              "end",
+              "revision",
+              "neutralize"
             ],
             "type": "string"
           },
@@ -1653,7 +1817,9 @@
               "catalog_publication",
               "guardrail",
               "sink",
-              "mcp_server"
+              "mcp_server",
+              "discount",
+              "rate_card"
             ],
             "type": "string"
           }
@@ -1775,6 +1941,106 @@
               "string",
               "null"
             ]
+          },
+          "audio_input_per_million": {
+            "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_audio_input_per_million": {
+            "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_output_per_million": {
+            "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_input_per_million": {
+            "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_image_input_per_million": {
+            "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_output_per_million": {
+            "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "per_request": {
+            "description": "A fixed fee charged once per successful attempt.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batch_multiplier": {
+            "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tool_calls": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceToolCalls"
+              }
+            ]
+          },
+          "tiers": {
+            "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PriceTier"
+                },
+                "maxItems": 8,
+                "minItems": 1,
+                "type": "array"
+              }
+            ]
+          },
+          "windows": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceWindows"
+              }
+            ]
           }
         },
         "required": [
@@ -1790,7 +2056,18 @@
           "cache_write_5m_input_per_million",
           "cache_write_1h_input_per_million",
           "unit_price",
-          "currency"
+          "currency",
+          "audio_input_per_million",
+          "cached_audio_input_per_million",
+          "audio_output_per_million",
+          "image_input_per_million",
+          "cached_image_input_per_million",
+          "image_output_per_million",
+          "per_request",
+          "batch_multiplier",
+          "tool_calls",
+          "tiers",
+          "windows"
         ],
         "type": "object"
       },
@@ -2370,6 +2647,31 @@
         },
         "type": "object"
       },
+      "Commitment": {
+        "additionalProperties": false,
+        "description": "Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.",
+        "properties": {
+          "amount": {
+            "description": "The commitment amount, a positive decimal string.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "period": {
+            "description": "The UTC calendar period the amount covers.",
+            "enum": [
+              "hour",
+              "day",
+              "month"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "period"
+        ],
+        "type": "object"
+      },
       "ConnectionOptions": {
         "additionalProperties": false,
         "properties": {
@@ -2472,6 +2774,9 @@
                 "$ref": "#/components/schemas/HealthProbe"
               }
             ]
+          },
+          "commitment": {
+            "$ref": "#/components/schemas/Commitment"
           }
         },
         "type": "object"
@@ -2779,6 +3084,14 @@
               "$ref": "#/components/schemas/RegionalRateLimits"
             },
             "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
           }
         },
         "required": [
@@ -2874,6 +3187,14 @@
               "null"
             ],
             "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
           }
         },
         "required": [
@@ -6420,6 +6741,98 @@
               "string",
               "null"
             ]
+          },
+          "audio_input_per_million": {
+            "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_audio_input_per_million": {
+            "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_output_per_million": {
+            "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_input_per_million": {
+            "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_image_input_per_million": {
+            "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_output_per_million": {
+            "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "per_request": {
+            "description": "A fixed fee charged once per successful attempt.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batch_multiplier": {
+            "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tool_calls": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceToolCalls"
+              }
+            ]
+          },
+          "tiers": {
+            "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PriceTier"
+                },
+                "maxItems": 8,
+                "minItems": 1,
+                "type": "array"
+              }
+            ]
+          },
+          "windows": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceWindows"
+              }
+            ]
           }
         },
         "required": [
@@ -6502,6 +6915,98 @@
               "string",
               "null"
             ]
+          },
+          "audio_input_per_million": {
+            "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_audio_input_per_million": {
+            "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_output_per_million": {
+            "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_input_per_million": {
+            "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_image_input_per_million": {
+            "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_output_per_million": {
+            "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "per_request": {
+            "description": "A fixed fee charged once per successful attempt.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batch_multiplier": {
+            "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tool_calls": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceToolCalls"
+              }
+            ]
+          },
+          "tiers": {
+            "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PriceTier"
+                },
+                "maxItems": 8,
+                "minItems": 1,
+                "type": "array"
+              }
+            ]
+          },
+          "windows": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceWindows"
+              }
+            ]
           }
         },
         "required": [
@@ -6509,6 +7014,178 @@
           "model",
           "operation",
           "currency"
+        ],
+        "type": "object"
+      },
+      "PriceToolCalls": {
+        "additionalProperties": {
+          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "type": "string"
+        },
+        "description": "Fee per metered server-side tool invocation, keyed by tool name.",
+        "maxProperties": 16,
+        "minProperties": 1,
+        "type": "object"
+      },
+      "PriceTier": {
+        "additionalProperties": false,
+        "description": "Per-million rates that apply once an attempt's input tokens exceed above_input_tokens. A tier replaces the entry's whole per-million rate set, so it names exactly the per-million fields the entry names.",
+        "properties": {
+          "above_input_tokens": {
+            "description": "Input tokens per attempt above which this tier's rates apply.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "input_per_million": {
+            "description": "Input token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_input_per_million": {
+            "description": "Cached input token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cache_write_input_per_million": {
+            "description": "Generic cache-write token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cache_write_5m_input_per_million": {
+            "description": "5-minute TTL cache-write token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cache_write_1h_input_per_million": {
+            "description": "1-hour TTL cache-write token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "output_per_million": {
+            "description": "Output token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_input_per_million": {
+            "description": "Audio input token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_audio_input_per_million": {
+            "description": "Cached audio input token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_output_per_million": {
+            "description": "Audio output token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_input_per_million": {
+            "description": "Image input token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_image_input_per_million": {
+            "description": "Cached image input token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_output_per_million": {
+            "description": "Image output token rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "above_input_tokens"
+        ],
+        "type": "object"
+      },
+      "PriceWindowPeriod": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "description": "ISO weekdays the period applies on: 1 is Monday, 7 is Sunday.",
+            "items": {
+              "maximum": 7,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxItems": 7,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "end": {
+            "description": "Local time the period ends at, exclusive; \"24:00\" runs through midnight.",
+            "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+            "type": "string"
+          },
+          "multiplier": {
+            "description": "Multiplier applied to the attempt's whole usage charge.",
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "start": {
+            "description": "Local time the period starts at, inclusive.",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "days",
+          "start",
+          "end",
+          "multiplier"
+        ],
+        "type": "object"
+      },
+      "PriceWindows": {
+        "additionalProperties": false,
+        "description": "Time-of-day and day-of-week multipliers evaluated in the named zone at the attempt's start.",
+        "properties": {
+          "periods": {
+            "items": {
+              "$ref": "#/components/schemas/PriceWindowPeriod"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "time_zone": {
+            "description": "IANA time zone the periods are evaluated in, for example America/New_York.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "time_zone",
+          "periods"
         ],
         "type": "object"
       },
@@ -9548,6 +10225,61 @@
           },
           "payload_captured": {
             "type": "boolean"
+          },
+          "audio_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cached_audio_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "audio_output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "image_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cached_image_input_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "image_output_tokens": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "charge": {
+            "description": "Sum of the request's attempt charges, an exact decimal string.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -9627,6 +10359,14 @@
               "null"
             ],
             "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
           }
         },
         "type": "object"
@@ -10656,6 +11396,14 @@
           "require_zero_data_retention": {
             "default": false,
             "type": "boolean"
+          },
+          "max_cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
           }
         },
         "type": "object"
@@ -10808,6 +11556,30 @@
             "type": [
               "number",
               "null"
+            ]
+          },
+          "estimated_cost": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "description": "The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve. Null when the price cannot bound the request or no demand is known.",
+            "properties": {
+              "minimum": {
+                "type": "string"
+              },
+              "maximum": {
+                "type": "string"
+              },
+              "currency": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "minimum",
+              "maximum",
+              "currency"
             ]
           }
         },
@@ -11007,6 +11779,14 @@
                 "$ref": "#/components/schemas/AdmissionPriority"
               }
             ]
+          },
+          "max_cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
           }
         },
         "type": "object"
@@ -11077,6 +11857,98 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "audio_input_per_million": {
+            "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_audio_input_per_million": {
+            "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_output_per_million": {
+            "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_input_per_million": {
+            "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_image_input_per_million": {
+            "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_output_per_million": {
+            "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "per_request": {
+            "description": "A fixed fee charged once per successful attempt.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batch_multiplier": {
+            "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tool_calls": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceToolCalls"
+              }
+            ]
+          },
+          "tiers": {
+            "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PriceTier"
+                },
+                "maxItems": 8,
+                "minItems": 1,
+                "type": "array"
+              }
+            ]
+          },
+          "windows": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceWindows"
+              }
             ]
           }
         },
@@ -12089,6 +12961,14 @@
               "$ref": "#/components/schemas/RegionalRateLimits"
             },
             "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
           }
         },
         "type": "object"
@@ -12149,6 +13029,14 @@
               "null"
             ],
             "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
           }
         },
         "type": "object"
@@ -12403,6 +13291,40 @@
             "format": "int64",
             "minimum": 0,
             "type": "integer"
+          },
+          "audio_input_tokens": {
+            "type": "string"
+          },
+          "cached_audio_input_tokens": {
+            "type": "string"
+          },
+          "audio_output_tokens": {
+            "type": "string"
+          },
+          "image_input_tokens": {
+            "type": "string"
+          },
+          "cached_image_input_tokens": {
+            "type": "string"
+          },
+          "image_output_tokens": {
+            "type": "string"
+          },
+          "allocated_commitment": {
+            "description": "This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.",
+            "type": "string"
+          },
+          "charge": {
+            "description": "Total consumer charge, an exact decimal string, null when nothing was charged.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "uncharged_attempt_count": {
+            "description": "Billable attempts no charge was resolved for.",
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
@@ -12419,7 +13341,16 @@
           "incomplete_count",
           "estimated_input_tokens",
           "reported_input_tokens",
-          "estimated_attempt_count"
+          "estimated_attempt_count",
+          "audio_input_tokens",
+          "cached_audio_input_tokens",
+          "audio_output_tokens",
+          "image_input_tokens",
+          "cached_image_input_tokens",
+          "image_output_tokens",
+          "allocated_commitment",
+          "charge",
+          "uncharged_attempt_count"
         ],
         "type": "object"
       },
@@ -12575,6 +13506,40 @@
             "format": "int64",
             "minimum": 0,
             "type": "integer"
+          },
+          "audio_input_tokens": {
+            "type": "string"
+          },
+          "cached_audio_input_tokens": {
+            "type": "string"
+          },
+          "audio_output_tokens": {
+            "type": "string"
+          },
+          "image_input_tokens": {
+            "type": "string"
+          },
+          "cached_image_input_tokens": {
+            "type": "string"
+          },
+          "image_output_tokens": {
+            "type": "string"
+          },
+          "allocated_commitment": {
+            "description": "This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.",
+            "type": "string"
+          },
+          "charge": {
+            "description": "Total consumer charge, an exact decimal string, null when nothing was charged.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "uncharged_attempt_count": {
+            "description": "Billable attempts no charge was resolved for.",
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
@@ -12591,7 +13556,16 @@
           "incomplete_count",
           "estimated_input_tokens",
           "reported_input_tokens",
-          "estimated_attempt_count"
+          "estimated_attempt_count",
+          "audio_input_tokens",
+          "cached_audio_input_tokens",
+          "audio_output_tokens",
+          "image_input_tokens",
+          "cached_image_input_tokens",
+          "image_output_tokens",
+          "allocated_commitment",
+          "charge",
+          "uncharged_attempt_count"
         ],
         "type": "object"
       },
@@ -12700,6 +13674,40 @@
             "format": "int64",
             "minimum": 0,
             "type": "integer"
+          },
+          "audio_input_tokens": {
+            "type": "string"
+          },
+          "cached_audio_input_tokens": {
+            "type": "string"
+          },
+          "audio_output_tokens": {
+            "type": "string"
+          },
+          "image_input_tokens": {
+            "type": "string"
+          },
+          "cached_image_input_tokens": {
+            "type": "string"
+          },
+          "image_output_tokens": {
+            "type": "string"
+          },
+          "allocated_commitment": {
+            "description": "This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.",
+            "type": "string"
+          },
+          "charge": {
+            "description": "Total consumer charge, an exact decimal string, null when nothing was charged.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "uncharged_attempt_count": {
+            "description": "Billable attempts no charge was resolved for.",
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
@@ -12720,7 +13728,16 @@
           "uncertain_request_metadata_gap_count",
           "coverage",
           "request_metadata_consumer",
-          "complete"
+          "complete",
+          "audio_input_tokens",
+          "cached_audio_input_tokens",
+          "audio_output_tokens",
+          "image_input_tokens",
+          "cached_image_input_tokens",
+          "image_output_tokens",
+          "allocated_commitment",
+          "charge",
+          "uncharged_attempt_count"
         ],
         "type": "object"
       },
@@ -16795,6 +17812,14 @@
               "null"
             ],
             "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
           }
         }
       },
@@ -17020,6 +18045,14 @@
               "null"
             ],
             "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
           }
         }
       },
@@ -17086,6 +18119,20 @@
                 "format": "date-time"
               }
             }
+          },
+          "cost_basis": {
+            "type": "string",
+            "enum": [
+              "cost",
+              "charge"
+            ],
+            "description": "The measure accrued expresses."
+          },
+          "uncharged_attempts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Billable attempts in the month whose charge could not be computed."
           }
         }
       },
@@ -21489,6 +22536,773 @@
           }
         },
         "additionalProperties": false
+      },
+      "Discount": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "provider_kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "vendor_id": {
+            "description": "Vendor catalogue identity the discount scopes to, when set.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_id": {
+            "description": "Scopes the discount to one provider.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "multiplier": {
+            "description": "Multiplier on provider cost, an exact decimal string.",
+            "type": "string"
+          },
+          "effective_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider_kind",
+          "vendor_id",
+          "provider_id",
+          "multiplier",
+          "effective_at",
+          "created_at",
+          "created_by"
+        ],
+        "type": "object"
+      },
+      "DiscountRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "provider_kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "vendor_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "multiplier": {
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "effective_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_kind",
+          "multiplier"
+        ],
+        "type": "object"
+      },
+      "DiscountsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Discount"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "RateCardOwner": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "installation",
+              "organization",
+              "project"
+            ],
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "organization": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "RateCard": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/RateCardOwner"
+          },
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/RateCardRevisionSummary"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "RateCardRevisionSummary": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "rate_card_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "revision": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "markup": {
+            "description": "Multiplier on provider cost the consumer is charged.",
+            "type": "string"
+          },
+          "effective_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "rate_card_id",
+          "revision",
+          "markup",
+          "effective_at",
+          "created_at",
+          "created_by"
+        ],
+        "type": "object"
+      },
+      "RateCardPriceEntry": {
+        "additionalProperties": false,
+        "description": "An explicit card rate: a price entry scoped by connector kind, optional vendor, model and operation, never a provider.",
+        "properties": {
+          "cache_write_1h_input_per_million": {
+            "description": "Rate for the 1-hour TTL share of cache writes. Omit to bill\nit at the generic cache-write rate, then the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cache_write_5m_input_per_million": {
+            "description": "Rate for the 5-minute TTL share of cache writes. Omit to bill\nit at the generic cache-write rate, then the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cache_write_input_per_million": {
+            "description": "Rate for the generic cache-write share of the input tokens.\nOmit to bill cache writes at the full input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_input_per_million": {
+            "description": "Rate for the cached share of the input tokens. Omit to bill cached\ntokens at the full input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "description": "Installation currency. Omit to use the configured installation currency."
+          },
+          "input_per_million": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/PriceOperation"
+          },
+          "output_per_million": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "vendor_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_input_per_million": {
+            "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_audio_input_per_million": {
+            "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_output_per_million": {
+            "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_input_per_million": {
+            "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cached_image_input_per_million": {
+            "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_output_per_million": {
+            "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "per_request": {
+            "description": "A fixed fee charged once per successful attempt.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batch_multiplier": {
+            "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tool_calls": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceToolCalls"
+              }
+            ]
+          },
+          "tiers": {
+            "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PriceTier"
+                },
+                "maxItems": 8,
+                "minItems": 1,
+                "type": "array"
+              }
+            ]
+          },
+          "windows": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PriceWindows"
+              }
+            ]
+          },
+          "provider_id": {
+            "description": "Always null on a card rate: cards price for every provider of the kind.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "provider_kind",
+          "model",
+          "operation"
+        ],
+        "type": "object"
+      },
+      "RateCardRevision": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "rate_card_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "revision": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "markup": {
+            "description": "Multiplier on provider cost the consumer is charged.",
+            "type": "string"
+          },
+          "effective_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "prices": {
+            "items": {
+              "$ref": "#/components/schemas/RateCardPriceEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "rate_card_id",
+          "revision",
+          "markup",
+          "effective_at",
+          "created_at",
+          "created_by",
+          "prices"
+        ],
+        "type": "object"
+      },
+      "RateCardRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "owner": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "installation",
+                  "organization",
+                  "project"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "description": "Organization or project identifier, required unless kind is installation.",
+                "format": "uuid",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "owner"
+        ],
+        "type": "object"
+      },
+      "RateCardsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RateCard"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "RateCardRevisionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "effective_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "markup": {
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "prices": {
+            "items": {
+              "$ref": "#/components/schemas/RateCardPriceEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "markup"
+        ],
+        "type": "object"
+      },
+      "RateCardRevisionsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RateCardRevision"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "PricingQuoteRequest": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider_id",
+          "model",
+          "operation",
+          "usage"
+        ],
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "model": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "usage": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Attempt usage dimensions, the same members accounting records.",
+            "properties": {
+              "input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "output_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cached_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_write_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_write_5m_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cache_write_1h_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "audio_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cached_audio_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "audio_output_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "image_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "cached_image_input_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "image_output_tokens": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "media_units": {
+                "type": "string",
+                "description": "Exact decimal media units, as the wire carries them."
+              },
+              "tool_calls": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1
+                }
+              },
+              "batch": {
+                "type": "boolean"
+              }
+            }
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Defaults to now."
+          },
+          "successful": {
+            "type": "boolean",
+            "description": "Defaults to true."
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "default": null,
+            "description": "The consumer project the charge is priced for; absent, the installation's card applies."
+          }
+        }
+      },
+      "PricingQuoteResponse": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "currency",
+          "complete",
+          "list_cost",
+          "cost",
+          "charge",
+          "components",
+          "commitment"
+        ],
+        "properties": {
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pricing_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "discount_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "rate_card_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "Every priced dimension had a rate."
+          },
+          "list_cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Undiscounted, uncommitted cost."
+          },
+          "cost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Provider cost after discount and commitment."
+          },
+          "charge": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Consumer charge under the applicable rate card."
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "commitment": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "amount": {
+                "type": "string"
+              },
+              "period": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "amount",
+              "period"
+            ]
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -52951,6 +54765,581 @@
             "description": "Export exceeds the bounded record or byte limit."
           }
         }
+      }
+    },
+    "/api/v1/pricing/discounts": {
+      "get": {
+        "operationId": "list_pricing_discounts",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscountsResponse"
+                }
+              }
+            },
+            "description": "Pricing discounts"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "pricing"
+        ]
+      },
+      "post": {
+        "operationId": "create_pricing_discount",
+        "parameters": [
+          {
+            "description": "Unique creation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Discount"
+                }
+              }
+            },
+            "description": "Discount created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency key reused or request in progress"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid discount"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/api/v1/rate-cards": {
+      "get": {
+        "operationId": "list_rate_cards",
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateCardsResponse"
+                }
+              }
+            },
+            "description": "Rate cards"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "pricing"
+        ]
+      },
+      "post": {
+        "operationId": "create_rate_card",
+        "parameters": [
+          {
+            "description": "Unique creation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateCardRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateCard"
+                }
+              }
+            },
+            "description": "Rate card created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The owner already has a rate card"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid rate card"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/api/v1/rate-cards/{rate_card_id}": {
+      "get": {
+        "operationId": "get_rate_card",
+        "parameters": [
+          {
+            "description": "Rate card identifier.",
+            "in": "path",
+            "name": "rate_card_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateCard"
+                }
+              }
+            },
+            "description": "Rate card"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The rate card does not exist"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/api/v1/rate-cards/{rate_card_id}/revisions": {
+      "get": {
+        "operationId": "list_rate_card_revisions",
+        "parameters": [
+          {
+            "description": "Rate card identifier.",
+            "in": "path",
+            "name": "rate_card_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateCardRevisionsResponse"
+                }
+              }
+            },
+            "description": "Rate card revisions"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "pricing"
+        ]
+      },
+      "post": {
+        "operationId": "create_rate_card_revision",
+        "parameters": [
+          {
+            "description": "Rate card identifier.",
+            "in": "path",
+            "name": "rate_card_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique creation key",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateCardRevisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateCardRevision"
+                }
+              }
+            },
+            "description": "Rate card revision published"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency-Key is missing or invalid"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The rate card does not exist"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Idempotency key reused or request in progress"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid rate card revision"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/api/v1/pricing/quote": {
+      "post": {
+        "operationId": "pricing_quote",
+        "x-olp-read-only": true,
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingQuoteResponse"
+                }
+              }
+            },
+            "description": "The priced quote."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invalid quote request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unknown provider"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "usage",
+              "installation"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage",
+              "installation"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ]
       }
     }
   },

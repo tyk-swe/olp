@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // selectionOptions supplies the shared routing authority and measurements.
@@ -23,6 +24,9 @@ func (s *Server) selectionOptions(ctx context.Context, x *execution) runtime.Sel
 		options.Unhealthy = s.unhealthy
 	}
 	options.Mirror = x.mirrorSeed()
+	options.WorstCost = func(provider runtime.Provider, target runtime.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
+		return x.targetCostBound(provider, target, price, discount)
+	}
 	// Only a route with selectors pays to describe the request to them.
 	if x.route != nil && len(x.route.Selectors) > 0 {
 		options.Features = x.features()

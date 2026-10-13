@@ -144,14 +144,18 @@ func accountingEvent(e Envelope) *usage.Event {
 		event.FirstByteMS = optionalMilliseconds(e.FirstByte)
 		// The request is settled when the attempt that served it reported its
 		// usage and had nothing left to reconcile.
-		event.UsageComplete = fact.UsageObserved && fact.UsageComplete
 		if fact.UsageObserved {
-			event.InputTokens, event.OutputTokens, event.CachedInputTokens = accountingTokens(fact)
-			event.CacheWriteInputTokens, event.CacheWrite5MInputTokens, event.CacheWrite1HInputTokens = accountingCacheWrites(fact)
-			event.MediaUnits = accountingMediaUnits(fact)
-			if e.Operation == "embeddings" {
-				event.OutputTokens = nil
-			}
+			evidence := attemptUsage(fact, e.Operation)
+			event.UsageComplete = evidence.Complete
+			event.InputTokens, event.OutputTokens, event.CachedInputTokens = evidence.InputTokens, evidence.OutputTokens, evidence.CachedInputTokens
+			event.CacheWriteInputTokens, event.CacheWrite5MInputTokens, event.CacheWrite1HInputTokens = evidence.CacheWriteInputTokens, evidence.CacheWrite5MInputTokens, evidence.CacheWrite1HInputTokens
+			event.MediaUnits = evidence.MediaUnits
+			event.AudioInputTokens, event.CachedAudioInputTokens, event.AudioOutputTokens = evidence.AudioInputTokens, evidence.CachedAudioInputTokens, evidence.AudioOutputTokens
+			event.ImageInputTokens, event.CachedImageInputTokens, event.ImageOutputTokens = evidence.ImageInputTokens, evidence.CachedImageInputTokens, evidence.ImageOutputTokens
+			event.ToolCalls = evidence.ToolCalls
+			event.Batch = evidence.Batch
+		} else {
+			event.UsageComplete = false
 		}
 	}
 	return event
@@ -193,7 +197,14 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 	}
 	attempt.Routing.Budgets = fact.Budgets
 	if fact.PolicyDigest != "" {
-		policy, _ := json.Marshal(map[string]any{"digest": fact.PolicyDigest, "strategy": fact.Strategy, "pricing_pinned": true, "vendor_id": fact.VendorID})
+		var discountID *string
+		if fact.Discount != nil {
+			discountID = &fact.Discount.ID
+		}
+		policy, _ := json.Marshal(map[string]any{"digest": fact.PolicyDigest, "strategy": fact.Strategy,
+			"pricing_pinned": true, "vendor_id": fact.VendorID,
+			"discount_pinned": true, "discount_id": discountID,
+			"rate_card_pinned": fact.CardPinned, "rate_card_revision_id": fact.CardRevisionID})
 		rawPolicy := json.RawMessage(policy)
 		attempt.Routing.Policy = &rawPolicy
 		if fact.Price != nil {
@@ -229,6 +240,12 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 	return attempt
 }
 
+// attemptSuccessful reports whether the attempt completed successfully, which
+// is when a per-request price component applies.
+func attemptSuccessful(fact *AttemptFact) bool {
+	return fact.Class == classSuccess && fact.Status >= 200 && fact.Status <= 299
+}
+
 // attemptUsage is the billing evidence an attempt carries into its usage event.
 // It is also what the gateway prices an attempt by when it settles the request's
 // cost, so what the budget holds for a request and what accounting later records
@@ -243,11 +260,46 @@ func attemptUsage(fact *AttemptFact, operation string) usage.AttemptUsage {
 		evidence.InputTokens, evidence.OutputTokens, evidence.CachedInputTokens = accountingTokens(fact)
 		evidence.CacheWriteInputTokens, evidence.CacheWrite5MInputTokens, evidence.CacheWrite1HInputTokens = accountingCacheWrites(fact)
 		evidence.MediaUnits = accountingMediaUnits(fact)
+		evidence.AudioInputTokens, evidence.CachedAudioInputTokens, evidence.AudioOutputTokens,
+			evidence.ImageInputTokens, evidence.CachedImageInputTokens, evidence.ImageOutputTokens,
+			evidence.ToolCalls = accountingModality(fact)
 		if operation == "embeddings" {
 			evidence.OutputTokens = nil
 		}
 	}
+	sanitizeUsageEvidence(&evidence)
 	return evidence
+}
+
+// accountingModality is the modality share and metered-tool detail an attempt
+// disclosed.
+func accountingModality(fact *AttemptFact) (audioInput, cachedAudioInput, audioOutput,
+	imageInput, cachedImageInput, imageOutput *int64, tools map[string]int64) {
+	if fact.Usage == nil {
+		return nil, nil, nil, nil, nil, nil, nil
+	}
+	u := fact.Usage
+	return u.AudioInputTokens, u.CachedAudioInputTokens, u.AudioOutputTokens,
+		u.ImageInputTokens, u.CachedImageInputTokens, u.ImageOutputTokens, u.ToolCalls
+}
+
+// sanitizeUsageEvidence holds an attempt's modality and tool detail to the
+// share invariants accounting stores. A provider whose detail contradicts the
+// totals it reports billed something the rates cannot describe, so the detail
+// drops and the attempt settles incomplete rather than being silently priced
+// at text rates.
+func sanitizeUsageEvidence(evidence *usage.AttemptUsage) {
+	if evidence == nil || !evidence.Observed || usage.ConsistentUsage(evidence) {
+		return
+	}
+	evidence.CachedAudioInputTokens = nil
+	evidence.AudioInputTokens = nil
+	evidence.AudioOutputTokens = nil
+	evidence.CachedImageInputTokens = nil
+	evidence.ImageInputTokens = nil
+	evidence.ImageOutputTokens = nil
+	evidence.ToolCalls = nil
+	evidence.Complete = false
 }
 
 // accountingTokens is the metering an attempt disclosed. A provider that

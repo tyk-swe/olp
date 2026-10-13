@@ -43,6 +43,10 @@ type Options struct {
 	Models            map[string]json.RawMessage       `json:"models"`
 	ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
 	VendorID          *string                          `json:"vendor_id"`
+	// Commitment is the provisioned capacity the connection pays for: priced
+	// attempts on it bill nothing extra and share the amount across each UTC
+	// calendar period by list-cost weight.
+	Commitment *runtime.Commitment `json:"commitment,omitempty"`
 	// PluginOptions holds a plugin provider's values for the options its
 	// plugin profile declares, by option name.
 	PluginOptions map[string]string `json:"plugin_options,omitempty"`
@@ -253,6 +257,18 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 	if err := openai.ValidateDefaults(c.Options.ParameterDefaults); err != nil {
 		return access.Invalid("configuration.options.parameter_defaults", err.Error())
 	}
+	if c.Options.Commitment != nil {
+		amount := strings.TrimSpace(c.Options.Commitment.Amount)
+		if !decimalAmount(amount) || strings.Trim(amount, "0.") == "" {
+			return access.Invalid("configuration.options.commitment.amount",
+				"A commitment amount is a positive decimal with at most 12 integer and 12 fractional digits.")
+		}
+		c.Options.Commitment.Amount = amount
+		if !runtime.CommitmentPeriods[c.Options.Commitment.Period] {
+			return access.Invalid("configuration.options.commitment.period",
+				`A commitment period is "hour", "day" or "month".`)
+		}
+	}
 	if c.Options.HealthProbe != nil {
 		if err := c.Options.HealthProbe.Validate("configuration.options.health_probe"); err != nil {
 			return err
@@ -332,6 +348,21 @@ func (c *Configuration) transportFingerprint() string {
 	encoded, _ := json.Marshal(parts)
 	h.Write(encoded)
 	return hex.EncodeToString(h.Sum(nil))[:32]
+}
+
+// decimalAmount applies the same rate decimal rule the pricing contract uses:
+// a non-negative decimal with at most 12 integer and 12 fractional digits.
+func decimalAmount(s string) bool {
+	whole, fraction, has := strings.Cut(s, ".")
+	if len(whole) < 1 || len(whole) > 12 || has && (len(fraction) < 1 || len(fraction) > 12) {
+		return false
+	}
+	for _, c := range whole + fraction {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func value(v *string) string {

@@ -78,9 +78,12 @@ type geminiResult struct {
 		BlockReason string `json:"blockReason"`
 	} `json:"promptFeedback"`
 	Usage *struct {
-		Prompt     int64 `json:"promptTokenCount"`
-		Candidates int64 `json:"candidatesTokenCount"`
-		Total      int64 `json:"totalTokenCount"`
+		Prompt           int64                 `json:"promptTokenCount"`
+		Candidates       int64                 `json:"candidatesTokenCount"`
+		Total            int64                 `json:"totalTokenCount"`
+		PromptDetails    []geminiModalityCount `json:"promptTokensDetails"`
+		CacheDetails     []geminiModalityCount `json:"cacheTokensDetails"`
+		CandidateDetails []geminiModalityCount `json:"candidatesTokensDetails"`
 	} `json:"usageMetadata"`
 }
 
@@ -103,11 +106,48 @@ func readGemini(body []byte) (*geminiResult, *Error) {
 	return &result, nil
 }
 
+// geminiModalityCount is one modality bucket in a Gemini usage detail array.
+// Images and video frames bill through the image shares.
+type geminiModalityCount struct {
+	Modality   string `json:"modality"`
+	TokenCount int64  `json:"tokenCount"`
+}
+
 func (r *geminiResult) tokens() *ImageUsage {
 	if r.Usage == nil {
 		return nil
 	}
-	return &ImageUsage{InputTokens: r.Usage.Prompt, OutputTokens: r.Usage.Candidates, TotalTokens: r.Usage.Total}
+	usage := &ImageUsage{InputTokens: r.Usage.Prompt, OutputTokens: r.Usage.Candidates, TotalTokens: r.Usage.Total}
+	if audio, image := modalityCounts(r.Usage.PromptDetails); audio > 0 || image > 0 {
+		if audio > 0 {
+			usage.AudioInputTokens = &audio
+		}
+		if image > 0 {
+			usage.ImageInputTokens = &image
+		}
+	}
+	if audio, image := modalityCounts(r.Usage.CandidateDetails); audio > 0 || image > 0 {
+		if audio > 0 {
+			usage.AudioOutputTokens = &audio
+		}
+		if image > 0 {
+			usage.ImageOutputTokens = &image
+		}
+	}
+	return usage
+}
+
+// modalityCounts sums a detail array's audio and image shares.
+func modalityCounts(detail []geminiModalityCount) (audio, image int64) {
+	for _, entry := range detail {
+		switch entry.Modality {
+		case "AUDIO":
+			audio += entry.TokenCount
+		case "IMAGE", "VIDEO":
+			image += entry.TokenCount
+		}
+	}
+	return audio, image
 }
 
 func decodeGeminiImage(body []byte, stage func(string, int) (*Artifact, *Error)) (*ImageResult, *Error) {

@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
 	"strings"
@@ -18,7 +19,15 @@ type Usage struct {
 	CacheWriteInputTokens   *int64 `json:"cache_write_input_tokens,omitempty"`
 	CacheWrite5MInputTokens *int64 `json:"cache_write_5m_input_tokens,omitempty"`
 	CacheWrite1HInputTokens *int64 `json:"cache_write_1h_input_tokens,omitempty"`
-	ReasoningTokens         *int64 `json:"reasoning_tokens,omitempty"`
+	AudioInputTokens        *int64 `json:"audio_input_tokens,omitempty"`
+	CachedAudioInputTokens  *int64 `json:"cached_audio_input_tokens,omitempty"`
+	AudioOutputTokens       *int64 `json:"audio_output_tokens,omitempty"`
+	ImageInputTokens        *int64 `json:"image_input_tokens,omitempty"`
+	CachedImageInputTokens  *int64 `json:"cached_image_input_tokens,omitempty"`
+	ImageOutputTokens       *int64 `json:"image_output_tokens,omitempty"`
+	// ToolCalls counts metered server-side tool invocations by tool name.
+	ToolCalls       map[string]int64 `json:"tool_calls,omitempty"`
+	ReasoningTokens *int64           `json:"reasoning_tokens,omitempty"`
 	// MediaUnits is the provider-metered media quantity — images returned or
 	// seconds processed — carried as decimal text so it survives the usage
 	// event wire shape unchanged.
@@ -60,7 +69,13 @@ func ObserveResponseDocumentUsage(source oif.Document) (ResponseUsageObservation
 			fields[name] = json.RawMessage(value.Raw())
 		}
 	}
-	return observeResponseUsage(fields)
+	observation, err := observeResponseUsage(fields)
+	if err == nil && observation.Usage != nil {
+		if output, present := source.Root().Lookup("output"); present {
+			observation.Usage.ToolCalls = responseToolCallsDocument(output)
+		}
+	}
+	return observation, err
 }
 
 func observeResponseUsage(fields map[string]json.RawMessage) (ResponseUsageObservation, error) {
@@ -74,6 +89,9 @@ func observeResponseUsage(fields map[string]json.RawMessage) (ResponseUsageObser
 	var err error
 	if observation.Usage, err = responseUsage(fields); err != nil {
 		return ResponseUsageObservation{}, err
+	}
+	if observation.Usage != nil {
+		observation.Usage.ToolCalls = responseToolCalls(fields["output"])
 	}
 	switch observation.Status {
 	case "completed", "incomplete", "failed", "cancelled":
@@ -414,6 +432,8 @@ func chatUsage(fields map[string]json.RawMessage) (*Usage, error) {
 		u.TotalTokens = u.InputTokens + u.OutputTokens
 	}
 	u.CachedInputTokens = nestedCount(usage, "prompt_tokens_details", "cached_tokens")
+	u.AudioInputTokens = nestedCount(usage, "prompt_tokens_details", "audio_tokens")
+	u.AudioOutputTokens = nestedCount(usage, "completion_tokens_details", "audio_tokens")
 	u.ReasoningTokens = nestedCount(usage, "completion_tokens_details", "reasoning_tokens")
 	return u, nil
 }
@@ -554,6 +574,9 @@ func responseSummaryWithUsage(fields map[string]json.RawMessage, usage *Usage) (
 			c.ToolCalls = append(c.ToolCalls, tc)
 		}
 	}
+	if usage != nil {
+		usage.ToolCalls = responseToolCalls(fields["output"])
+	}
 	c.OutputText = text.String()
 	status, _ := stringField(fields, "status")
 	switch {
@@ -574,6 +597,77 @@ func responseSummaryWithUsage(fields map[string]json.RawMessage, usage *Usage) (
 		c.FinishReason = status
 	}
 	return c, nil
+}
+
+// responseToolCalls counts the server-side tools a Responses reply billed:
+// only completed web_search_call and file_search_call items are invocations.
+// responseToolCallsDocument counts the same invocations on an already parsed
+// output array, touching only the fields that name a call — the generated
+// text itself is never copied.
+func responseToolCallsDocument(output oif.Value) map[string]int64 {
+	var calls map[string]int64
+	for _, item := range output.Elements() {
+		kind, ok := item.Lookup("type")
+		if !ok || kind.Kind() != oif.String {
+			continue
+		}
+		name, ok := kind.Chars()
+		if !ok || name != "web_search_call" && name != "file_search_call" {
+			continue
+		}
+		status, ok := item.Lookup("status")
+		if !ok || status.Kind() != oif.String {
+			continue
+		}
+		done, ok := status.Chars()
+		if !ok || done != "completed" {
+			continue
+		}
+		if calls == nil {
+			calls = map[string]int64{}
+		}
+		switch name {
+		case "web_search_call":
+			calls["web_search"]++
+		case "file_search_call":
+			calls["file_search"]++
+		}
+	}
+	return calls
+}
+
+func responseToolCalls(raw json.RawMessage) map[string]int64 {
+	if raw == nil || isNull(raw) ||
+		!bytes.Contains(raw, []byte("web_search_call")) && !bytes.Contains(raw, []byte("file_search_call")) {
+		return nil
+	}
+	var items []struct {
+		Type   string `json:"type"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil
+	}
+	var calls map[string]int64
+	for _, item := range items {
+		var tool string
+		switch item.Type {
+		case "web_search_call":
+			tool = "web_search"
+		case "file_search_call":
+			tool = "file_search"
+		default:
+			continue
+		}
+		if item.Status != "completed" {
+			continue
+		}
+		if calls == nil {
+			calls = map[string]int64{}
+		}
+		calls[tool]++
+	}
+	return calls
 }
 
 func responseUsage(fields map[string]json.RawMessage) (*Usage, error) {

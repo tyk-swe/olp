@@ -5,6 +5,7 @@ package integration_test
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -29,6 +31,10 @@ func pricingHarness(t *testing.T) *accessHarness {
 	management.Register(mux)
 	h.Server.Register(mux)
 	(&usage.Server{Access: h.Server, VendorKind: repVendorKind, Egress: policy}).Register(mux)
+	// Configuration endpoints exercise the pricing round trip through export,
+	// plan and apply; this harness carries no providers, so the credential
+	// stores and rate limiter are never reached.
+	(&configuration.Server{Access: h.Server, Egress: policy, VendorKind: repVendorKind}).Register(mux)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	h.HTTP = server
@@ -246,9 +252,18 @@ func catalogFor(t *testing.T, published time.Time, input string) []byte {
 	t.Helper()
 	provenance := catalog.Provenance{SourceURL: "https://example.test/pricing", ObservedAt: published}
 	rate, output := catalog.Decimal(input), catalog.Decimal("15")
+	toolFee := catalog.Decimal("0.01")
+	batch := catalog.Decimal("0.5")
+	window := catalog.Decimal("0.75")
 	document, err := catalog.Encode(&catalog.Catalog{APIVersion: catalog.APIVersion, PublishedAt: published, Currency: "USD", Vendors: []catalog.Vendor{{ID: "anthropic", Name: "Anthropic", Models: []catalog.Model{{
 		ID: "claude-catalog", Aliases: []string{"claude-catalog-20261001"}, InputModalities: []string{"text"}, OutputModalities: []string{"text"}, Provenance: provenance,
-		Prices: []catalog.Price{{Operation: "generation", InputPerMillion: &rate, OutputPerMillion: &output, Unrepresentable: []catalog.Unrepresentable{{Component: "batch_multiplier", Detail: "Batch is half price."}}, Provenance: provenance}},
+		Prices: []catalog.Price{{
+			Operation: "generation", InputPerMillion: &rate, OutputPerMillion: &output,
+			ToolCalls: map[string]catalog.Decimal{"web_search": toolFee}, BatchMultiplier: &batch,
+			Tiers:           []catalog.Tier{{AboveInputTokens: 100000, InputPerMillion: &rate, OutputPerMillion: &output}},
+			Windows:         &catalog.Windows{TimeZone: "UTC", Periods: []catalog.WindowPeriod{{Days: []int{6, 7}, Start: "00:00", End: "24:00", Multiplier: window}}},
+			Unrepresentable: []catalog.Unrepresentable{{Component: "service_tier", Detail: "A priority tier is billed at 1.5x."}},
+			Provenance:      provenance}},
 	}}}}})
 	if err != nil {
 		t.Fatal(err)
@@ -307,6 +322,20 @@ func TestCatalogPricingSourceLifecycle(t *testing.T) {
 	if unrepresentable := snapshot["document"].(map[string]any)["unrepresentable"].([]any); len(unrepresentable) != 1 {
 		t.Fatalf("unrepresentable = %v", unrepresentable)
 	}
+	// A catalog snapshot carries every price component it lists.
+	prices := snapshot["document"].(map[string]any)["prices"].([]any)
+	if len(prices) != 2 {
+		t.Fatalf("snapshot prices = %v", prices)
+	}
+	price := prices[0].(map[string]any)
+	tiers, _ := price["tiers"].([]any)
+	windows, _ := price["windows"].(map[string]any)
+	if len(tiers) != 1 || tiers[0].(map[string]any)["above_input_tokens"] != float64(100000) ||
+		price["tool_calls"].(map[string]any)["web_search"] != "0.01" ||
+		price["batch_multiplier"] != "0.5" ||
+		windows["time_zone"] != "UTC" {
+		t.Fatalf("snapshot price = %v", price)
+	}
 
 	tampered := catalogFor(t, october.Add(time.Hour), "0.3")
 	fixture.document.Store(tampered)
@@ -344,5 +373,153 @@ func TestCatalogPricingSourceLifecycle(t *testing.T) {
 		map[string]any{"name": "list without url"}, map[string]string{"Idempotency-Key": uuid.NewString()})
 	if status != 422 {
 		t.Fatalf("price list without URL = %d %v", status, problem)
+	}
+}
+
+// componentPrice is one price carrying every H1 component.
+func componentPrice() map[string]any {
+	return map[string]any{
+		"provider_kind": "openai", "model": "component-model", "operation": "generation",
+		"currency":                       "USD",
+		"input_per_million":              "2.000000000000",
+		"cached_input_per_million":       "0.500000000000",
+		"output_per_million":             "6.000000000000",
+		"audio_input_per_million":        "4.000000000000",
+		"cached_audio_input_per_million": "1.000000000000",
+		"audio_output_per_million":       "8.000000000000",
+		"image_input_per_million":        "3.000000000000",
+		"cached_image_input_per_million": "0.750000000000",
+		"image_output_per_million":       "12.000000000000",
+		"per_request":                    "0.020000000000",
+		"batch_multiplier":               "0.500000000000",
+		"tool_calls":                     map[string]any{"web_search": "0.010000000000", "file_search": "0.005000000000"},
+		"tiers": []any{map[string]any{
+			"above_input_tokens":             1000000,
+			"input_per_million":              "1.500000000000",
+			"cached_input_per_million":       "0.400000000000",
+			"output_per_million":             "5.000000000000",
+			"audio_input_per_million":        "3.500000000000",
+			"cached_audio_input_per_million": "0.900000000000",
+			"audio_output_per_million":       "7.000000000000",
+			"image_input_per_million":        "2.500000000000",
+			"cached_image_input_per_million": "0.600000000000",
+			"image_output_per_million":       "10.000000000000"}},
+		"windows": map[string]any{"time_zone": "America/New_York", "periods": []any{
+			map[string]any{"days": []any{1, 2, 3, 4, 5}, "start": "00:00", "end": "06:00", "multiplier": "0.500000000000"},
+			map[string]any{"days": []any{6, 7}, "start": "00:00", "end": "24:00", "multiplier": "0.250000000000"}}},
+	}
+}
+
+// componentFields are the scalar members of a component-rich price.
+func componentFields(entry map[string]any) map[string]string {
+	fields := map[string]string{}
+	for _, field := range []string{"input_per_million", "cached_input_per_million", "output_per_million",
+		"audio_input_per_million", "cached_audio_input_per_million", "audio_output_per_million",
+		"image_input_per_million", "cached_image_input_per_million", "image_output_per_million",
+		"per_request", "batch_multiplier"} {
+		if value, ok := entry[field].(string); ok {
+			fields[field] = value
+		}
+	}
+	return fields
+}
+
+// checkComponentPrice verifies a component-rich price came back whole.
+func checkComponentPrice(t *testing.T, entry map[string]any) {
+	t.Helper()
+	for field, want := range componentFields(componentPrice()) {
+		if entry[field] != want {
+			t.Fatalf("price[%s] = %v, want %s in %v", field, entry[field], want, entry)
+		}
+	}
+	tools, ok := entry["tool_calls"].(map[string]any)
+	if !ok || len(tools) != 2 || tools["web_search"] != "0.010000000000" {
+		t.Fatalf("tool_calls = %v", entry["tool_calls"])
+	}
+	tiers, ok := entry["tiers"].([]any)
+	if !ok || len(tiers) != 1 {
+		t.Fatalf("tiers = %v", entry["tiers"])
+	}
+	tier := tiers[0].(map[string]any)
+	if tier["above_input_tokens"].(float64) != 1000000 || tier["input_per_million"] != "1.500000000000" {
+		t.Fatalf("tier = %v", tier)
+	}
+	windows, ok := entry["windows"].(map[string]any)
+	if !ok || windows["time_zone"] != "America/New_York" ||
+		len(windows["periods"].([]any)) != 2 {
+		t.Fatalf("windows = %v", entry["windows"])
+	}
+}
+
+func TestPricingComponentsRoundTrip(t *testing.T) {
+	h := pricingHarness(t)
+	owner := h.owner()
+
+	// A revision carries every component through create and list.
+	body := map[string]any{
+		"effective_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		"prices":       []any{componentPrice()},
+	}
+	created := h.want(owner, "POST", "/api/v1/pricing/revisions", body, idem("components-create"), 201)
+	prices := created["prices"].([]any)
+	if len(prices) != 1 {
+		t.Fatalf("prices = %v", prices)
+	}
+	checkComponentPrice(t, prices[0].(map[string]any))
+	revisions := h.want(owner, "GET", "/api/v1/pricing/revisions", nil, nil, 200)
+	listed := revisions["items"].([]any)[0].(map[string]any)
+	checkComponentPrice(t, listed["prices"].([]any)[0].(map[string]any))
+
+	// A prices-format source round-trips them through refresh and publish.
+	document, _ := json.Marshal(map[string]any{"currency": "USD", "prices": []any{componentPrice()}})
+	fixture := newSourceFixture(t, string(document))
+	source := h.want(owner, "POST", "/api/v1/pricing/sources",
+		map[string]any{"name": "component feed", "url": fixture.URL + "/prices.json"},
+		map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	refresh := h.want(owner, "POST", "/api/v1/pricing/sources/"+source["id"].(string)+"/refresh", nil, nil, 200)
+	snapshot := refresh["snapshot"].(map[string]any)
+	// The stored snapshot document holds the components too.
+	var storedText string
+	if err := h.Pool.QueryRow(t.Context(),
+		`SELECT document::text FROM olp.pricing_source_snapshots WHERE id=$1::uuid`,
+		snapshot["id"].(string)).Scan(&storedText); err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	var stored map[string]any
+	if err := json.Unmarshal([]byte(storedText), &stored); err != nil {
+		t.Fatalf("snapshot document: %v", err)
+	}
+	checkComponentPrice(t, stored["prices"].([]any)[0].(map[string]any))
+	published := h.want(owner, "POST", "/api/v1/pricing/source-snapshots/"+snapshot["id"].(string)+"/publish",
+		map[string]any{}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	checkComponentPrice(t, published["prices"].([]any)[0].(map[string]any))
+
+	// Configuration export, plan and apply carry the components without drift.
+	exported := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	docEntry := exported["document"].(map[string]any)["pricing"].(map[string]any)["prices"].([]any)[0].(map[string]any)
+	checkComponentPrice(t, docEntry)
+	planned := h.want(owner, "POST", "/api/v1/configuration/plan",
+		map[string]any{"document": exported["document"]}, nil, 200)
+	for _, item := range planned["actions"].([]any) {
+		action := item.(map[string]any)
+		if action["kind"] == "pricing" && action["action"] != "noop" {
+			t.Fatalf("export -> plan sees a pricing change: %v", action)
+		}
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply",
+		map[string]any{"document": exported["document"]}, idem("components-apply"), 200)
+	revisions = h.want(owner, "GET", "/api/v1/pricing/revisions", nil, nil, 200)
+	var found bool
+	for _, raw := range revisions["items"].([]any) {
+		for _, rawPrice := range raw.(map[string]any)["prices"].([]any) {
+			price := rawPrice.(map[string]any)
+			if price["model"] == "component-model" {
+				checkComponentPrice(t, price)
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("applied configuration lost the component price: %v", revisions)
 	}
 }

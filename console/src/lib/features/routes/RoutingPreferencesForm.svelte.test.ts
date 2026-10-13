@@ -62,3 +62,46 @@ describe.each(['preferred_max_latency_ms', 'preferred_min_throughput'])(
     });
   }
 );
+
+describe('max_cost', () => {
+  function input() {
+    return host.querySelector<HTMLInputElement>(
+      '#routing-preferences-max-cost'
+    )!;
+  }
+
+  it('writes the decimal ceiling into preferences', () => {
+    input().value = '0.5';
+    input().dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(JSON.parse(onChange.mock.lastCall![0])).toEqual({
+      strategy: 'latency',
+      max_cost: '0.5'
+    });
+  });
+
+  it('clears it with an empty value', () => {
+    input().value = '0.5';
+    input().dispatchEvent(new Event('input', { bubbles: true }));
+    input().value = '';
+    input().dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(JSON.parse(onChange.mock.lastCall![0])).toEqual({
+      strategy: 'latency'
+    });
+  });
+
+  it('shows the stored ceiling', () => {
+    unmount(component);
+    component = mount(RoutingPreferencesForm, {
+      target: host,
+      props: {
+        value: '{"max_cost":"0.001"}',
+        constraintsOnly: true,
+        onChange
+      }
+    });
+    flushSync();
+    expect(input().value).toBe('0.001');
+  });
+});

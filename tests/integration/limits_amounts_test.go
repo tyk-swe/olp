@@ -253,13 +253,13 @@ func TestLimitsReservationsAreExactAtTheLargestAmounts(t *testing.T) {
 		t.Fatalf("Refund: %v", err)
 	}
 	f.wantReserved(t, "0.999999999999")
-	almost.SetActualCost("1.000000000001")
+	almost.SetActualCost("1.000000000001", "1.000000000001")
 	if err := almost.SettleCost(t.Context()); err != nil {
 		t.Fatalf("SettleCost: %v", err)
 	}
 	f.wantReserved(t, "1.000000000001")
 	f.wantConsistent(t)
-	almost.SetActualCost("0.000000000001")
+	almost.SetActualCost("0.000000000001", "0.000000000001")
 	if err := almost.SettleCost(t.Context()); err != nil {
 		t.Fatalf("SettleCost: %v", err)
 	}

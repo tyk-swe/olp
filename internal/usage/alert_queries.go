@@ -83,10 +83,10 @@ const exhaustedBudgetSignalsSQL = `WITH end_users AS (
  FROM subjects s CROSS JOIN unnest(ARRAY['day','week','month']) AS k(window_kind)
  CROSS JOIN LATERAL olp.budget_window(k.window_kind,now()) b
  LEFT JOIN LATERAL (
- SELECT accrued,weekly_complete FROM olp.api_key_cost_windows WHERE s.kind='api_key' AND api_key_id=s.owner_id AND window_kind=k.window_kind AND window_id=b.window_id
- UNION ALL SELECT accrued,weekly_complete FROM olp.budget_group_cost_windows WHERE s.kind='budget_group' AND budget_group_id=s.owner_id AND window_kind=k.window_kind AND window_id=b.window_id
- UNION ALL SELECT accrued,weekly_complete FROM olp.end_user_cost_windows WHERE s.kind='end_user' AND account_id=s.owner_id AND window_kind=k.window_kind AND window_id=b.window_id
- UNION ALL SELECT accrued,weekly_complete FROM olp.aggregate_cost_windows WHERE s.kind IN ('organization','project','installation') AND account_id=s.owner_id AND window_kind=k.window_kind AND window_id=b.window_id
+ SELECT CASE WHEN s.policy->>'cost_basis'='charge' THEN charged ELSE accrued END,weekly_complete FROM olp.api_key_cost_windows WHERE s.kind='api_key' AND api_key_id=s.owner_id AND window_kind=k.window_kind AND window_id=b.window_id
+ UNION ALL SELECT CASE WHEN s.policy->>'cost_basis'='charge' THEN charged ELSE accrued END,weekly_complete FROM olp.budget_group_cost_windows WHERE s.kind='budget_group' AND budget_group_id=s.owner_id AND window_kind=k.window_kind AND window_id=b.window_id
+ UNION ALL SELECT CASE WHEN s.policy->>'cost_basis'='charge' THEN charged ELSE accrued END,weekly_complete FROM olp.end_user_cost_windows WHERE s.kind='end_user' AND account_id=s.owner_id AND window_kind=k.window_kind AND window_id=b.window_id
+ UNION ALL SELECT CASE WHEN s.policy->>'cost_basis'='charge' THEN charged ELSE accrued END,weekly_complete FROM olp.aggregate_cost_windows WHERE s.kind IN ('organization','project','installation') AND account_id=s.owner_id AND window_kind=k.window_kind AND window_id=b.window_id
  ) w ON true WHERE ($1::uuid IS NULL OR s.project_id=$1)
  ) SELECT c.kind,c.id::text,c.project_id::text,c.name,c.window_kind,c.window_id,c.accrued::text,
  (c.base_limit::numeric+COALESCE((SELECT sum(amount) FROM olp.budget_increases bi WHERE bi.owner_id=c.owner_id

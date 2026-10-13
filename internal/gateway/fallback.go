@@ -113,6 +113,9 @@ func (s *Server) delegate(ctx context.Context, x *execution, plan runtime.Plan) 
 		return e
 	}
 	if outcome != runtime.FallbackPlanned {
+		if x.costExcluded {
+			return costLimitExceeded()
+		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, x.route.Slug)
 	}
 	if x.selector == "" {

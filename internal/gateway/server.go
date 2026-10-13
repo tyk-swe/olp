@@ -489,6 +489,24 @@ func requestError(err error) *Error {
 	return invalidRequest("invalid_request", err.Error(), nil)
 }
 
+// noteCostExceeded remembers that a leg this request planned excluded a
+// non-shadow target for its maximum cost; when nothing serves, the refusal is
+// 400 cost_limit_exceeded rather than route-unavailable.
+func (x *execution) noteCostExceeded(plan runtime.Plan) {
+	for index := range plan.Decisions {
+		if plan.Decisions[index].Reason != nil && *plan.Decisions[index].Reason == "cost_limit_exceeded" && !plan.Decisions[index].Shadow {
+			x.costExcluded = true
+			return
+		}
+	}
+}
+
+// costLimitExceeded is the refusal a request ends on when a leg it planned
+// excluded a non-shadow target for its maximum cost.
+func costLimitExceeded() *Error {
+	return invalidRequest("cost_limit_exceeded", "Every candidate exceeds the request's maximum cost.", func() *string { p := "max_cost"; return &p }())
+}
+
 func selectionError(err error, model string) *Error {
 	if se, ok := errors.AsType[*runtime.SelectionError](err); ok {
 		switch se.Code {
@@ -564,6 +582,20 @@ func (s *Server) inferenceOperation(family openai.Family, dialect string) http.H
 		x.budgetGroupID = authority.BudgetGroupID
 		x.responseMetadata = authority.Policy.ResponseMetadata
 		x.authority = authority
+		// A request charged to a key resolves its consumer's rate card at
+		// admission and pins the revision for accounting. Stale inputs leave
+		// the request unpinned so accounting resolves it at the fact time.
+		if x.authority.ProjectID != nil {
+			if inputs := s.Runtime.RoutingInputs(); inputs != nil {
+				if revision, known := inputs.RateCardRevision(x.authority.ProjectID, s.now()); known {
+					x.cardPinned = true
+					if revision != nil {
+						x.cardRevisionID = &revision.ID
+						x.cardRev = revision
+					}
+				}
+			}
+		}
 		if x.attribution, e = s.parseAttribution(r, authority); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
@@ -877,6 +909,10 @@ func (s *Server) planCanonical(ctx context.Context, x *execution) *Error {
 					return invalidRequest(*decision.Reason, "The effective invocation exceeds a declared model limit; its controls were not reduced.", nil)
 				}
 			}
+		}
+		x.noteCostExceeded(plan)
+		if x.costExcluded {
+			return costLimitExceeded()
 		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}

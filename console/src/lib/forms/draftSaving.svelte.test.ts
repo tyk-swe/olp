@@ -686,6 +686,7 @@ it('shows before and after policies when only the routing policy changed', async
   const constraints = {
     deny_data_collection: false,
     ignore: [],
+    max_cost: null,
     max_price: null,
     only: null,
     quantizations: null,

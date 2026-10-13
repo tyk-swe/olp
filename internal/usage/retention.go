@@ -192,13 +192,16 @@ const rollupSQL = `WITH candidates AS (
       RETURNING route_slug, provider_id, upstream_model, operation, surface, api_key_id,
                 budget_group_id, observed_at, input_tokens, output_tokens, cached_input_tokens,
                 cache_write_input_tokens, cache_write_5m_input_tokens, cache_write_1h_input_tokens,
+                audio_input_tokens, cached_audio_input_tokens, audio_output_tokens,
+                image_input_tokens, cached_image_input_tokens, image_output_tokens,
                 media_units,
                 estimated_cost, currency, charge_status, unpriced,
                 request_counted, provider_request_counted, model_request_counted,
                 target_request_counted, request_unpriced_counted, provider_unpriced_counted,
                 model_unpriced_counted, target_unpriced_counted, request_incomplete_counted,
                 provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted,
-                attribution, end_user_digest, budget_exempt, usage_observed, estimated_input_tokens, estimate_provenance, model_family
+                attribution, end_user_digest, budget_exempt, usage_observed, estimated_input_tokens, estimate_provenance, model_family,
+                commitment_weight, commitment_amount, commitment_period, charge
     ), rolled AS (
       INSERT INTO olp.attempt_usage_hourly
         (bucket, budget_bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
@@ -206,12 +209,15 @@ const rollupSQL = `WITH candidates AS (
          request_count, provider_request_count, model_request_count, target_request_count,
          input_tokens, output_tokens, cached_input_tokens,
          cache_write_input_tokens, cache_write_5m_input_tokens, cache_write_1h_input_tokens,
+         audio_input_tokens, cached_audio_input_tokens, audio_output_tokens,
+         image_input_tokens, cached_image_input_tokens, image_output_tokens,
          media_units, estimated_cost,
          request_unpriced_count, provider_unpriced_count, model_unpriced_count,
          target_unpriced_count, unpriced_attempt_count, request_incomplete_count,
          provider_incomplete_count, model_incomplete_count, target_incomplete_count, currency,
          model_family, estimate_provenance, estimated_input_tokens,
-         estimate_reported_input_tokens, estimate_attempt_count)
+         estimate_reported_input_tokens, estimate_attempt_count,
+         commitment_weight, commitment_amount, commitment_period, charge, uncharged_attempt_count)
       SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
              route_slug, provider_id, upstream_model, operation, surface, api_key_id,
              budget_group_id, attribution, end_user_digest, budget_exempt,
@@ -224,6 +230,12 @@ const rollupSQL = `WITH candidates AS (
              COALESCE(SUM(cache_write_input_tokens), 0),
              COALESCE(SUM(cache_write_5m_input_tokens), 0),
              COALESCE(SUM(cache_write_1h_input_tokens), 0),
+             COALESCE(SUM(audio_input_tokens), 0),
+             COALESCE(SUM(cached_audio_input_tokens), 0),
+             COALESCE(SUM(audio_output_tokens), 0),
+             COALESCE(SUM(image_input_tokens), 0),
+             COALESCE(SUM(cached_image_input_tokens), 0),
+             COALESCE(SUM(image_output_tokens), 0),
              COALESCE(SUM(media_units), 0),
              SUM(estimated_cost),
              COUNT(*) FILTER (WHERE request_unpriced_counted),
@@ -238,11 +250,14 @@ const rollupSQL = `WITH candidates AS (
              model_family, estimate_provenance,
              COALESCE(SUM(estimated_input_tokens) FILTER (WHERE ` + estimatePaired + `), 0),
              COALESCE(SUM(input_tokens) FILTER (WHERE ` + estimatePaired + `), 0),
-             COUNT(*) FILTER (WHERE ` + estimatePaired + `)
+             COUNT(*) FILTER (WHERE ` + estimatePaired + `),
+             COALESCE(SUM(commitment_weight), 0), commitment_amount, commitment_period,
+             SUM(charge), COUNT(*) FILTER (WHERE charge_status <> 'not_billable' AND charge IS NULL)
         FROM expired
        GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
                 route_slug, provider_id, upstream_model, operation, surface, api_key_id,
-                budget_group_id, attribution, end_user_digest, budget_exempt, model_family, estimate_provenance
+                budget_group_id, attribution, end_user_digest, budget_exempt, model_family, estimate_provenance,
+                commitment_amount, commitment_period
       ON CONFLICT ON CONSTRAINT attempt_usage_hourly_dimensions_key DO UPDATE SET
         request_count = attempt_usage_hourly.request_count + EXCLUDED.request_count,
         provider_request_count = attempt_usage_hourly.provider_request_count + EXCLUDED.provider_request_count,
@@ -254,6 +269,12 @@ const rollupSQL = `WITH candidates AS (
         cache_write_input_tokens = attempt_usage_hourly.cache_write_input_tokens + EXCLUDED.cache_write_input_tokens,
         cache_write_5m_input_tokens = attempt_usage_hourly.cache_write_5m_input_tokens + EXCLUDED.cache_write_5m_input_tokens,
         cache_write_1h_input_tokens = attempt_usage_hourly.cache_write_1h_input_tokens + EXCLUDED.cache_write_1h_input_tokens,
+        audio_input_tokens = attempt_usage_hourly.audio_input_tokens + EXCLUDED.audio_input_tokens,
+        cached_audio_input_tokens = attempt_usage_hourly.cached_audio_input_tokens + EXCLUDED.cached_audio_input_tokens,
+        audio_output_tokens = attempt_usage_hourly.audio_output_tokens + EXCLUDED.audio_output_tokens,
+        image_input_tokens = attempt_usage_hourly.image_input_tokens + EXCLUDED.image_input_tokens,
+        cached_image_input_tokens = attempt_usage_hourly.cached_image_input_tokens + EXCLUDED.cached_image_input_tokens,
+        image_output_tokens = attempt_usage_hourly.image_output_tokens + EXCLUDED.image_output_tokens,
         media_units = attempt_usage_hourly.media_units + EXCLUDED.media_units,
         estimated_cost = CASE
           WHEN attempt_usage_hourly.estimated_cost IS NULL AND EXCLUDED.estimated_cost IS NULL THEN NULL
@@ -270,7 +291,14 @@ const rollupSQL = `WITH candidates AS (
         currency = COALESCE(attempt_usage_hourly.currency, EXCLUDED.currency),
         estimated_input_tokens = attempt_usage_hourly.estimated_input_tokens + EXCLUDED.estimated_input_tokens,
         estimate_reported_input_tokens = attempt_usage_hourly.estimate_reported_input_tokens + EXCLUDED.estimate_reported_input_tokens,
-        estimate_attempt_count = attempt_usage_hourly.estimate_attempt_count + EXCLUDED.estimate_attempt_count
+        estimate_attempt_count = attempt_usage_hourly.estimate_attempt_count + EXCLUDED.estimate_attempt_count,
+        commitment_weight = attempt_usage_hourly.commitment_weight + EXCLUDED.commitment_weight,
+        commitment_amount = COALESCE(attempt_usage_hourly.commitment_amount, EXCLUDED.commitment_amount),
+        commitment_period = COALESCE(attempt_usage_hourly.commitment_period, EXCLUDED.commitment_period),
+        charge = CASE
+          WHEN attempt_usage_hourly.charge IS NULL AND EXCLUDED.charge IS NULL THEN NULL
+          ELSE COALESCE(attempt_usage_hourly.charge, 0) + COALESCE(EXCLUDED.charge, 0) END,
+        uncharged_attempt_count = attempt_usage_hourly.uncharged_attempt_count + EXCLUDED.uncharged_attempt_count
       RETURNING 1
     )
     SELECT (SELECT count(*) FROM rolled)::bigint, (SELECT count(*) FROM expired)::bigint`

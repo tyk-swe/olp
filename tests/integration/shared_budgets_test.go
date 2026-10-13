@@ -230,8 +230,8 @@ func TestSharedBudgetAccounting(t *testing.T) {
 	if result.Outcome != usage.PersistOutcomePersisted {
 		t.Fatalf("outcome = %v, want persisted", result.Outcome)
 	}
-	if len(result.CostSnapshots) != 2 {
-		t.Fatalf("cost snapshots = %d, want one per owner", len(result.CostSnapshots))
+	if len(result.CostSnapshots) != 4 {
+		t.Fatalf("cost snapshots = %d, want a cost and charge pair per owner", len(result.CostSnapshots))
 	}
 	// Each snapshot names the request it accounts for, which is how installing
 	// it removes the cost reserved for that request from the key and the group.
@@ -242,6 +242,9 @@ func TestSharedBudgetAccounting(t *testing.T) {
 	}
 	var keySnapshot, groupSnapshot *limits.CostSnapshot
 	for i := range result.CostSnapshots {
+		if result.CostSnapshots[i].Basis != limits.BasisCost {
+			continue
+		}
 		switch result.CostSnapshots[i].CostOwnerID {
 		case fixture.Key:
 			keySnapshot = &result.CostSnapshots[i]
@@ -310,7 +313,7 @@ func TestSharedBudgetAccounting(t *testing.T) {
 	}
 	var reconciled *limits.CostSnapshot
 	for i := range snapshots {
-		if snapshots[i].CostOwnerID == groupA {
+		if snapshots[i].CostOwnerID == groupA && snapshots[i].Basis != limits.BasisCharge {
 			reconciled = &snapshots[i]
 		}
 	}
@@ -324,8 +327,8 @@ func TestSharedBudgetAccounting(t *testing.T) {
 		acctAttempt(t, fixture.Provider, 1, "gpt-4o-mini", 200, acctObserved(10, 10, nil, nil)),
 	}})
 	second.BudgetGroupID = acctPtr(groupA)
-	if result := acctPersist(t, fixture, second); len(result.CostSnapshots) != 2 {
-		t.Fatalf("second event snapshots = %d, want 2", len(result.CostSnapshots))
+	if result := acctPersist(t, fixture, second); len(result.CostSnapshots) != 4 {
+		t.Fatalf("second event snapshots = %d, want 4", len(result.CostSnapshots))
 	}
 	if err := fixture.Pool.QueryRow(t.Context(), `SELECT budget_group_id::text
         FROM olp.attempt_usage_facts WHERE request_id = $1::uuid`, second.RequestID).Scan(&storedGroup); err != nil {

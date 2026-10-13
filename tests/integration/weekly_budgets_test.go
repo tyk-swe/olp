@@ -55,7 +55,7 @@ func TestWeeklyBudgetAdmissionNeedsCompleteCurrentEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease.SetActualCost("3")
+	lease.SetActualCost("3", "3")
 	if err = lease.SettleCost(t.Context()); err != nil {
 		t.Fatal(err)
 	}

@@ -49,7 +49,15 @@ byte limits, and enable/disable, all under ETag concurrency.
 
 Usage filters project/session, refusing conflicting non-session attribution;
 breakdowns and CSV exports retain visible filters/current axes. Request detail
-links session attribution to filtered history.
+links session attribution to filtered history. Summary and breakdown show
+consumer charge beside cost and the month's uncharged-attempt count.
+
+The **cost calculator** bounds a published route's request or prices a usage
+record exactly as accounting would record it. *Route* mode simulates and lists
+every target's minimum/maximum bound and exclusion reason. *Usage* mode prices
+an attempt's token/media/tool usage against a provider's price, discount,
+commitment and the applicable rate card, including the recorded components and
+provenance; nothing is written or retained.
 
 Creates own stable mutation ID plus submitted payload/ETag through ambiguous
 retry; changed intent gets a new ID. Confirmed writes never repeat on refresh

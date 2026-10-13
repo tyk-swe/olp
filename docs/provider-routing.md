@@ -190,6 +190,11 @@ additional/rotated slots need their own proof. Secretless modes still honor defa
 restrictions/quotas. Published options/contracts/versions and attempt price pins
 remain immutable, while new admissions use current published count quotas.
 
+`options.commitment` declares provisioned capacity,
+`{"amount": "<decimal>", "period": "hour"|"day"|"month"}`: priced usage on the
+connection settles at zero marginal cost and the commitment allocates across
+the period's list-cost weight, as [Pricing](pricing.md#commitments) describes.
+
 Connection `options.limits` and slot RPM/TPM/concurrency both apply. Valkey owns UTC
 minutes/leases; configured quotas fail closed. Logical quota identity survives
 rotation. Dispatched token reservations cannot decrease; settlement releases
@@ -483,10 +488,21 @@ permission and current ETag.
 
 Hard constraints intersect across all scopes and the request. They include
 `only`, `ignore`, `regions`, `quantizations`, `deny_data_collection`,
-`require_zero_data_retention`, `require_parameters`, and `max_price`. Selectors
-are `vendor:<catalog-id>` or `provider:<connection-uuid>`. Unknown facts cannot
-satisfy a required constraint. Constraints placed inside policy defaults also
-narrow eligibility. They do not grant additional access.
+`require_zero_data_retention`, `require_parameters`, `max_price`, and
+`max_cost`. Selectors are `vendor:<catalog-id>` or `provider:<connection-uuid>`.
+Unknown facts cannot satisfy a required constraint. Constraints placed inside
+policy defaults also narrow eligibility. They do not grant additional access.
+
+`max_cost` is an exact-decimal ceiling on a request's worst-case attempt cost:
+the bound the gateway would reserve (highest input-side rate for the estimate,
+the declared or default reply allowance, the per-request fee, the window
+multiplier, and the attempt's pinned discount). Every scope that sets it
+narrows it — the effective ceiling is the smallest. A candidate whose worst
+case exceeds the ceiling, or that cannot be bounded at all, is ineligible with
+the `cost_limit_exceeded` reason; a committed provider bounds zero and always
+passes. When no non-shadow target remains eligible for that reason the request
+fails `400` with `cost_limit_exceeded` before anything is dispatched, without
+triggering fallback; fallback legs that do run apply the same ceiling.
 
 Ordering and strategy preferences use request → key → route → installation
 precedence. A policy can restrict `allowed_strategies`. `order` precedes the
@@ -498,7 +514,7 @@ deadlines or attempt limits, or broaden policy constraints.
 All native inference surfaces accept one optional `X-OLP-Routing` header:
 
 ```http
-X-OLP-Routing: {"only":["vendor:deepseek"],"strategy":"price","max_price":{"input_per_million":"0.50","output_per_million":"2.00"}}
+X-OLP-Routing: {"only":["vendor:deepseek"],"strategy":"price","max_price":{"input_per_million":"0.50","output_per_million":"2.00"},"max_cost":"0.25"}
 ```
 
 The header also chooses the request's admission `priority`, such as
@@ -552,7 +568,12 @@ nor a request an unconfined plugin carried whose outcome is unknown; see
 `POST /api/v1/routing/simulate` and draft/playground preview share the execution
 planner. Supply operation/surface/mode/preferences, optional key/seed/native request.
 Results include exclusions/order/slots/prices/measurement freshness and target-
-prepared input tokens/provenance/family. An explicit estimated count applies to
+prepared input tokens/provenance/family. Simulations also report each target's
+`estimated_cost`: the `minimum` prices the input estimate at the cheapest
+input-side rate the selected tier carries, plus the per-request fee; the
+`maximum` is the worst case the gateway would reserve. Server-side tool fees and
+batch multipliers are not bounded. The pair is null when the target's price
+cannot bound the request or no token demand is known. An explicit estimated count applies to
 all targets without provenance. Admission additionally reserves reply/larger
 source-prepared bounds; simulation is not a dispatch guarantee.
 

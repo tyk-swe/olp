@@ -394,9 +394,22 @@ Routes become non-activated drafts; cross-project slug conflicts and lifecycle
 differences need explicit activation/retirement. Active runtime stays pinned.
 
 Exact unchanged prices are noop; other prices create a revision and republish.
-Future effective times survive, past/current times rebase to apply. Feature-specific
-budget/group/calendar omission semantics are in [access](access.md), not a global
-merge rule. `expected_digest` fences destination drift; remaining blockers return
+Future effective times survive, past/current times rebase to apply.
+
+Top-level `discounts` carries every scope's in-force multiplier, multiplier-1
+scope endings included (`provider_kind`, optional `vendor_id`, `provider` by
+name). Apply publishes a new now-effective discount for each listed scope
+whose multiplier differs — listing `multiplier` "1" ends a discount — and
+leaves scopes the document omits untouched, like every other collection.
+Top-level `rate_cards` carries each card's in-force revision, neutral ones
+included: `owner` (`kind` installation/organization/project, named like
+routes), `markup`, `prices` in the price-entry shape minus provider scope.
+Apply creates missing cards and publishes a new now-effective revision when
+the listed revision differs; a listed card is neutralized by publishing
+`markup` "1" with no prices, and cards the document omits are untouched. Connection commitments ride provider `options` and each budget's `cost_basis`
+rides its `budget_policy`, so they promote with their owners. Feature-specific
+budget/group/calendar omission semantics are in [access](access.md), not a
+global merge rule. `expected_digest` fences destination drift; remaining blockers return
 409 with plan body, successful staging records one digest-only audit event.
 
 Console **Settings → Configuration promotion** forgets secrets on artifact changes;

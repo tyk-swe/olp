@@ -4,9 +4,13 @@ import (
 	"math/big"
 	"math/rand/v2"
 	"testing"
+	"time"
 )
 
 func rate(text string) *string { return &text }
+
+// settledAt is a fixed attempt start time for tests that do not exercise windows.
+var settledAt = time.Date(2025, 6, 2, 12, 0, 0, 0, time.UTC)
 
 func tokens(value int64) *int64 { return &value }
 
@@ -84,16 +88,16 @@ func TestPriceCostMatchesHandComputedBills(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := test.price.Cost(test.usage())
+			got, ok := test.price.Cost(test.usage(), settledAt, true)
 			if !ok || got.String() != test.want {
 				t.Fatalf("Cost = %q, %v, want %q", got.String(), ok, test.want)
 			}
 			routing := &RoutingPrice{Price: test.price}
-			if again, ok := routing.Cost(test.usage()); !ok || again.Cmp(got) != 0 {
+			if again, ok := routing.Cost(test.usage(), settledAt, true, nil); !ok || again.Cmp(got) != 0 {
 				t.Fatalf("a routing price without cached rates costs %q, want %q", again.String(), got.String())
 			}
 			routing.rates = parseRates(&routing.Price)
-			if again, ok := routing.Cost(test.usage()); !ok || again.Cmp(got) != 0 {
+			if again, ok := routing.Cost(test.usage(), settledAt, true, nil); !ok || again.Cmp(got) != 0 {
 				t.Fatalf("a routing price with cached rates costs %q, want %q", again.String(), got.String())
 			}
 		})
@@ -153,16 +157,16 @@ func TestPriceCostIsUnpricedWherePostgreSQLRecordsNoCost(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			if got, ok := test.price.Cost(test.usage()); ok {
+			if got, ok := test.price.Cost(test.usage(), settledAt, true); ok {
 				t.Fatalf("Cost = %q, true, want no cost", got.String())
 			}
 		})
 	}
 	var missing *RoutingPrice
-	if _, ok := missing.Cost(completeUsage()); ok {
+	if _, ok := missing.Cost(completeUsage(), settledAt, true, nil); ok {
 		t.Fatal("a missing price costs something")
 	}
-	if _, ok := missing.CostBound(10, 10, true); ok {
+	if _, ok := missing.CostBound(10, 10, true, settledAt, nil); ok {
 		t.Fatal("a missing price bounds something")
 	}
 }
@@ -173,7 +177,7 @@ func TestCostBoundIsACeilingOnEveryTierMix(t *testing.T) {
 		InputPerMillion: rate("3"), CachedInputPerMillion: rate("0.3"), CacheWriteInputPerMillion: rate("3.75"),
 		CacheWrite1HInputPerMillion: rate("6"), OutputPerMillion: rate("15"),
 	}}
-	got, ok := price.CostBound(1_000_000, 100_000, true)
+	got, ok := price.CostBound(1_000_000, 100_000, true, settledAt, nil)
 	// A million input tokens at the dearest input rate, 6, plus the reply, 1.5.
 	if !ok || got.String() != "7.5" {
 		t.Fatalf("CostBound = %q, %v, want 7.5", got.String(), ok)
@@ -181,21 +185,21 @@ func TestCostBoundIsACeilingOnEveryTierMix(t *testing.T) {
 	// An embedding has no reply to bound, so a price without an output rate
 	// still prices it.
 	embedding := &RoutingPrice{Price: Price{InputPerMillion: rate("0.02")}}
-	if got, ok := embedding.CostBound(1000, 4096, false); !ok || got.String() != "0.00002" {
+	if got, ok := embedding.CostBound(1000, 4096, false, settledAt, nil); !ok || got.String() != "0.00002" {
 		t.Fatalf("embedding CostBound = %q, %v", got.String(), ok)
 	}
-	if _, ok := embedding.CostBound(1000, 4096, true); ok {
+	if _, ok := embedding.CostBound(1000, 4096, true, settledAt, nil); ok {
 		t.Fatal("a generation without an output rate has a bound")
 	}
-	if _, ok := (&RoutingPrice{Price: Price{OutputPerMillion: rate("1")}}).CostBound(1, 1, true); ok {
+	if _, ok := (&RoutingPrice{Price: Price{OutputPerMillion: rate("1")}}).CostBound(1, 1, true, settledAt, nil); ok {
 		t.Fatal("a price without an input rate has a bound")
 	}
 	// Each division rounds up, so a single token never bounds at nothing.
-	if got, ok := price.CostBound(1, 0, true); !ok || got.String() != "0.000006" {
+	if got, ok := price.CostBound(1, 0, true, settledAt, nil); !ok || got.String() != "0.000006" {
 		t.Fatalf("one token CostBound = %q, %v", got.String(), ok)
 	}
 	tiny := &RoutingPrice{Price: Price{InputPerMillion: rate("0.000000000001"), OutputPerMillion: rate("0.000000000001")}}
-	if got, ok := tiny.CostBound(1, 1, true); !ok || got.String() != "0.000000000002" {
+	if got, ok := tiny.CostBound(1, 1, true, settledAt, nil); !ok || got.String() != "0.000000000002" {
 		t.Fatalf("rounded-up CostBound = %q, %v", got.String(), ok)
 	}
 
@@ -239,8 +243,8 @@ func TestCostBoundIsACeilingOnEveryTierMix(t *testing.T) {
 			write5m = random.Int64N(write - write1h + 1)
 			u.CacheWrite5MInputTokens = &write5m
 		}
-		actual, ok := p.Cost(u)
-		bound, boundOK := p.CostBound(input, output, true)
+		actual, ok := p.Cost(u, settledAt, true, nil)
+		bound, boundOK := p.CostBound(input, output, true, settledAt, nil)
 		if !ok || !boundOK || bound.Cmp(actual) < 0 {
 			t.Fatalf("bound %q < cost %q for %+v / %+v", bound.String(), actual.String(), *p, u)
 		}
@@ -253,7 +257,7 @@ func TestCostArithmetic(t *testing.T) {
 	if !zero.IsZero() || zero.String() != "0" || zero.Cmp(Cost{}) != 0 {
 		t.Fatal("the zero Cost is not nothing")
 	}
-	one, _ := (Price{UnitPrice: rate("1")}).Cost(AttemptUsage{Complete: true, MediaUnits: rate("1")})
+	one, _ := (Price{UnitPrice: rate("1")}).Cost(AttemptUsage{Complete: true, MediaUnits: rate("1")}, settledAt, true)
 	if one.String() != "1" || one.IsZero() || one.Cmp(zero) <= 0 || zero.Cmp(one) >= 0 {
 		t.Fatalf("one = %q", one.String())
 	}
@@ -263,7 +267,7 @@ func TestCostArithmetic(t *testing.T) {
 	if got := MaxCost().Add(one); got.Cmp(MaxCost()) != 0 || got.String() != "999999999999.999999999999" {
 		t.Fatalf("the sum of the largest cost and one = %q", got.String())
 	}
-	small, _ := (Price{UnitPrice: rate("0.000000000123")}).Cost(AttemptUsage{Complete: true, MediaUnits: rate("1")})
+	small, _ := (Price{UnitPrice: rate("0.000000000123")}).Cost(AttemptUsage{Complete: true, MediaUnits: rate("1")}, settledAt, true)
 	if small.String() != "0.000000000123" {
 		t.Fatalf("small = %q", small.String())
 	}
@@ -311,7 +315,7 @@ func BenchmarkCostBound(b *testing.B) {
 	price.rates = parseRates(&price.Price)
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, ok := price.CostBound(50_000, 4096, true); !ok {
+		if _, ok := price.CostBound(50_000, 4096, true, settledAt, nil); !ok {
 			b.Fatal("unpriced")
 		}
 	}
@@ -328,8 +332,135 @@ func BenchmarkPriceCost(b *testing.B) {
 		tokens(50_000), tokens(20_000), tokens(5_000), tokens(300)
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, ok := price.Cost(usage); !ok {
+		if _, ok := price.Cost(usage, settledAt, true, nil); !ok {
 			b.Fatal("unpriced")
 		}
+	}
+}
+
+// The card mirror prices a consumer as the SQL does: an explicit rate prices
+// the usage itself at discount one, a markup rounds the already-rounded cost,
+// and no explicit match plus an unpriced cost is no charge.
+func TestRoutingCostDiscountWithoutWindow(t *testing.T) {
+	price := &RoutingPrice{Price: Price{InputPerMillion: rate("3"), Currency: "USD"}}
+	for _, tc := range []struct{ multiplier, want string }{{"0", "0"}, {"0.5", "0.0015"}, {"1", "0.003"}} {
+		t.Run(tc.multiplier, func(t *testing.T) {
+			got, ok := price.Cost(AttemptUsage{Complete: true, InputTokens: tokens(1000)}, time.Now(), true, &RoutingDiscount{Multiplier: tc.multiplier})
+			if !ok || got.String() != tc.want {
+				t.Fatalf("cost = %v, priced = %v; want %s", got, ok, tc.want)
+			}
+		})
+	}
+}
+
+func TestRoutingCardCharge(t *testing.T) {
+	settledAt := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	explicit := &RoutingPrice{Price: Price{ProviderKind: "openai", Model: "m",
+		Operation: "generation", InputPerMillion: rate("7"), Currency: "USD"}}
+	vendor := "openai"
+	card := &RoutingCardRevision{ID: "rev", Markup: "1.5",
+		Prices: []RoutingPrice{*explicit}}
+	usage := AttemptUsage{Complete: true, InputTokens: tokens(1000)}
+
+	// The explicit rate prices the usage itself, ignoring provider cost.
+	charge, ok := card.Charge(usage, settledAt, true, nil, "openai", vendor, "m", "generation")
+	if !ok || charge.String() != "0.007" {
+		t.Fatalf("explicit charge = %v %v, want 0.007", charge, ok)
+	}
+	// A vendor-scoped entry wins over the unscoped one.
+	card.Prices = append(card.Prices, RoutingPrice{Price: Price{VendorID: &vendor,
+		ProviderKind: "openai", Model: "m", Operation: "generation",
+		InputPerMillion: rate("10"), Currency: "USD"}})
+	charge, ok = card.Charge(usage, settledAt, true, nil, "openai", vendor, "m", "generation")
+	if !ok || charge.String() != "0.01" {
+		t.Fatalf("vendor charge = %v %v, want 0.01", charge, ok)
+	}
+	// Markup multiplies the already-rounded cost in one rounding.
+	cost := Cost{new(big.Int).Mul(big.NewInt(3000), perMillion)}
+	if cost.String() != "0.003" {
+		t.Fatalf("cost fixture broken: %v", cost)
+	}
+	card2 := &RoutingCardRevision{ID: "rev2", Markup: "1.5"}
+	charge, ok = card2.Charge(usage, settledAt, true, &cost, "openai", vendor, "other", "generation")
+	if !ok || charge.String() != "0.0045" {
+		t.Fatalf("markup charge = %v %v, want 0.0045", charge, ok)
+	}
+	// No explicit match and an unpriced cost is no charge.
+	if _, ok := card2.Charge(usage, settledAt, true, nil, "openai", vendor, "other", "generation"); ok {
+		t.Fatal("unpriced cost under markup produced a charge")
+	}
+	// A zero cost — a committed attempt's — charges zero under any markup.
+	zero := Cost{}
+	charge, ok = card2.Charge(usage, settledAt, true, &zero, "openai", vendor, "other", "generation")
+	if !ok || charge.String() != "0" {
+		t.Fatalf("zero-cost charge = %v %v, want 0", charge, ok)
+	}
+	zeroBound, ok := card2.ChargeBound(0, 0, false, settledAt, Cost{}, "openai", vendor, "other", "generation")
+	if !ok || zeroBound.String() != "0" {
+		t.Fatalf("zero bound = %v %v, want 0", zeroBound, ok)
+	}
+	// The charge bound mirrors the same shapes.
+	bound, ok := card2.ChargeBound(1000, 1000, true, settledAt, cost, "openai", vendor, "other", "generation")
+	if !ok || bound.String() != "0.0045" {
+		t.Fatalf("markup bound = %v %v, want 0.0045", bound, ok)
+	}
+	// The explicit rate's bound is its own bound, markup-free: the vendor
+	// entry prices input only, so a generation request cannot bound.
+	if _, ok = card.ChargeBound(1000, 1000, true, settledAt, cost, "openai", vendor, "m", "generation"); ok {
+		t.Fatal("an input-only explicit rate bounded a generation request")
+	}
+	bound, ok = card.ChargeBound(1000, 0, false, settledAt, cost, "openai", vendor, "m", "generation")
+	want, _ := card.Prices[1].CostBound(1000, 0, false, settledAt, nil)
+	if !ok || bound.Cmp(want) != 0 {
+		t.Fatalf("explicit bound = %v, want %v", bound, want)
+	}
+}
+
+// The card a request pins is the most specific card with a revision in
+// force — input order in the slice is irrelevant, and a card whose revisions
+// all start in the future falls through to the next scope.
+func TestRoutingCardResolution(t *testing.T) {
+	now := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	projectID, organizationID := "project", "organization"
+	card := func(id string, org, proj *string, revisions ...RoutingCardRevision) RoutingRateCard {
+		return RoutingRateCard{ID: id, OrganizationID: org, ProjectID: proj, Revisions: revisions}
+	}
+	revision := func(id string, r int, effective time.Time) RoutingCardRevision {
+		return RoutingCardRevision{ID: id, Revision: r, Markup: "2",
+			EffectiveAt: effective, Prices: nil}
+	}
+	// The installation card arriving first cannot shadow a better scope.
+	inputs := &RoutingInputs{
+		RefreshedAt: now.Add(-time.Minute),
+		RateCards: []RoutingRateCard{
+			card("install", nil, nil, revision("install-r", 1, now.Add(-time.Hour))),
+			card("org", &organizationID, nil, revision("org-r", 1, now.Add(-time.Hour))),
+			card("proj", nil, &projectID, revision("proj-r", 1, now.Add(-time.Hour))),
+		},
+		ProjectOrganizations: map[string]string{projectID: organizationID},
+	}
+	found, known := inputs.RateCardRevision(&projectID, now)
+	if !known || found == nil || found.ID != "proj-r" {
+		t.Fatalf("project card resolution = %v known=%v", found, known)
+	}
+	// A project card whose only revision is future falls through to the
+	// organization card — and without that, to the installation card.
+	inputs.RateCards[2].Revisions[0].EffectiveAt = now.Add(time.Hour)
+	found, _ = inputs.RateCardRevision(&projectID, now)
+	if found == nil || found.ID != "org-r" {
+		t.Fatalf("organization fallthrough = %v", found)
+	}
+	inputs.RateCards[1].Revisions[0].EffectiveAt = now.Add(time.Hour)
+	found, _ = inputs.RateCardRevision(&projectID, now)
+	if found == nil || found.ID != "install-r" {
+		t.Fatalf("installation fallthrough = %v", found)
+	}
+	// Stale inputs cannot answer at all.
+	inputs.RefreshedAt = now.Add(-PerformanceMaxAge - time.Second)
+	if found, known = inputs.RateCardRevision(&projectID, now); known || found != nil {
+		t.Fatalf("stale inputs answered %v known=%v", found, known)
+	}
+	if found, known = (*RoutingInputs)(nil).RateCardRevision(&projectID, now); known || found != nil {
+		t.Fatalf("missing inputs answered %v known=%v", found, known)
 	}
 }

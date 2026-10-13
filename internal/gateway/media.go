@@ -360,6 +360,10 @@ func (s *Server) planMedia(ctx context.Context, x *execution) *Error {
 		if semantic != nil {
 			return requestError(semantic)
 		}
+		x.noteCostExceeded(plan)
+		if x.costExcluded {
+			return costLimitExceeded()
+		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, route.Slug)
 	}
 	return nil
@@ -794,7 +798,9 @@ func mediaUsage(request *media.Request, result *media.Result) *openai.Usage {
 
 // tokenUsage is the accounting usage of a vendor that bills media by token.
 func tokenUsage(tokens *media.ImageUsage) *openai.Usage {
-	return &openai.Usage{InputTokens: tokens.InputTokens, OutputTokens: tokens.OutputTokens, TotalTokens: tokens.TotalTokens}
+	return &openai.Usage{InputTokens: tokens.InputTokens, OutputTokens: tokens.OutputTokens, TotalTokens: tokens.TotalTokens,
+		AudioInputTokens: tokens.AudioInputTokens, AudioOutputTokens: tokens.AudioOutputTokens,
+		ImageInputTokens: tokens.ImageInputTokens, ImageOutputTokens: tokens.ImageOutputTokens}
 }
 
 // writeMediaResult renders the successful media response.
@@ -1051,22 +1057,26 @@ func (s *Server) streamMediaEvents(ctx context.Context, w http.ResponseWriter, x
 			buf.WriteString("data: " + line + "\n")
 		}
 		buf.WriteByte('\n')
-		if input, output, cached := media.ObserveMediaUsage(frame.Data); input != nil || output != nil || cached != nil {
+		if observed := media.ObserveMediaUsage(frame.Data, x.media.Op); observed != nil {
 			if usage == nil {
 				usage = &openai.Usage{}
 			}
-			if input != nil {
-				usage.InputTokens = *input
+			if observed.Input != nil {
+				usage.InputTokens = *observed.Input
 			}
-			if output != nil {
-				usage.OutputTokens = *output
+			if observed.Output != nil {
+				usage.OutputTokens = *observed.Output
 			}
-			if input != nil && output != nil {
-				usage.TotalTokens = *input + *output
+			if observed.Input != nil && observed.Output != nil {
+				usage.TotalTokens = *observed.Input + *observed.Output
 			}
-			if cached != nil {
-				usage.CachedInputTokens = cached
+			if observed.Cached != nil {
+				usage.CachedInputTokens = observed.Cached
 			}
+			usage.AudioInputTokens = observed.AudioInput
+			usage.AudioOutputTokens = observed.AudioOutput
+			usage.ImageInputTokens = observed.ImageInput
+			usage.ImageOutputTokens = observed.ImageOutput
 		}
 		completed := media.IsMediaTerminal(event)
 		if completed {

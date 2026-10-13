@@ -305,18 +305,31 @@ func (s *realtimeResponseState) clientFrame(typ websocket.MessageType, data []by
 	}
 }
 
+// realtimeUsage is the usage object of a terminal realtime response,
+// including the modality shares a multimodal session reports.
+type realtimeUsage struct {
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	InputDetails *struct {
+		CachedTokens  *int64 `json:"cached_tokens"`
+		AudioTokens   *int64 `json:"audio_tokens"`
+		ImageTokens   *int64 `json:"image_tokens"`
+		CachedDetails *struct {
+			AudioTokens *int64 `json:"audio_tokens"`
+			ImageTokens *int64 `json:"image_tokens"`
+		} `json:"cached_tokens_details"`
+	} `json:"input_token_details"`
+	OutputDetails *struct {
+		AudioTokens *int64 `json:"audio_tokens"`
+	} `json:"output_token_details"`
+}
+
 type realtimeFrame struct {
 	Type       string `json:"type"`
 	ResponseID string `json:"response_id"`
 	Response   *struct {
-		ID    string `json:"id"`
-		Usage *struct {
-			InputTokens  int64 `json:"input_tokens"`
-			OutputTokens int64 `json:"output_tokens"`
-			InputDetails *struct {
-				CachedTokens *int64 `json:"cached_tokens"`
-			} `json:"input_token_details"`
-		} `json:"usage"`
+		ID    string         `json:"id"`
+		Usage *realtimeUsage `json:"usage"`
 	} `json:"response"`
 }
 
@@ -346,14 +359,8 @@ func decodeStrictRealtimeFrame(data []byte, event *realtimeFrame) bool {
 		return false
 	}
 	event.Response = new(struct {
-		ID    string `json:"id"`
-		Usage *struct {
-			InputTokens  int64 `json:"input_tokens"`
-			OutputTokens int64 `json:"output_tokens"`
-			InputDetails *struct {
-				CachedTokens *int64 `json:"cached_tokens"`
-			} `json:"input_token_details"`
-		} `json:"usage"`
+		ID    string         `json:"id"`
+		Usage *realtimeUsage `json:"usage"`
 	})
 	if event.Response.ID, valid = realtimeStringField(response, "id"); !valid {
 		return false
@@ -365,13 +372,7 @@ func decodeStrictRealtimeFrame(data []byte, event *realtimeFrame) bool {
 	if usageValue.Kind() != oif.Object {
 		return false
 	}
-	event.Response.Usage = new(struct {
-		InputTokens  int64 `json:"input_tokens"`
-		OutputTokens int64 `json:"output_tokens"`
-		InputDetails *struct {
-			CachedTokens *int64 `json:"cached_tokens"`
-		} `json:"input_token_details"`
-	})
+	event.Response.Usage = new(realtimeUsage)
 	if event.Response.Usage.InputTokens, valid = realtimeIntField(usageValue, "input_tokens"); !valid {
 		return false
 	}
@@ -386,17 +387,61 @@ func decodeStrictRealtimeFrame(data []byte, event *realtimeFrame) bool {
 		return false
 	}
 	event.Response.Usage.InputDetails = new(struct {
-		CachedTokens *int64 `json:"cached_tokens"`
+		CachedTokens  *int64 `json:"cached_tokens"`
+		AudioTokens   *int64 `json:"audio_tokens"`
+		ImageTokens   *int64 `json:"image_tokens"`
+		CachedDetails *struct {
+			AudioTokens *int64 `json:"audio_tokens"`
+			ImageTokens *int64 `json:"image_tokens"`
+		} `json:"cached_tokens_details"`
 	})
-	cached, present := realtimeMember(details, "cached_tokens")
-	if !present || cached.Kind() == oif.Null {
-		return true
+	readDetail := func(parent oif.Value, name string) (*int64, bool) {
+		value, present := realtimeMember(parent, name)
+		if !present || value.Kind() == oif.Null {
+			return nil, true
+		}
+		count, valid := realtimeIntField(parent, name)
+		if !valid {
+			return nil, false
+		}
+		return &count, true
 	}
-	value, valid := realtimeIntField(details, "cached_tokens")
-	if !valid {
+	var ok bool
+	if event.Response.Usage.InputDetails.CachedTokens, ok = readDetail(details, "cached_tokens"); !ok {
 		return false
 	}
-	event.Response.Usage.InputDetails.CachedTokens = &value
+	if event.Response.Usage.InputDetails.AudioTokens, ok = readDetail(details, "audio_tokens"); !ok {
+		return false
+	}
+	if event.Response.Usage.InputDetails.ImageTokens, ok = readDetail(details, "image_tokens"); !ok {
+		return false
+	}
+	if cachedDetails, present := realtimeMember(details, "cached_tokens_details"); present && cachedDetails.Kind() != oif.Null {
+		if cachedDetails.Kind() != oif.Object {
+			return false
+		}
+		event.Response.Usage.InputDetails.CachedDetails = new(struct {
+			AudioTokens *int64 `json:"audio_tokens"`
+			ImageTokens *int64 `json:"image_tokens"`
+		})
+		if event.Response.Usage.InputDetails.CachedDetails.AudioTokens, ok = readDetail(cachedDetails, "audio_tokens"); !ok {
+			return false
+		}
+		if event.Response.Usage.InputDetails.CachedDetails.ImageTokens, ok = readDetail(cachedDetails, "image_tokens"); !ok {
+			return false
+		}
+	}
+	if outputDetails, present := realtimeMember(usageValue, "output_token_details"); present && outputDetails.Kind() != oif.Null {
+		if outputDetails.Kind() != oif.Object {
+			return false
+		}
+		event.Response.Usage.OutputDetails = new(struct {
+			AudioTokens *int64 `json:"audio_tokens"`
+		})
+		if event.Response.Usage.OutputDetails.AudioTokens, ok = readDetail(outputDetails, "audio_tokens"); !ok {
+			return false
+		}
+	}
 	return true
 }
 
@@ -476,12 +521,23 @@ func (s *realtimeResponseState) providerFrame(typ websocket.MessageType, data []
 		return nil
 	}
 	out := &openai.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
-	if u.InputDetails != nil && u.InputDetails.CachedTokens != nil {
-		cached := *u.InputDetails.CachedTokens
-		if cached < 0 || cached > u.InputTokens {
-			return nil
+	if u.InputDetails != nil {
+		if u.InputDetails.CachedTokens != nil {
+			cached := *u.InputDetails.CachedTokens
+			if cached < 0 || cached > u.InputTokens {
+				return nil
+			}
+			out.CachedInputTokens = &cached
 		}
-		out.CachedInputTokens = &cached
+		out.AudioInputTokens = u.InputDetails.AudioTokens
+		out.ImageInputTokens = u.InputDetails.ImageTokens
+		if u.InputDetails.CachedDetails != nil {
+			out.CachedAudioInputTokens = u.InputDetails.CachedDetails.AudioTokens
+			out.CachedImageInputTokens = u.InputDetails.CachedDetails.ImageTokens
+		}
+	}
+	if u.OutputDetails != nil {
+		out.AudioOutputTokens = u.OutputDetails.AudioTokens
 	}
 	return out
 }
@@ -585,7 +641,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		settled := geminiLiveSettlement(x)
 		s.settlePinHold(r.Context(), x, p.hold, settled)
-		x.recordCost()
+		s.recordCost(x)
 		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
 	}()
 	if x.strict() {

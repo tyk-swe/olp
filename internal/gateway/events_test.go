@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"log/slog"
+	"reflect"
 	"testing"
 	"time"
 
@@ -94,11 +95,11 @@ func TestJSONLogPreservesRevisionAndUsageMetadata(t *testing.T) {
 	if err := json.Unmarshal(buffer.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.ClientIP != env.ClientIP || got.RouteRevisionID != env.RouteRevisionID || !got.StartedAt.Equal(at) || got.Usage == nil || *got.Usage != *usage || len(got.Attempts) != 1 {
+	if got.ClientIP != env.ClientIP || got.RouteRevisionID != env.RouteRevisionID || !got.StartedAt.Equal(at) || got.Usage == nil || !reflect.DeepEqual(*got.Usage, *usage) || len(got.Attempts) != 1 {
 		t.Fatalf("terminal metadata lost: %s", buffer.Bytes())
 	}
 	a := got.Attempts[0]
-	if a.ProviderRevisionID != env.Attempts[0].ProviderRevisionID || a.CredentialID != env.Attempts[0].CredentialID || a.UpstreamModel != env.Attempts[0].UpstreamModel || !a.StartedAt.Equal(at) || a.Usage == nil || *a.Usage != *usage {
+	if a.ProviderRevisionID != env.Attempts[0].ProviderRevisionID || a.CredentialID != env.Attempts[0].CredentialID || a.UpstreamModel != env.Attempts[0].UpstreamModel || !a.StartedAt.Equal(at) || a.Usage == nil || !reflect.DeepEqual(*a.Usage, *usage) {
 		t.Fatalf("attempt metadata lost: %s", buffer.Bytes())
 	}
 }

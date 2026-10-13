@@ -199,7 +199,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 			s.settlePinHold(r.Context(), x, p.hold, settled)
 		}
 		s.settleCaps(r.Context(), x)
-		x.recordCost()
+		s.recordCost(x)
 		settleKey(r.Context(), x.lease, x.dispatched, settled, s.log)
 	}()
 	p, e = s.selectPinSurface(ctx, x, &route, "realtime", "gemini", "realtime", func(provider *runtime.Provider, model string) bool {
@@ -385,6 +385,7 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 	var mu sync.Mutex
 	var observed *openai.Usage
 	var turn *openai.Usage
+	var turnGrounding int64
 	var inFlight bool
 	type relayEnd struct {
 		err            error
@@ -418,9 +419,21 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 				var usageValue *openai.Usage
 				if u := frame.Usage; u != nil {
 					usageValue = geminiExtendedUsage(*u.Input, *u.Output, u.Cached, u.Thoughts, u.ToolUse, u.Total)
+					geminiLiveModality(usageValue, u)
 				}
 				turnComplete := frame.TurnComplete
 				serverContent, toolCall := frame.Kind == "serverContent", frame.Kind == "toolCall"
+				if serverContent {
+					// Grounded turns bill per query; the grounded prompt marker is a
+					// flag the completion turns on once.
+					if content, ok := doc.Lookup("serverContent"); ok {
+						if grounding, ok := content.Lookup("groundingMetadata"); ok {
+							if queries, ok := grounding.Lookup("webSearchQueries"); ok && queries.Kind() == oif.Array {
+								turnGrounding += int64(len(queries.Elements()))
+							}
+						}
+					}
+				}
 				providerError = frame.Kind == "error"
 				if providerError {
 					// An in-band provider error can echo an applied credential;
@@ -442,6 +455,13 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 						turn = usageValue
 					}
 					if turnComplete && turn != nil {
+						if turnGrounding > 0 {
+							turn.ToolCalls = map[string]int64{
+								"google_search_query":  turnGrounding,
+								"google_search_prompt": 1,
+							}
+							turnGrounding = 0
+						}
 						if observed == nil {
 							observed = turn
 						} else {
@@ -461,6 +481,24 @@ func (s *Server) relayGeminiLive(ctx context.Context, x *execution, p *pin, clie
 									cached = addBounded(cached, *observed.CachedInputTokens)
 								}
 								observed.CachedInputTokens = &cached
+							}
+							mergeUsageShare(&observed.AudioInputTokens, turn.AudioInputTokens)
+							mergeUsageShare(&observed.CachedAudioInputTokens, turn.CachedAudioInputTokens)
+							mergeUsageShare(&observed.AudioOutputTokens, turn.AudioOutputTokens)
+							mergeUsageShare(&observed.ImageInputTokens, turn.ImageInputTokens)
+							mergeUsageShare(&observed.CachedImageInputTokens, turn.CachedImageInputTokens)
+							mergeUsageShare(&observed.ImageOutputTokens, turn.ImageOutputTokens)
+							if len(turn.ToolCalls) > 0 {
+								if observed.ToolCalls == nil {
+									observed.ToolCalls = turn.ToolCalls
+								} else {
+									for tool, invocations := range turn.ToolCalls {
+										observed.ToolCalls[tool] = addBounded(observed.ToolCalls[tool], invocations)
+									}
+									if observed.ToolCalls["google_search_prompt"] > 1 {
+										observed.ToolCalls["google_search_prompt"] = 1
+									}
+								}
 							}
 						}
 						turn = nil
@@ -571,6 +609,60 @@ loop:
 		return observed, turn == nil && observed != nil, nil
 	}
 	return observed, false, first.err
+}
+
+// mergeUsageShare accumulates one optional usage share across turns.
+func mergeUsageShare(slot **int64, value *int64) {
+	if value == nil {
+		return
+	}
+	total := *value
+	if *slot != nil {
+		total = addBounded(total, **slot)
+	}
+	*slot = &total
+}
+
+// geminiUsageDetails maps a Live frame's modality detail arrays onto the usage
+// shares they price through: video frames bill as image input.
+func geminiUsageDetails(detail []geminilifecycle.LiveUsageDetail) (audio, image int64) {
+	for _, entry := range detail {
+		switch entry.Modality {
+		case "AUDIO":
+			audio += entry.TokenCount
+		case "IMAGE", "VIDEO":
+			image += entry.TokenCount
+		}
+	}
+	return audio, image
+}
+
+// geminiLiveModality applies a Live frame's detail arrays to its usage.
+func geminiLiveModality(u *openai.Usage, native *geminilifecycle.LiveUsage) {
+	if u == nil {
+		return
+	}
+	audio, image := geminiUsageDetails(native.PromptDetails)
+	if audio > 0 {
+		u.AudioInputTokens = &audio
+	}
+	if image > 0 {
+		u.ImageInputTokens = &image
+	}
+	audio, image = geminiUsageDetails(native.CacheDetails)
+	if audio > 0 {
+		u.CachedAudioInputTokens = &audio
+	}
+	if image > 0 {
+		u.CachedImageInputTokens = &image
+	}
+	audio, image = geminiUsageDetails(native.ResponseDetails)
+	if audio > 0 {
+		u.AudioOutputTokens = &audio
+	}
+	if image > 0 {
+		u.ImageOutputTokens = &image
+	}
 }
 
 // geminiExtendedUsage folds the thinking and tool-use counts Gemini reports

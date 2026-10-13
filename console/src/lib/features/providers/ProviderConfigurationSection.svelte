@@ -1,5 +1,6 @@
 <script lang="ts">
   import ProviderProfileEditor from './ProviderProfileEditor.svelte';
+  import ProviderCommitmentEditor from './ProviderCommitmentEditor.svelte';
   import ProviderConnectionFields from './ProviderConnectionFields.svelte';
   import PluginProfileField from './PluginProfileField.svelte';
   import type { Provider } from '$lib/features/providers/api/providers';
@@ -70,6 +71,12 @@
       <ProviderConnectionFields
         bind:values={editValues}
         spec={providerSpec}
+        idPrefix="detail"
+        disabled={!canManage}
+        onChange={onTouch}
+      />
+      <ProviderCommitmentEditor
+        bind:values={editValues}
         idPrefix="detail"
         disabled={!canManage}
         onChange={onTouch}

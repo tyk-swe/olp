@@ -193,8 +193,10 @@ return 403. Empty-project deletion needs ETag and Idempotency-Key; retained
 foreign-key dependencies return `409 project_in_use`.
 
 `/api/v1/budget-groups` manages shared limits in one project/unassigned boundary.
-A group needs a positive cost limit and can also set RPM/TPM/concurrency.
-Attach keys with `budget_group_id`; membership changes do not reassign history.
+A group needs a positive cost limit and can also set RPM/TPM/concurrency, and
+`cost_basis` (`cost`, the default, or `charge`) picks whether the budget
+enforces provider cost or the consumer charge. Attach keys with
+`budget_group_id`; membership changes do not reassign history.
 Group and individual limits both apply, including
 [fail-closed initialization](operations.md#spend-budget-reconciliation).
 Writes require `keys` and project change authority.
@@ -429,8 +431,12 @@ attribution and supply caps. Shadow/paid probes count; code subscriptions do not
 `GET/PUT /api/v1/budgets/installation` needs global `read`/`settings` respectively.
 `/api/v1/projects/{project_id}/budget` needs project visibility or `keys` plus
 manager authority. Writes use ETag and explicit `policy`/null, with exact-decimal
-`daily_cost_limit`, `weekly_cost_limit`, `monthly_cost_limit`. Reports show live/
-retained spend and monthly unpriced attempts.
+`daily_cost_limit`, `weekly_cost_limit`, `monthly_cost_limit` and `cost_basis`,
+which is `cost` (default, what the provider bills) or `charge` (what the
+consumer owes under its rate card; see [pricing](pricing.md#rate-cards-and-charge)).
+Reports show live/retained spend and monthly unpriced attempts on the enforced
+basis. Supply-side caps — spend caps, connection limits and slot limits —
+always measure provider cost and take no basis.
 
 Every boundary reserves before dispatch and refunds on later refusal. Exhaustion
 returns `429 budget_exhausted`; unknown balances return 503 until reconstruction.

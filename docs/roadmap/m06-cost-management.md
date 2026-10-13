@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M2](m02-provider-catalog.md), [M4](m04-tenancy-identity.md), [M5](m05-observability.md) | FinOps adoption |
+| In progress | [M2](m02-provider-catalog.md), [M4](m04-tenancy-identity.md), [M5](m05-observability.md) | FinOps adoption |
 
 OLP already has exact-decimal pinned prices, fail-closed hierarchical budgets,
 completeness evidence and M5 metadata exports. This milestone adds remaining
@@ -112,30 +112,118 @@ is not yet released.
 | Reconciliation | `internal/usage/`, `internal/process/workers.go` |
 | Console | `console/src/lib/features/usage/` |
 
-## Decisions to settle
+## Implementation decisions
 
-1. Whether budgets may enforce `charge` (recommended: yes, chosen per budget, so
-   internal consumers can be capped in the currency they are billed in).
-2. Commitment allocation: by tokens or by cost-weighted tokens (recommended: by
-   the list-price-weighted share, so cheap and expensive models on one
-   commitment allocate fairly).
-3. The minimum provider set for invoice reconciliation (recommended: OpenAI and
-   Anthropic first, then the cloud billing exports).
+M6.1 to M6.3 are implemented first; M6.4 and M6.5 follow with the decisions
+below already settled.
+
+1. **Budget basis.** Every consumer budget (key, budget group, end user,
+   installation, organization, project, attribution and per-key route caps)
+   chooses `cost` or `charge` as its `cost_basis`, defaulting to `cost`, so
+   internal consumers can be capped in the amount they are billed. Supply-side
+   caps on connections, slots and routes always enforce provider cost.
+2. **Commitment allocation.** A commitment is allocated by list-price-weighted
+   share: each committed attempt weighs what it would have cost at list price,
+   so cheap and expensive models on one commitment allocate fairly.
+3. **Reconciliation providers.** M6.5 starts with the OpenAI and Anthropic cost
+   APIs; AWS Cost and Usage Reports, Google Cloud billing export and Azure Cost
+   Management follow.
+4. **FOCUS format.** M6.4 writes FOCUS 1.4 datasets as gzip-compressed CSV,
+   which every FOCUS consumer and the FOCUS validator read, so no columnar
+   serialization dependency is added.
+5. **Cached modality rates.** Vendors price cached audio and image tokens apart
+   from cached text, so `cached_audio_input_per_million` and
+   `cached_image_input_per_million` join the components listed in M6.1.
+6. **Tiers.** A tier applies when a request's input tokens, cache reads and
+   writes included, exceed its `above_input_tokens`; the highest such tier
+   replaces the entry's whole per-million rate set for every token of the
+   request. A rate the tier omits falls back within the tier, as the entry's
+   own rates do, never to the entry's rate.
+7. **Multipliers.** Window and batch multipliers scale an attempt's whole usage
+   charge. Windows are evaluated at the attempt's start in the period's IANA
+   time zone. `batch_multiplier` applies to usage marked as batch results,
+   which M9.2 produces.
+8. **Tool calls.** A fee applies per metered server-side invocation. An attempt
+   that used a tool its price names no fee for is unpriced, like any other
+   dimension without a rate. Anthropic `server_tool_use` counters, OpenAI
+   Responses web and file search calls and Gemini grounding search queries are
+   metered.
+9. **Per-request fees** apply to successful attempts only.
+10. **Commitments** are a connection option published with provider revisions:
+    an amount per UTC hour, day or month. Committed attempts cost nothing and
+    record their list cost as their allocation weight; an attempt with no list
+    price stays unpriced. Usage reports allocate each period's amount across
+    the period's committed attempts; a period with none allocates nothing, and
+    an open period's allocation is provisional.
+11. **Discounts** are immutable, effective-dated multipliers. The most specific
+    scope wins (connection, then vendor, then connector kind), then the newest
+    effective time. The gateway pins the discount it priced an attempt with, as
+    it pins the pricing revision.
+12. **Rate cards** belong to the installation, an organization or a project and
+    publish immutable revisions: a markup on cost plus optional explicit rates
+    in the price format. The project's card applies, else its organization's,
+    else the installation's. An explicit rate prices matching usage itself;
+    otherwise the charge is the cost times the markup. Without a card the
+    charge is the cost.
+13. **Catalog format.** Catalogs carrying the new components are
+    `openllmproxy.dev/catalog/v2`; strict decoding means an older release
+    refuses them as an unsupported version rather than misreading them.
+14. **`max_cost`** is checked against the same worst-case bound the gateway
+    reserves for an attempt. A candidate with no price cannot be shown to fit
+    and is skipped.
 
 ## Exit criteria
 
-- [ ] Every price component above round-trips through revisions, sources,
+- [x] Every price component above round-trips through revisions, sources,
       snapshots and configuration export, and accounting tests price each one
       exactly.
-- [ ] The [reference catalog](m02-provider-catalog.md#m24-reference-catalog)
+- [x] The [reference catalog](m02-provider-catalog.md#m24-reference-catalog)
       prices every catalog model with no `unrepresentable` component left for
       structures listed above.
-- [ ] Usage reports show cost and charge side by side, with commitments
+- [x] Usage reports show cost and charge side by side, with commitments
       allocated.
-- [ ] `max_cost` refuses requests whose worst case exceeds the ceiling, before
+- [x] `max_cost` refuses requests whose worst case exceeds the ceiling, before
       dispatch, in integration tests.
 - [ ] A FOCUS dataset validates against the pinned specification's schema, and
       CloudEvents and Stripe meter deliveries are idempotent under redelivery.
 - [ ] Reconciliation reports a capture rate for OpenAI and Anthropic
       connections against recorded fixtures.
 - [ ] The [parity matrix](parity.md) cost rows are `Parity` or better.
+
+## Delivered and verified
+
+M6.1 to M6.3 are implemented; M6.4 and M6.5 remain planned, so the milestone
+stays in progress.
+
+- **Price components.** Pricing revisions, price-list sources, catalog
+  snapshots and configuration documents carry modality and cached-modality
+  rates, input-token tiers, time-of-day windows, per-request and tool-call
+  fees and the batch multiplier. One PostgreSQL function prices every attempt
+  and the gateway's Go mirror reproduces it exactly for reservations,
+  settlement and `X-OLP-Cost`; a parity suite holds the two together.
+- **Metering.** OpenAI, Anthropic and Gemini usage populates audio and image
+  shares and server-side tool calls; inconsistent provider detail settles the
+  attempt incomplete rather than at text rates.
+- **Commitments.** Connection commitments bill nothing per attempt and are
+  allocated in usage reports by list-price-weighted share.
+- **Reference catalog v2.** Every component the catalog listed as
+  unrepresentable in a structure OLP now prices is transcribed, independently
+  checked against the vendor figures it came from; what remains carries an
+  accurate residual name.
+- **Discounts, rate cards and charge.** Usage records carry cost and charge
+  with their provenance; reports, exports and request history show both, and
+  every consumer budget enforces either.
+- **Estimation.** Route simulation states minimum and maximum cost per target,
+  `max_cost` refuses requests whose worst case exceeds it before dispatch, and
+  the console calculator prices routes and exact usage.
+
+`make check`, `make test-race` and one complete, unmodified `make integration`
+run pass on the branch; the integration run includes the race-enabled package
+phase, every client qualification suite and the packaged Playwright journeys,
+the new pricing journeys among them. `make bench-gate` holds every hot-path
+benchmark within its threshold except `BenchmarkEligibility/secret` (+13% time,
+no allocations), whose code path M6 does not change: on the development host
+its time moves by similar amounts between commits that do not touch it, which
+marks layout sensitivity rather than a regression. Live-provider qualification
+of the new metering is not part of this evidence; it rests on recorded
+response fixtures.

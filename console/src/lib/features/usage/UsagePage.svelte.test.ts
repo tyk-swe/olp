@@ -36,12 +36,14 @@ const coverage = {
   range_complete: true
 };
 const counts = {
+  charge: null,
   complete: true,
   coverage,
   incomplete_count: 0,
   request_count: 42,
   request_metadata_consumer: consumer,
   request_metadata_gap_events: 0,
+  uncharged_attempt_count: 0,
   uncertain_request_metadata_gap_count: 0,
   unpriced_count: 0
 };
@@ -52,6 +54,17 @@ let component: ReturnType<typeof mount> | undefined;
 
 // The totals every report carries about admission estimates; zero attempts
 // had both an estimate and reported usage.
+// The modality token sums every totals report carries.
+const modalityZeros = {
+  audio_input_tokens: '0',
+  cached_audio_input_tokens: '0',
+  audio_output_tokens: '0',
+  image_input_tokens: '0',
+  cached_image_input_tokens: '0',
+  image_output_tokens: '0',
+  allocated_commitment: '0'
+};
+
 const unestimated = {
   estimated_attempt_count: 0,
   estimated_input_tokens: '0',
@@ -68,6 +81,7 @@ beforeEach(() => {
   vi.mocked(usageSummary).mockResolvedValue({
     ...counts,
     ...unestimated,
+    ...modalityZeros,
     cache_write_1h_input_tokens: '0',
     cache_write_5m_input_tokens: '0',
     cache_write_input_tokens: '0',
@@ -135,6 +149,7 @@ it('shows no estimation error when no attempt had both an estimate and usage', a
 it('shows the signed estimation error with the sums it is drawn from', async () => {
   vi.mocked(usageSummary).mockResolvedValue({
     ...counts,
+    ...modalityZeros,
     cache_write_1h_input_tokens: '0',
     cache_write_5m_input_tokens: '0',
     cache_write_input_tokens: '0',
@@ -161,6 +176,7 @@ it('shows the signed estimation error with the sums it is drawn from', async () 
 it('does not claim an empty sample when the providers reported no input', async () => {
   vi.mocked(usageSummary).mockResolvedValue({
     ...counts,
+    ...modalityZeros,
     cache_write_1h_input_tokens: '0',
     cache_write_5m_input_tokens: '0',
     cache_write_input_tokens: '0',
@@ -220,6 +236,7 @@ it('sets estimated against reported input in each breakdown row', async () => {
   const row = {
     ...counts,
     dimension: 'openai-o200k',
+    ...modalityZeros,
     cache_write_1h_input_tokens: '0',
     cache_write_5m_input_tokens: '0',
     cache_write_input_tokens: '0',
@@ -241,13 +258,16 @@ it('sets estimated against reported input in each breakdown row', async () => {
   await vi.waitFor(() =>
     expect(host.querySelector('table.data-table')).not.toBeNull()
   );
-  const headers = [...host.querySelectorAll('thead th')].map(
+  const table = [...host.querySelectorAll('table')].find((candidate) =>
+    candidate.textContent?.includes('Estimated / reported input')
+  )!;
+  const headers = [...table.querySelectorAll('thead th')].map(
     (header) => header.textContent
   );
   expect(headers).toContain('Estimated / reported input');
   expect(headers).toContain('Estimate error');
   const cells = (index: number) =>
-    [...host.querySelectorAll('tbody tr')[index].querySelectorAll('td')].map(
+    [...table.querySelectorAll('tbody tr')[index].querySelectorAll('td')].map(
       (cell) => cell.textContent?.trim()
     );
   const estimated = headers.indexOf('Estimated / reported input');
@@ -334,4 +354,49 @@ it('surfaces an export failure without downloading', async () => {
     expect(host.textContent).toContain('The export is too large')
   );
   expect(vi.mocked(downloadBlob)).not.toHaveBeenCalled();
+});
+
+it('shows modality token totals and the allocated commitment', async () => {
+  vi.mocked(usageSummary).mockResolvedValue({
+    ...counts,
+    ...unestimated,
+    cache_write_1h_input_tokens: '0',
+    cache_write_5m_input_tokens: '0',
+    cache_write_input_tokens: '0',
+    cached_input_tokens: '0',
+    input_tokens: '0',
+    output_tokens: '0',
+    media_units: '0',
+    audio_input_tokens: '100',
+    cached_audio_input_tokens: '40',
+    audio_output_tokens: '60',
+    image_input_tokens: '20',
+    cached_image_input_tokens: '8',
+    image_output_tokens: '10',
+    allocated_commitment: '250.000000000000'
+  });
+  vi.mocked(usageBreakdown).mockResolvedValue({
+    items: [
+      {
+        ...counts,
+        ...modalityZeros,
+        allocated_commitment: '150.000000000000',
+        audio_input_tokens: '100',
+        audio_output_tokens: '60',
+        image_input_tokens: '20',
+        image_output_tokens: '10',
+        dimension: 'team-chat'
+      }
+    ]
+  } as never);
+  render(`${window}&dimension=route&granularity=hour`);
+  await vi.waitFor(() =>
+    expect(host.querySelector('table.data-table')).not.toBeNull()
+  );
+  expect(host.textContent).toContain('Audio / image tokens');
+  expect(host.textContent).toContain('Allocated commitment');
+  const row = host.querySelector('tbody tr')!;
+  expect(row.textContent).toContain('100 / 60');
+  expect(row.textContent).toContain('20 / 10');
+  expect(row.textContent).toContain('150.00');
 });

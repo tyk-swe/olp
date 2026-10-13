@@ -166,7 +166,7 @@ func BenchmarkAdmission(b *testing.B) {
 					b.Fatal(e)
 				}
 				if tc.hold.amount != "" {
-					lease.SetActualCost("0.0129")
+					lease.SetActualCost("0.0129", "0.0129")
 				}
 				settleKey(ctx, lease, true, &actual, quiet)
 				operations++

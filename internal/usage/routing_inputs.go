@@ -35,7 +35,66 @@ type Performance struct {
 type RoutingInputs struct {
 	Prices      []RoutingPrice
 	Performance map[string]Performance
-	RefreshedAt time.Time
+	// Discounts are the multipliers in force now plus every scheduled one;
+	// the most specific scope at the plan time is pinned on the attempt.
+	Discounts []RoutingDiscount
+	// RateCards are each owner's card with its in-force and scheduled
+	// revisions; a request with an authority project resolves and pins one.
+	RateCards            []RoutingRateCard
+	ProjectOrganizations map[string]string
+	RefreshedAt          time.Time
+}
+
+// RoutingDiscount is one multiplier the plan may pin on an attempt.
+type RoutingDiscount struct {
+	ID           string    `json:"id"`
+	ProviderKind string    `json:"provider_kind"`
+	VendorID     *string   `json:"vendor_id"`
+	ProviderID   *string   `json:"provider_id"`
+	Multiplier   string    `json:"multiplier"`
+	EffectiveAt  time.Time `json:"effective_at"`
+	CreatedAt    time.Time `json:"created_at"`
+
+	multiplier *big.Int
+}
+
+// parsedMultiplier is the discount at rate scale, as olp.price_usage applies
+// it inside the one rounding.
+func (d *RoutingDiscount) parsedMultiplier() *big.Int {
+	if d.multiplier != nil {
+		return d.multiplier
+	}
+	units, _ := scaledDecimal(d.Multiplier, costDigits)
+	return units
+}
+
+// RoutingRateCard is one owner's card with its revisions and their explicit
+// rates, parsed like routing prices.
+type RoutingRateCard struct {
+	ID             string  `json:"id"`
+	OrganizationID *string `json:"organization_id"`
+	ProjectID      *string `json:"project_id"`
+	Revisions      []RoutingCardRevision
+}
+
+// RoutingCardRevision is one card revision: a markup and explicit prices.
+type RoutingCardRevision struct {
+	ID          string         `json:"id"`
+	Revision    int            `json:"revision"`
+	Markup      string         `json:"markup"`
+	EffectiveAt time.Time      `json:"effective_at"`
+	Prices      []RoutingPrice `json:"prices"`
+
+	markup *big.Int
+}
+
+// parsedMarkup is the markup at rate scale.
+func (r *RoutingCardRevision) parsedMarkup() *big.Int {
+	if r.markup != nil {
+		return r.markup
+	}
+	units, _ := scaledDecimal(r.Markup, costDigits)
+	return units
 }
 
 func PerformanceKey(provider, model, operation, mode string) string {
@@ -92,6 +151,140 @@ func (p *RoutingPrice) Scalar(operation string) *big.Rat {
 	}
 	return total
 }
+
+// Discount is the multiplier in force for one attempt's scope at `now`: the
+// most specific scope wins (provider over vendor over kind), then the newest
+// effective time, then the newest created time, then the greatest id.
+func (i *RoutingInputs) Discount(kind, provider, vendor string, now time.Time) *RoutingDiscount {
+	if i == nil || now.Sub(i.RefreshedAt) > PerformanceMaxAge {
+		return nil
+	}
+	var found *RoutingDiscount
+	for index := range i.Discounts {
+		d := &i.Discounts[index]
+		if d.ProviderKind != kind || d.EffectiveAt.After(now) ||
+			d.ProviderID != nil && *d.ProviderID != provider ||
+			d.VendorID != nil && *d.VendorID != vendor {
+			continue
+		}
+		candidate := *d
+		priority := 0
+		if candidate.VendorID != nil {
+			priority++
+		}
+		if candidate.ProviderID != nil {
+			priority += 2
+		}
+		if found == nil {
+			found = &candidate
+			continue
+		}
+		existing := 0
+		if found.VendorID != nil {
+			existing++
+		}
+		if found.ProviderID != nil {
+			existing += 2
+		}
+		better := priority > existing ||
+			priority == existing && (candidate.EffectiveAt.After(found.EffectiveAt) ||
+				candidate.EffectiveAt.Equal(found.EffectiveAt) &&
+					(candidate.CreatedAt.After(found.CreatedAt) ||
+						candidate.CreatedAt.Equal(found.CreatedAt) && candidate.ID > found.ID))
+		if better {
+			found = &candidate
+		}
+	}
+	return found
+}
+
+// RateCardRevision is the resolved card revision for a consumer at `now`:
+// the most specific card — project, then its organization, then the
+// installation — that has a revision in force; a card whose revisions all
+// start in the future falls through to the next scope. Known reports the
+// inputs are fresh enough to decide; when they are not the caller must leave
+// the attempt unpinned rather than pin "no card".
+func (i *RoutingInputs) RateCardRevision(projectID *string, now time.Time) (revision *RoutingCardRevision, known bool) {
+	if i == nil || now.Sub(i.RefreshedAt) > PerformanceMaxAge {
+		return nil, false
+	}
+	var organization string
+	if projectID != nil {
+		organization = i.ProjectOrganizations[*projectID]
+	}
+	inForce := func(card *RoutingRateCard) *RoutingCardRevision {
+		if card == nil {
+			return nil
+		}
+		var found *RoutingCardRevision
+		for index := range card.Revisions {
+			candidate := &card.Revisions[index]
+			if candidate.EffectiveAt.After(now) {
+				continue
+			}
+			if found == nil || candidate.EffectiveAt.After(found.EffectiveAt) ||
+				candidate.EffectiveAt.Equal(found.EffectiveAt) && candidate.Revision > found.Revision {
+				found = candidate
+			}
+		}
+		return found
+	}
+	var projectCard, organizationCard, installationCard *RoutingRateCard
+	for index := range i.RateCards {
+		candidate := &i.RateCards[index]
+		switch {
+		case projectID != nil && candidate.ProjectID != nil && *candidate.ProjectID == *projectID:
+			projectCard = candidate
+		case organization != "" && candidate.OrganizationID != nil && *candidate.OrganizationID == organization:
+			organizationCard = candidate
+		case candidate.ProjectID == nil && candidate.OrganizationID == nil:
+			installationCard = candidate
+		}
+	}
+	for _, card := range []*RoutingRateCard{projectCard, organizationCard, installationCard} {
+		if found := inForce(card); found != nil {
+			return found, true
+		}
+	}
+	return nil, true
+}
+
+// CardRevision returns the revision the given id names, for a gateway that
+// pinned it at admission.
+func (i *RoutingInputs) CardRevision(id string) *RoutingCardRevision {
+	if i == nil {
+		return nil
+	}
+	for index := range i.RateCards {
+		for j := range i.RateCards[index].Revisions {
+			if i.RateCards[index].Revisions[j].ID == id {
+				return &i.RateCards[index].Revisions[j]
+			}
+		}
+	}
+	return nil
+}
+
+// Explicit is the card revision's rate for one attempt's dimensions, the
+// vendor-scoped entry winning over the unscoped one.
+func (r *RoutingCardRevision) Explicit(kind, vendor, model, operation string) *RoutingPrice {
+	if r == nil {
+		return nil
+	}
+	var found *RoutingPrice
+	for index := range r.Prices {
+		p := &r.Prices[index]
+		if p.ProviderKind != kind || p.Model != model || p.Operation != operation ||
+			p.VendorID != nil && *p.VendorID != vendor {
+			continue
+		}
+		if found == nil || p.VendorID != nil {
+			found = p
+		}
+	}
+	return found
+}
+
 func (i *RoutingInputs) Metrics(provider, model, operation, mode string, now time.Time) *Performance {
 	if i == nil || now.Sub(i.RefreshedAt) > PerformanceMaxAge {
 		return nil
@@ -116,6 +309,9 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
  SELECT rid::text,revision,effective_at,provider_kind,provider_id::text,vendor_id,model,operation,
  input_per_million::text,output_per_million::text,cached_input_per_million::text,
  cache_write_input_per_million::text,cache_write_5m_input_per_million::text,cache_write_1h_input_per_million::text,
+ audio_input_per_million::text,cached_audio_input_per_million::text,audio_output_per_million::text,
+ image_input_per_million::text,cached_image_input_per_million::text,image_output_per_million::text,
+ per_request::text,batch_multiplier::text,tool_calls::text,tiers::text,windows::text,
  unit_price::text,btrim(currency)
  FROM ranked WHERE rank=1 OR effective_at>$1 LIMIT 100001`, now)
 	if err != nil {
@@ -123,9 +319,29 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
 	}
 	for rows.Next() {
 		var p RoutingPrice
-		if err = rows.Scan(&p.RevisionID, &p.Revision, &p.EffectiveAt, &p.ProviderKind, &p.ProviderID, &p.VendorID, &p.Model, &p.Operation, &p.InputPerMillion, &p.OutputPerMillion, &p.CachedInputPerMillion, &p.CacheWriteInputPerMillion, &p.CacheWrite5MInputPerMillion, &p.CacheWrite1HInputPerMillion, &p.UnitPrice, &p.Currency); err != nil {
+		var toolCalls, tiers, windows *string
+		if err = rows.Scan(&p.RevisionID, &p.Revision, &p.EffectiveAt, &p.ProviderKind, &p.ProviderID, &p.VendorID, &p.Model, &p.Operation, &p.InputPerMillion, &p.OutputPerMillion, &p.CachedInputPerMillion, &p.CacheWriteInputPerMillion, &p.CacheWrite5MInputPerMillion, &p.CacheWrite1HInputPerMillion, &p.AudioInputPerMillion, &p.CachedAudioInputPerMillion, &p.AudioOutputPerMillion, &p.ImageInputPerMillion, &p.CachedImageInputPerMillion, &p.ImageOutputPerMillion, &p.PerRequest, &p.BatchMultiplier, &toolCalls, &tiers, &windows, &p.UnitPrice, &p.Currency); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if toolCalls != nil {
+			if err = json.Unmarshal([]byte(*toolCalls), &p.ToolCalls); err != nil {
+				rows.Close()
+				return nil, err
+			}
+		}
+		if tiers != nil {
+			if err = json.Unmarshal([]byte(*tiers), &p.Tiers); err != nil {
+				rows.Close()
+				return nil, err
+			}
+		}
+		if windows != nil {
+			p.Windows = &PriceWindows{}
+			if err = json.Unmarshal([]byte(*windows), p.Windows); err != nil {
+				rows.Close()
+				return nil, err
+			}
 		}
 		p.rates = parseRates(&p.Price)
 		in.Prices = append(in.Prices, p)
@@ -159,10 +375,195 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
 		}
 		in.Performance[PerformanceKey(provider, model, op, mode)] = p
 	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
 	if len(in.Performance) > 100000 {
 		return nil, errors.New("routing performance catalogue exceeds bounded capacity")
 	}
+	if err = loadRoutingDiscounts(ctx, q, now, in); err != nil {
+		return nil, err
+	}
+	if err = loadRoutingRateCards(ctx, q, now, in); err != nil {
+		return nil, err
+	}
 	return in, rows.Err()
+}
+
+// loadRoutingDiscounts reads the multipliers in force plus those scheduled
+// within 90 days; a bounded catalogue keeps each plan's pin lookup cheap.
+func loadRoutingDiscounts(ctx context.Context, q access.Queryer, now time.Time, in *RoutingInputs) error {
+	rows, err := q.Query(ctx, `SELECT id::text,provider_kind,vendor_id,provider_id::text,
+ multiplier::text,effective_at,created_at
+ FROM (
+  (SELECT DISTINCT ON (provider_kind,vendor_id,provider_id) *
+   FROM olp.pricing_discounts WHERE effective_at<=$1
+   ORDER BY provider_kind,vendor_id,provider_id,effective_at DESC,created_at DESC,id DESC)
+  UNION ALL
+  (SELECT * FROM olp.pricing_discounts
+   WHERE effective_at>$1 AND effective_at<=$1::timestamptz+interval '90 days')
+ ) discounts ORDER BY id LIMIT 100001`, now)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d RoutingDiscount
+		if err = rows.Scan(&d.ID, &d.ProviderKind, &d.VendorID, &d.ProviderID,
+			&d.Multiplier, &d.EffectiveAt, &d.CreatedAt); err != nil {
+			return err
+		}
+		if units, ok := scaledDecimal(d.Multiplier, costDigits); ok {
+			d.multiplier = units
+		}
+		in.Discounts = append(in.Discounts, d)
+	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	if len(in.Discounts) > 100000 {
+		return errors.New("routing discount catalogue exceeds bounded capacity")
+	}
+	return nil
+}
+
+// loadRoutingRateCards reads every card with its revisions and prices plus
+// the organization of every project a card may resolve through.
+func loadRoutingRateCards(ctx context.Context, q access.Queryer, _ time.Time, in *RoutingInputs) error {
+	in.ProjectOrganizations = map[string]string{}
+	rows, err := q.Query(ctx, `SELECT id::text,organization_id::text FROM olp.projects
+ WHERE organization_id IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var project, organization string
+		if err = rows.Scan(&project, &organization); err != nil {
+			rows.Close()
+			return err
+		}
+		in.ProjectOrganizations[project] = organization
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+
+	cards := map[string]*RoutingRateCard{}
+	order := []string{}
+	rows, err = q.Query(ctx, `SELECT id::text,organization_id::text,project_id::text FROM olp.rate_cards`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var card RoutingRateCard
+		if err = rows.Scan(&card.ID, &card.OrganizationID, &card.ProjectID); err != nil {
+			rows.Close()
+			return err
+		}
+		cards[card.ID] = &card
+		order = append(order, card.ID)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	if len(cards) == 0 {
+		return nil
+	}
+	revisions := map[string]*RoutingCardRevision{}
+	cardRevisions := map[string][]*RoutingCardRevision{}
+	rows, err = q.Query(ctx, `SELECT id::text,rate_card_id::text,revision,markup::text,effective_at
+ FROM olp.rate_card_revisions`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cardID string
+		revision := &RoutingCardRevision{}
+		if err = rows.Scan(&revision.ID, &cardID, &revision.Revision, &revision.Markup, &revision.EffectiveAt); err != nil {
+			rows.Close()
+			return err
+		}
+		if units, ok := scaledDecimal(revision.Markup, costDigits); ok {
+			revision.markup = units
+		}
+		revisions[revision.ID] = revision
+		if _, ok := cards[cardID]; ok {
+			cardRevisions[cardID] = append(cardRevisions[cardID], revision)
+		}
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	if len(revisions) == 0 {
+		for _, id := range order {
+			in.RateCards = append(in.RateCards, *cards[id])
+		}
+		return nil
+	}
+	rows, err = q.Query(ctx, `SELECT rate_card_revision_id::text,provider_kind,vendor_id,model,operation,
+ input_per_million::text,cached_input_per_million::text,cache_write_input_per_million::text,
+ cache_write_5m_input_per_million::text,cache_write_1h_input_per_million::text,
+ output_per_million::text,audio_input_per_million::text,cached_audio_input_per_million::text,
+ audio_output_per_million::text,image_input_per_million::text,cached_image_input_per_million::text,
+ image_output_per_million::text,unit_price::text,per_request::text,batch_multiplier::text,
+ tool_calls::text,tiers::text,windows::text,btrim(currency)
+ FROM olp.rate_card_prices`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var revisionID string
+		var p RoutingPrice
+		var toolCalls, tiers, windows *string
+		if err = rows.Scan(&revisionID, &p.ProviderKind, &p.VendorID, &p.Model, &p.Operation,
+			&p.InputPerMillion, &p.CachedInputPerMillion, &p.CacheWriteInputPerMillion,
+			&p.CacheWrite5MInputPerMillion, &p.CacheWrite1HInputPerMillion,
+			&p.OutputPerMillion, &p.AudioInputPerMillion, &p.CachedAudioInputPerMillion,
+			&p.AudioOutputPerMillion, &p.ImageInputPerMillion, &p.CachedImageInputPerMillion,
+			&p.ImageOutputPerMillion, &p.UnitPrice, &p.PerRequest, &p.BatchMultiplier,
+			&toolCalls, &tiers, &windows, &p.Currency); err != nil {
+			rows.Close()
+			return err
+		}
+		if toolCalls != nil {
+			if err = json.Unmarshal([]byte(*toolCalls), &p.ToolCalls); err != nil {
+				rows.Close()
+				return err
+			}
+		}
+		if tiers != nil {
+			if err = json.Unmarshal([]byte(*tiers), &p.Tiers); err != nil {
+				rows.Close()
+				return err
+			}
+		}
+		if windows != nil {
+			p.Windows = &PriceWindows{}
+			if err = json.Unmarshal([]byte(*windows), p.Windows); err != nil {
+				rows.Close()
+				return err
+			}
+		}
+		p.rates = parseRates(&p.Price)
+		if revision, ok := revisions[revisionID]; ok {
+			revision.Prices = append(revision.Prices, p)
+		}
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range order {
+		for _, revision := range cardRevisions[id] {
+			cards[id].Revisions = append(cards[id].Revisions, *revision)
+		}
+		in.RateCards = append(in.RateCards, *cards[id])
+	}
+	return nil
 }
 
 func (p Performance) MarshalJSON() ([]byte, error) {

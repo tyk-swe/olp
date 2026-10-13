@@ -120,11 +120,19 @@ Caller attribution labels can help filter and group usage. Keys explicitly allow
 label names, and values must be bounded machine tokens. Labels never grant
 access or change routing; see [request attribution](gateway.md#request-path).
 
+Cost and charge are two different numbers. *Cost* is what the provider bills
+for an attempt, priced from the published price list under any committed or
+discounted terms. *Charge* is what the consumer owes for it: the rate card of
+the consumer's project, organization or installation marks up the cost, or an
+explicit card price replaces it entirely. [Pricing](pricing.md) has the exact
+selection and rounding rules.
+
 ## What is stored — and what never is
 
 Durable diagnostics contain identifiers, timing, token/media units, status,
-error classification, pricing provenance, and allowed attribution labels. They
-exclude prompts, outputs, reasoning, tool payloads, uploads, raw request
+error classification, pricing provenance — pinned pricing revisions, discounts
+and rate cards, components, cost and charge — and allowed attribution labels.
+They exclude prompts, outputs, reasoning, tool payloads, uploads, raw request
 headers, and credentials. Keep secrets out of operator names and labels too.
 
 Payload capture is a separate, explicit exception for operator-owned external

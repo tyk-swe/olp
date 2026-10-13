@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openllmproxy.dev/schemas/catalog/v1.json",
+  "$id": "https://openllmproxy.dev/schemas/catalog/v2.json",
   "title": "OpenLLMProxy reference catalog",
   "description": "Model facts and list prices by vendor, each entry with the documentation page and time it was observed. The catalog is advisory: it never certifies a model or prices an attempt on its own.",
   "type": "object",
   "additionalProperties": false,
   "required": ["api_version", "published_at", "currency", "estimation", "vendors"],
   "properties": {
-    "api_version": { "const": "openllmproxy.dev/catalog/v1" },
+    "api_version": { "const": "openllmproxy.dev/catalog/v2" },
     "published_at": { "$ref": "#/$defs/instant", "description": "Orders catalogs: a refresh never accepts an older one." },
     "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
     "estimation": { "type": "array", "items": { "$ref": "#/$defs/estimation" } },
@@ -94,7 +94,13 @@
       "anyOf": [
         { "required": ["input_per_million"] },
         { "required": ["output_per_million"] },
-        { "required": ["unit_price"] }
+        { "required": ["audio_input_per_million"] },
+        { "required": ["audio_output_per_million"] },
+        { "required": ["image_input_per_million"] },
+        { "required": ["image_output_per_million"] },
+        { "required": ["unit_price"] },
+        { "required": ["per_request"] },
+        { "required": ["tool_calls"] }
       ],
       "dependentRequired": {
         "cached_input_per_million": ["input_per_million"],
@@ -112,7 +118,31 @@
         "cache_write_5m_input_per_million": { "$ref": "#/$defs/decimal" },
         "cache_write_1h_input_per_million": { "$ref": "#/$defs/decimal" },
         "output_per_million": { "$ref": "#/$defs/decimal" },
+        "audio_input_per_million": { "$ref": "#/$defs/decimal", "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate." },
+        "cached_audio_input_per_million": { "$ref": "#/$defs/decimal", "description": "Rate for the cached share of audio input tokens." },
+        "audio_output_per_million": { "$ref": "#/$defs/decimal", "description": "Rate for the audio share of the output tokens." },
+        "image_input_per_million": { "$ref": "#/$defs/decimal", "description": "Rate for the image share of the input tokens; video input is metered as image." },
+        "cached_image_input_per_million": { "$ref": "#/$defs/decimal", "description": "Rate for the cached share of image input tokens." },
+        "image_output_per_million": { "$ref": "#/$defs/decimal", "description": "Rate for the image share of the output tokens." },
         "unit_price": { "$ref": "#/$defs/decimal", "description": "Price of one media unit: an image, a second of audio or video, a character of speech input, or a search unit." },
+        "per_request": { "$ref": "#/$defs/decimal", "description": "A fixed fee charged once per successful attempt." },
+        "tool_calls": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/decimal" },
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+          "minProperties": 1,
+          "maxProperties": 16,
+          "description": "Fees per metered server-side tool invocation."
+        },
+        "tiers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/tier" },
+          "description": "Input-token tiers, ascending by above_input_tokens. A tier names the same per-million rates as its entry."
+        },
+        "windows": { "$ref": "#/$defs/windows" },
+        "batch_multiplier": { "$ref": "#/$defs/decimal", "description": "Multiplies the whole usage charge of usage marked batch." },
         "unrepresentable": {
           "type": "array",
           "description": "Every price component the vendor charges that OLP cannot yet price, in the vendor's own terms.",
@@ -122,13 +152,57 @@
             "required": ["component", "detail"],
             "properties": {
               "component": {
-                "enum": ["tiers", "audio_input_per_million", "audio_output_per_million", "image_input_per_million", "image_output_per_million", "per_request", "tool_calls", "windows", "batch_multiplier", "service_tier", "regional_uplift", "cache_storage", "media_units"]
+                "enum": ["ambiguous", "batch_rates", "cache_storage", "conditions", "free_allowance", "holiday_calendar", "media_units", "minimum_charge", "plan_pricing", "prepaid_credits", "promotion", "regional_uplift", "service_tier", "thinking_mode", "tool_usage", "unpublished_rates", "video_input"]
               },
               "detail": { "type": "string", "minLength": 1 }
             }
           }
         },
         "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    },
+    "tier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["above_input_tokens"],
+      "properties": {
+        "above_input_tokens": { "type": "integer", "minimum": 1 },
+        "input_per_million": { "$ref": "#/$defs/decimal" },
+        "cached_input_per_million": { "$ref": "#/$defs/decimal" },
+        "cache_write_input_per_million": { "$ref": "#/$defs/decimal" },
+        "cache_write_5m_input_per_million": { "$ref": "#/$defs/decimal" },
+        "cache_write_1h_input_per_million": { "$ref": "#/$defs/decimal" },
+        "output_per_million": { "$ref": "#/$defs/decimal" },
+        "audio_input_per_million": { "$ref": "#/$defs/decimal" },
+        "cached_audio_input_per_million": { "$ref": "#/$defs/decimal" },
+        "audio_output_per_million": { "$ref": "#/$defs/decimal" },
+        "image_input_per_million": { "$ref": "#/$defs/decimal" },
+        "cached_image_input_per_million": { "$ref": "#/$defs/decimal" },
+        "image_output_per_million": { "$ref": "#/$defs/decimal" }
+      }
+    },
+    "windows": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time_zone", "periods"],
+      "properties": {
+        "time_zone": { "type": "string", "minLength": 1, "description": "An IANA time zone such as America/New_York." },
+        "periods": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["days", "start", "end", "multiplier"],
+            "properties": {
+              "days": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 1, "maximum": 7 } },
+              "start": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+              "end": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$|^24:00$" },
+              "multiplier": { "$ref": "#/$defs/decimal" }
+            }
+          }
+        }
       }
     }
   }

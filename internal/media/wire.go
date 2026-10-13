@@ -1179,9 +1179,13 @@ type ImageArtifact struct {
 // ImageUsage is the token usage a media response reported, such as an image
 // model's, or a speech or transcription model's that bills by token.
 type ImageUsage struct {
-	InputTokens  int64
-	OutputTokens int64
-	TotalTokens  int64
+	InputTokens       int64
+	OutputTokens      int64
+	TotalTokens       int64
+	AudioInputTokens  *int64
+	AudioOutputTokens *int64
+	ImageInputTokens  *int64
+	ImageOutputTokens *int64
 }
 
 // DecodeImageResponse parses an upstream image document, staging each
@@ -1198,6 +1202,12 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifa
 			InputTokens  int64 `json:"input_tokens"`
 			OutputTokens int64 `json:"output_tokens"`
 			TotalTokens  int64 `json:"total_tokens"`
+			InputDetail  *struct {
+				ImageTokens *int64 `json:"image_tokens"`
+			} `json:"input_tokens_details"`
+			OutputDetail *struct {
+				ImageTokens *int64 `json:"image_tokens"`
+			} `json:"output_tokens_details"`
 		} `json:"usage"`
 	}
 	var doc map[string]any
@@ -1220,7 +1230,8 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifa
 		}
 	}
 	if usageDoc, ok := doc["usage"].(map[string]any); ok {
-		result.UsageExtra = diffFields(usageDoc, "input_tokens", "output_tokens", "total_tokens")
+		result.UsageExtra = diffFields(usageDoc, "input_tokens", "output_tokens", "total_tokens",
+			"input_tokens_details", "output_tokens_details")
 	}
 	for i, image := range wire.Data {
 		artifact := ImageArtifact{RevisedPrompt: image.RevisedPrompt}
@@ -1244,6 +1255,17 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifa
 			InputTokens:  wire.Usage.InputTokens,
 			OutputTokens: wire.Usage.OutputTokens,
 			TotalTokens:  wire.Usage.TotalTokens,
+		}
+		if wire.Usage.InputDetail != nil {
+			result.Usage.ImageInputTokens = wire.Usage.InputDetail.ImageTokens
+		}
+		if wire.Usage.OutputDetail != nil && wire.Usage.OutputDetail.ImageTokens != nil {
+			result.Usage.ImageOutputTokens = wire.Usage.OutputDetail.ImageTokens
+		} else {
+			// Without an output breakdown every output token an image model
+			// reports is the image it produced.
+			output := wire.Usage.OutputTokens
+			result.Usage.ImageOutputTokens = &output
 		}
 	}
 	return result, nil
@@ -1733,6 +1755,15 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 			Text    string          `json:"text"`
 			Speaker *string         `json:"speaker"`
 		} `json:"segments"`
+		Usage *struct {
+			Type         string `json:"type"`
+			InputTokens  int64  `json:"input_tokens"`
+			OutputTokens int64  `json:"output_tokens"`
+			TotalTokens  int64  `json:"total_tokens"`
+			InputDetail  *struct {
+				AudioTokens *int64 `json:"audio_tokens"`
+			} `json:"input_token_details"`
+		} `json:"usage"`
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
@@ -1758,7 +1789,16 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 	}
 	result := &TranscriptionResult{
 		Text: wire.Text, Language: wire.Language, DurationSeconds: wire.Duration,
-		Extra: diffFields(doc, "text", "language", "duration", "segments"),
+		Extra: diffFields(doc, "text", "language", "duration", "segments", "usage"),
+	}
+	if wire.Usage != nil && (wire.Usage.Type == "" || wire.Usage.Type == "tokens") {
+		result.Tokens = &ImageUsage{
+			InputTokens: wire.Usage.InputTokens, OutputTokens: wire.Usage.OutputTokens,
+			TotalTokens: wire.Usage.TotalTokens,
+		}
+		if wire.Usage.InputDetail != nil {
+			result.Tokens.AudioInputTokens = wire.Usage.InputDetail.AudioTokens
+		}
 	}
 	if segments, ok := doc["segments"].([]any); ok && len(segments) == len(wire.Segments) {
 		for i, item := range segments {
@@ -1830,8 +1870,19 @@ func EncodeTranscriptionJSON(result *TranscriptionResult) ([]byte, *Error) {
 	return body, nil
 }
 
-// ObserveMediaUsage extracts token usage from a raw media SSE frame payload.
-func ObserveMediaUsage(data string) (input, output, cached *int64) {
+// MediaUsage is the token accounting one media SSE frame observed: input,
+// output and cached counts plus the modality shares the operation reports.
+type MediaUsage struct {
+	Input, Output, Cached   *int64
+	AudioInput, AudioOutput *int64
+	ImageInput, ImageOutput *int64
+}
+
+// ObserveMediaUsage extracts token usage from a raw media SSE frame payload,
+// resolved through the operation's modality rule: speech bills all output as
+// audio, transcription details its audio input, and an image operation's
+// output is its image unless the usage names another breakdown.
+func ObserveMediaUsage(data, op string) *MediaUsage {
 	var frame struct {
 		Usage *struct {
 			InputTokens       *int64 `json:"input_tokens"`
@@ -1840,24 +1891,67 @@ func ObserveMediaUsage(data string) (input, output, cached *int64) {
 			CompletionTokens  *int64 `json:"completion_tokens"`
 			InputTokenDetails *struct {
 				CachedTokens *int64 `json:"cached_tokens"`
+				AudioTokens  *int64 `json:"audio_tokens"`
+				ImageTokens  *int64 `json:"image_tokens"`
 			} `json:"input_tokens_details"`
+			InputTokenDetail *struct {
+				AudioTokens *int64 `json:"audio_tokens"`
+				ImageTokens *int64 `json:"image_tokens"`
+			} `json:"input_token_details"`
+			OutputTokenDetails *struct {
+				ImageTokens *int64 `json:"image_tokens"`
+			} `json:"output_tokens_details"`
 			PromptTokenDetails *struct {
 				CachedTokens *int64 `json:"cached_tokens"`
 			} `json:"prompt_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(data), &frame); err != nil || frame.Usage == nil {
-		return nil, nil, nil
+		return nil
 	}
 	usage := frame.Usage
-	input = firstInt(usage.InputTokens, usage.PromptTokens)
-	output = firstInt(usage.OutputTokens, usage.CompletionTokens)
-	if usage.InputTokenDetails != nil && usage.InputTokenDetails.CachedTokens != nil {
-		cached = usage.InputTokenDetails.CachedTokens
-	} else if usage.PromptTokenDetails != nil {
-		cached = usage.PromptTokenDetails.CachedTokens
+	m := &MediaUsage{
+		Input:  firstInt(usage.InputTokens, usage.PromptTokens),
+		Output: firstInt(usage.OutputTokens, usage.CompletionTokens),
 	}
-	return input, output, cached
+	if usage.InputTokenDetails != nil && usage.InputTokenDetails.CachedTokens != nil {
+		m.Cached = usage.InputTokenDetails.CachedTokens
+	} else if usage.PromptTokenDetails != nil {
+		m.Cached = usage.PromptTokenDetails.CachedTokens
+	}
+	imageDetail := func() *int64 {
+		if usage.InputTokenDetails != nil && usage.InputTokenDetails.ImageTokens != nil {
+			return usage.InputTokenDetails.ImageTokens
+		}
+		if usage.InputTokenDetail != nil {
+			return usage.InputTokenDetail.ImageTokens
+		}
+		return nil
+	}
+	audioDetail := func() *int64 {
+		if usage.InputTokenDetails != nil && usage.InputTokenDetails.AudioTokens != nil {
+			return usage.InputTokenDetails.AudioTokens
+		}
+		if usage.InputTokenDetail != nil {
+			return usage.InputTokenDetail.AudioTokens
+		}
+		return nil
+	}
+	switch op {
+	case OpSpeech:
+		// Speech models bill their whole output as audio.
+		m.AudioOutput = m.Output
+	case OpTranscription:
+		m.AudioInput = audioDetail()
+	case OpImageGeneration, OpImageEdit, OpImageVariation:
+		m.ImageInput = imageDetail()
+		if usage.OutputTokenDetails != nil && usage.OutputTokenDetails.ImageTokens != nil {
+			m.ImageOutput = usage.OutputTokenDetails.ImageTokens
+		} else {
+			m.ImageOutput = m.Output
+		}
+	}
+	return m
 }
 
 func firstInt(values ...*int64) *int64 {

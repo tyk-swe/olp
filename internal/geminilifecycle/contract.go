@@ -353,12 +353,21 @@ func ValidateLiveClientFrame(data []byte, maxBytes int) error {
 // LiveUsage is the provider's native token observation. Missing or malformed
 // counts remain absent; absence never means zero consumption.
 type LiveUsage struct {
-	Input    *int64 `json:"promptTokenCount"`
-	Output   *int64 `json:"responseTokenCount"`
-	Cached   *int64 `json:"cachedContentTokenCount"`
-	Thoughts *int64 `json:"thoughtsTokenCount"`
-	ToolUse  *int64 `json:"toolUsePromptTokenCount"`
-	Total    *int64 `json:"totalTokenCount"`
+	Input           *int64            `json:"promptTokenCount"`
+	Output          *int64            `json:"responseTokenCount"`
+	Cached          *int64            `json:"cachedContentTokenCount"`
+	Thoughts        *int64            `json:"thoughtsTokenCount"`
+	ToolUse         *int64            `json:"toolUsePromptTokenCount"`
+	Total           *int64            `json:"totalTokenCount"`
+	PromptDetails   []LiveUsageDetail `json:"promptTokensDetails"`
+	CacheDetails    []LiveUsageDetail `json:"cacheTokensDetails"`
+	ResponseDetails []LiveUsageDetail `json:"responseTokensDetails"`
+}
+
+// LiveUsageDetail is one modality bucket in a usage detail array.
+type LiveUsageDetail struct {
+	Modality   string `json:"modality"`
+	TokenCount int64  `json:"tokenCount"`
 }
 
 // LiveServerFrame projects one validated immutable source. The gateway owns
@@ -421,6 +430,13 @@ func validLiveUsage(u LiveUsage) bool {
 	for _, value := range []*int64{u.Input, u.Output, u.Cached, u.Thoughts, u.ToolUse, u.Total} {
 		if value != nil && *value < 0 {
 			return false
+		}
+	}
+	for _, detail := range [][]LiveUsageDetail{u.PromptDetails, u.CacheDetails, u.ResponseDetails} {
+		for _, entry := range detail {
+			if entry.TokenCount < 0 {
+				return false
+			}
 		}
 	}
 	return u.Cached == nil || *u.Cached <= *u.Input

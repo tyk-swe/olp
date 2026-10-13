@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -140,11 +141,31 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, runtime.Pla
 		copied.MaxAttempts = nil
 		preferences = &copied
 	}
+	now := time.Now()
 	options := runtime.SelectionOptions{
 		Region:  s.Region,
 		Context: m.ctx, KeyID: key.id, Preferences: preferences, Inputs: m.inputs, TokenDemand: counted.fixed, Demand: counted.sourceDemand(),
 		CheckSlots: true, CredentialEligibility: eligibility, UnconfinedPlugins: s.UnconfinedPlugins,
-		Accept: accept, Effective: effective, Supply: m.supply, Unhealthy: m.unhealthy,
+		Accept: accept, Effective: effective, Supply: m.supply, Unhealthy: m.unhealthy, Now: now,
+		// A simulation reports what each target could cost and applies the
+		// caller's cost ceiling to the same worst case.
+		EstimateCost: true,
+		WorstCost: func(provider runtime.Provider, target runtime.Target, price *usage.RoutingPrice, discount *usage.RoutingDiscount) (usage.Cost, bool) {
+			d := counted.fixed
+			if demand := counted.sourceDemand(); demand != nil {
+				d = demand(provider, target)
+			}
+			if d == nil {
+				return usage.Cost{}, false
+			}
+			output := int64(0)
+			if d.MaxOutputTokens != nil {
+				output = *d.MaxOutputTokens
+			} else if input.Operation == "generation" {
+				output = estimate.DefaultOutputTokens
+			}
+			return price.CostBound(d.EstimatedInputTokens, output, output > 0, now, discount)
+		},
 	}
 	if key.reason != "" {
 		options.Accept = nil

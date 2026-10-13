@@ -1,10 +1,11 @@
 # Parity matrix
 
 Released LiteLLM gateway documentation reviewed 2026-10-01 is compared with OLP
-0.1.0 after M1–M5 and M11. This is the [roadmap](README.md)'s capability scope,
-not a live-provider/released-image qualification claim. OLP-only additions have
-no comparative row. Current counts: 23 Ahead, 81 Parity, 11 Partial, 33 Gap,
-2 Excluded (150 capabilities; legend rows excluded).
+0.1.0 after M1–M5, M11 and M6.1–M6.3. This is the [roadmap](README.md)'s
+capability scope, not a live-provider/released-image qualification claim.
+OLP-only additions have no comparative row. Current counts: 22 Ahead,
+85 Parity, 10 Partial, 30 Gap, 2 Excluded (149 capabilities; legend rows
+excluded).
 
 | Status | Meaning |
 | --- | --- |
@@ -59,7 +60,7 @@ of [M3](m03-routing-resilience.md).
 | Self-hosted runtimes | Ollama, vLLM, LM Studio, Triton, llamafile and more | vLLM, Ollama, LM Studio, llama.cpp, Docker Model Runner and Infinity presets, custom endpoints, TEI native operations | `Parity` | |
 | Cloud AI platforms | Azure AI Foundry, Vertex partner models, SageMaker, watsonx, Databricks, Snowflake, OCI | Azure OpenAI and AI Foundry, Vertex Gemini, Anthropic and OpenAI-compatible partner models, Bedrock, SageMaker AI, watsonx.ai, Databricks, Snowflake Cortex; OCI through a plugin built from the signed-request template | `Parity` | |
 | Media providers | ElevenLabs, Deepgram, Stability, Black Forest Labs, fal, Runway and more | ElevenLabs, Deepgram, AssemblyAI, Stability AI, Black Forest Labs, Recraft, Runway, Amazon Polly and the media of Azure OpenAI, Gemini, Groq and xAI. fal is declined ([M2.3](m02-provider-catalog.md#settled-during-implementation-1)) | `Parity` | |
-| Model facts and price map | [Model cost map](https://docs.litellm.ai/docs/proxy/sync_models_github), synced from GitHub | A [signed reference catalog](../catalog.md) of model facts, list prices and lifecycle dates with provenance, refreshed as a reviewed pricing source and offered to discovery | `Parity` | |
+| Model facts and price map | [Model cost map](https://docs.litellm.ai/docs/proxy/sync_models_github), synced from GitHub | A [signed reference catalog](../catalog.md) of model facts, list prices in every price component and lifecycle dates with provenance, refreshed as a reviewed pricing source and offered to discovery | `Parity` | |
 | Custom pricing | [Custom pricing](https://docs.litellm.ai/docs/proxy/custom_pricing) | Immutable decimal pricing revisions scoped by connection, vendor or kind | `Parity` | |
 | Model discovery | [Model discovery](https://docs.litellm.ai/docs/proxy/model_discovery) for wildcard models | Discovery from upstream lists or declared identifiers | `Parity` | |
 | Capability certification | Not a serving gate | Exact-tuple live certification before activation | `Ahead` | |
@@ -143,14 +144,14 @@ of [M3](m03-routing-resilience.md).
 
 | Capability | LiteLLM | OLP today | Status | Milestone |
 | --- | --- | --- | --- | --- |
-| Per-request cost | [Cost tracking](https://docs.litellm.ai/docs/proxy/cost_tracking) | Attempt-level cost from pinned pricing revisions; unpriced work stays visible; a unary response states its cost in `X-OLP-Cost` for a key that [opts in](../access.md#key-response-metadata) | `Parity` | |
+| Per-request cost | [Cost tracking](https://docs.litellm.ai/docs/proxy/cost_tracking) | Attempt-level cost from pinned pricing revisions with tiers, modality shares, tool, request and batch components; unpriced work stays visible; a unary response states its cost in `X-OLP-Cost` for a key that [opts in](../access.md#key-response-metadata) | `Parity` | |
 | Accounting completeness evidence | No equivalent documented | Completeness reports, gateway epochs and explicit gaps | `Ahead` | |
 | Spend by key, team, tag and model | [Cost tracking](https://docs.litellm.ai/docs/proxy/cost_tracking) | Usage summary, breakdown and time series with attribution filters | `Parity` | |
 | Spend reports | [Spend reports](https://docs.litellm.ai/docs/proxy/cost_tracking) and scheduled reports | Scoped usage/request CSV exports and daily, weekly or monthly spend digests through notification channels | `Parity` | M5.5 |
-| Discounts and margins | [Discounts](https://docs.litellm.ai/docs/proxy/provider_discounts), [margins](https://docs.litellm.ai/docs/proxy/provider_margins) | Publish-time price overrides | `Partial` | M6.2 |
-| Off-peak pricing | [Off-peak pricing](https://docs.litellm.ai/docs/proxy/off_peak_pricing) | Not available | `Gap` | M6.1 |
-| Provisioned throughput costs | [PTU flat cost](https://docs.litellm.ai/docs/proxy/ptu_flat_cost) | Not available | `Gap` | M6.1 |
-| Pricing calculator | [Pricing calculator](https://docs.litellm.ai/docs/proxy/pricing_calculator) | Not available | `Gap` | M6.3 |
+| Discounts and margins | [Discounts](https://docs.litellm.ai/docs/proxy/provider_discounts), [margins](https://docs.litellm.ai/docs/proxy/provider_margins) | Effective-dated [discounts](../pricing.md#discounts) by connection, vendor or kind, and [rate cards](../pricing.md#rate-cards-and-charge) for the installation, organizations and projects with a markup or explicit rates; usage records carry cost and charge, and each budget enforces either | `Parity` | M6.2 |
+| Off-peak pricing | [Off-peak pricing](https://docs.litellm.ai/docs/proxy/off_peak_pricing) | Time-of-day and day-of-week [window multipliers](../pricing.md#windows) in an IANA time zone, priced exactly by accounting and admission | `Parity` | M6.1 |
+| Provisioned throughput costs | [PTU flat cost](https://docs.litellm.ai/docs/proxy/ptu_flat_cost) | Connection [commitments](../pricing.md#commitments) per UTC hour, day or month: zero marginal cost, allocated in usage reports by list-price-weighted share | `Parity` | M6.1 |
+| Pricing calculator | [Pricing calculator](https://docs.litellm.ai/docs/proxy/pricing_calculator) | Route simulation states each target's minimum and maximum cost, `max_cost` refuses requests whose worst case exceeds it before dispatch, and the console calculator prices routes and exact usage | `Parity` | M6.3 |
 | Billing integrations | [Lago](https://docs.litellm.ai/docs/observability/lago), [OpenMeter](https://docs.litellm.ai/docs/observability/openmeter), [billing](https://docs.litellm.ai/docs/proxy/billing) | Not available | `Gap` | M6.4 |
 | FOCUS cost export | [FOCUS](https://docs.litellm.ai/docs/observability/focus) | Not available | `Gap` | M6.4 |
 

@@ -15,20 +15,23 @@ import (
 )
 
 type Preferences struct {
-	Strategy                 *string         `json:"strategy"`
-	AllowFallbacks           *bool           `json:"allow_fallbacks"`
-	Order                    []string        `json:"order"`
-	PreferredMaxLatencyMS    *int64          `json:"preferred_max_latency_ms"`
-	PreferredMinThroughput   *int64          `json:"preferred_min_throughput"`
-	DenyDataCollection       *bool           `json:"deny_data_collection"`
-	Ignore                   []string        `json:"ignore"`
-	MaxPrice                 json.RawMessage `json:"max_price"`
-	Only                     []string        `json:"only"`
-	Quantizations            []string        `json:"quantizations"`
-	Regions                  []string        `json:"regions"`
-	RequireParameters        *bool           `json:"require_parameters"`
-	RequireZeroDataRetention *bool           `json:"require_zero_data_retention"`
-	MaxAttempts              *int            `json:"max_attempts,omitempty"`
+	Strategy               *string         `json:"strategy"`
+	AllowFallbacks         *bool           `json:"allow_fallbacks"`
+	Order                  []string        `json:"order"`
+	PreferredMaxLatencyMS  *int64          `json:"preferred_max_latency_ms"`
+	PreferredMinThroughput *int64          `json:"preferred_min_throughput"`
+	DenyDataCollection     *bool           `json:"deny_data_collection"`
+	Ignore                 []string        `json:"ignore"`
+	MaxPrice               json.RawMessage `json:"max_price"`
+	// MaxCost caps the worst-case cost an attempt may reserve, as the price
+	// decimal; every scope that sets it narrows the effective ceiling.
+	MaxCost                  *string  `json:"max_cost"`
+	Only                     []string `json:"only"`
+	Quantizations            []string `json:"quantizations"`
+	Regions                  []string `json:"regions"`
+	RequireParameters        *bool    `json:"require_parameters"`
+	RequireZeroDataRetention *bool    `json:"require_zero_data_retention"`
+	MaxAttempts              *int     `json:"max_attempts,omitempty"`
 	// Priority is the admission class a request asks for, up to its key's
 	// ceiling. Only the routing header carries it; it never steers selection.
 	Priority *string `json:"priority,omitempty"`
@@ -83,6 +86,9 @@ func (p *Preferences) Validate(field string) error {
 				return invalid("Invalid fact constraint")
 			}
 		}
+	}
+	if p.MaxCost != nil && !decimal(*p.MaxCost) {
+		return invalid("The maximum cost must be a non-negative decimal string")
 	}
 	if len(p.MaxPrice) > 0 && string(p.MaxPrice) != "null" {
 		var c PriceCeiling
@@ -167,10 +173,20 @@ type EffectivePolicy struct {
 	Constraints []Preferences
 	Allowed     []string
 	Digest      string
+	// MaxCost is the narrowest cost ceiling every scope set, or nil.
+	MaxCost *string
 }
 
 func ResolvePolicy(installation, route, key *Policy, requested *Preferences) (EffectivePolicy, error) {
 	e := EffectivePolicy{Strategy: "weighted", Allowed: slices.Clone(Strategies)}
+	narrow := func(maxCost *string) {
+		if maxCost == nil {
+			return
+		}
+		if e.MaxCost == nil || lessOrEqual(maxCost, e.MaxCost) {
+			e.MaxCost = maxCost
+		}
+	}
 	apply := func(p Preferences) {
 		e.Constraints = append(e.Constraints, p)
 		if p.Strategy != nil {
@@ -200,6 +216,8 @@ func ResolvePolicy(installation, route, key *Policy, requested *Preferences) (Ef
 			e.Allowed = slices.DeleteFunc(e.Allowed, func(s string) bool { return !slices.Contains(p.AllowedStrategies, s) })
 		}
 		e.Constraints = append(e.Constraints, p.Constraints)
+		narrow(p.Constraints.MaxCost)
+		narrow(p.Defaults.MaxCost)
 		apply(p.Defaults)
 	}
 	var request *Preferences
@@ -212,6 +230,7 @@ func ResolvePolicy(installation, route, key *Policy, requested *Preferences) (Ef
 		request = &Preferences{}
 		*request = *requested
 		request.Priority = nil
+		narrow(request.MaxCost)
 		apply(*request)
 	}
 	if !slices.Contains(e.Allowed, e.Strategy) {
@@ -288,7 +307,7 @@ func lessOrEqual(value, ceiling *string) bool {
 // schema. Preferences share their validation but add delivery choices.
 func (p Policy) MarshalJSON() ([]byte, error) {
 	c := p.Constraints
-	constraints := map[string]any{"deny_data_collection": required(c.DenyDataCollection), "ignore": c.Ignore, "max_price": c.MaxPrice, "only": c.Only, "quantizations": c.Quantizations, "regions": c.Regions, "require_parameters": required(c.RequireParameters), "require_zero_data_retention": required(c.RequireZeroDataRetention)}
+	constraints := map[string]any{"deny_data_collection": required(c.DenyDataCollection), "ignore": c.Ignore, "max_cost": c.MaxCost, "max_price": c.MaxPrice, "only": c.Only, "quantizations": c.Quantizations, "regions": c.Regions, "require_parameters": required(c.RequireParameters), "require_zero_data_retention": required(c.RequireZeroDataRetention)}
 	if c.Ignore == nil {
 		constraints["ignore"] = []string{}
 	}

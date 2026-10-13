@@ -1215,22 +1215,30 @@ func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := limits.AddCostDelta(t.Context(), tx, idle, now, "0.500000000000", 1)
+	pair, err := limits.AddCostDelta(t.Context(), tx, idle, now, "0.500000000000", 1, "0.500000000000", 1)
 	if err != nil {
 		t.Fatalf("AddCostDelta: %v", err)
 	}
+	if len(pair) != 2 || pair[1].Basis != limits.BasisCharge {
+		t.Fatalf("AddCostDelta = %+v, want the cost and charge snapshots", pair)
+	}
+	snapshot := pair[0]
 	if snapshot.DailyAccrued != "0.500000000000" || snapshot.MonthlyAccrued != "0.500000000000" ||
 		snapshot.UnpricedAttempts != 1 || snapshot.DailyWindowID != windows.DailyID ||
 		snapshot.MonthlyWindowID != windows.MonthlyID {
 		t.Fatalf("AddCostDelta = %+v", snapshot)
 	}
-	if snapshot, err = limits.AddCostDelta(t.Context(), tx, idle, now, "0.500000000000", 1); err != nil {
+	if pair[1].DailyAccrued != "0.500000000000" || pair[1].MonthlyAccrued != "0.500000000000" ||
+		pair[1].UnpricedAttempts != 1 {
+		t.Fatalf("the charge snapshot = %+v", pair[1])
+	}
+	if pair, err = limits.AddCostDelta(t.Context(), tx, idle, now, "0.500000000000", 1, "0.500000000000", 1); err != nil {
 		t.Fatalf("AddCostDelta: %v", err)
 	}
-	if snapshot.MonthlyAccrued != "1.000000000000" || snapshot.UnpricedAttempts != 2 {
+	if snapshot = pair[0]; snapshot.MonthlyAccrued != "1.000000000000" || snapshot.UnpricedAttempts != 2 {
 		t.Fatalf("AddCostDelta = %+v, want the deltas accumulated", snapshot)
 	}
-	if _, err = limits.AddCostDelta(t.Context(), tx, idle, windows.MonthlyEnd, "0.100000000000", 0); err != nil {
+	if _, err = limits.AddCostDelta(t.Context(), tx, idle, windows.MonthlyEnd, "0.100000000000", 0, "0.100000000000", 0); err != nil {
 		t.Fatalf("AddCostDelta: %v", err)
 	}
 	if err = tx.Commit(t.Context()); err != nil {
@@ -1265,10 +1273,13 @@ func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 	}
 	byKey := map[string]limits.CostSnapshot{}
 	for _, snapshot := range snapshots {
+		if snapshot.Basis != limits.BasisCost {
+			continue
+		}
 		byKey[snapshot.CostOwnerID] = snapshot
 	}
-	if len(byKey) != 2 {
-		t.Fatalf("snapshots = %+v, want only the two live keys", snapshots)
+	if len(byKey) != 2 || len(snapshots) != 4 {
+		t.Fatalf("snapshots = %+v, want only the two live keys on each basis", snapshots)
 	}
 	if _, ok := byKey[revoked]; ok {
 		t.Fatal("a revoked key must not be reconciled")

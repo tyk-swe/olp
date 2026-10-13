@@ -37,6 +37,60 @@ func (e AdmissionPriority) Valid() bool {
 	}
 }
 
+// Defines values for AggregateBudgetUsageCostBasis.
+const (
+	AggregateBudgetUsageCostBasisCharge AggregateBudgetUsageCostBasis = "charge"
+	AggregateBudgetUsageCostBasisCost   AggregateBudgetUsageCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the AggregateBudgetUsageCostBasis enum.
+func (e AggregateBudgetUsageCostBasis) Valid() bool {
+	switch e {
+	case AggregateBudgetUsageCostBasisCharge:
+		return true
+	case AggregateBudgetUsageCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApiKeyBudgetResponseCostBasis.
+const (
+	ApiKeyBudgetResponseCostBasisCharge ApiKeyBudgetResponseCostBasis = "charge"
+	ApiKeyBudgetResponseCostBasisCost   ApiKeyBudgetResponseCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the ApiKeyBudgetResponseCostBasis enum.
+func (e ApiKeyBudgetResponseCostBasis) Valid() bool {
+	switch e {
+	case ApiKeyBudgetResponseCostBasisCharge:
+		return true
+	case ApiKeyBudgetResponseCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApiKeyDetailResponseCostBasis.
+const (
+	ApiKeyDetailResponseCostBasisCharge ApiKeyDetailResponseCostBasis = "charge"
+	ApiKeyDetailResponseCostBasisCost   ApiKeyDetailResponseCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the ApiKeyDetailResponseCostBasis enum.
+func (e ApiKeyDetailResponseCostBasis) Valid() bool {
+	switch e {
+	case ApiKeyDetailResponseCostBasisCharge:
+		return true
+	case ApiKeyDetailResponseCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ApiKeyDetailResponseEndUserSource.
 const (
 	ApiKeyDetailResponseEndUserSourceHeader      ApiKeyDetailResponseEndUserSource = "header"
@@ -178,6 +232,42 @@ func (e AuditEventResponseActorType) Valid() bool {
 	}
 }
 
+// Defines values for BudgetGroupBudgetResponseCostBasis.
+const (
+	BudgetGroupBudgetResponseCostBasisCharge BudgetGroupBudgetResponseCostBasis = "charge"
+	BudgetGroupBudgetResponseCostBasisCost   BudgetGroupBudgetResponseCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the BudgetGroupBudgetResponseCostBasis enum.
+func (e BudgetGroupBudgetResponseCostBasis) Valid() bool {
+	switch e {
+	case BudgetGroupBudgetResponseCostBasisCharge:
+		return true
+	case BudgetGroupBudgetResponseCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BudgetGroupDetailResponseCostBasis.
+const (
+	BudgetGroupDetailResponseCostBasisCharge BudgetGroupDetailResponseCostBasis = "charge"
+	BudgetGroupDetailResponseCostBasisCost   BudgetGroupDetailResponseCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the BudgetGroupDetailResponseCostBasis enum.
+func (e BudgetGroupDetailResponseCostBasis) Valid() bool {
+	switch e {
+	case BudgetGroupDetailResponseCostBasisCharge:
+		return true
+	case BudgetGroupDetailResponseCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BudgetIncreaseWindowKind.
 const (
 	BudgetIncreaseWindowKindDay   BudgetIncreaseWindowKind = "day"
@@ -241,6 +331,24 @@ func (e BudgetIncreaseTargetKind) Valid() bool {
 	case BudgetIncreaseTargetKindProjectEndUser:
 		return true
 	case BudgetIncreaseTargetKindSink:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BudgetPolicyCostBasis.
+const (
+	BudgetPolicyCostBasisCharge BudgetPolicyCostBasis = "charge"
+	BudgetPolicyCostBasisCost   BudgetPolicyCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the BudgetPolicyCostBasis enum.
+func (e BudgetPolicyCostBasis) Valid() bool {
+	switch e {
+	case BudgetPolicyCostBasisCharge:
+		return true
+	case BudgetPolicyCostBasisCost:
 		return true
 	default:
 		return false
@@ -748,6 +856,27 @@ func (e CodeTokenWindowPeriod) Valid() bool {
 	}
 }
 
+// Defines values for CommitmentPeriod.
+const (
+	CommitmentPeriodDay   CommitmentPeriod = "day"
+	CommitmentPeriodHour  CommitmentPeriod = "hour"
+	CommitmentPeriodMonth CommitmentPeriod = "month"
+)
+
+// Valid indicates whether the value is a known member of the CommitmentPeriod enum.
+func (e CommitmentPeriod) Valid() bool {
+	switch e {
+	case CommitmentPeriodDay:
+		return true
+	case CommitmentPeriodHour:
+		return true
+	case CommitmentPeriodMonth:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConfigurationCapabilityEntryMode.
 const (
 	ConfigurationCapabilityEntryModeStreaming ConfigurationCapabilityEntryMode = "streaming"
@@ -813,15 +942,18 @@ func (e ConfigurationMCPServerTransport) Valid() bool {
 
 // Defines values for ConfigurationPlanItemAction.
 const (
-	ConfigurationPlanItemActionBind     ConfigurationPlanItemAction = "bind"
-	ConfigurationPlanItemActionBlocker  ConfigurationPlanItemAction = "blocker"
-	ConfigurationPlanItemActionConflict ConfigurationPlanItemAction = "conflict"
-	ConfigurationPlanItemActionCreate   ConfigurationPlanItemAction = "create"
-	ConfigurationPlanItemActionEnroll   ConfigurationPlanItemAction = "enroll"
-	ConfigurationPlanItemActionNoop     ConfigurationPlanItemAction = "noop"
-	ConfigurationPlanItemActionReplace  ConfigurationPlanItemAction = "replace"
-	ConfigurationPlanItemActionReuse    ConfigurationPlanItemAction = "reuse"
-	ConfigurationPlanItemActionStage    ConfigurationPlanItemAction = "stage"
+	ConfigurationPlanItemActionBind       ConfigurationPlanItemAction = "bind"
+	ConfigurationPlanItemActionBlocker    ConfigurationPlanItemAction = "blocker"
+	ConfigurationPlanItemActionConflict   ConfigurationPlanItemAction = "conflict"
+	ConfigurationPlanItemActionCreate     ConfigurationPlanItemAction = "create"
+	ConfigurationPlanItemActionEnd        ConfigurationPlanItemAction = "end"
+	ConfigurationPlanItemActionEnroll     ConfigurationPlanItemAction = "enroll"
+	ConfigurationPlanItemActionNeutralize ConfigurationPlanItemAction = "neutralize"
+	ConfigurationPlanItemActionNoop       ConfigurationPlanItemAction = "noop"
+	ConfigurationPlanItemActionReplace    ConfigurationPlanItemAction = "replace"
+	ConfigurationPlanItemActionReuse      ConfigurationPlanItemAction = "reuse"
+	ConfigurationPlanItemActionRevision   ConfigurationPlanItemAction = "revision"
+	ConfigurationPlanItemActionStage      ConfigurationPlanItemAction = "stage"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationPlanItemAction enum.
@@ -835,13 +967,19 @@ func (e ConfigurationPlanItemAction) Valid() bool {
 		return true
 	case ConfigurationPlanItemActionCreate:
 		return true
+	case ConfigurationPlanItemActionEnd:
+		return true
 	case ConfigurationPlanItemActionEnroll:
+		return true
+	case ConfigurationPlanItemActionNeutralize:
 		return true
 	case ConfigurationPlanItemActionNoop:
 		return true
 	case ConfigurationPlanItemActionReplace:
 		return true
 	case ConfigurationPlanItemActionReuse:
+		return true
+	case ConfigurationPlanItemActionRevision:
 		return true
 	case ConfigurationPlanItemActionStage:
 		return true
@@ -855,6 +993,7 @@ const (
 	ConfigurationPlanItemKindCatalogPublication ConfigurationPlanItemKind = "catalog_publication"
 	ConfigurationPlanItemKindConfiguration      ConfigurationPlanItemKind = "configuration"
 	ConfigurationPlanItemKindCredential         ConfigurationPlanItemKind = "credential"
+	ConfigurationPlanItemKindDiscount           ConfigurationPlanItemKind = "discount"
 	ConfigurationPlanItemKindGuardrail          ConfigurationPlanItemKind = "guardrail"
 	ConfigurationPlanItemKindMcpServer          ConfigurationPlanItemKind = "mcp_server"
 	ConfigurationPlanItemKindNetworkCredential  ConfigurationPlanItemKind = "network_credential"
@@ -862,6 +1001,7 @@ const (
 	ConfigurationPlanItemKindPricing            ConfigurationPlanItemKind = "pricing"
 	ConfigurationPlanItemKindProject            ConfigurationPlanItemKind = "project"
 	ConfigurationPlanItemKindProvider           ConfigurationPlanItemKind = "provider"
+	ConfigurationPlanItemKindRateCard           ConfigurationPlanItemKind = "rate_card"
 	ConfigurationPlanItemKindRoute              ConfigurationPlanItemKind = "route"
 	ConfigurationPlanItemKindRouteTemplate      ConfigurationPlanItemKind = "route_template"
 	ConfigurationPlanItemKindSink               ConfigurationPlanItemKind = "sink"
@@ -876,6 +1016,8 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 		return true
 	case ConfigurationPlanItemKindCredential:
 		return true
+	case ConfigurationPlanItemKindDiscount:
+		return true
 	case ConfigurationPlanItemKindGuardrail:
 		return true
 	case ConfigurationPlanItemKindMcpServer:
@@ -889,6 +1031,8 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 	case ConfigurationPlanItemKindProject:
 		return true
 	case ConfigurationPlanItemKindProvider:
+		return true
+	case ConfigurationPlanItemKindRateCard:
 		return true
 	case ConfigurationPlanItemKindRoute:
 		return true
@@ -1078,6 +1222,24 @@ func (e ContentPolicyRulePhase) Valid() bool {
 	}
 }
 
+// Defines values for CreateApiKeyRequestCostBasis.
+const (
+	CreateApiKeyRequestCostBasisCharge CreateApiKeyRequestCostBasis = "charge"
+	CreateApiKeyRequestCostBasisCost   CreateApiKeyRequestCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the CreateApiKeyRequestCostBasis enum.
+func (e CreateApiKeyRequestCostBasis) Valid() bool {
+	switch e {
+	case CreateApiKeyRequestCostBasisCharge:
+		return true
+	case CreateApiKeyRequestCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateApiKeyRequestEndUserSource.
 const (
 	CreateApiKeyRequestEndUserSourceHeader      CreateApiKeyRequestEndUserSource = "header"
@@ -1093,6 +1255,24 @@ func (e CreateApiKeyRequestEndUserSource) Valid() bool {
 	case CreateApiKeyRequestEndUserSourceLessThannil:
 		return true
 	case CreateApiKeyRequestEndUserSourceNative:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateBudgetGroupRequestCostBasis.
+const (
+	CreateBudgetGroupRequestCostBasisCharge CreateBudgetGroupRequestCostBasis = "charge"
+	CreateBudgetGroupRequestCostBasisCost   CreateBudgetGroupRequestCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the CreateBudgetGroupRequestCostBasis enum.
+func (e CreateBudgetGroupRequestCostBasis) Valid() bool {
+	switch e {
+	case CreateBudgetGroupRequestCostBasisCharge:
+		return true
+	case CreateBudgetGroupRequestCostBasisCost:
 		return true
 	default:
 		return false
@@ -1351,6 +1531,24 @@ func (e CredentialRequirement) Valid() bool {
 	case CredentialRequirementGrant:
 		return true
 	case CredentialRequirementRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EndUserLimitsCostBasis.
+const (
+	EndUserLimitsCostBasisCharge EndUserLimitsCostBasis = "charge"
+	EndUserLimitsCostBasisCost   EndUserLimitsCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the EndUserLimitsCostBasis enum.
+func (e EndUserLimitsCostBasis) Valid() bool {
+	switch e {
+	case EndUserLimitsCostBasisCharge:
+		return true
+	case EndUserLimitsCostBasisCost:
 		return true
 	default:
 		return false
@@ -2716,6 +2914,48 @@ func (e PutProjectMemberRequestRole) Valid() bool {
 	}
 }
 
+// Defines values for RateCardOwnerKind.
+const (
+	RateCardOwnerKindInstallation RateCardOwnerKind = "installation"
+	RateCardOwnerKindOrganization RateCardOwnerKind = "organization"
+	RateCardOwnerKindProject      RateCardOwnerKind = "project"
+)
+
+// Valid indicates whether the value is a known member of the RateCardOwnerKind enum.
+func (e RateCardOwnerKind) Valid() bool {
+	switch e {
+	case RateCardOwnerKindInstallation:
+		return true
+	case RateCardOwnerKindOrganization:
+		return true
+	case RateCardOwnerKindProject:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RateCardRequestOwnerKind.
+const (
+	RateCardRequestOwnerKindInstallation RateCardRequestOwnerKind = "installation"
+	RateCardRequestOwnerKindOrganization RateCardRequestOwnerKind = "organization"
+	RateCardRequestOwnerKindProject      RateCardRequestOwnerKind = "project"
+)
+
+// Valid indicates whether the value is a known member of the RateCardRequestOwnerKind enum.
+func (e RateCardRequestOwnerKind) Valid() bool {
+	switch e {
+	case RateCardRequestOwnerKindInstallation:
+		return true
+	case RateCardRequestOwnerKindOrganization:
+		return true
+	case RateCardRequestOwnerKindProject:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RequestDetailResponseBudgetBoundary.
 const (
 	RequestDetailResponseBudgetBoundaryApiKey         RequestDetailResponseBudgetBoundary = "api_key"
@@ -2815,6 +3055,24 @@ func (e RequestSummaryBudgetBoundary) Valid() bool {
 	case RequestSummaryBudgetBoundaryProject:
 		return true
 	case RequestSummaryBudgetBoundaryProjectEndUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RotateApiKeyRequestCostBasis.
+const (
+	RotateApiKeyRequestCostBasisCharge RotateApiKeyRequestCostBasis = "charge"
+	RotateApiKeyRequestCostBasisCost   RotateApiKeyRequestCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the RotateApiKeyRequestCostBasis enum.
+func (e RotateApiKeyRequestCostBasis) Valid() bool {
+	switch e {
+	case RotateApiKeyRequestCostBasisCharge:
+		return true
+	case RotateApiKeyRequestCostBasisCost:
 		return true
 	default:
 		return false
@@ -3334,6 +3592,24 @@ func (e TransportMode) Valid() bool {
 	}
 }
 
+// Defines values for UpdateApiKeyRequestCostBasis.
+const (
+	UpdateApiKeyRequestCostBasisCharge UpdateApiKeyRequestCostBasis = "charge"
+	UpdateApiKeyRequestCostBasisCost   UpdateApiKeyRequestCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the UpdateApiKeyRequestCostBasis enum.
+func (e UpdateApiKeyRequestCostBasis) Valid() bool {
+	switch e {
+	case UpdateApiKeyRequestCostBasisCharge:
+		return true
+	case UpdateApiKeyRequestCostBasisCost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UpdateApiKeyRequestEndUserSource.
 const (
 	UpdateApiKeyRequestEndUserSourceHeader      UpdateApiKeyRequestEndUserSource = "header"
@@ -3349,6 +3625,24 @@ func (e UpdateApiKeyRequestEndUserSource) Valid() bool {
 	case UpdateApiKeyRequestEndUserSourceLessThannil:
 		return true
 	case UpdateApiKeyRequestEndUserSourceNative:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateBudgetGroupRequestCostBasis.
+const (
+	UpdateBudgetGroupRequestCostBasisCharge UpdateBudgetGroupRequestCostBasis = "charge"
+	UpdateBudgetGroupRequestCostBasisCost   UpdateBudgetGroupRequestCostBasis = "cost"
+)
+
+// Valid indicates whether the value is a known member of the UpdateBudgetGroupRequestCostBasis enum.
+func (e UpdateBudgetGroupRequestCostBasis) Valid() bool {
+	switch e {
+	case UpdateBudgetGroupRequestCostBasisCharge:
+		return true
+	case UpdateBudgetGroupRequestCostBasisCost:
 		return true
 	default:
 		return false
@@ -3795,7 +4089,9 @@ type AggregateBudget struct {
 
 // AggregateBudgetUsage defines model for AggregateBudgetUsage.
 type AggregateBudgetUsage struct {
-	Daily struct {
+	// CostBasis The measure accrued expresses.
+	CostBasis *AggregateBudgetUsageCostBasis `json:"cost_basis,omitempty"`
+	Daily     struct {
 		Accrued      string    `json:"accrued"`
 		WindowEndsAt time.Time `json:"window_ends_at"`
 	} `json:"daily"`
@@ -3803,23 +4099,34 @@ type AggregateBudgetUsage struct {
 		Accrued      string    `json:"accrued"`
 		WindowEndsAt time.Time `json:"window_ends_at"`
 	} `json:"monthly"`
-	UnpricedAttempts int `json:"unpriced_attempts"`
-	Weekly           *struct {
+
+	// UnchargedAttempts Billable attempts in the month whose charge could not be computed.
+	UnchargedAttempts *int64 `json:"uncharged_attempts,omitempty"`
+	UnpricedAttempts  int    `json:"unpriced_attempts"`
+	Weekly            *struct {
 		Accrued      string    `json:"accrued"`
 		WindowEndsAt time.Time `json:"window_ends_at"`
 	} `json:"weekly,omitempty"`
 }
 
+// AggregateBudgetUsageCostBasis The measure accrued expresses.
+type AggregateBudgetUsageCostBasis string
+
 // ApiKeyBudgetResponse defines model for ApiKeyBudgetResponse.
 type ApiKeyBudgetResponse struct {
-	Daily ApiKeyBudgetWindowResponse `json:"daily"`
+	CostBasis *ApiKeyBudgetResponseCostBasis `json:"cost_basis,omitempty"`
+	Daily     ApiKeyBudgetWindowResponse     `json:"daily"`
 
 	// EnforcementActive False when the amounts are stored policy only; accrued values are not live accounting.
 	EnforcementActive *bool                       `json:"enforcement_active,omitempty"`
 	Monthly           ApiKeyBudgetWindowResponse  `json:"monthly"`
+	UnchargedAttempts *int64                      `json:"uncharged_attempts,omitempty"`
 	UnpricedAttempts  int64                       `json:"unpriced_attempts"`
 	Weekly            *ApiKeyBudgetWindowResponse `json:"weekly,omitempty"`
 }
+
+// ApiKeyBudgetResponseCostBasis defines model for ApiKeyBudgetResponse.CostBasis.
+type ApiKeyBudgetResponseCostBasis string
 
 // ApiKeyBudgetWindowResponse defines model for ApiKeyBudgetWindowResponse.
 type ApiKeyBudgetWindowResponse struct {
@@ -3866,7 +4173,10 @@ type ApiKeyDetailResponse struct {
 
 	// BudgetGroupId Shared budget group this key spends against; null means key-only budgets.
 	BudgetGroupId nullable.Nullable[openapi_types.UUID] `json:"budget_group_id"`
-	CreatedAt     time.Time                             `json:"created_at"`
+
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis *ApiKeyDetailResponseCostBasis `json:"cost_basis,omitempty"`
+	CreatedAt time.Time                      `json:"created_at"`
 
 	// CreatedBy The operator who issued this installation-scoped key.
 	CreatedBy      openapi_types.UUID `json:"created_by"`
@@ -3927,6 +4237,9 @@ type ApiKeyDetailResponse struct {
 	WorkloadMapping nullable.Nullable[string] `json:"workload_mapping,omitempty"`
 }
 
+// ApiKeyDetailResponseCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type ApiKeyDetailResponseCostBasis string
+
 // ApiKeyDetailResponseEndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
 type ApiKeyDetailResponseEndUserSource string
 
@@ -3976,33 +4289,66 @@ type AttemptInteractionMetadataUpstreamState string
 
 // AttemptResponse defines model for AttemptResponse.
 type AttemptResponse struct {
-	CacheWrite1hInputTokens nullable.Nullable[int64]                  `json:"cache_write_1h_input_tokens,omitempty"`
-	CacheWrite5mInputTokens nullable.Nullable[int64]                  `json:"cache_write_5m_input_tokens,omitempty"`
-	CacheWriteInputTokens   nullable.Nullable[int64]                  `json:"cache_write_input_tokens,omitempty"`
-	CachedInputTokens       nullable.Nullable[int64]                  `json:"cached_input_tokens,omitempty"`
-	ChargeStatus            nullable.Nullable[string]                 `json:"charge_status,omitempty"`
-	Committed               bool                                      `json:"committed"`
-	CompletedAt             nullable.Nullable[time.Time]              `json:"completed_at,omitempty"`
-	Currency                nullable.Nullable[string]                 `json:"currency,omitempty"`
-	ErrorClass              nullable.Nullable[string]                 `json:"error_class,omitempty"`
-	EstimatedCost           nullable.Nullable[string]                 `json:"estimated_cost,omitempty"`
-	FirstByteMs             nullable.Nullable[int64]                  `json:"first_byte_ms,omitempty"`
-	Id                      openapi_types.UUID                        `json:"id"`
-	InputTokens             nullable.Nullable[int64]                  `json:"input_tokens,omitempty"`
-	LatencyMs               nullable.Nullable[int64]                  `json:"latency_ms,omitempty"`
-	MediaUnits              nullable.Nullable[string]                 `json:"media_units,omitempty"`
-	Ordinal                 int32                                     `json:"ordinal"`
-	OutputTokens            nullable.Nullable[int64]                  `json:"output_tokens,omitempty"`
-	PricingRevisionId       nullable.Nullable[openapi_types.UUID]     `json:"pricing_revision_id,omitempty"`
-	ProviderId              openapi_types.UUID                        `json:"provider_id"`
-	ProviderName            string                                    `json:"provider_name"`
-	Routing                 nullable.Nullable[AttemptRoutingMetadata] `json:"routing,omitempty"`
-	StartedAt               time.Time                                 `json:"started_at"`
-	StatusCode              nullable.Nullable[int32]                  `json:"status_code,omitempty"`
-	Unpriced                nullable.Nullable[bool]                   `json:"unpriced,omitempty"`
-	UpstreamModel           string                                    `json:"upstream_model"`
-	UsageComplete           nullable.Nullable[bool]                   `json:"usage_complete,omitempty"`
-	UsageObserved           nullable.Nullable[bool]                   `json:"usage_observed,omitempty"`
+	AudioInputTokens  nullable.Nullable[int64] `json:"audio_input_tokens,omitempty"`
+	AudioOutputTokens nullable.Nullable[int64] `json:"audio_output_tokens,omitempty"`
+
+	// Batch The attempt's usage was produced at batch terms.
+	Batch                   nullable.Nullable[bool]  `json:"batch,omitempty"`
+	CacheWrite1hInputTokens nullable.Nullable[int64] `json:"cache_write_1h_input_tokens,omitempty"`
+	CacheWrite5mInputTokens nullable.Nullable[int64] `json:"cache_write_5m_input_tokens,omitempty"`
+	CacheWriteInputTokens   nullable.Nullable[int64] `json:"cache_write_input_tokens,omitempty"`
+	CachedAudioInputTokens  nullable.Nullable[int64] `json:"cached_audio_input_tokens,omitempty"`
+	CachedImageInputTokens  nullable.Nullable[int64] `json:"cached_image_input_tokens,omitempty"`
+	CachedInputTokens       nullable.Nullable[int64] `json:"cached_input_tokens,omitempty"`
+
+	// Charge What the attempt's consumer was billed, an exact decimal string.
+	Charge       nullable.Nullable[string] `json:"charge,omitempty"`
+	ChargeStatus nullable.Nullable[string] `json:"charge_status,omitempty"`
+
+	// CommitmentAmount The commitment amount the attempt's provider owes per period.
+	CommitmentAmount nullable.Nullable[string] `json:"commitment_amount,omitempty"`
+
+	// CommitmentPeriod The UTC calendar period the commitment amount covers, when the attempt's provider is committed.
+	CommitmentPeriod nullable.Nullable[string] `json:"commitment_period,omitempty"`
+
+	// CommitmentWeight The list-cost weight the committed attempt divides its commitment period's amount by.
+	CommitmentWeight nullable.Nullable[string]    `json:"commitment_weight,omitempty"`
+	Committed        bool                         `json:"committed"`
+	CompletedAt      nullable.Nullable[time.Time] `json:"completed_at,omitempty"`
+	Currency         nullable.Nullable[string]    `json:"currency,omitempty"`
+
+	// DiscountId The discount the attempt was priced under, when one applied.
+	DiscountId        nullable.Nullable[openapi_types.UUID] `json:"discount_id,omitempty"`
+	ErrorClass        nullable.Nullable[string]             `json:"error_class,omitempty"`
+	EstimatedCost     nullable.Nullable[string]             `json:"estimated_cost,omitempty"`
+	FirstByteMs       nullable.Nullable[int64]              `json:"first_byte_ms,omitempty"`
+	Id                openapi_types.UUID                    `json:"id"`
+	ImageInputTokens  nullable.Nullable[int64]              `json:"image_input_tokens,omitempty"`
+	ImageOutputTokens nullable.Nullable[int64]              `json:"image_output_tokens,omitempty"`
+	InputTokens       nullable.Nullable[int64]              `json:"input_tokens,omitempty"`
+	LatencyMs         nullable.Nullable[int64]              `json:"latency_ms,omitempty"`
+	MediaUnits        nullable.Nullable[string]             `json:"media_units,omitempty"`
+	Ordinal           int32                                 `json:"ordinal"`
+	OutputTokens      nullable.Nullable[int64]              `json:"output_tokens,omitempty"`
+
+	// PricingComponents The price components the attempt was charged through.
+	PricingComponents nullable.Nullable[[]string]           `json:"pricing_components,omitempty"`
+	PricingRevisionId nullable.Nullable[openapi_types.UUID] `json:"pricing_revision_id,omitempty"`
+	ProviderId        openapi_types.UUID                    `json:"provider_id"`
+	ProviderName      string                                `json:"provider_name"`
+
+	// RateCardRevisionId The rate card revision the charge came from, when a card applied.
+	RateCardRevisionId nullable.Nullable[openapi_types.UUID]     `json:"rate_card_revision_id,omitempty"`
+	Routing            nullable.Nullable[AttemptRoutingMetadata] `json:"routing,omitempty"`
+	StartedAt          time.Time                                 `json:"started_at"`
+	StatusCode         nullable.Nullable[int32]                  `json:"status_code,omitempty"`
+
+	// ToolCalls Metered server-side tool invocations by tool name.
+	ToolCalls     nullable.Nullable[map[string]int64] `json:"tool_calls,omitempty"`
+	Unpriced      nullable.Nullable[bool]             `json:"unpriced,omitempty"`
+	UpstreamModel string                              `json:"upstream_model"`
+	UsageComplete nullable.Nullable[bool]             `json:"usage_complete,omitempty"`
+	UsageObserved nullable.Nullable[bool]             `json:"usage_observed,omitempty"`
 }
 
 // AttemptRoutingMetadata defines model for AttemptRoutingMetadata.
@@ -4109,14 +4455,19 @@ type BTreeMap map[string][]struct {
 
 // BudgetGroupBudgetResponse defines model for BudgetGroupBudgetResponse.
 type BudgetGroupBudgetResponse struct {
-	Daily BudgetGroupBudgetWindowResponse `json:"daily"`
+	CostBasis *BudgetGroupBudgetResponseCostBasis `json:"cost_basis,omitempty"`
+	Daily     BudgetGroupBudgetWindowResponse     `json:"daily"`
 
 	// EnforcementActive False when the amounts are stored policy only; accrued values are not live accounting.
 	EnforcementActive *bool                            `json:"enforcement_active,omitempty"`
 	Monthly           BudgetGroupBudgetWindowResponse  `json:"monthly"`
+	UnchargedAttempts *int64                           `json:"uncharged_attempts,omitempty"`
 	UnpricedAttempts  int64                            `json:"unpriced_attempts"`
 	Weekly            *BudgetGroupBudgetWindowResponse `json:"weekly,omitempty"`
 }
+
+// BudgetGroupBudgetResponseCostBasis defines model for BudgetGroupBudgetResponse.CostBasis.
+type BudgetGroupBudgetResponseCostBasis string
 
 // BudgetGroupBudgetWindowResponse defines model for BudgetGroupBudgetWindowResponse.
 type BudgetGroupBudgetWindowResponse struct {
@@ -4137,11 +4488,14 @@ type BudgetGroupBudgetWindowResponse struct {
 
 // BudgetGroupDetailResponse defines model for BudgetGroupDetailResponse.
 type BudgetGroupDetailResponse struct {
-	Budget         BudgetGroupBudgetResponse `json:"budget"`
-	CreatedAt      time.Time                 `json:"created_at"`
-	CreatedBy      openapi_types.UUID        `json:"created_by"`
-	CreatedByEmail string                    `json:"created_by_email"`
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit"`
+	Budget BudgetGroupBudgetResponse `json:"budget"`
+
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis      *BudgetGroupDetailResponseCostBasis `json:"cost_basis,omitempty"`
+	CreatedAt      time.Time                           `json:"created_at"`
+	CreatedBy      openapi_types.UUID                  `json:"created_by"`
+	CreatedByEmail string                              `json:"created_by_email"`
+	DailyCostLimit nullable.Nullable[string]           `json:"daily_cost_limit"`
 
 	// EffectiveLimits A complete limit set. Null or omitted dimensions are unlimited.
 	EffectiveLimits *EndUserLimits     `json:"effective_limits,omitempty"`
@@ -4164,6 +4518,9 @@ type BudgetGroupDetailResponse struct {
 	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// BudgetGroupDetailResponseCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type BudgetGroupDetailResponseCostBasis string
 
 // BudgetGroupListResponse defines model for BudgetGroupListResponse.
 type BudgetGroupListResponse struct {
@@ -4223,12 +4580,17 @@ type BudgetIncreasesResponse struct {
 
 // BudgetPolicy Aggregate inference cost caps. Each configured boundary applies independently. Omitted or null dimensions are unlimited.
 type BudgetPolicy struct {
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis        *BudgetPolicyCostBasis    `json:"cost_basis,omitempty"`
 	DailyCostLimit   nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
 	MonthlyCostLimit nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
 
 	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// BudgetPolicyCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type BudgetPolicyCostBasis string
 
 // BudgetSubjectKind Whose spend a budget.threshold rule watches.
 type BudgetSubjectKind string
@@ -4827,6 +5189,18 @@ type CodeTokenWindowsList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// Commitment Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.
+type Commitment struct {
+	// Amount The commitment amount, a positive decimal string.
+	Amount string `json:"amount"`
+
+	// Period The UTC calendar period the amount covers.
+	Period CommitmentPeriod `json:"period"`
+}
+
+// CommitmentPeriod The UTC calendar period the amount covers.
+type CommitmentPeriod string
+
 // ConfigurationCapabilityEntry defines model for ConfigurationCapabilityEntry.
 type ConfigurationCapabilityEntry struct {
 	Mode      ConfigurationCapabilityEntryMode `json:"mode"`
@@ -4961,21 +5335,49 @@ type ConfigurationPlanResponse struct {
 
 // ConfigurationPriceEntry defines model for ConfigurationPriceEntry.
 type ConfigurationPriceEntry struct {
+	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.
+	AudioInputPerMillion nullable.Nullable[string] `json:"audio_input_per_million"`
+
+	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it at the output rate.
+	AudioOutputPerMillion nullable.Nullable[string] `json:"audio_output_per_million"`
+
+	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.
+	BatchMultiplier             nullable.Nullable[string] `json:"batch_multiplier"`
 	CacheWrite1hInputPerMillion nullable.Nullable[string] `json:"cache_write_1h_input_per_million"`
 	CacheWrite5mInputPerMillion nullable.Nullable[string] `json:"cache_write_5m_input_per_million"`
 	CacheWriteInputPerMillion   nullable.Nullable[string] `json:"cache_write_input_per_million"`
-	CachedInputPerMillion       nullable.Nullable[string] `json:"cached_input_per_million"`
-	Currency                    string                    `json:"currency"`
-	InputPerMillion             nullable.Nullable[string] `json:"input_per_million"`
-	Model                       string                    `json:"model"`
-	Operation                   string                    `json:"operation"`
-	OutputPerMillion            nullable.Nullable[string] `json:"output_per_million"`
+
+	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.
+	CachedAudioInputPerMillion nullable.Nullable[string] `json:"cached_audio_input_per_million"`
+
+	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.
+	CachedImageInputPerMillion nullable.Nullable[string] `json:"cached_image_input_per_million"`
+	CachedInputPerMillion      nullable.Nullable[string] `json:"cached_input_per_million"`
+	Currency                   string                    `json:"currency"`
+
+	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image input at the input rate.
+	ImageInputPerMillion nullable.Nullable[string] `json:"image_input_per_million"`
+
+	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it at the output rate.
+	ImageOutputPerMillion nullable.Nullable[string] `json:"image_output_per_million"`
+	InputPerMillion       nullable.Nullable[string] `json:"input_per_million"`
+	Model                 string                    `json:"model"`
+	Operation             string                    `json:"operation"`
+	OutputPerMillion      nullable.Nullable[string] `json:"output_per_million"`
+
+	// PerRequest A fixed fee charged once per successful attempt.
+	PerRequest nullable.Nullable[string] `json:"per_request"`
 
 	// Provider Provider name, or null for a provider-kind price
 	Provider     nullable.Nullable[string] `json:"provider"`
 	ProviderKind string                    `json:"provider_kind"`
-	UnitPrice    nullable.Nullable[string] `json:"unit_price"`
-	VendorId     nullable.Nullable[string] `json:"vendor_id"`
+
+	// Tiers Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.
+	Tiers     nullable.Nullable[[]PriceTier]    `json:"tiers"`
+	ToolCalls nullable.Nullable[PriceToolCalls] `json:"tool_calls"`
+	UnitPrice nullable.Nullable[string]         `json:"unit_price"`
+	VendorId  nullable.Nullable[string]         `json:"vendor_id"`
+	Windows   nullable.Nullable[PriceWindows]   `json:"windows"`
 }
 
 // ConfigurationPricingEntry defines model for ConfigurationPricingEntry.
@@ -5261,6 +5663,9 @@ type ConnectionOptions struct {
 	// Bindings Serving bindings keyed by configured upstream model.
 	Bindings *map[string]ProviderServingBinding `json:"bindings,omitempty"`
 
+	// Commitment Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.
+	Commitment *Commitment `json:"commitment,omitempty"`
+
 	// CredentialHeaders Header names whose values are supplied in the encrypted credential JSON.
 	CredentialHeaders *[]string                           `json:"credential_headers,omitempty"`
 	HealthProbe       nullable.Nullable[HealthProbe]      `json:"health_probe,omitempty"`
@@ -5336,9 +5741,12 @@ type CreateApiKeyRequest struct {
 	AttributionDefaults nullable.Nullable[map[string]string] `json:"attribution_defaults,omitempty"`
 
 	// BudgetGroupId Shared budget group; must belong to the same project as the key (both may be null).
-	BudgetGroupId  nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
-	DailyCostLimit nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
-	EndUserPolicy  nullable.Nullable[EndUserPolicy]      `json:"end_user_policy,omitempty"`
+	BudgetGroupId nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
+
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis      *CreateApiKeyRequestCostBasis    `json:"cost_basis,omitempty"`
+	DailyCostLimit nullable.Nullable[string]        `json:"daily_cost_limit,omitempty"`
+	EndUserPolicy  nullable.Nullable[EndUserPolicy] `json:"end_user_policy,omitempty"`
 
 	// EndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
 	EndUserSource nullable.Nullable[CreateApiKeyRequestEndUserSource] `json:"end_user_source,omitempty"`
@@ -5379,6 +5787,9 @@ type CreateApiKeyRequest struct {
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
+// CreateApiKeyRequestCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type CreateApiKeyRequestCostBasis string
+
 // CreateApiKeyRequestEndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
 type CreateApiKeyRequestEndUserSource string
 
@@ -5394,7 +5805,9 @@ type CreateApiKeyResponse struct {
 
 // CreateBudgetGroupRequest defines model for CreateBudgetGroupRequest.
 type CreateBudgetGroupRequest struct {
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis      *CreateBudgetGroupRequestCostBasis `json:"cost_basis,omitempty"`
+	DailyCostLimit nullable.Nullable[string]          `json:"daily_cost_limit,omitempty"`
 
 	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
 	LimitTemplate    nullable.Nullable[string] `json:"limit_template,omitempty"`
@@ -5410,6 +5823,9 @@ type CreateBudgetGroupRequest struct {
 	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// CreateBudgetGroupRequestCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type CreateBudgetGroupRequestCostBasis string
 
 // CreateBudgetGroupResponse defines model for CreateBudgetGroupResponse.
 type CreateBudgetGroupResponse struct {
@@ -5816,6 +6232,44 @@ type CredentialSlotDetail struct {
 	Weight            *int32                   `json:"weight,omitempty"`
 }
 
+// Discount defines model for Discount.
+type Discount struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	CreatedBy   openapi_types.UUID `json:"created_by"`
+	EffectiveAt time.Time          `json:"effective_at"`
+	Id          openapi_types.UUID `json:"id"`
+
+	// Multiplier Multiplier on provider cost, an exact decimal string.
+	Multiplier string `json:"multiplier"`
+
+	// ProviderId Scopes the discount to one provider.
+	ProviderId nullable.Nullable[openapi_types.UUID] `json:"provider_id"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind ProviderKind              `json:"provider_kind"`
+	ProviderName nullable.Nullable[string] `json:"provider_name,omitempty"`
+
+	// VendorId Vendor catalogue identity the discount scopes to, when set.
+	VendorId nullable.Nullable[string] `json:"vendor_id"`
+}
+
+// DiscountRequest defines model for DiscountRequest.
+type DiscountRequest struct {
+	EffectiveAt *time.Time                            `json:"effective_at,omitempty"`
+	Multiplier  string                                `json:"multiplier"`
+	ProviderId  nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind ProviderKind              `json:"provider_kind"`
+	VendorId     nullable.Nullable[string] `json:"vendor_id,omitempty"`
+}
+
+// DiscountsResponse defines model for DiscountsResponse.
+type DiscountsResponse struct {
+	Items      []Discount                `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
 // DiscoverModelsRequest defines model for DiscoverModelsRequest.
 type DiscoverModelsRequest struct {
 	// Models Omit or pass an empty array to query the upstream model-list API.
@@ -5834,6 +6288,8 @@ type DiscoveredModelRequest struct {
 
 // EndUserLimits A complete limit set. Null or omitted dimensions are unlimited.
 type EndUserLimits struct {
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis         *EndUserLimitsCostBasis   `json:"cost_basis,omitempty"`
 	DailyCostLimit    nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
 	MaxConcurrency    nullable.Nullable[int32]  `json:"max_concurrency,omitempty"`
 	MonthlyCostLimit  nullable.Nullable[string] `json:"monthly_cost_limit,omitempty"`
@@ -5843,6 +6299,9 @@ type EndUserLimits struct {
 	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// EndUserLimitsCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type EndUserLimitsCostBasis string
 
 // EndUserPolicy defines model for EndUserPolicy.
 type EndUserPolicy struct {
@@ -7291,6 +7750,15 @@ type PriceOperation = string
 
 // PriceRequest defines model for PriceRequest.
 type PriceRequest struct {
+	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.
+	AudioInputPerMillion nullable.Nullable[string] `json:"audio_input_per_million,omitempty"`
+
+	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it at the output rate.
+	AudioOutputPerMillion nullable.Nullable[string] `json:"audio_output_per_million,omitempty"`
+
+	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.
+	BatchMultiplier nullable.Nullable[string] `json:"batch_multiplier,omitempty"`
+
 	// CacheWrite1hInputPerMillion Rate for the 1-hour TTL share of cache writes. Omit to bill
 	// it at the generic cache-write rate, then the input rate.
 	CacheWrite1hInputPerMillion nullable.Nullable[string] `json:"cache_write_1h_input_per_million,omitempty"`
@@ -7303,10 +7771,22 @@ type PriceRequest struct {
 	// Omit to bill cache writes at the full input rate.
 	CacheWriteInputPerMillion nullable.Nullable[string] `json:"cache_write_input_per_million,omitempty"`
 
+	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.
+	CachedAudioInputPerMillion nullable.Nullable[string] `json:"cached_audio_input_per_million,omitempty"`
+
+	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.
+	CachedImageInputPerMillion nullable.Nullable[string] `json:"cached_image_input_per_million,omitempty"`
+
 	// CachedInputPerMillion Rate for the cached share of the input tokens. Omit to bill cached
 	// tokens at the full input rate.
 	CachedInputPerMillion nullable.Nullable[string] `json:"cached_input_per_million,omitempty"`
 	Currency              string                    `json:"currency"`
+
+	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image input at the input rate.
+	ImageInputPerMillion nullable.Nullable[string] `json:"image_input_per_million,omitempty"`
+
+	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it at the output rate.
+	ImageOutputPerMillion nullable.Nullable[string] `json:"image_output_per_million,omitempty"`
 	InputPerMillion       nullable.Nullable[string] `json:"input_per_million,omitempty"`
 	Model                 string                    `json:"model"`
 
@@ -7314,17 +7794,34 @@ type PriceRequest struct {
 	Operation        PriceOperation            `json:"operation"`
 	OutputPerMillion nullable.Nullable[string] `json:"output_per_million,omitempty"`
 
+	// PerRequest A fixed fee charged once per successful attempt.
+	PerRequest nullable.Nullable[string] `json:"per_request,omitempty"`
+
 	// ProviderId Scopes the price to one provider. A price for plugin providers names its provider: no kind-wide or vendor price applies to them.
 	ProviderId nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
 
 	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
-	ProviderKind ProviderKind              `json:"provider_kind"`
-	UnitPrice    nullable.Nullable[string] `json:"unit_price,omitempty"`
-	VendorId     nullable.Nullable[string] `json:"vendor_id,omitempty"`
+	ProviderKind ProviderKind `json:"provider_kind"`
+
+	// Tiers Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.
+	Tiers     nullable.Nullable[[]PriceTier]    `json:"tiers,omitempty"`
+	ToolCalls nullable.Nullable[PriceToolCalls] `json:"tool_calls,omitempty"`
+	UnitPrice nullable.Nullable[string]         `json:"unit_price,omitempty"`
+	VendorId  nullable.Nullable[string]         `json:"vendor_id,omitempty"`
+	Windows   nullable.Nullable[PriceWindows]   `json:"windows,omitempty"`
 }
 
 // PriceResponse defines model for PriceResponse.
 type PriceResponse struct {
+	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.
+	AudioInputPerMillion nullable.Nullable[string] `json:"audio_input_per_million,omitempty"`
+
+	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it at the output rate.
+	AudioOutputPerMillion nullable.Nullable[string] `json:"audio_output_per_million,omitempty"`
+
+	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.
+	BatchMultiplier nullable.Nullable[string] `json:"batch_multiplier,omitempty"`
+
 	// CacheWrite1hInputPerMillion Rate for the 1-hour TTL share of cache writes. Omit to bill
 	// it at the generic cache-write rate, then the input rate.
 	CacheWrite1hInputPerMillion nullable.Nullable[string] `json:"cache_write_1h_input_per_million,omitempty"`
@@ -7337,20 +7834,169 @@ type PriceResponse struct {
 	// Omit to bill cache writes at the full input rate.
 	CacheWriteInputPerMillion nullable.Nullable[string] `json:"cache_write_input_per_million,omitempty"`
 
+	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.
+	CachedAudioInputPerMillion nullable.Nullable[string] `json:"cached_audio_input_per_million,omitempty"`
+
+	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.
+	CachedImageInputPerMillion nullable.Nullable[string] `json:"cached_image_input_per_million,omitempty"`
+
 	// CachedInputPerMillion Rate for the cached share of the input tokens. Omit to bill cached
 	// tokens at the full input rate.
-	CachedInputPerMillion nullable.Nullable[string]             `json:"cached_input_per_million,omitempty"`
-	Currency              string                                `json:"currency"`
-	InputPerMillion       nullable.Nullable[string]             `json:"input_per_million,omitempty"`
-	Model                 string                                `json:"model"`
-	Operation             string                                `json:"operation"`
-	OutputPerMillion      nullable.Nullable[string]             `json:"output_per_million,omitempty"`
-	ProviderId            nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
+	CachedInputPerMillion nullable.Nullable[string] `json:"cached_input_per_million,omitempty"`
+	Currency              string                    `json:"currency"`
+
+	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image input at the input rate.
+	ImageInputPerMillion nullable.Nullable[string] `json:"image_input_per_million,omitempty"`
+
+	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it at the output rate.
+	ImageOutputPerMillion nullable.Nullable[string] `json:"image_output_per_million,omitempty"`
+	InputPerMillion       nullable.Nullable[string] `json:"input_per_million,omitempty"`
+	Model                 string                    `json:"model"`
+	Operation             string                    `json:"operation"`
+	OutputPerMillion      nullable.Nullable[string] `json:"output_per_million,omitempty"`
+
+	// PerRequest A fixed fee charged once per successful attempt.
+	PerRequest nullable.Nullable[string]             `json:"per_request,omitempty"`
+	ProviderId nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
 
 	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
-	ProviderKind ProviderKind              `json:"provider_kind"`
-	UnitPrice    nullable.Nullable[string] `json:"unit_price,omitempty"`
-	VendorId     nullable.Nullable[string] `json:"vendor_id,omitempty"`
+	ProviderKind ProviderKind `json:"provider_kind"`
+
+	// Tiers Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.
+	Tiers     nullable.Nullable[[]PriceTier]    `json:"tiers,omitempty"`
+	ToolCalls nullable.Nullable[PriceToolCalls] `json:"tool_calls,omitempty"`
+	UnitPrice nullable.Nullable[string]         `json:"unit_price,omitempty"`
+	VendorId  nullable.Nullable[string]         `json:"vendor_id,omitempty"`
+	Windows   nullable.Nullable[PriceWindows]   `json:"windows,omitempty"`
+}
+
+// PriceTier Per-million rates that apply once an attempt's input tokens exceed above_input_tokens. A tier replaces the entry's whole per-million rate set, so it names exactly the per-million fields the entry names.
+type PriceTier struct {
+	// AboveInputTokens Input tokens per attempt above which this tier's rates apply.
+	AboveInputTokens int64 `json:"above_input_tokens"`
+
+	// AudioInputPerMillion Audio input token rate.
+	AudioInputPerMillion nullable.Nullable[string] `json:"audio_input_per_million,omitempty"`
+
+	// AudioOutputPerMillion Audio output token rate.
+	AudioOutputPerMillion nullable.Nullable[string] `json:"audio_output_per_million,omitempty"`
+
+	// CacheWrite1hInputPerMillion 1-hour TTL cache-write token rate.
+	CacheWrite1hInputPerMillion nullable.Nullable[string] `json:"cache_write_1h_input_per_million,omitempty"`
+
+	// CacheWrite5mInputPerMillion 5-minute TTL cache-write token rate.
+	CacheWrite5mInputPerMillion nullable.Nullable[string] `json:"cache_write_5m_input_per_million,omitempty"`
+
+	// CacheWriteInputPerMillion Generic cache-write token rate.
+	CacheWriteInputPerMillion nullable.Nullable[string] `json:"cache_write_input_per_million,omitempty"`
+
+	// CachedAudioInputPerMillion Cached audio input token rate.
+	CachedAudioInputPerMillion nullable.Nullable[string] `json:"cached_audio_input_per_million,omitempty"`
+
+	// CachedImageInputPerMillion Cached image input token rate.
+	CachedImageInputPerMillion nullable.Nullable[string] `json:"cached_image_input_per_million,omitempty"`
+
+	// CachedInputPerMillion Cached input token rate.
+	CachedInputPerMillion nullable.Nullable[string] `json:"cached_input_per_million,omitempty"`
+
+	// ImageInputPerMillion Image input token rate.
+	ImageInputPerMillion nullable.Nullable[string] `json:"image_input_per_million,omitempty"`
+
+	// ImageOutputPerMillion Image output token rate.
+	ImageOutputPerMillion nullable.Nullable[string] `json:"image_output_per_million,omitempty"`
+
+	// InputPerMillion Input token rate.
+	InputPerMillion nullable.Nullable[string] `json:"input_per_million,omitempty"`
+
+	// OutputPerMillion Output token rate.
+	OutputPerMillion nullable.Nullable[string] `json:"output_per_million,omitempty"`
+}
+
+// PriceToolCalls Fee per metered server-side tool invocation, keyed by tool name.
+type PriceToolCalls map[string]string
+
+// PriceWindowPeriod defines model for PriceWindowPeriod.
+type PriceWindowPeriod struct {
+	// Days ISO weekdays the period applies on: 1 is Monday, 7 is Sunday.
+	Days []int `json:"days"`
+
+	// End Local time the period ends at, exclusive; "24:00" runs through midnight.
+	End string `json:"end"`
+
+	// Multiplier Multiplier applied to the attempt's whole usage charge.
+	Multiplier string `json:"multiplier"`
+
+	// Start Local time the period starts at, inclusive.
+	Start string `json:"start"`
+}
+
+// PriceWindows Time-of-day and day-of-week multipliers evaluated in the named zone at the attempt's start.
+type PriceWindows struct {
+	Periods []PriceWindowPeriod `json:"periods"`
+
+	// TimeZone IANA time zone the periods are evaluated in, for example America/New_York.
+	TimeZone string `json:"time_zone"`
+}
+
+// PricingQuoteRequest defines model for PricingQuoteRequest.
+type PricingQuoteRequest struct {
+	Model     string `json:"model"`
+	Operation string `json:"operation"`
+
+	// ProjectId The consumer project the charge is priced for; absent, the installation's card applies.
+	ProjectId  nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+	ProviderId openapi_types.UUID                    `json:"provider_id"`
+
+	// StartedAt Defaults to now.
+	StartedAt nullable.Nullable[time.Time] `json:"started_at,omitempty"`
+
+	// Successful Defaults to true.
+	Successful *bool `json:"successful,omitempty"`
+
+	// Usage Attempt usage dimensions, the same members accounting records.
+	Usage struct {
+		AudioInputTokens        *int64 `json:"audio_input_tokens,omitempty"`
+		AudioOutputTokens       *int64 `json:"audio_output_tokens,omitempty"`
+		Batch                   *bool  `json:"batch,omitempty"`
+		CacheWrite1hInputTokens *int64 `json:"cache_write_1h_input_tokens,omitempty"`
+		CacheWrite5mInputTokens *int64 `json:"cache_write_5m_input_tokens,omitempty"`
+		CacheWriteInputTokens   *int64 `json:"cache_write_input_tokens,omitempty"`
+		CachedAudioInputTokens  *int64 `json:"cached_audio_input_tokens,omitempty"`
+		CachedImageInputTokens  *int64 `json:"cached_image_input_tokens,omitempty"`
+		CachedInputTokens       *int64 `json:"cached_input_tokens,omitempty"`
+		ImageInputTokens        *int64 `json:"image_input_tokens,omitempty"`
+		ImageOutputTokens       *int64 `json:"image_output_tokens,omitempty"`
+		InputTokens             *int64 `json:"input_tokens,omitempty"`
+
+		// MediaUnits Exact decimal media units, as the wire carries them.
+		MediaUnits   *string           `json:"media_units,omitempty"`
+		OutputTokens *int64            `json:"output_tokens,omitempty"`
+		ToolCalls    *map[string]int64 `json:"tool_calls,omitempty"`
+	} `json:"usage"`
+}
+
+// PricingQuoteResponse defines model for PricingQuoteResponse.
+type PricingQuoteResponse struct {
+	// Charge Consumer charge under the applicable rate card.
+	Charge     nullable.Nullable[string] `json:"charge"`
+	Commitment nullable.Nullable[struct {
+		Amount string `json:"amount"`
+		Period string `json:"period"`
+	}] `json:"commitment"`
+
+	// Complete Every priced dimension had a rate.
+	Complete   bool     `json:"complete"`
+	Components []string `json:"components"`
+
+	// Cost Provider cost after discount and commitment.
+	Cost       nullable.Nullable[string]             `json:"cost"`
+	Currency   nullable.Nullable[string]             `json:"currency"`
+	DiscountId nullable.Nullable[openapi_types.UUID] `json:"discount_id,omitempty"`
+
+	// ListCost Undiscounted, uncommitted cost.
+	ListCost           nullable.Nullable[string]             `json:"list_cost"`
+	PricingRevisionId  nullable.Nullable[openapi_types.UUID] `json:"pricing_revision_id,omitempty"`
+	RateCardRevisionId nullable.Nullable[openapi_types.UUID] `json:"rate_card_revision_id,omitempty"`
 }
 
 // PricingRevisionRequest defines model for PricingRevisionRequest.
@@ -8204,6 +8850,149 @@ type PutProjectMemberRequest struct {
 // PutProjectMemberRequestRole defines model for PutProjectMemberRequest.Role.
 type PutProjectMemberRequestRole string
 
+// RateCard defines model for RateCard.
+type RateCard struct {
+	CreatedAt time.Time                  `json:"created_at"`
+	Id        openapi_types.UUID         `json:"id"`
+	Owner     RateCardOwner              `json:"owner"`
+	Revisions *[]RateCardRevisionSummary `json:"revisions,omitempty"`
+}
+
+// RateCardOwner defines model for RateCardOwner.
+type RateCardOwner struct {
+	Kind           RateCardOwnerKind                     `json:"kind"`
+	Organization   nullable.Nullable[string]             `json:"organization,omitempty"`
+	OrganizationId nullable.Nullable[openapi_types.UUID] `json:"organization_id,omitempty"`
+	Project        nullable.Nullable[string]             `json:"project,omitempty"`
+	ProjectId      nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
+}
+
+// RateCardOwnerKind defines model for RateCardOwner.Kind.
+type RateCardOwnerKind string
+
+// RateCardPriceEntry An explicit card rate: a price entry scoped by connector kind, optional vendor, model and operation, never a provider.
+type RateCardPriceEntry struct {
+	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.
+	AudioInputPerMillion nullable.Nullable[string] `json:"audio_input_per_million,omitempty"`
+
+	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it at the output rate.
+	AudioOutputPerMillion nullable.Nullable[string] `json:"audio_output_per_million,omitempty"`
+
+	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.
+	BatchMultiplier nullable.Nullable[string] `json:"batch_multiplier,omitempty"`
+
+	// CacheWrite1hInputPerMillion Rate for the 1-hour TTL share of cache writes. Omit to bill
+	// it at the generic cache-write rate, then the input rate.
+	CacheWrite1hInputPerMillion nullable.Nullable[string] `json:"cache_write_1h_input_per_million,omitempty"`
+
+	// CacheWrite5mInputPerMillion Rate for the 5-minute TTL share of cache writes. Omit to bill
+	// it at the generic cache-write rate, then the input rate.
+	CacheWrite5mInputPerMillion nullable.Nullable[string] `json:"cache_write_5m_input_per_million,omitempty"`
+
+	// CacheWriteInputPerMillion Rate for the generic cache-write share of the input tokens.
+	// Omit to bill cache writes at the full input rate.
+	CacheWriteInputPerMillion nullable.Nullable[string] `json:"cache_write_input_per_million,omitempty"`
+
+	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.
+	CachedAudioInputPerMillion nullable.Nullable[string] `json:"cached_audio_input_per_million,omitempty"`
+
+	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.
+	CachedImageInputPerMillion nullable.Nullable[string] `json:"cached_image_input_per_million,omitempty"`
+
+	// CachedInputPerMillion Rate for the cached share of the input tokens. Omit to bill cached
+	// tokens at the full input rate.
+	CachedInputPerMillion nullable.Nullable[string] `json:"cached_input_per_million,omitempty"`
+
+	// Currency Installation currency. Omit to use the configured installation currency.
+	Currency *string `json:"currency,omitempty"`
+
+	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image input at the input rate.
+	ImageInputPerMillion nullable.Nullable[string] `json:"image_input_per_million,omitempty"`
+
+	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it at the output rate.
+	ImageOutputPerMillion nullable.Nullable[string] `json:"image_output_per_million,omitempty"`
+	InputPerMillion       nullable.Nullable[string] `json:"input_per_million,omitempty"`
+	Model                 string                    `json:"model"`
+
+	// Operation An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected.
+	Operation        PriceOperation            `json:"operation"`
+	OutputPerMillion nullable.Nullable[string] `json:"output_per_million,omitempty"`
+
+	// PerRequest A fixed fee charged once per successful attempt.
+	PerRequest nullable.Nullable[string] `json:"per_request,omitempty"`
+
+	// ProviderId Always null on a card rate: cards price for every provider of the kind.
+	ProviderId nullable.Nullable[openapi_types.UUID] `json:"provider_id,omitempty"`
+
+	// ProviderKind Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it.
+	ProviderKind ProviderKind `json:"provider_kind"`
+
+	// Tiers Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.
+	Tiers     nullable.Nullable[[]PriceTier]    `json:"tiers,omitempty"`
+	ToolCalls nullable.Nullable[PriceToolCalls] `json:"tool_calls,omitempty"`
+	UnitPrice nullable.Nullable[string]         `json:"unit_price,omitempty"`
+	VendorId  nullable.Nullable[string]         `json:"vendor_id,omitempty"`
+	Windows   nullable.Nullable[PriceWindows]   `json:"windows,omitempty"`
+}
+
+// RateCardRequest defines model for RateCardRequest.
+type RateCardRequest struct {
+	Owner struct {
+		// Id Organization or project identifier, required unless kind is installation.
+		Id   nullable.Nullable[openapi_types.UUID] `json:"id,omitempty"`
+		Kind RateCardRequestOwnerKind              `json:"kind"`
+	} `json:"owner"`
+}
+
+// RateCardRequestOwnerKind defines model for RateCardRequest.Owner.Kind.
+type RateCardRequestOwnerKind string
+
+// RateCardRevision defines model for RateCardRevision.
+type RateCardRevision struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	CreatedBy   openapi_types.UUID `json:"created_by"`
+	EffectiveAt time.Time          `json:"effective_at"`
+	Id          openapi_types.UUID `json:"id"`
+
+	// Markup Multiplier on provider cost the consumer is charged.
+	Markup     string               `json:"markup"`
+	Prices     []RateCardPriceEntry `json:"prices"`
+	RateCardId openapi_types.UUID   `json:"rate_card_id"`
+	Revision   int32                `json:"revision"`
+}
+
+// RateCardRevisionRequest defines model for RateCardRevisionRequest.
+type RateCardRevisionRequest struct {
+	EffectiveAt *time.Time            `json:"effective_at,omitempty"`
+	Markup      string                `json:"markup"`
+	Prices      *[]RateCardPriceEntry `json:"prices,omitempty"`
+}
+
+// RateCardRevisionSummary defines model for RateCardRevisionSummary.
+type RateCardRevisionSummary struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	CreatedBy   openapi_types.UUID `json:"created_by"`
+	EffectiveAt time.Time          `json:"effective_at"`
+	Id          openapi_types.UUID `json:"id"`
+
+	// Markup Multiplier on provider cost the consumer is charged.
+	Markup     string             `json:"markup"`
+	RateCardId openapi_types.UUID `json:"rate_card_id"`
+	Revision   int32              `json:"revision"`
+}
+
+// RateCardRevisionsResponse defines model for RateCardRevisionsResponse.
+type RateCardRevisionsResponse struct {
+	Items      []RateCardRevision        `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// RateCardsResponse defines model for RateCardsResponse.
+type RateCardsResponse struct {
+	Items      []RateCard                `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
 // RecentAuthenticationRequest defines model for RecentAuthenticationRequest.
 type RecentAuthenticationRequest struct {
 	CurrentPassword *string `json:"current_password,omitempty"`
@@ -8286,25 +9075,34 @@ type RequestDetailResponse struct {
 	Attempts     []AttemptResponse                     `json:"attempts"`
 
 	// Attribution Bounded allowlisted labels reported with this request; never content.
-	Attribution map[string]string `json:"attribution"`
+	Attribution       map[string]string        `json:"attribution"`
+	AudioInputTokens  nullable.Nullable[int64] `json:"audio_input_tokens,omitempty"`
+	AudioOutputTokens nullable.Nullable[int64] `json:"audio_output_tokens,omitempty"`
 
 	// BudgetBoundary Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs.
 	BudgetBoundary          *RequestDetailResponseBudgetBoundary `json:"budget_boundary,omitempty"`
 	CacheWrite1hInputTokens nullable.Nullable[int64]             `json:"cache_write_1h_input_tokens,omitempty"`
 	CacheWrite5mInputTokens nullable.Nullable[int64]             `json:"cache_write_5m_input_tokens,omitempty"`
 	CacheWriteInputTokens   nullable.Nullable[int64]             `json:"cache_write_input_tokens,omitempty"`
+	CachedAudioInputTokens  nullable.Nullable[int64]             `json:"cached_audio_input_tokens,omitempty"`
+	CachedImageInputTokens  nullable.Nullable[int64]             `json:"cached_image_input_tokens,omitempty"`
 	CachedInputTokens       nullable.Nullable[int64]             `json:"cached_input_tokens,omitempty"`
-	CompletedAt             nullable.Nullable[time.Time]         `json:"completed_at,omitempty"`
-	Currency                nullable.Nullable[string]            `json:"currency,omitempty"`
+
+	// Charge Sum of the request's attempt charges, an exact decimal string.
+	Charge      nullable.Nullable[string]    `json:"charge,omitempty"`
+	CompletedAt nullable.Nullable[time.Time] `json:"completed_at,omitempty"`
+	Currency    nullable.Nullable[string]    `json:"currency,omitempty"`
 
 	// EndUserDigest Project-scoped HMAC-SHA256 identity, or empty when not identified. Never the raw identifier.
-	EndUserDigest *string                   `json:"end_user_digest,omitempty"`
-	ErrorClass    nullable.Nullable[string] `json:"error_class,omitempty"`
-	EstimatedCost nullable.Nullable[string] `json:"estimated_cost,omitempty"`
-	FirstByteMs   nullable.Nullable[int64]  `json:"first_byte_ms,omitempty"`
-	Id            openapi_types.UUID        `json:"id"`
-	InputTokens   nullable.Nullable[int64]  `json:"input_tokens,omitempty"`
-	Operation     string                    `json:"operation"`
+	EndUserDigest     *string                   `json:"end_user_digest,omitempty"`
+	ErrorClass        nullable.Nullable[string] `json:"error_class,omitempty"`
+	EstimatedCost     nullable.Nullable[string] `json:"estimated_cost,omitempty"`
+	FirstByteMs       nullable.Nullable[int64]  `json:"first_byte_ms,omitempty"`
+	Id                openapi_types.UUID        `json:"id"`
+	ImageInputTokens  nullable.Nullable[int64]  `json:"image_input_tokens,omitempty"`
+	ImageOutputTokens nullable.Nullable[int64]  `json:"image_output_tokens,omitempty"`
+	InputTokens       nullable.Nullable[int64]  `json:"input_tokens,omitempty"`
+	Operation         string                    `json:"operation"`
 
 	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 	Origin       RequestOrigin            `json:"origin"`
@@ -8392,25 +9190,34 @@ type RequestSummary struct {
 	AttemptCount int32                                 `json:"attempt_count"`
 
 	// Attribution Bounded allowlisted labels reported with this request; never content.
-	Attribution map[string]string `json:"attribution"`
+	Attribution       map[string]string        `json:"attribution"`
+	AudioInputTokens  nullable.Nullable[int64] `json:"audio_input_tokens,omitempty"`
+	AudioOutputTokens nullable.Nullable[int64] `json:"audio_output_tokens,omitempty"`
 
 	// BudgetBoundary Present for a cost-budget refusal: identifies the exhausted hierarchy level without retaining labels, digests or owner IDs.
 	BudgetBoundary          *RequestSummaryBudgetBoundary `json:"budget_boundary,omitempty"`
 	CacheWrite1hInputTokens nullable.Nullable[int64]      `json:"cache_write_1h_input_tokens,omitempty"`
 	CacheWrite5mInputTokens nullable.Nullable[int64]      `json:"cache_write_5m_input_tokens,omitempty"`
 	CacheWriteInputTokens   nullable.Nullable[int64]      `json:"cache_write_input_tokens,omitempty"`
+	CachedAudioInputTokens  nullable.Nullable[int64]      `json:"cached_audio_input_tokens,omitempty"`
+	CachedImageInputTokens  nullable.Nullable[int64]      `json:"cached_image_input_tokens,omitempty"`
 	CachedInputTokens       nullable.Nullable[int64]      `json:"cached_input_tokens,omitempty"`
-	CompletedAt             nullable.Nullable[time.Time]  `json:"completed_at,omitempty"`
-	Currency                nullable.Nullable[string]     `json:"currency,omitempty"`
+
+	// Charge Sum of the request's attempt charges, an exact decimal string.
+	Charge      nullable.Nullable[string]    `json:"charge,omitempty"`
+	CompletedAt nullable.Nullable[time.Time] `json:"completed_at,omitempty"`
+	Currency    nullable.Nullable[string]    `json:"currency,omitempty"`
 
 	// EndUserDigest Project-scoped HMAC-SHA256 identity, or empty when not identified. Never the raw identifier.
-	EndUserDigest *string                   `json:"end_user_digest,omitempty"`
-	ErrorClass    nullable.Nullable[string] `json:"error_class,omitempty"`
-	EstimatedCost nullable.Nullable[string] `json:"estimated_cost,omitempty"`
-	FirstByteMs   nullable.Nullable[int64]  `json:"first_byte_ms,omitempty"`
-	Id            openapi_types.UUID        `json:"id"`
-	InputTokens   nullable.Nullable[int64]  `json:"input_tokens,omitempty"`
-	Operation     string                    `json:"operation"`
+	EndUserDigest     *string                   `json:"end_user_digest,omitempty"`
+	ErrorClass        nullable.Nullable[string] `json:"error_class,omitempty"`
+	EstimatedCost     nullable.Nullable[string] `json:"estimated_cost,omitempty"`
+	FirstByteMs       nullable.Nullable[int64]  `json:"first_byte_ms,omitempty"`
+	Id                openapi_types.UUID        `json:"id"`
+	ImageInputTokens  nullable.Nullable[int64]  `json:"image_input_tokens,omitempty"`
+	ImageOutputTokens nullable.Nullable[int64]  `json:"image_output_tokens,omitempty"`
+	InputTokens       nullable.Nullable[int64]  `json:"input_tokens,omitempty"`
+	Operation         string                    `json:"operation"`
 
 	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 	Origin       RequestOrigin            `json:"origin"`
@@ -8454,9 +9261,12 @@ type RevokeNetworkCredentialResponse struct {
 // RotateApiKeyRequest defines model for RotateApiKeyRequest.
 type RotateApiKeyRequest struct {
 	// BudgetGroupId Omit to keep the stored group; send null to clear it.
-	BudgetGroupId    nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
-	DailyCostLimit   nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
-	MonthlyCostLimit nullable.Nullable[string]             `json:"monthly_cost_limit,omitempty"`
+	BudgetGroupId nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
+
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis        *RotateApiKeyRequestCostBasis `json:"cost_basis,omitempty"`
+	DailyCostLimit   nullable.Nullable[string]     `json:"daily_cost_limit,omitempty"`
+	MonthlyCostLimit nullable.Nullable[string]     `json:"monthly_cost_limit,omitempty"`
 
 	// OverlapSeconds Allow the previous secret for this many seconds, bounded by key expiry. Zero (default) immediately ends all prior overlaps on authority refresh. At most eight previous secrets may overlap; every version shares current policy, counters and budgets. Replay never extends an overlap.
 	OverlapSeconds *int `json:"overlap_seconds,omitempty"`
@@ -8464,6 +9274,9 @@ type RotateApiKeyRequest struct {
 	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// RotateApiKeyRequestCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type RotateApiKeyRequestCostBasis string
 
 // RotateApiKeyResponse defines model for RotateApiKeyResponse.
 type RotateApiKeyResponse struct {
@@ -8946,8 +9759,11 @@ type RouteTemplateResultOutcome string
 
 // RoutingConstraints defines model for RoutingConstraints.
 type RoutingConstraints struct {
-	DenyDataCollection       *bool                           `json:"deny_data_collection,omitempty"`
-	Ignore                   *[]string                       `json:"ignore,omitempty"`
+	DenyDataCollection *bool     `json:"deny_data_collection,omitempty"`
+	Ignore             *[]string `json:"ignore,omitempty"`
+
+	// MaxCost Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded.
+	MaxCost                  nullable.Nullable[string]       `json:"max_cost,omitempty"`
 	MaxPrice                 nullable.Nullable[PriceCeiling] `json:"max_price,omitempty"`
 	Only                     nullable.Nullable[[]string]     `json:"only,omitempty"`
 	Quantizations            nullable.Nullable[[]string]     `json:"quantizations,omitempty"`
@@ -8965,6 +9781,13 @@ type RoutingDecision struct {
 
 	// EstimateProvenance How estimated_input_tokens was counted: tokenizer for an exact count by the model's own tokenizer of a prompt that is all text and message framing, calibrated for a count that is partly a measured ratio or a guess (the tail of a prompt too long to count exactly, or one with images or media charged at a flat rate, or with tool schemas or tool calls, which a model reads in a rendering of its own), heuristic for the four-characters-per-token rule, which also prices the tail of a long prompt that follows too little exact text to measure a ratio from. Null when the caller supplied the estimate or no request was inspected.
 	EstimateProvenance nullable.Nullable[string] `json:"estimate_provenance,omitempty"`
+
+	// EstimatedCost The target's minimum and maximum attempt cost for the simulated request: the input estimate at the cheapest input-side rate plus the per-request fee, and the worst case the gateway would reserve. Null when the price cannot bound the request or no demand is known.
+	EstimatedCost nullable.Nullable[struct {
+		Currency string `json:"currency"`
+		Maximum  string `json:"maximum"`
+		Minimum  string `json:"minimum"`
+	}] `json:"estimated_cost,omitempty"`
 
 	// EstimatedInputTokens The request's input tokens as this target's model counts them, which is the estimate routing weighs the target's context window by, or the estimate the caller supplied. Null when neither exists.
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
@@ -9027,7 +9850,10 @@ type RoutingPreferences struct {
 	Ignore             *[]string               `json:"ignore,omitempty"`
 
 	// MaxAttempts Optional request ceiling; cannot exceed the published route budget.
-	MaxAttempts            nullable.Nullable[int]          `json:"max_attempts,omitempty"`
+	MaxAttempts nullable.Nullable[int] `json:"max_attempts,omitempty"`
+
+	// MaxCost Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded.
+	MaxCost                nullable.Nullable[string]       `json:"max_cost,omitempty"`
 	MaxPrice               nullable.Nullable[PriceCeiling] `json:"max_price,omitempty"`
 	Only                   nullable.Nullable[[]string]     `json:"only,omitempty"`
 	Order                  nullable.Nullable[[]string]     `json:"order,omitempty"`
@@ -9045,20 +9871,48 @@ type RoutingPreferences struct {
 
 // RoutingPrice defines model for RoutingPrice.
 type RoutingPrice struct {
+	// AudioInputPerMillion Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.
+	AudioInputPerMillion nullable.Nullable[string] `json:"audio_input_per_million,omitempty"`
+
+	// AudioOutputPerMillion Rate for the audio share of the output tokens. Omit to bill it at the output rate.
+	AudioOutputPerMillion nullable.Nullable[string] `json:"audio_output_per_million,omitempty"`
+
+	// BatchMultiplier Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.
+	BatchMultiplier             nullable.Nullable[string] `json:"batch_multiplier,omitempty"`
 	CacheWrite1hInputPerMillion nullable.Nullable[string] `json:"cache_write_1h_input_per_million,omitempty"`
 	CacheWrite5mInputPerMillion nullable.Nullable[string] `json:"cache_write_5m_input_per_million,omitempty"`
 	CacheWriteInputPerMillion   nullable.Nullable[string] `json:"cache_write_input_per_million,omitempty"`
-	Currency                    string                    `json:"currency"`
-	EffectiveAt                 time.Time                 `json:"effective_at"`
-	InputPerMillion             nullable.Nullable[string] `json:"input_per_million,omitempty"`
-	Model                       string                    `json:"model"`
-	Operation                   string                    `json:"operation"`
-	OutputPerMillion            nullable.Nullable[string] `json:"output_per_million,omitempty"`
-	ProviderId                  openapi_types.UUID        `json:"provider_id"`
-	Revision                    int32                     `json:"revision"`
-	RevisionId                  openapi_types.UUID        `json:"revision_id"`
-	ScopePriority               int32                     `json:"scope_priority"`
-	UnitPrice                   nullable.Nullable[string] `json:"unit_price,omitempty"`
+
+	// CachedAudioInputPerMillion Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.
+	CachedAudioInputPerMillion nullable.Nullable[string] `json:"cached_audio_input_per_million,omitempty"`
+
+	// CachedImageInputPerMillion Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.
+	CachedImageInputPerMillion nullable.Nullable[string] `json:"cached_image_input_per_million,omitempty"`
+	Currency                   string                    `json:"currency"`
+	EffectiveAt                time.Time                 `json:"effective_at"`
+
+	// ImageInputPerMillion Rate for the image share of the input tokens. Omit to bill image input at the input rate.
+	ImageInputPerMillion nullable.Nullable[string] `json:"image_input_per_million,omitempty"`
+
+	// ImageOutputPerMillion Rate for the image share of the output tokens. Omit to bill it at the output rate.
+	ImageOutputPerMillion nullable.Nullable[string] `json:"image_output_per_million,omitempty"`
+	InputPerMillion       nullable.Nullable[string] `json:"input_per_million,omitempty"`
+	Model                 string                    `json:"model"`
+	Operation             string                    `json:"operation"`
+	OutputPerMillion      nullable.Nullable[string] `json:"output_per_million,omitempty"`
+
+	// PerRequest A fixed fee charged once per successful attempt.
+	PerRequest    nullable.Nullable[string] `json:"per_request,omitempty"`
+	ProviderId    openapi_types.UUID        `json:"provider_id"`
+	Revision      int32                     `json:"revision"`
+	RevisionId    openapi_types.UUID        `json:"revision_id"`
+	ScopePriority int32                     `json:"scope_priority"`
+
+	// Tiers Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.
+	Tiers     nullable.Nullable[[]PriceTier]    `json:"tiers,omitempty"`
+	ToolCalls nullable.Nullable[PriceToolCalls] `json:"tool_calls,omitempty"`
+	UnitPrice nullable.Nullable[string]         `json:"unit_price,omitempty"`
+	Windows   nullable.Nullable[PriceWindows]   `json:"windows,omitempty"`
 }
 
 // RoutingStrategy defines model for RoutingStrategy.
@@ -9765,9 +10619,12 @@ type UpdateApiKeyRequest struct {
 	AttributionDefaults nullable.Nullable[map[string]string] `json:"attribution_defaults,omitempty"`
 
 	// BudgetGroupId Omit to keep the stored group; send null to clear it.
-	BudgetGroupId  nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
-	DailyCostLimit nullable.Nullable[string]             `json:"daily_cost_limit,omitempty"`
-	EndUserPolicy  nullable.Nullable[EndUserPolicy]      `json:"end_user_policy,omitempty"`
+	BudgetGroupId nullable.Nullable[openapi_types.UUID] `json:"budget_group_id,omitempty"`
+
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis      *UpdateApiKeyRequestCostBasis    `json:"cost_basis,omitempty"`
+	DailyCostLimit nullable.Nullable[string]        `json:"daily_cost_limit,omitempty"`
+	EndUserPolicy  nullable.Nullable[EndUserPolicy] `json:"end_user_policy,omitempty"`
 
 	// EndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
 	EndUserSource nullable.Nullable[UpdateApiKeyRequestEndUserSource] `json:"end_user_source,omitempty"`
@@ -9805,12 +10662,17 @@ type UpdateApiKeyRequest struct {
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
 
+// UpdateApiKeyRequestCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type UpdateApiKeyRequestCostBasis string
+
 // UpdateApiKeyRequestEndUserSource Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.
 type UpdateApiKeyRequestEndUserSource string
 
 // UpdateBudgetGroupRequest Merge patch; omitted fields retain values, null clears a limit or template reference. project_id is immutable. Inline limits and a project template intersect; at least one limit or a template reference is required.
 type UpdateBudgetGroupRequest struct {
-	DailyCostLimit nullable.Nullable[string] `json:"daily_cost_limit,omitempty"`
+	// CostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+	CostBasis      *UpdateBudgetGroupRequestCostBasis `json:"cost_basis,omitempty"`
+	DailyCostLimit nullable.Nullable[string]          `json:"daily_cost_limit,omitempty"`
 
 	// LimitTemplate Project limit-template name. Every non-null template dimension is a ceiling; inline limits may only tighten it. Updates propagate at authority refresh. Null detaches the reference.
 	LimitTemplate     nullable.Nullable[string] `json:"limit_template,omitempty"`
@@ -9823,6 +10685,9 @@ type UpdateBudgetGroupRequest struct {
 	// WeeklyCostLimit Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed.
 	WeeklyCostLimit nullable.Nullable[string] `json:"weekly_cost_limit,omitempty"`
 }
+
+// UpdateBudgetGroupRequestCostBasis Which amount the budget enforces: provider cost (default) or consumer charge.
+type UpdateBudgetGroupRequestCostBasis string
 
 // UpdateCaptureConfigurationRequest defines model for UpdateCaptureConfigurationRequest.
 type UpdateCaptureConfigurationRequest struct {
@@ -10032,12 +10897,21 @@ type UpdateUserRoleRequestAccessScope string
 
 // UsageBreakdownItem defines model for UsageBreakdownItem.
 type UsageBreakdownItem struct {
-	CacheWrite1hInputTokens string                    `json:"cache_write_1h_input_tokens"`
-	CacheWrite5mInputTokens string                    `json:"cache_write_5m_input_tokens"`
-	CacheWriteInputTokens   string                    `json:"cache_write_input_tokens"`
-	CachedInputTokens       string                    `json:"cached_input_tokens"`
-	Currency                nullable.Nullable[string] `json:"currency,omitempty"`
-	Dimension               string                    `json:"dimension"`
+	// AllocatedCommitment This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.
+	AllocatedCommitment     string `json:"allocated_commitment"`
+	AudioInputTokens        string `json:"audio_input_tokens"`
+	AudioOutputTokens       string `json:"audio_output_tokens"`
+	CacheWrite1hInputTokens string `json:"cache_write_1h_input_tokens"`
+	CacheWrite5mInputTokens string `json:"cache_write_5m_input_tokens"`
+	CacheWriteInputTokens   string `json:"cache_write_input_tokens"`
+	CachedAudioInputTokens  string `json:"cached_audio_input_tokens"`
+	CachedImageInputTokens  string `json:"cached_image_input_tokens"`
+	CachedInputTokens       string `json:"cached_input_tokens"`
+
+	// Charge Total consumer charge, an exact decimal string, null when nothing was charged.
+	Charge    nullable.Nullable[string] `json:"charge"`
+	Currency  nullable.Nullable[string] `json:"currency,omitempty"`
+	Dimension string                    `json:"dimension"`
 
 	// EstimatedAttemptCount Attempts counted in estimated_input_tokens and reported_input_tokens: those with both an estimate and observed input usage. It counts attempts, not requests.
 	EstimatedAttemptCount int64                     `json:"estimated_attempt_count"`
@@ -10045,6 +10919,8 @@ type UsageBreakdownItem struct {
 
 	// EstimatedInputTokens Input tokens admission estimated, summed only over the attempts that had both an estimate and observed usage. It covers the same attempts as reported_input_tokens; an attempt that was never estimated, or whose provider reported no input usage, is in neither.
 	EstimatedInputTokens string `json:"estimated_input_tokens"`
+	ImageInputTokens     string `json:"image_input_tokens"`
+	ImageOutputTokens    string `json:"image_output_tokens"`
 	IncompleteCount      int64  `json:"incomplete_count"`
 	InputTokens          string `json:"input_tokens"`
 	MediaUnits           string `json:"media_units"`
@@ -10053,7 +10929,10 @@ type UsageBreakdownItem struct {
 	// ReportedInputTokens Input tokens the providers reported for the attempts that estimated_input_tokens covers, so the two compare directly. input_tokens covers every attempt with observed usage, estimated or not. The estimation error is (estimated_input_tokens - reported_input_tokens) / reported_input_tokens, positive when admission over-estimated.
 	ReportedInputTokens string `json:"reported_input_tokens"`
 	RequestCount        int64  `json:"request_count"`
-	UnpricedCount       int64  `json:"unpriced_count"`
+
+	// UnchargedAttemptCount Billable attempts no charge was resolved for.
+	UnchargedAttemptCount int64 `json:"uncharged_attempt_count"`
+	UnpricedCount         int64 `json:"unpriced_count"`
 }
 
 // UsageBreakdownResponse defines model for UsageBreakdownResponse.
@@ -10079,12 +10958,21 @@ type UsageCompletenessResponse struct {
 
 // UsagePointResponse defines model for UsagePointResponse.
 type UsagePointResponse struct {
-	Bucket                  time.Time                 `json:"bucket"`
-	CacheWrite1hInputTokens string                    `json:"cache_write_1h_input_tokens"`
-	CacheWrite5mInputTokens string                    `json:"cache_write_5m_input_tokens"`
-	CacheWriteInputTokens   string                    `json:"cache_write_input_tokens"`
-	CachedInputTokens       string                    `json:"cached_input_tokens"`
-	Currency                nullable.Nullable[string] `json:"currency,omitempty"`
+	// AllocatedCommitment This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.
+	AllocatedCommitment     string    `json:"allocated_commitment"`
+	AudioInputTokens        string    `json:"audio_input_tokens"`
+	AudioOutputTokens       string    `json:"audio_output_tokens"`
+	Bucket                  time.Time `json:"bucket"`
+	CacheWrite1hInputTokens string    `json:"cache_write_1h_input_tokens"`
+	CacheWrite5mInputTokens string    `json:"cache_write_5m_input_tokens"`
+	CacheWriteInputTokens   string    `json:"cache_write_input_tokens"`
+	CachedAudioInputTokens  string    `json:"cached_audio_input_tokens"`
+	CachedImageInputTokens  string    `json:"cached_image_input_tokens"`
+	CachedInputTokens       string    `json:"cached_input_tokens"`
+
+	// Charge Total consumer charge, an exact decimal string, null when nothing was charged.
+	Charge   nullable.Nullable[string] `json:"charge"`
+	Currency nullable.Nullable[string] `json:"currency,omitempty"`
 
 	// EstimatedAttemptCount Attempts counted in estimated_input_tokens and reported_input_tokens: those with both an estimate and observed input usage. It counts attempts, not requests.
 	EstimatedAttemptCount int64                     `json:"estimated_attempt_count"`
@@ -10092,6 +10980,8 @@ type UsagePointResponse struct {
 
 	// EstimatedInputTokens Input tokens admission estimated, summed only over the attempts that had both an estimate and observed usage. It covers the same attempts as reported_input_tokens; an attempt that was never estimated, or whose provider reported no input usage, is in neither.
 	EstimatedInputTokens string `json:"estimated_input_tokens"`
+	ImageInputTokens     string `json:"image_input_tokens"`
+	ImageOutputTokens    string `json:"image_output_tokens"`
 	IncompleteCount      int64  `json:"incomplete_count"`
 	InputTokens          string `json:"input_tokens"`
 	MediaUnits           string `json:"media_units"`
@@ -10100,7 +10990,10 @@ type UsagePointResponse struct {
 	// ReportedInputTokens Input tokens the providers reported for the attempts that estimated_input_tokens covers, so the two compare directly. input_tokens covers every attempt with observed usage, estimated or not. The estimation error is (estimated_input_tokens - reported_input_tokens) / reported_input_tokens, positive when admission over-estimated.
 	ReportedInputTokens string `json:"reported_input_tokens"`
 	RequestCount        int64  `json:"request_count"`
-	UnpricedCount       int64  `json:"unpriced_count"`
+
+	// UnchargedAttemptCount Billable attempts no charge was resolved for.
+	UnchargedAttemptCount int64 `json:"uncharged_attempt_count"`
+	UnpricedCount         int64 `json:"unpriced_count"`
 }
 
 // UsageRangeCoverageResponse defines model for UsageRangeCoverageResponse.
@@ -10112,13 +11005,22 @@ type UsageRangeCoverageResponse struct {
 
 // UsageSummaryResponse defines model for UsageSummaryResponse.
 type UsageSummaryResponse struct {
-	CacheWrite1hInputTokens string                     `json:"cache_write_1h_input_tokens"`
-	CacheWrite5mInputTokens string                     `json:"cache_write_5m_input_tokens"`
-	CacheWriteInputTokens   string                     `json:"cache_write_input_tokens"`
-	CachedInputTokens       string                     `json:"cached_input_tokens"`
-	Complete                bool                       `json:"complete"`
-	Coverage                UsageRangeCoverageResponse `json:"coverage"`
-	Currency                nullable.Nullable[string]  `json:"currency,omitempty"`
+	// AllocatedCommitment This row's share of the commitment amounts its committed attempts divide by list-cost weight, an exact decimal string.
+	AllocatedCommitment     string `json:"allocated_commitment"`
+	AudioInputTokens        string `json:"audio_input_tokens"`
+	AudioOutputTokens       string `json:"audio_output_tokens"`
+	CacheWrite1hInputTokens string `json:"cache_write_1h_input_tokens"`
+	CacheWrite5mInputTokens string `json:"cache_write_5m_input_tokens"`
+	CacheWriteInputTokens   string `json:"cache_write_input_tokens"`
+	CachedAudioInputTokens  string `json:"cached_audio_input_tokens"`
+	CachedImageInputTokens  string `json:"cached_image_input_tokens"`
+	CachedInputTokens       string `json:"cached_input_tokens"`
+
+	// Charge Total consumer charge, an exact decimal string, null when nothing was charged.
+	Charge   nullable.Nullable[string]  `json:"charge"`
+	Complete bool                       `json:"complete"`
+	Coverage UsageRangeCoverageResponse `json:"coverage"`
+	Currency nullable.Nullable[string]  `json:"currency,omitempty"`
 
 	// EstimatedAttemptCount Attempts counted in estimated_input_tokens and reported_input_tokens: those with both an estimate and observed input usage. It counts attempts, not requests.
 	EstimatedAttemptCount int64                     `json:"estimated_attempt_count"`
@@ -10126,6 +11028,8 @@ type UsageSummaryResponse struct {
 
 	// EstimatedInputTokens Input tokens admission estimated, summed only over the attempts that had both an estimate and observed usage. It covers the same attempts as reported_input_tokens; an attempt that was never estimated, or whose provider reported no input usage, is in neither.
 	EstimatedInputTokens string `json:"estimated_input_tokens"`
+	ImageInputTokens     string `json:"image_input_tokens"`
+	ImageOutputTokens    string `json:"image_output_tokens"`
 	IncompleteCount      int64  `json:"incomplete_count"`
 	InputTokens          string `json:"input_tokens"`
 	MediaUnits           string `json:"media_units"`
@@ -10142,7 +11046,10 @@ type UsageSummaryResponse struct {
 	// UncertainRequestMetadataGapCount Unclean gateway epochs make completeness unknown even when their last
 	// durable in-flight lower bound was zero.
 	UncertainRequestMetadataGapCount int64 `json:"uncertain_request_metadata_gap_count"`
-	UnpricedCount                    int64 `json:"unpriced_count"`
+
+	// UnchargedAttemptCount Billable attempts no charge was resolved for.
+	UnchargedAttemptCount int64 `json:"uncharged_attempt_count"`
+	UnpricedCount         int64 `json:"unpriced_count"`
 }
 
 // UsageTimeSeriesResponse defines model for UsageTimeSeriesResponse.
@@ -10966,6 +11873,21 @@ type ApprovePluginParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// ListPricingDiscountsParams defines parameters for ListPricingDiscounts.
+type ListPricingDiscountsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreatePricingDiscountParams defines parameters for CreatePricingDiscount.
+type CreatePricingDiscountParams struct {
+	// IdempotencyKey Unique creation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListPricingRevisionsParams defines parameters for ListPricingRevisions.
 type ListPricingRevisionsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -11381,6 +12303,36 @@ type ListProviderRevisionModelsParams struct {
 type RestoreProviderRevisionParams struct {
 	// IfMatch Current provider draft ETag
 	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ListRateCardsParams defines parameters for ListRateCards.
+type ListRateCardsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateRateCardParams defines parameters for CreateRateCard.
+type CreateRateCardParams struct {
+	// IdempotencyKey Unique creation key
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ListRateCardRevisionsParams defines parameters for ListRateCardRevisions.
+type ListRateCardRevisionsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateRateCardRevisionParams defines parameters for CreateRateCardRevision.
+type CreateRateCardRevisionParams struct {
+	// IdempotencyKey Unique creation key
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
@@ -12126,6 +13078,12 @@ type StreamPlaygroundJSONRequestBody = PlaygroundRequest
 // ApprovePluginJSONRequestBody defines body for ApprovePlugin for application/json ContentType.
 type ApprovePluginJSONRequestBody = PluginApprovalRequest
 
+// CreatePricingDiscountJSONRequestBody defines body for CreatePricingDiscount for application/json ContentType.
+type CreatePricingDiscountJSONRequestBody = DiscountRequest
+
+// PricingQuoteJSONRequestBody defines body for PricingQuote for application/json ContentType.
+type PricingQuoteJSONRequestBody = PricingQuoteRequest
+
 // CreatePricingRevisionJSONRequestBody defines body for CreatePricingRevision for application/json ContentType.
 type CreatePricingRevisionJSONRequestBody = PricingRevisionRequest
 
@@ -12218,6 +13176,12 @@ type CreateProviderNetworkCredentialJSONRequestBody = CreateNetworkCredentialReq
 
 // ProvisionUserJSONRequestBody defines body for ProvisionUser for application/json ContentType.
 type ProvisionUserJSONRequestBody = ProvisionUserRequest
+
+// CreateRateCardJSONRequestBody defines body for CreateRateCard for application/json ContentType.
+type CreateRateCardJSONRequestBody = RateCardRequest
+
+// CreateRateCardRevisionJSONRequestBody defines body for CreateRateCardRevision for application/json ContentType.
+type CreateRateCardRevisionJSONRequestBody = RateCardRevisionRequest
 
 // CreateRouteDraftJSONRequestBody defines body for CreateRouteDraft for application/json ContentType.
 type CreateRouteDraftJSONRequestBody = CreateRouteDraftRequest

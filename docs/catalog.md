@@ -17,8 +17,9 @@ Nothing in the catalog certifies a model or prices an attempt on its own.
 
 ## Format
 
-The document is `openllmproxy.dev/catalog/v1`, defined by
-[`internal/catalog/schema.json`](../internal/catalog/schema.json):
+The document is `openllmproxy.dev/catalog/v2`, defined by
+[`internal/catalog/schema.json`](../internal/catalog/schema.json). A v2
+catalog is refused by older releases as an unsupported version.
 
 | Member | Contents |
 | --- | --- |
@@ -27,13 +28,43 @@ The document is `openllmproxy.dev/catalog/v1`, defined by
 | `estimation` | Token-estimation factors for model families without a public tokenizer, each measured against the vendor's own counts. |
 | `vendors[].id` | An OLP vendor identifier, as `GET /api/v1/provider-vendors` lists. |
 | `vendors[].models[]` | The model identifier the vendor's API is sent, its aliases, an `organization/model` canonical identity, context and output limits, input and output modalities, documented capability hints, and documented deprecation and retirement dates. |
-| `prices[]` | One price per operation in every component OLP prices: input, cached input, cache writes, output, and a unit price per image, second of audio or video, character of speech input, or search unit. |
-| `unrepresentable[]` | Every component the vendor charges that OLP cannot yet price, such as long-context tiers, batch discounts, audio tokens or regional uplifts, in the vendor's own terms. |
+| `prices[]` | One price per operation in every component OLP prices, exactly as a [pricing revision](pricing.md#price-components) declares them: the twelve per-million token rates (input, cached input, the three cache writes, output, audio and image input/output with their cached shares), a `unit_price` per image, second of audio or video, character of speech input, or search unit, `per_request`, `tool_calls` fees, input-token `tiers`, time-of-day `windows`, and `batch_multiplier`. |
+| `unrepresentable[]` | Every component the vendor charges that OLP cannot yet price, in the vendor's own terms — a closed vocabulary, and never a component a price can carry. |
 | `provenance` | On every model, price, lifecycle and factor: the HTTPS page it was transcribed from and when it was observed. |
 
+`unrepresentable[].component` names one of:
+
+| Component | The vendor structure OLP cannot price |
+| --- | --- |
+| `ambiguous` | The vendor's figures contradict each other or the model's other rates. |
+| `batch_rates` | Batch prices a batch multiplier does not express, or does not demonstrably cover. |
+| `cache_storage` | Charges for holding cached context over time. |
+| `conditions` | Rates or fees that apply only under conditions usage does not record. |
+| `free_allowance` | Free quotas, trials or credits. |
+| `holiday_calendar` | Rates that change on public holidays. |
+| `media_units` | Media pricing by resolution, duration or quality beyond one unit price. |
+| `minimum_charge` | Minimum billed quantities. |
+| `plan_pricing` | Rates that depend on a subscription plan. |
+| `prepaid_credits` | Prepaid packs or credit currencies. |
+| `promotion` | Time-limited prices and their scheduled change. |
+| `regional_uplift` | Rates that differ by region, endpoint or data residency. |
+| `service_tier` | Rates of other service tiers such as priority, flex or reserved. |
+| `thinking_mode` | Separate rates for reasoning or thinking output. |
+| `tool_usage` | Server-side tool charges not billed per metered invocation. |
+| `unpublished_rates` | Rates a vendor names but does not publish. |
+| `video_input` | Video input rates distinct from image input; video tokens are metered as image shares. |
+
 Prices are decimal strings with no redundant zeros. A catalog validates only if
-every model has a price, every cache rate has an input rate, identifiers and
+every model has a price, every cache rate has an input rate, every tier names
+exactly the per-million rates its entry does at a strictly increasing positive
+threshold, window periods do not overlap on any shared day, identifiers and
 aliases are unique within a vendor, and nothing was observed after publication.
+
+Vendor documents write thresholds inconsistently. A `K` a vendor writes is
+read as 1,024 for Alibaba Cloud (DashScope), BytePlus and MiniMax — whose exact
+figures, and their resellers', use binary multiples — and as 1,000 elsewhere.
+"Reaches" or "at least" thresholds transcribe as one less than the stated
+count, because a tier applies above its threshold.
 
 ## Canonical form and signature
 

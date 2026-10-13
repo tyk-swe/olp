@@ -186,6 +186,10 @@ func (s *Server) planUnary(ctx context.Context, x *execution) *Error {
 		if incompatible != nil {
 			return requestError(incompatible)
 		}
+		x.noteCostExceeded(plan)
+		if x.costExcluded {
+			return costLimitExceeded()
+		}
 		return selectionError(&runtime.SelectionError{Code: runtime.NoEligibleTargets}, x.route.Slug)
 	}
 	return nil

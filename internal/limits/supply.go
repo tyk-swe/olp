@@ -267,7 +267,13 @@ func AddSupplyCostDelta(ctx context.Context, tx pgx.Tx, ownerID string, observed
 	if _, err := uuid.Parse(ownerID); err != nil {
 		return CostSnapshot{}, fmt.Errorf("supply owner ID %q is not a UUID", ownerID)
 	}
-	return addOwnerDelta(ctx, tx, addSupplyCostDeltaSQL, ownerID, observedAt, cost, unpriced)
+	if !validDecimal(cost) {
+		return CostSnapshot{}, fmt.Errorf("cost delta %q is not a non-negative decimal with at most 12 fractional digits", cost)
+	}
+	if unpriced < 0 || unpriced > maxLuaInteger {
+		return CostSnapshot{}, fmt.Errorf("unpriced attempt count %d is out of range", unpriced)
+	}
+	return scanSnapshot(tx.QueryRow(ctx, addSupplyCostDeltaSQL, ownerID, cost, unpriced, observedAt))
 }
 
 // supplySnapshotsSQL keeps the current windows of every capped owner present,

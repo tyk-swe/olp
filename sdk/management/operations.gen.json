@@ -726,6 +726,14 @@
             "require_zero_data_retention": {
               "default": false,
               "type": "boolean"
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -887,6 +895,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -997,6 +1013,106 @@
                 "string",
                 "null"
               ]
+            },
+            "audio_input_per_million": {
+              "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "per_request": {
+              "description": "A fixed fee charged once per successful attempt.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "batch_multiplier": {
+              "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_calls": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceToolCalls"
+                }
+              ]
+            },
+            "tiers": {
+              "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "items": {
+                    "$ref": "#/$defs/PriceTier"
+                  },
+                  "maxItems": 8,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              ]
+            },
+            "windows": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceWindows"
+                }
+              ]
             }
           },
           "required": [
@@ -1012,7 +1128,190 @@
             "cache_write_5m_input_per_million",
             "cache_write_1h_input_per_million",
             "unit_price",
-            "currency"
+            "currency",
+            "audio_input_per_million",
+            "cached_audio_input_per_million",
+            "audio_output_per_million",
+            "image_input_per_million",
+            "cached_image_input_per_million",
+            "image_output_per_million",
+            "per_request",
+            "batch_multiplier",
+            "tool_calls",
+            "tiers",
+            "windows"
+          ],
+          "type": "object"
+        },
+        "PriceToolCalls": {
+          "additionalProperties": {
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "description": "Fee per metered server-side tool invocation, keyed by tool name.",
+          "maxProperties": 16,
+          "minProperties": 1,
+          "type": "object"
+        },
+        "PriceTier": {
+          "additionalProperties": false,
+          "description": "Per-million rates that apply once an attempt's input tokens exceed above_input_tokens. A tier replaces the entry's whole per-million rate set, so it names exactly the per-million fields the entry names.",
+          "properties": {
+            "above_input_tokens": {
+              "description": "Input tokens per attempt above which this tier's rates apply.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_per_million": {
+              "description": "Input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_input_per_million": {
+              "description": "Cached input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_input_per_million": {
+              "description": "Generic cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_5m_input_per_million": {
+              "description": "5-minute TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_1h_input_per_million": {
+              "description": "1-hour TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "output_per_million": {
+              "description": "Output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_input_per_million": {
+              "description": "Audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Cached audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Audio output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Cached image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Image output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "above_input_tokens"
+          ],
+          "type": "object"
+        },
+        "PriceWindows": {
+          "additionalProperties": false,
+          "description": "Time-of-day and day-of-week multipliers evaluated in the named zone at the attempt's start.",
+          "properties": {
+            "periods": {
+              "items": {
+                "$ref": "#/$defs/PriceWindowPeriod"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "time_zone": {
+              "description": "IANA time zone the periods are evaluated in, for example America/New_York.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "time_zone",
+            "periods"
+          ],
+          "type": "object"
+        },
+        "PriceWindowPeriod": {
+          "additionalProperties": false,
+          "properties": {
+            "days": {
+              "description": "ISO weekdays the period applies on: 1 is Monday, 7 is Sunday.",
+              "items": {
+                "maximum": 7,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 7,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "end": {
+              "description": "Local time the period ends at, exclusive; \"24:00\" runs through midnight.",
+              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+              "type": "string"
+            },
+            "multiplier": {
+              "description": "Multiplier applied to the attempt's whole usage charge.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "start": {
+              "description": "Local time the period starts at, inclusive.",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "days",
+            "start",
+            "end",
+            "multiplier"
           ],
           "type": "object"
         },
@@ -1149,6 +1448,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         },
@@ -1223,6 +1530,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         },
@@ -1500,6 +1815,9 @@
                   "$ref": "#/$defs/HealthProbe"
                 }
               ]
+            },
+            "commitment": {
+              "$ref": "#/$defs/Commitment"
             }
           },
           "type": "object"
@@ -1855,6 +2173,31 @@
           },
           "required": [
             "interval_seconds"
+          ],
+          "type": "object"
+        },
+        "Commitment": {
+          "additionalProperties": false,
+          "description": "Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.",
+          "properties": {
+            "amount": {
+              "description": "The commitment amount, a positive decimal string.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "period": {
+              "description": "The UTC calendar period the amount covers.",
+              "enum": [
+                "hour",
+                "day",
+                "month"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "amount",
+            "period"
           ],
           "type": "object"
         },
@@ -3680,6 +4023,14 @@
                 "$ref": "#/$defs/RegionalRateLimits"
               },
               "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           },
           "required": [
@@ -3781,6 +4132,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         },
@@ -3937,6 +4296,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           },
           "required": [
@@ -5334,6 +5701,102 @@
     }
   },
   {
+    "name": "create_pricing_discount",
+    "group": "pricing",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/pricing/discounts",
+    "description": "create pricing discount",
+    "scopes": [
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique creation key"
+        },
+        "body": {
+          "$ref": "#/$defs/DiscountRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "DiscountRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "provider_kind": {
+              "$ref": "#/$defs/ProviderKind"
+            },
+            "vendor_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provider_id": {
+              "format": "uuid",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "multiplier": {
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "effective_at": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider_kind",
+            "multiplier"
+          ],
+          "type": "object"
+        },
+        "ProviderKind": {
+          "enum": [
+            "openai",
+            "anthropic",
+            "gemini",
+            "vertex_ai",
+            "bedrock",
+            "sagemaker",
+            "watsonx",
+            "azure_openai",
+            "openai_compatible",
+            "plugin"
+          ],
+          "type": "string",
+          "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
+        }
+      }
+    }
+  },
+  {
     "name": "create_pricing_revision",
     "group": "pricing",
     "method": "POST",
@@ -5468,6 +5931,98 @@
                 "string",
                 "null"
               ]
+            },
+            "audio_input_per_million": {
+              "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "per_request": {
+              "description": "A fixed fee charged once per successful attempt.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "batch_multiplier": {
+              "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_calls": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceToolCalls"
+                }
+              ]
+            },
+            "tiers": {
+              "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "items": {
+                    "$ref": "#/$defs/PriceTier"
+                  },
+                  "maxItems": 8,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              ]
+            },
+            "windows": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceWindows"
+                }
+              ]
             }
           },
           "required": [
@@ -5498,6 +6053,178 @@
           ],
           "type": "string",
           "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
+        },
+        "PriceToolCalls": {
+          "additionalProperties": {
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "description": "Fee per metered server-side tool invocation, keyed by tool name.",
+          "maxProperties": 16,
+          "minProperties": 1,
+          "type": "object"
+        },
+        "PriceTier": {
+          "additionalProperties": false,
+          "description": "Per-million rates that apply once an attempt's input tokens exceed above_input_tokens. A tier replaces the entry's whole per-million rate set, so it names exactly the per-million fields the entry names.",
+          "properties": {
+            "above_input_tokens": {
+              "description": "Input tokens per attempt above which this tier's rates apply.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_per_million": {
+              "description": "Input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_input_per_million": {
+              "description": "Cached input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_input_per_million": {
+              "description": "Generic cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_5m_input_per_million": {
+              "description": "5-minute TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_1h_input_per_million": {
+              "description": "1-hour TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "output_per_million": {
+              "description": "Output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_input_per_million": {
+              "description": "Audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Cached audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Audio output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Cached image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Image output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "above_input_tokens"
+          ],
+          "type": "object"
+        },
+        "PriceWindows": {
+          "additionalProperties": false,
+          "description": "Time-of-day and day-of-week multipliers evaluated in the named zone at the attempt's start.",
+          "properties": {
+            "periods": {
+              "items": {
+                "$ref": "#/$defs/PriceWindowPeriod"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "time_zone": {
+              "description": "IANA time zone the periods are evaluated in, for example America/New_York.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "time_zone",
+            "periods"
+          ],
+          "type": "object"
+        },
+        "PriceWindowPeriod": {
+          "additionalProperties": false,
+          "properties": {
+            "days": {
+              "description": "ISO weekdays the period applies on: 1 is Monday, 7 is Sunday.",
+              "items": {
+                "maximum": 7,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 7,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "end": {
+              "description": "Local time the period ends at, exclusive; \"24:00\" runs through midnight.",
+              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+              "type": "string"
+            },
+            "multiplier": {
+              "description": "Multiplier applied to the attempt's whole usage charge.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "start": {
+              "description": "Local time the period starts at, inclusive.",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "days",
+            "start",
+            "end",
+            "multiplier"
+          ],
+          "type": "object"
         }
       }
     }
@@ -5928,6 +6655,9 @@
                   "$ref": "#/$defs/HealthProbe"
                 }
               ]
+            },
+            "commitment": {
+              "$ref": "#/$defs/Commitment"
             }
           },
           "type": "object"
@@ -6286,6 +7016,31 @@
           ],
           "type": "object"
         },
+        "Commitment": {
+          "additionalProperties": false,
+          "description": "Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.",
+          "properties": {
+            "amount": {
+              "description": "The commitment amount, a positive decimal string.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "period": {
+              "description": "The UTC calendar period the amount covers.",
+              "enum": [
+                "hour",
+                "day",
+                "month"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "amount",
+            "period"
+          ],
+          "type": "object"
+        },
         "ExternalCredentialReference": {
           "type": "object",
           "additionalProperties": false,
@@ -6415,6 +7170,545 @@
           },
           "required": [
             "credential"
+          ],
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "create_rate_card",
+    "group": "pricing",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/rate-cards",
+    "description": "create rate card",
+    "scopes": [
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique creation key"
+        },
+        "body": {
+          "$ref": "#/$defs/RateCardRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "RateCardRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "owner": {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "installation",
+                    "organization",
+                    "project"
+                  ],
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Organization or project identifier, required unless kind is installation.",
+                  "format": "uuid",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "owner"
+          ],
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "create_rate_card_revision",
+    "group": "pricing",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/rate-cards/{rate_card_id}/revisions",
+    "description": "create rate card revision",
+    "scopes": [
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "rate_card_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "rate_card_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "rate_card_id"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique creation key"
+        },
+        "body": {
+          "$ref": "#/$defs/RateCardRevisionRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "RateCardRevisionRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "effective_at": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "markup": {
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "prices": {
+              "items": {
+                "$ref": "#/$defs/RateCardPriceEntry"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "markup"
+          ],
+          "type": "object"
+        },
+        "RateCardPriceEntry": {
+          "additionalProperties": false,
+          "description": "An explicit card rate: a price entry scoped by connector kind, optional vendor, model and operation, never a provider.",
+          "properties": {
+            "cache_write_1h_input_per_million": {
+              "description": "Rate for the 1-hour TTL share of cache writes. Omit to bill\nit at the generic cache-write rate, then the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_5m_input_per_million": {
+              "description": "Rate for the 5-minute TTL share of cache writes. Omit to bill\nit at the generic cache-write rate, then the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_input_per_million": {
+              "description": "Rate for the generic cache-write share of the input tokens.\nOmit to bill cache writes at the full input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_input_per_million": {
+              "description": "Rate for the cached share of the input tokens. Omit to bill cached\ntokens at the full input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "currency": {
+              "type": "string",
+              "description": "Installation currency. Omit to use the configured installation currency."
+            },
+            "input_per_million": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/$defs/PriceOperation"
+            },
+            "output_per_million": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provider_kind": {
+              "$ref": "#/$defs/ProviderKind"
+            },
+            "unit_price": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "vendor_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_input_per_million": {
+              "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "per_request": {
+              "description": "A fixed fee charged once per successful attempt.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "batch_multiplier": {
+              "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_calls": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceToolCalls"
+                }
+              ]
+            },
+            "tiers": {
+              "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "items": {
+                    "$ref": "#/$defs/PriceTier"
+                  },
+                  "maxItems": 8,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              ]
+            },
+            "windows": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceWindows"
+                }
+              ]
+            },
+            "provider_id": {
+              "description": "Always null on a card rate: cards price for every provider of the kind.",
+              "format": "uuid",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "provider_kind",
+            "model",
+            "operation"
+          ],
+          "type": "object"
+        },
+        "PriceOperation": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,95}$",
+          "description": "An operation registered by this release, including generation, embeddings, rerank, moderation, classification, scoring and token_count. Unknown operations are rejected."
+        },
+        "ProviderKind": {
+          "enum": [
+            "openai",
+            "anthropic",
+            "gemini",
+            "vertex_ai",
+            "bedrock",
+            "sagemaker",
+            "watsonx",
+            "azure_openai",
+            "openai_compatible",
+            "plugin"
+          ],
+          "type": "string",
+          "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
+        },
+        "PriceToolCalls": {
+          "additionalProperties": {
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "description": "Fee per metered server-side tool invocation, keyed by tool name.",
+          "maxProperties": 16,
+          "minProperties": 1,
+          "type": "object"
+        },
+        "PriceTier": {
+          "additionalProperties": false,
+          "description": "Per-million rates that apply once an attempt's input tokens exceed above_input_tokens. A tier replaces the entry's whole per-million rate set, so it names exactly the per-million fields the entry names.",
+          "properties": {
+            "above_input_tokens": {
+              "description": "Input tokens per attempt above which this tier's rates apply.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_per_million": {
+              "description": "Input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_input_per_million": {
+              "description": "Cached input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_input_per_million": {
+              "description": "Generic cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_5m_input_per_million": {
+              "description": "5-minute TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_1h_input_per_million": {
+              "description": "1-hour TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "output_per_million": {
+              "description": "Output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_input_per_million": {
+              "description": "Audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Cached audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Audio output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Cached image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Image output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "above_input_tokens"
+          ],
+          "type": "object"
+        },
+        "PriceWindows": {
+          "additionalProperties": false,
+          "description": "Time-of-day and day-of-week multipliers evaluated in the named zone at the attempt's start.",
+          "properties": {
+            "periods": {
+              "items": {
+                "$ref": "#/$defs/PriceWindowPeriod"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "time_zone": {
+              "description": "IANA time zone the periods are evaluated in, for example America/New_York.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "time_zone",
+            "periods"
+          ],
+          "type": "object"
+        },
+        "PriceWindowPeriod": {
+          "additionalProperties": false,
+          "properties": {
+            "days": {
+              "description": "ISO weekdays the period applies on: 1 is Monday, 7 is Sunday.",
+              "items": {
+                "maximum": 7,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 7,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "end": {
+              "description": "Local time the period ends at, exclusive; \"24:00\" runs through midnight.",
+              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+              "type": "string"
+            },
+            "multiplier": {
+              "description": "Multiplier applied to the attempt's whole usage charge.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "start": {
+              "description": "Local time the period starts at, inclusive.",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "days",
+            "start",
+            "end",
+            "multiplier"
           ],
           "type": "object"
         }
@@ -7935,6 +9229,14 @@
             "require_zero_data_retention": {
               "default": false,
               "type": "boolean"
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -8096,6 +9398,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -10151,6 +11461,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -11779,6 +13097,54 @@
           "required": [
             "provider_id",
             "revision_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_rate_card",
+    "group": "pricing",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/rate-cards/{rate_card_id}",
+    "description": "get rate card",
+    "scopes": [
+      [
+        "usage",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "rate_card_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "rate_card_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "rate_card_id"
           ]
         }
       },
@@ -14258,6 +15624,59 @@
     }
   },
   {
+    "name": "list_pricing_discounts",
+    "group": "pricing",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/pricing/discounts",
+    "description": "list pricing discounts",
+    "scopes": [
+      [
+        "usage",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "list_pricing_revisions",
     "group": "pricing",
     "method": "GET",
@@ -15362,6 +16781,134 @@
             },
             "search": {
               "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_rate_card_revisions",
+    "group": "pricing",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/rate-cards/{rate_card_id}/revisions",
+    "description": "list rate card revisions",
+    "scopes": [
+      [
+        "usage",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "rate_card_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "rate_card_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "rate_card_id"
+          ]
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "list_rate_cards",
+    "group": "pricing",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/rate-cards",
+    "description": "list rate cards",
+    "scopes": [
+      [
+        "usage",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
             }
           },
           "additionalProperties": false
@@ -17215,6 +18762,14 @@
             "require_zero_data_retention": {
               "default": false,
               "type": "boolean"
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -17376,6 +18931,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -17486,6 +19049,106 @@
                 "string",
                 "null"
               ]
+            },
+            "audio_input_per_million": {
+              "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "per_request": {
+              "description": "A fixed fee charged once per successful attempt.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "batch_multiplier": {
+              "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_calls": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceToolCalls"
+                }
+              ]
+            },
+            "tiers": {
+              "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "items": {
+                    "$ref": "#/$defs/PriceTier"
+                  },
+                  "maxItems": 8,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              ]
+            },
+            "windows": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceWindows"
+                }
+              ]
             }
           },
           "required": [
@@ -17501,7 +19164,190 @@
             "cache_write_5m_input_per_million",
             "cache_write_1h_input_per_million",
             "unit_price",
-            "currency"
+            "currency",
+            "audio_input_per_million",
+            "cached_audio_input_per_million",
+            "audio_output_per_million",
+            "image_input_per_million",
+            "cached_image_input_per_million",
+            "image_output_per_million",
+            "per_request",
+            "batch_multiplier",
+            "tool_calls",
+            "tiers",
+            "windows"
+          ],
+          "type": "object"
+        },
+        "PriceToolCalls": {
+          "additionalProperties": {
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "description": "Fee per metered server-side tool invocation, keyed by tool name.",
+          "maxProperties": 16,
+          "minProperties": 1,
+          "type": "object"
+        },
+        "PriceTier": {
+          "additionalProperties": false,
+          "description": "Per-million rates that apply once an attempt's input tokens exceed above_input_tokens. A tier replaces the entry's whole per-million rate set, so it names exactly the per-million fields the entry names.",
+          "properties": {
+            "above_input_tokens": {
+              "description": "Input tokens per attempt above which this tier's rates apply.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_per_million": {
+              "description": "Input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_input_per_million": {
+              "description": "Cached input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_input_per_million": {
+              "description": "Generic cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_5m_input_per_million": {
+              "description": "5-minute TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_1h_input_per_million": {
+              "description": "1-hour TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "output_per_million": {
+              "description": "Output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_input_per_million": {
+              "description": "Audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Cached audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Audio output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Cached image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Image output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "above_input_tokens"
+          ],
+          "type": "object"
+        },
+        "PriceWindows": {
+          "additionalProperties": false,
+          "description": "Time-of-day and day-of-week multipliers evaluated in the named zone at the attempt's start.",
+          "properties": {
+            "periods": {
+              "items": {
+                "$ref": "#/$defs/PriceWindowPeriod"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "time_zone": {
+              "description": "IANA time zone the periods are evaluated in, for example America/New_York.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "time_zone",
+            "periods"
+          ],
+          "type": "object"
+        },
+        "PriceWindowPeriod": {
+          "additionalProperties": false,
+          "properties": {
+            "days": {
+              "description": "ISO weekdays the period applies on: 1 is Monday, 7 is Sunday.",
+              "items": {
+                "maximum": 7,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 7,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "end": {
+              "description": "Local time the period ends at, exclusive; \"24:00\" runs through midnight.",
+              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+              "type": "string"
+            },
+            "multiplier": {
+              "description": "Multiplier applied to the attempt's whole usage charge.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "start": {
+              "description": "Local time the period starts at, inclusive.",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "days",
+            "start",
+            "end",
+            "multiplier"
           ],
           "type": "object"
         },
@@ -17638,6 +19484,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         },
@@ -17712,6 +19566,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         },
@@ -17989,6 +19851,9 @@
                   "$ref": "#/$defs/HealthProbe"
                 }
               ]
+            },
+            "commitment": {
+              "$ref": "#/$defs/Commitment"
             }
           },
           "type": "object"
@@ -18344,6 +20209,31 @@
           },
           "required": [
             "interval_seconds"
+          ],
+          "type": "object"
+        },
+        "Commitment": {
+          "additionalProperties": false,
+          "description": "Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.",
+          "properties": {
+            "amount": {
+              "description": "The commitment amount, a positive decimal string.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "period": {
+              "description": "The UTC calendar period the amount covers.",
+              "enum": [
+                "hour",
+                "day",
+                "month"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "amount",
+            "period"
           ],
           "type": "object"
         },
@@ -19893,6 +21783,164 @@
     }
   },
   {
+    "name": "pricing_quote",
+    "group": "usage",
+    "method": "POST",
+    "read_only": true,
+    "path": "/api/v1/pricing/quote",
+    "description": "pricing quote",
+    "scopes": [
+      [
+        "usage",
+        "installation"
+      ]
+    ],
+    "parameters": [],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/PricingQuoteRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "body"
+      ],
+      "$defs": {
+        "PricingQuoteRequest": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "provider_id",
+            "model",
+            "operation",
+            "usage"
+          ],
+          "properties": {
+            "provider_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "model": {
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "usage": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Attempt usage dimensions, the same members accounting records.",
+              "properties": {
+                "input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "output_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "cached_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "cache_write_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "cache_write_5m_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "cache_write_1h_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "audio_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "cached_audio_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "audio_output_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "image_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "cached_image_input_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "image_output_tokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "media_units": {
+                  "type": "string",
+                  "description": "Exact decimal media units, as the wire carries them."
+                },
+                "tool_calls": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1
+                  }
+                },
+                "batch": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "started_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time",
+              "description": "Defaults to now."
+            },
+            "successful": {
+              "type": "boolean",
+              "description": "Defaults to true."
+            },
+            "project_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid",
+              "default": null,
+              "description": "The consumer project the charge is priced for; absent, the installation's card applies."
+            }
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "probe_provider",
     "group": "providers",
     "method": "POST",
@@ -20360,6 +22408,98 @@
                 "string",
                 "null"
               ]
+            },
+            "audio_input_per_million": {
+              "description": "Rate for the audio share of the input tokens. Omit to bill audio input at the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Rate for the cached share of audio input tokens. Omit to bill it at the cached input rate, then the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Rate for the audio share of the output tokens. Omit to bill it at the output rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Rate for the image share of the input tokens. Omit to bill image input at the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Rate for the cached share of image input tokens. Omit to bill it at the cached input rate, then the input rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Rate for the image share of the output tokens. Omit to bill it at the output rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "per_request": {
+              "description": "A fixed fee charged once per successful attempt.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "batch_multiplier": {
+              "description": "Multiplier applied to the whole usage charge of usage marked as batch. Usage marked batch with no multiplier is unpriced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_calls": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceToolCalls"
+                }
+              ]
+            },
+            "tiers": {
+              "description": "Input-token tiers, ascending by above_input_tokens. The highest exceeded tier replaces the entry's per-million rate set.",
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "items": {
+                    "$ref": "#/$defs/PriceTier"
+                  },
+                  "maxItems": 8,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              ]
+            },
+            "windows": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/PriceWindows"
+                }
+              ]
             }
           },
           "required": [
@@ -20390,6 +22530,178 @@
           ],
           "type": "string",
           "description": "Connector kind of a provider. A `plugin` provider's profile is supplied by an installed provider plugin, so no built-in kind's endpoint, discovery, API-key header or vendor prices apply to it."
+        },
+        "PriceToolCalls": {
+          "additionalProperties": {
+            "pattern": "^[0-9]+(\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "description": "Fee per metered server-side tool invocation, keyed by tool name.",
+          "maxProperties": 16,
+          "minProperties": 1,
+          "type": "object"
+        },
+        "PriceTier": {
+          "additionalProperties": false,
+          "description": "Per-million rates that apply once an attempt's input tokens exceed above_input_tokens. A tier replaces the entry's whole per-million rate set, so it names exactly the per-million fields the entry names.",
+          "properties": {
+            "above_input_tokens": {
+              "description": "Input tokens per attempt above which this tier's rates apply.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input_per_million": {
+              "description": "Input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_input_per_million": {
+              "description": "Cached input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_input_per_million": {
+              "description": "Generic cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_5m_input_per_million": {
+              "description": "5-minute TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_write_1h_input_per_million": {
+              "description": "1-hour TTL cache-write token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "output_per_million": {
+              "description": "Output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_input_per_million": {
+              "description": "Audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_audio_input_per_million": {
+              "description": "Cached audio input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "audio_output_per_million": {
+              "description": "Audio output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_input_per_million": {
+              "description": "Image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cached_image_input_per_million": {
+              "description": "Cached image input token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "image_output_per_million": {
+              "description": "Image output token rate.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "above_input_tokens"
+          ],
+          "type": "object"
+        },
+        "PriceWindows": {
+          "additionalProperties": false,
+          "description": "Time-of-day and day-of-week multipliers evaluated in the named zone at the attempt's start.",
+          "properties": {
+            "periods": {
+              "items": {
+                "$ref": "#/$defs/PriceWindowPeriod"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array"
+            },
+            "time_zone": {
+              "description": "IANA time zone the periods are evaluated in, for example America/New_York.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "time_zone",
+            "periods"
+          ],
+          "type": "object"
+        },
+        "PriceWindowPeriod": {
+          "additionalProperties": false,
+          "properties": {
+            "days": {
+              "description": "ISO weekdays the period applies on: 1 is Monday, 7 is Sunday.",
+              "items": {
+                "maximum": 7,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 7,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "end": {
+              "description": "Local time the period ends at, exclusive; \"24:00\" runs through midnight.",
+              "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+              "type": "string"
+            },
+            "multiplier": {
+              "description": "Multiplier applied to the attempt's whole usage charge.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "start": {
+              "description": "Local time the period starts at, inclusive.",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "days",
+            "start",
+            "end",
+            "multiplier"
+          ],
+          "type": "object"
         }
       }
     }
@@ -20990,6 +23302,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         }
@@ -21097,6 +23417,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         }
@@ -21307,6 +23635,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         }
@@ -21523,6 +23859,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         }
@@ -21691,6 +24035,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         }
@@ -21827,6 +24179,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         }
@@ -22319,6 +24679,14 @@
             "require_zero_data_retention": {
               "default": false,
               "type": "boolean"
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -22480,6 +24848,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -24316,6 +26692,14 @@
             "require_zero_data_retention": {
               "default": false,
               "type": "boolean"
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -24477,6 +26861,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -25323,6 +27715,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           },
           "type": "object"
@@ -27743,6 +30143,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -28123,6 +30531,14 @@
                   "$ref": "#/$defs/AdmissionPriority"
                 }
               ]
+            },
+            "max_cost": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null,
+              "description": "Maximum worst-case attempt cost as a decimal string. The effective ceiling is the narrowest value every scope sets; a candidate that cannot be bounded or exceeds it is ineligible with reason cost_limit_exceeded."
             }
           },
           "type": "object"
@@ -28602,6 +31018,14 @@
                 "$ref": "#/$defs/RegionalRateLimits"
               },
               "description": "Limits keyed by deployment region. Unlisted regions inherit the complete default rate and concurrency values; no automatic division. Templates still cap overrides. Cost budgets stay global."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           },
           "type": "object"
@@ -28700,6 +31124,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           }
         },
@@ -28869,6 +31301,14 @@
                 "null"
               ],
               "description": "Optional ISO-Monday weekly cost ceiling. Independent of daily and monthly ceilings; unknown accrued spend fails closed."
+            },
+            "cost_basis": {
+              "type": "string",
+              "enum": [
+                "cost",
+                "charge"
+              ],
+              "description": "Which amount the budget enforces: provider cost (default) or consumer charge."
             }
           },
           "type": "object"
@@ -30258,6 +32698,9 @@
                   "$ref": "#/$defs/HealthProbe"
                 }
               ]
+            },
+            "commitment": {
+              "$ref": "#/$defs/Commitment"
             }
           },
           "type": "object"
@@ -30613,6 +33056,31 @@
           },
           "required": [
             "interval_seconds"
+          ],
+          "type": "object"
+        },
+        "Commitment": {
+          "additionalProperties": false,
+          "description": "Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.",
+          "properties": {
+            "amount": {
+              "description": "The commitment amount, a positive decimal string.",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "type": "string"
+            },
+            "period": {
+              "description": "The UTC calendar period the amount covers.",
+              "enum": [
+                "hour",
+                "day",
+                "month"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "amount",
+            "period"
           ],
           "type": "object"
         }

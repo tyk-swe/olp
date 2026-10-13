@@ -92,6 +92,9 @@
       <strong class:unpriced={detail.data.unpriced}
         >{formatCost(detail.data.estimated_cost, detail.data.currency)}</strong
       >
+      {#if detail.data.charge != null}<small
+          >Charge {formatCost(detail.data.charge, detail.data.currency)}</small
+        >{/if}
       {#if detail.data.unpriced}<small class="unpriced"
           >Unpriced — no published price covered part of this request.</small
         >{/if}
@@ -439,6 +442,69 @@
                   <dt>Output tokens</dt>
                   <dd>{formatInteger(attempt.output_tokens)}</dd>
                 </div>
+                {#if attempt.audio_input_tokens != null || attempt.cached_audio_input_tokens != null || attempt.audio_output_tokens != null || attempt.image_input_tokens != null || attempt.cached_image_input_tokens != null || attempt.image_output_tokens != null}
+                  <div>
+                    <dt>Audio tokens</dt>
+                    <dd>
+                      {formatInteger(attempt.audio_input_tokens)} in · {formatInteger(
+                        attempt.audio_output_tokens
+                      )} out{#if attempt.cached_audio_input_tokens != null}
+                        <small
+                          >{formatInteger(attempt.cached_audio_input_tokens)} cached
+                          input</small
+                        >{/if}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Image tokens</dt>
+                    <dd>
+                      {formatInteger(attempt.image_input_tokens)} in · {formatInteger(
+                        attempt.image_output_tokens
+                      )} out{#if attempt.cached_image_input_tokens != null}
+                        <small
+                          >{formatInteger(attempt.cached_image_input_tokens)} cached
+                          input</small
+                        >{/if}
+                    </dd>
+                  </div>
+                {/if}
+                {#if attempt.tool_calls != null && Object.keys(attempt.tool_calls).length > 0}
+                  <div>
+                    <dt>Tool calls</dt>
+                    <dd>
+                      {#each Object.entries(attempt.tool_calls) as [tool, count] (tool)}
+                        <small>{tool} × {formatInteger(count)}</small>
+                      {/each}
+                    </dd>
+                  </div>
+                {/if}
+                {#if attempt.batch === true}
+                  <div>
+                    <dt>Batch pricing</dt>
+                    <dd>Yes — settled at batch terms</dd>
+                  </div>
+                {/if}
+                {#if attempt.pricing_components && attempt.pricing_components.length > 0}
+                  <div>
+                    <dt>Priced components</dt>
+                    <dd class="mono">
+                      {attempt.pricing_components.join(', ')}
+                    </dd>
+                  </div>
+                {/if}
+                {#if attempt.commitment_amount != null}
+                  <div>
+                    <dt>Commitment</dt>
+                    <dd>
+                      {formatCost(attempt.commitment_amount, attempt.currency)} per
+                      {attempt.commitment_period}
+                      <small>
+                        List-cost weight {attempt.commitment_weight ?? '—'};
+                        marginal cost is zero.
+                      </small>
+                    </dd>
+                  </div>
+                {/if}
                 <div>
                   <dt>Media units</dt>
                   <dd>{attempt.media_units ?? '—'}</dd>
@@ -466,6 +532,30 @@
                         ? 'Not applicable'
                         : 'Not recorded')}
                   </dd>
+                </div>
+                <div>
+                  <dt>Charge</dt>
+                  <dd>
+                    {attempt.charge != null
+                      ? formatCost(attempt.charge, attempt.currency)
+                      : attempt.charge_status === 'not_billable'
+                        ? 'Not applicable'
+                        : 'Not recorded'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Rate card revision</dt>
+                  <dd class="mono">
+                    {attempt.rate_card_revision_id ??
+                      (attempt.charge != null &&
+                      attempt.rate_card_revision_id == null
+                        ? 'No card'
+                        : 'Not recorded')}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Discount</dt>
+                  <dd class="mono">{attempt.discount_id ?? 'None'}</dd>
                 </div>
               </dl>
             {/if}

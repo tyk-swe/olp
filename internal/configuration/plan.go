@@ -1001,6 +1001,12 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			result.item("pricing", "pricing", "create", detail)
 		}
 	}
+	if err := s.planDiscounts(ctx, q, doc, result); err != nil {
+		return nil, err
+	}
+	if err := s.planRateCards(ctx, q, doc, result); err != nil {
+		return nil, err
+	}
 	result.sort()
 	if doc.RequireLocalMFA != nil {
 		var current bool
@@ -1031,12 +1037,7 @@ func (s *Server) pricingChanged(ctx context.Context, q access.Queryer, doc *Docu
 	}
 	current := PricingEntry{EffectiveAt: latest.EffectiveAt.Format(time.RFC3339)}
 	for _, price := range latest.Prices {
-		entry := PriceEntry{VendorID: price.VendorID, ProviderKind: price.ProviderKind, Model: price.Model, Operation: price.Operation,
-			InputPerMillion: price.InputPerMillion, CachedInputPerMillion: price.CachedInputPerMillion,
-			OutputPerMillion: price.OutputPerMillion, CacheWriteInputPerMillion: price.CacheWriteInputPerMillion,
-			CacheWrite5MInputPerMillion: price.CacheWrite5MInputPerMillion,
-			CacheWrite1HInputPerMillion: price.CacheWrite1HInputPerMillion,
-			UnitPrice:                   price.UnitPrice, Currency: price.Currency}
+		entry := priceEntryFromUsage(price)
 		if price.ProviderID != nil {
 			name := providerNames[*price.ProviderID]
 			entry.Provider = &name

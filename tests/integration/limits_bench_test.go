@@ -98,7 +98,7 @@ func BenchmarkLimitsPricedRequest(b *testing.B) {
 		if err != nil {
 			b.Fatalf("Reserve: %v", err)
 		}
-		lease.SetActualCost("0.1")
+		lease.SetActualCost("0.1", "0.1")
 		if err := lease.SettleCost(ctx); err != nil {
 			b.Fatalf("SettleCost: %v", err)
 		}

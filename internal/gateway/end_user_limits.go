@@ -58,11 +58,12 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *access.Autho
 			return nil, limitsUnavailable()
 		}
 		request := limits.Request{CostOwnerID: owner, CostIncreases: authority.BudgetIncreases[owner], LookupID: limits.EndUserLookup(owner),
+			CostBasis:         limits.Basis(policy.CostBasis),
 			RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute,
 			MaxConcurrency: policy.MaxConcurrency, DailyCostLimit: policy.DailyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
 			RequestedTokens: estimate, LeaseTTL: ttl}
 		if policy.CostBudgeted() {
-			request.CostEstimate, request.RequestID = hold.amount, hold.requestID
+			request.CostEstimate, request.RequestID = hold.amountFor(request.CostBasis), hold.requestID
 		}
 		if policy.TokensPerMinute != nil && estimate > *policy.TokensPerMinute {
 			settleKey(ctx, chain, false, nil, a.logger())
@@ -83,7 +84,7 @@ func (a *Admission) reserveEndUsers(ctx context.Context, authority *access.Autho
 			if boundary.project {
 				name, param = "project end-user", "end_user.project"
 			}
-			return nil, budgetBoundaryError(rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate), name, param)
+			return nil, budgetBoundaryError(rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis), name, param)
 		}
 		if refusal := a.outage(authority.ID, policy.CostBudgeted(), err); refusal != nil {
 			settleKey(ctx, chain, false, nil, a.logger())

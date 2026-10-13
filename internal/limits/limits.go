@@ -131,6 +131,10 @@ const (
 	DimensionRequests    Dimension = "requests"
 	DimensionTokens      Dimension = "tokens"
 	DimensionConcurrency Dimension = "concurrency"
+	// Basis names which amount a budget enforces.
+	BasisCost   Basis = "cost"
+	BasisCharge Basis = "charge"
+
 	DimensionDailyCost   Dimension = "daily_cost"
 	DimensionWeeklyCost  Dimension = "weekly_cost"
 	DimensionMonthlyCost Dimension = "monthly_cost"
@@ -163,7 +167,9 @@ func (e *ServiceError) Unwrap() error { return e.Err }
 // ExceededError reports a budget that rejected the request. RetryAfter comes
 // from the script, which derived it from the server clock.
 type ExceededError struct {
-	Dimension  Dimension
+	Dimension Dimension
+	// Basis is the measure the refused owner enforces, so a refusal can name it.
+	Basis      Basis
 	RetryAfter time.Duration
 	// Estimate is set when a cost budget refused the request although it is not
 	// spent: what has accrued and what requests in flight hold leave no room for
@@ -193,6 +199,10 @@ func (e *InvalidRequestError) Error() string { return e.Reason }
 type Request struct {
 	// CostOwnerID identifies the cost budget owner. Provider connections and slots
 	// pass their own identifier: cost keys are only used when a cost limit is set.
+	// CostBasis chooses which amount the budget enforces: provider "cost" (the
+	// default) or consumer "charge". It selects the owner's key set outright —
+	// each basis keeps its own day, week, month, pending and expiry keys.
+	CostBasis   Basis
 	CostOwnerID string
 	// LookupID names the shared rate and concurrency counters.
 	LookupID          string
@@ -238,6 +248,32 @@ type Request struct {
 	// Share divides the rate and concurrency limits between admission
 	// classes. The zero Share leaves them undivided.
 	Share Share
+}
+
+// Basis is a consumer budget's measure: "cost" is what the provider bills,
+// "charge" what the consumer owes under its rate card. The empty basis is
+// cost; anything else is refused at validation.
+type Basis string
+
+// normalized reports the basis as it is used, which is cost when unset.
+func (b Basis) normalized() Basis {
+	if b == BasisCharge {
+		return BasisCharge
+	}
+	return BasisCost
+}
+
+// valid reports whether the basis names a measure Valkey keeps.
+func (b Basis) valid() bool {
+	return b == "" || b == BasisCost || b == BasisCharge
+}
+
+// Pick chooses the amount the basis enforces.
+func (b Basis) Pick(cost, charge string) string {
+	if b.normalized() == BasisCharge {
+		return charge
+	}
+	return cost
 }
 
 // Share is the part of a quota one admission class may hold once the quota is
@@ -376,6 +412,9 @@ func (r Request) Validate() error {
 			return &InvalidRequestError{Reason: "a cost estimate needs the request ID it will be accounted under"}
 		}
 	}
+	if !r.CostBasis.valid() {
+		return &InvalidRequestError{Reason: `cost basis must be "cost" or "charge"`}
+	}
 	return nil
 }
 
@@ -478,7 +517,7 @@ func (l *Limiter) keysFor(r Request) keys {
 		k.rate, k.concurrency = l.rateKeys(r.LookupID)
 	}
 	if r.HasCostBudget() {
-		prefix := l.costPrefix(r.CostOwnerID)
+		prefix := l.costPrefixFor(r.CostOwnerID, r.CostBasis)
 		k.dailyCost, k.monthlyCost = prefix+":day", prefix+":month"
 		k.weeklyCost = prefix + ":week"
 		k.pending, k.expiry = prefix+":pending", prefix+":expiry"
@@ -724,6 +763,7 @@ func (l *Limiter) reserveCost(ctx context.Context, r Request, scriptKeys keys) (
 					Dimension:  result.dimension,
 					RetryAfter: time.Duration(result.retryAfterMS) * time.Millisecond,
 					Estimate:   result.estimate,
+					Basis:      r.CostBasis,
 				}
 			case resultUninitialized:
 				return false, ErrUninitializedCost
@@ -886,19 +926,21 @@ func (le *Lease) CostOwnerIDs() []string {
 
 // GrowCost reserves the new total cost of a request without taking its rate or
 // concurrency allowance again. Earlier holds survive a refused increase and
-// settle with the original lease, including its budget group.
-func (le *Lease) GrowCost(ctx context.Context, amount, requestID string, ttl time.Duration) error {
+// settle with the original lease, including its budget group. Each owner in
+// the chain takes the amount its own basis enforces.
+func (le *Lease) GrowCost(ctx context.Context, cost, charge, requestID string, ttl time.Duration) error {
 	if le == nil {
 		return nil
 	}
-	if err := le.group.GrowCost(ctx, amount, requestID, ttl); err != nil {
+	if err := le.group.GrowCost(ctx, cost, charge, requestID, ttl); err != nil {
 		return err
 	}
 	if le.costRequest == nil {
 		return nil
 	}
 	r := *le.costRequest
-	r.CostEstimate, r.RequestID, r.LeaseTTL = amount, requestID, ttl
+	r.CostEstimate = r.CostBasis.Pick(cost, charge)
+	r.RequestID, r.LeaseTTL = requestID, ttl
 	r.RetainCostReservation = le.costReserved
 	keys := le.limiter.keysFor(r)
 	reserved, err := le.limiter.reserveCost(ctx, r, keys)
@@ -971,15 +1013,24 @@ func (le *Lease) HasCostReservation() bool {
 	return le != nil && (le.costReserved || le.group.HasCostReservation())
 }
 
-// SetActualCost records what the request cost, a canonical decimal string, for
-// SettleCost to replace its estimate with. The attached lease is a reservation
-// of the same request and takes the same amount.
-func (le *Lease) SetActualCost(amount string) {
+// SetActualCost records what the request cost and charged, canonical decimal
+// strings, for SettleCost to replace its estimate with. Each reservation takes
+// the amount its own basis enforces.
+func (le *Lease) SetActualCost(cost, charge string) {
 	if le == nil {
 		return
 	}
-	le.actualCost = amount
-	le.group.SetActualCost(amount)
+	le.actualCost = le.costBasis().Pick(cost, charge)
+	le.group.SetActualCost(cost, charge)
+}
+
+// costBasis is the basis the lease's cost owner enforces, cost when the lease
+// holds none.
+func (le *Lease) costBasis() Basis {
+	if le.costRequest == nil {
+		return ""
+	}
+	return le.costRequest.CostBasis
 }
 
 // SettleCost replaces the estimate with the recorded actual cost. It does nothing

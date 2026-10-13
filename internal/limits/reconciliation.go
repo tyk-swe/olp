@@ -100,14 +100,18 @@ func (l *Leader) Reconcile(ctx context.Context, limiter *Limiter, now time.Time)
 			}
 			continue
 		}
-		if daily || monthly {
-			report.KeysReconciled++
-		}
-		if daily {
-			report.DailyWindowsReconciled++
-		}
-		if monthly {
-			report.MonthlyWindowsReconciled++
+		// Accounting emits each owner's cost and charge snapshots as a pair;
+		// a key and its windows are reconciled once, on either basis.
+		if snapshot.Basis.normalized() == BasisCost {
+			if daily || monthly {
+				report.KeysReconciled++
+			}
+			if daily {
+				report.DailyWindowsReconciled++
+			}
+			if monthly {
+				report.MonthlyWindowsReconciled++
+			}
 		}
 	}
 	if failure != nil {

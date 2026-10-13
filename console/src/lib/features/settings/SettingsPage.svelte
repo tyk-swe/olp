@@ -8,6 +8,8 @@
   import PricingSourcesPanel from '$lib/features/usage/PricingSourcesPanel.svelte';
   import { settingsKeys } from '$lib/features/settings/settingsKeys';
   import PricingRevisionsPanel from '$lib/features/usage/PricingRevisionsPanel.svelte';
+  import DiscountsPanel from '$lib/features/usage/DiscountsPanel.svelte';
+  import RateCardsPanel from '$lib/features/usage/RateCardsPanel.svelte';
   import ObservabilityPanel from '$lib/features/observability/ObservabilityPanel.svelte';
 
   import { resolve } from '$app/paths';
@@ -311,6 +313,10 @@
 
 {#if services.gatewayAvailable}
   <PricingSourcesPanel />
+{/if}
+{#if services.gatewayAvailable}
+  <DiscountsPanel />
+  <RateCardsPanel />
 {/if}
 <PricingRevisionsPanel
   blocked={Boolean(savingKey)}

@@ -29,10 +29,11 @@ func (a *Admission) reserveRouteLimits(ctx context.Context, authority *access.Au
 	request := limits.Request{
 		CostOwnerID: owner, CostIncreases: authority.BudgetIncreases[owner], LookupID: limits.AggregateBudgetLookup(owner),
 		RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute, MaxConcurrency: policy.MaxConcurrency,
-		DailyCostLimit: policy.DailyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit, RequestedTokens: estimate, LeaseTTL: ttl,
+		DailyCostLimit: policy.DailyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
+		CostBasis: limits.Basis(policy.CostBasis), RequestedTokens: estimate, LeaseTTL: ttl,
 	}
 	if policy.CostBudgeted() {
-		request.CostEstimate, request.RequestID = hold.amount, hold.requestID
+		request.CostEstimate, request.RequestID = hold.amountFor(request.CostBasis), hold.requestID
 	}
 	decision, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
@@ -42,7 +43,7 @@ func (a *Admission) reserveRouteLimits(ctx context.Context, authority *access.Au
 	}
 	if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 		a.recordRejection(exceeded.Dimension)
-		e := rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
+		e := rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
 		param := "route_limits." + route
 		e.Param = &param
 		e.Message = "The API key limit for this route was exhausted."

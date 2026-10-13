@@ -16,6 +16,9 @@ type AdmissionLimits struct {
 	DailyCostLimit    *string `json:"daily_cost_limit"`
 	MonthlyCostLimit  *string `json:"monthly_cost_limit"`
 	WeeklyCostLimit   *string `json:"weekly_cost_limit"`
+	// CostBasis is "cost" (the provider-billed amount, the default) or
+	// "charge" (what the consumer owes under its rate card).
+	CostBasis string `json:"cost_basis,omitempty"`
 }
 
 func (p AdmissionLimits) Limited() bool {
@@ -68,6 +71,7 @@ func (policy AdmissionLimits) Validate() error {
 		Scopes: []string{"inference"}, AllowedRoutes: []string{},
 		RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute,
 		MaxConcurrency: policy.MaxConcurrency, DailyCostLimit: policy.DailyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
+		CostBasis: policy.CostBasis,
 	}}, false)
 }
 

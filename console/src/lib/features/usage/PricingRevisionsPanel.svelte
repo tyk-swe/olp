@@ -2,6 +2,13 @@
   import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import PriceFields from './PriceFields.svelte';
+  import {
+    rateFieldPairs,
+    type TierRow,
+    type ToolFeeRow,
+    type WindowPeriodRow
+  } from './priceEntry';
   import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
   import {
     cursorPaginationProps,
@@ -22,12 +29,43 @@
   import {
     createPricingRevision,
     listPricing,
-    type PriceDraft
+    type PriceDraft,
+    type PricingRevision
   } from './api/pricing';
   import { pricingKeys } from './pricingKeys';
-  import { optionalDecimal } from './pricingValidation';
+  import {
+    decimalText,
+    optionalDecimal,
+    tierRows,
+    toolFeeRows,
+    windowsDraft
+  } from './pricingValidation';
 
   const createIntent = useMutationIntent();
+
+  // One compact line for the components beyond the per-million table columns.
+  function extraComponents(price: PricingRevision['prices'][number]): string {
+    const parts: string[] = [];
+    for (const [key, label] of [
+      ['audio_input_per_million', 'audio in'],
+      ['cached_audio_input_per_million', 'cached audio'],
+      ['audio_output_per_million', 'audio out'],
+      ['image_input_per_million', 'image in'],
+      ['cached_image_input_per_million', 'cached image'],
+      ['image_output_per_million', 'image out'],
+      ['per_request', 'per request'],
+      ['batch_multiplier', 'batch']
+    ] as const) {
+      if ((price as Record<string, unknown>)[key] != null)
+        parts.push(`${label} ${(price as Record<string, unknown>)[key]}`);
+    }
+    if (price.tool_calls && Object.keys(price.tool_calls).length)
+      parts.push(`tools ${Object.keys(price.tool_calls).join(', ')}`);
+    if (price.tiers?.length) parts.push(`${price.tiers.length} tiers`);
+    if (price.windows?.time_zone)
+      parts.push(`windows ${price.windows.time_zone}`);
+    return parts.join(' · ');
+  }
 
   let {
     blocked,
@@ -60,6 +98,36 @@
   let cacheWrite1hPrice = $state('');
   let outputPrice = $state('');
   let unitPrice = $state('');
+  let audioInputPrice = $state('');
+  let cachedAudioInputPrice = $state('');
+  let audioOutputPrice = $state('');
+  let imageInputPrice = $state('');
+  let cachedImageInputPrice = $state('');
+  let imageOutputPrice = $state('');
+  let perRequestPrice = $state('');
+  let batchMultiplier = $state('');
+  let toolFees = $state<ToolFeeRow[]>([]);
+  let tiers = $state<TierRow[]>([]);
+  let windowZone = $state('');
+  let windowPeriods = $state<WindowPeriodRow[]>([]);
+  // The per-million rate fields the entry carries decide every tier's rate
+  // set: a tier names exactly the same fields.
+  const rateFields = $derived(
+    rateFieldPairs({
+      inputPrice,
+      cachedInputPrice,
+      cacheWritePrice,
+      cacheWrite5mPrice,
+      cacheWrite1hPrice,
+      outputPrice,
+      audioInputPrice,
+      cachedAudioInputPrice,
+      audioOutputPrice,
+      imageInputPrice,
+      cachedImageInputPrice,
+      imageOutputPrice
+    })
+  );
   let currency = $state('USD');
   let effectiveAt = $state(dateTimeLocalValue(new Date()));
   let savingPrice = $state(false);
@@ -110,6 +178,18 @@
       cacheWrite1hPrice,
       outputPrice,
       unitPrice,
+      audioInputPrice,
+      cachedAudioInputPrice,
+      audioOutputPrice,
+      imageInputPrice,
+      cachedImageInputPrice,
+      imageOutputPrice,
+      perRequestPrice,
+      batchMultiplier,
+      toolFees,
+      tiers,
+      windowZone,
+      windowPeriods,
       currency,
       effectiveAt
     };
@@ -136,12 +216,38 @@
         ),
         output_per_million: optionalDecimal(submitted.outputPrice),
         unit_price: optionalDecimal(submitted.unitPrice),
+        audio_input_per_million: optionalDecimal(submitted.audioInputPrice),
+        cached_audio_input_per_million: optionalDecimal(
+          submitted.cachedAudioInputPrice
+        ),
+        audio_output_per_million: optionalDecimal(submitted.audioOutputPrice),
+        image_input_per_million: optionalDecimal(submitted.imageInputPrice),
+        cached_image_input_per_million: optionalDecimal(
+          submitted.cachedImageInputPrice
+        ),
+        image_output_per_million: optionalDecimal(submitted.imageOutputPrice),
+        per_request: optionalDecimal(submitted.perRequestPrice),
+        batch_multiplier: optionalDecimal(submitted.batchMultiplier),
+        tool_calls: toolFeeRows(submitted.toolFees),
+        tiers: tierRows(
+          submitted.tiers,
+          rateFields
+            .filter(([, value]) => decimalText(value) != null)
+            .map(([key]) => key)
+        ),
+        windows: windowsDraft(submitted.windowZone, submitted.windowPeriods),
         currency: submitted.currency.trim().toUpperCase()
       };
       if (
         !price.input_per_million &&
         !price.output_per_million &&
-        !price.unit_price
+        !price.unit_price &&
+        !price.per_request &&
+        !price.audio_input_per_million &&
+        !price.audio_output_per_million &&
+        !price.image_input_per_million &&
+        !price.image_output_per_million &&
+        !price.tool_calls
       )
         throw new Error('Enter at least one price.');
       const submission = createIntent.prepare({
@@ -171,6 +277,22 @@
         cacheWrite1hPrice = '';
       if (outputPrice === submitted.outputPrice) outputPrice = '';
       if (unitPrice === submitted.unitPrice) unitPrice = '';
+      if (audioInputPrice === submitted.audioInputPrice) audioInputPrice = '';
+      if (cachedAudioInputPrice === submitted.cachedAudioInputPrice)
+        cachedAudioInputPrice = '';
+      if (audioOutputPrice === submitted.audioOutputPrice)
+        audioOutputPrice = '';
+      if (imageInputPrice === submitted.imageInputPrice) imageInputPrice = '';
+      if (cachedImageInputPrice === submitted.cachedImageInputPrice)
+        cachedImageInputPrice = '';
+      if (imageOutputPrice === submitted.imageOutputPrice)
+        imageOutputPrice = '';
+      if (perRequestPrice === submitted.perRequestPrice) perRequestPrice = '';
+      if (batchMultiplier === submitted.batchMultiplier) batchMultiplier = '';
+      toolFees = [];
+      tiers = [];
+      windowZone = '';
+      windowPeriods = [];
       if (providerId === submitted.providerId) providerId = '';
       if (effectiveAt === submitted.effectiveAt)
         effectiveAt = dateTimeLocalValue(new Date());
@@ -268,76 +390,30 @@
               >{/each}</select
           >
         </div>
-        <div class="form-field">
-          <label for="input-price">Input / million</label><input
-            id="input-price"
-            bind:value={inputPrice}
-            inputmode="decimal"
-            placeholder="2.50"
-            disabled={!canEditPricing}
-          />
-        </div>
-        <div class="form-field">
-          <label for="cached-input-price">Cached input / million</label><input
-            id="cached-input-price"
-            bind:value={cachedInputPrice}
-            inputmode="decimal"
-            placeholder="0.25"
-            disabled={!canEditPricing}
-          /><small
-            >Leave empty to bill cached tokens at the full input rate.</small
-          >
-        </div>
-        <div class="form-field">
-          <label for="cache-write-price">Cache write / million</label><input
-            id="cache-write-price"
-            bind:value={cacheWritePrice}
-            inputmode="decimal"
-            placeholder="3.00"
-            disabled={!canEditPricing}
-          /><small
-            >Leave empty to bill cache writes at the full input rate.</small
-          >
-        </div>
-        <div class="form-field">
-          <label for="cache-write-5m-price">Cache write 5m / million</label
-          ><input
-            id="cache-write-5m-price"
-            bind:value={cacheWrite5mPrice}
-            inputmode="decimal"
-            placeholder="3.00"
-            disabled={!canEditPricing}
-          /><small>Defaults to the cache write rate, then input.</small>
-        </div>
-        <div class="form-field">
-          <label for="cache-write-1h-price">Cache write 1h / million</label
-          ><input
-            id="cache-write-1h-price"
-            bind:value={cacheWrite1hPrice}
-            inputmode="decimal"
-            placeholder="6.00"
-            disabled={!canEditPricing}
-          /><small>Defaults to the cache write rate, then input.</small>
-        </div>
-        <div class="form-field">
-          <label for="output-price">Output / million</label><input
-            id="output-price"
-            bind:value={outputPrice}
-            inputmode="decimal"
-            placeholder="10.00"
-            disabled={!canEditPricing}
-          />
-        </div>
-        <div class="form-field">
-          <label for="unit-price">Media unit price</label><input
-            id="unit-price"
-            bind:value={unitPrice}
-            inputmode="decimal"
-            placeholder="0.04"
-            disabled={!canEditPricing}
-          />
-        </div>
-        <div class="form-field">
+        <PriceFields
+          idPrefix="price"
+          canEdit={canEditPricing}
+          bind:inputPrice
+          bind:cachedInputPrice
+          bind:cacheWritePrice
+          bind:cacheWrite5mPrice
+          bind:cacheWrite1hPrice
+          bind:outputPrice
+          bind:unitPrice
+          bind:audioInputPrice
+          bind:cachedAudioInputPrice
+          bind:audioOutputPrice
+          bind:imageInputPrice
+          bind:cachedImageInputPrice
+          bind:imageOutputPrice
+          bind:perRequestPrice
+          bind:batchMultiplier
+          bind:toolFees
+          bind:tiers
+          bind:windowZone
+          bind:windowPeriods
+        />
+        <div class="form-field full">
           <label for="currency">Currency</label><input
             id="currency"
             bind:value={currency}
@@ -356,6 +432,7 @@
           />
         </div>
       </div>
+
       <button
         class="button button-primary"
         type="submit"
@@ -441,7 +518,9 @@
                       >Write 5m / million</th
                     ><th scope="col">Write 1h / million</th><th scope="col"
                       >Output / million</th
-                    ><th scope="col">Unit</th><th scope="col">Currency</th></tr
+                    ><th scope="col">Unit</th><th scope="col">Components</th><th
+                      scope="col">Currency</th
+                    ></tr
                   ></thead
                 >
                 <tbody
@@ -464,7 +543,9 @@
                       ><td>{price.cache_write_1h_input_per_million ?? '—'}</td
                       ><td>{price.output_per_million ?? '—'}</td><td
                         >{price.unit_price ?? '—'}</td
-                      ><td>{price.currency}</td></tr
+                      ><td>{extraComponents(price) || '—'}</td><td
+                        >{price.currency}</td
+                      ></tr
                     >{/each}</tbody
                 >
               </table>

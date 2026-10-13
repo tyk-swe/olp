@@ -113,6 +113,12 @@ func limitsUnavailable() *Error {
 // cost budget refused the request although it is not spent: the request's own
 // estimated cost does not fit beside what is accrued and in flight.
 func rateLimited(dimension limits.Dimension, retryAfter time.Duration, estimate bool) *Error {
+	return rateLimitedBasis(dimension, retryAfter, estimate, limits.BasisCost)
+}
+
+// rateLimitedBasis is rateLimited for a refusal under an owner's basis: a
+// charge-basis budget names its measure.
+func rateLimitedBasis(dimension limits.Dimension, retryAfter time.Duration, estimate bool, basis limits.Basis) *Error {
 	code, message := "rate_limit_exceeded", "The API key rate limit was exceeded."
 	switch dimension {
 	case limits.DimensionRequests:
@@ -127,10 +133,14 @@ func rateLimited(dimension limits.Dimension, retryAfter time.Duration, estimate 
 		// nobody could price is charged nothing. A budget with room left says it
 		// is the request that does not fit, which is what a client can change.
 		code = "budget_exhausted"
+		budgetKind := "cost budget"
+		if basis == limits.BasisCharge {
+			budgetKind = "charge budget"
+		}
 		if estimate {
-			message = "The API key cost budget cannot cover this request's estimated cost beside the spend and requests already counted against it. Lower max_tokens, wait for requests in flight to finish, or raise the budget."
+			message = "The API key " + budgetKind + " cannot cover this request's estimated cost beside the spend and requests already counted against it. Lower max_tokens, wait for requests in flight to finish, or raise the budget."
 		} else {
-			message = "The API key cost budget was exhausted. Unpriced attempts accrue 0."
+			message = "The API key " + budgetKind + " was exhausted. Unpriced attempts accrue 0."
 		}
 	}
 	return &Error{
@@ -169,6 +179,7 @@ func keyRequest(authority access.Authority, estimate int64, ttl time.Duration) l
 		MaxConcurrency:    policy.MaxConcurrency,
 		DailyCostLimit:    policy.DailyCostLimit,
 		MonthlyCostLimit:  policy.MonthlyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
+		CostBasis:       limits.Basis(policy.CostBasis),
 		RequestedTokens: estimate,
 		LeaseTTL:        ttl,
 		ReportRate:      true,
@@ -186,6 +197,7 @@ func groupRequest(authority *access.Authority, ttl time.Duration) *limits.Reques
 		LookupID:         limits.BudgetGroupLookup(*authority.BudgetGroupID),
 		DailyCostLimit:   authority.BudgetGroupDailyCostLimit,
 		MonthlyCostLimit: authority.BudgetGroupMonthlyCostLimit, WeeklyCostLimit: authority.BudgetGroupWeeklyCostLimit,
+		CostBasis:       limits.Basis(authority.BudgetGroupCostBasis),
 		RequestedTokens: 0,
 		LeaseTTL:        ttl,
 	}
@@ -304,7 +316,7 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Au
 			if e := a.checkPendingCostAccounting(ctx, request.CostOwnerID); e != nil {
 				return nil, e
 			}
-			request.CostEstimate, request.RequestID = hold.amount, hold.requestID
+			request.CostEstimate, request.RequestID = hold.amountFor(request.CostBasis), hold.requestID
 		}
 		if !a.ready() {
 			return nil, limitsUnavailable()
@@ -320,7 +332,7 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Au
 		if err != nil {
 			if exceeded, ok := errors.AsType[*limits.ExceededError](err); ok {
 				a.recordRejection(exceeded.Dimension)
-				return nil, budgetBoundaryError(rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate), "budget group", "budget_group")
+				return nil, budgetBoundaryError(rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis), "budget group", "budget_group")
 			}
 			if failure := a.outage(authority.ID, request.DailyCostLimit != nil || request.MonthlyCostLimit != nil || request.WeeklyCostLimit != nil, err); failure != nil {
 				return nil, failure
@@ -351,7 +363,7 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Au
 			settleKey(ctx, group, false, nil, a.logger())
 			return nil, e
 		}
-		request.CostEstimate, request.RequestID = hold.amount, hold.requestID
+		request.CostEstimate, request.RequestID = hold.amountFor(request.CostBasis), hold.requestID
 	}
 	if !a.ready() {
 		return nil, limitsUnavailable()
@@ -375,7 +387,7 @@ func (a *Admission) reserveKeyAndGroup(ctx context.Context, authority *access.Au
 		// Only the key's own request and token limits state an allowance, and
 		// only its rejection reports it: a budget group has none, and the quota
 		// of a provider is not the caller's.
-		e := rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
+		e := rateLimitedBasis(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate, exceeded.Basis)
 		e.rate = exceeded.Rate
 		return nil, e
 	}

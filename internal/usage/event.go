@@ -72,24 +72,32 @@ type Event struct {
 	// financial evidence may settle before the original HTTP exchange ends.
 	// Snapshot timestamps remain valid, but persistence leaves its final HTTP
 	// metadata unknown until the gateway supplies the actual completion.
-	HTTPOutcomePending      bool      `json:"http_outcome_pending,omitempty"`
-	ObservedAt              time.Time `json:"observed_at"`
-	StatusCode              *int      `json:"status_code"`
-	ErrorClass              *string   `json:"error_class"`
-	Committed               bool      `json:"committed"`
-	LatencyMS               int64     `json:"latency_ms"`
-	FirstByteMS             *int64    `json:"first_byte_ms"`
-	InputTokens             *int64    `json:"input_tokens"`
-	OutputTokens            *int64    `json:"output_tokens"`
-	CachedInputTokens       *int64    `json:"cached_input_tokens"`
-	CacheWriteInputTokens   *int64    `json:"cache_write_input_tokens"`
-	CacheWrite5MInputTokens *int64    `json:"cache_write_5m_input_tokens"`
-	CacheWrite1HInputTokens *int64    `json:"cache_write_1h_input_tokens"`
-	MediaUnits              *string   `json:"media_units"`
-	UsageComplete           bool      `json:"usage_complete"`
-	Unpriced                bool      `json:"unpriced"`
-	PayloadCaptured         bool      `json:"payload_captured"`
-	Attempts                []Attempt `json:"attempts"`
+	HTTPOutcomePending      bool             `json:"http_outcome_pending,omitempty"`
+	ObservedAt              time.Time        `json:"observed_at"`
+	StatusCode              *int             `json:"status_code"`
+	ErrorClass              *string          `json:"error_class"`
+	Committed               bool             `json:"committed"`
+	LatencyMS               int64            `json:"latency_ms"`
+	FirstByteMS             *int64           `json:"first_byte_ms"`
+	InputTokens             *int64           `json:"input_tokens"`
+	OutputTokens            *int64           `json:"output_tokens"`
+	CachedInputTokens       *int64           `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64           `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64           `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64           `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64           `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64           `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64           `json:"audio_output_tokens"`
+	ImageInputTokens        *int64           `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64           `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64           `json:"image_output_tokens"`
+	MediaUnits              *string          `json:"media_units"`
+	ToolCalls               map[string]int64 `json:"tool_calls,omitempty"`
+	Batch                   bool             `json:"batch,omitempty"`
+	UsageComplete           bool             `json:"usage_complete"`
+	Unpriced                bool             `json:"unpriced"`
+	PayloadCaptured         bool             `json:"payload_captured"`
+	Attempts                []Attempt        `json:"attempts"`
 }
 
 // Attempt is one provider attempt made while serving the request. Routing and
@@ -193,7 +201,18 @@ type AttemptUsage struct {
 	CacheWriteInputTokens   *int64  `json:"cache_write_input_tokens"`
 	CacheWrite5MInputTokens *int64  `json:"cache_write_5m_input_tokens"`
 	CacheWrite1HInputTokens *int64  `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64  `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64  `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64  `json:"audio_output_tokens"`
+	ImageInputTokens        *int64  `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64  `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64  `json:"image_output_tokens"`
 	MediaUnits              *string `json:"media_units"`
+	// ToolCalls counts metered server-side tool invocations by tool name, and
+	// Batch marks usage produced at batch terms, which a batch_multiplier
+	// prices. Both are omitted when absent.
+	ToolCalls map[string]int64 `json:"tool_calls,omitempty"`
+	Batch     bool             `json:"batch,omitempty"`
 }
 
 // Routing is the provenance of one attempt: which policy chose it, which
@@ -330,7 +349,15 @@ type wireEvent struct {
 	CacheWriteInputTokens   *int64             `json:"cache_write_input_tokens"`
 	CacheWrite5MInputTokens *int64             `json:"cache_write_5m_input_tokens"`
 	CacheWrite1HInputTokens *int64             `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64             `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64             `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64             `json:"audio_output_tokens"`
+	ImageInputTokens        *int64             `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64             `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64             `json:"image_output_tokens"`
 	MediaUnits              *string            `json:"media_units"`
+	ToolCalls               *map[string]int64  `json:"tool_calls"`
+	Batch                   *bool              `json:"batch"`
 	UsageComplete           *bool              `json:"usage_complete"`
 	Unpriced                *bool              `json:"unpriced"`
 	Attempts                *[]wireAttempt     `json:"attempts"`
@@ -367,7 +394,18 @@ type wireUsage struct {
 	CacheWriteInputTokens   *int64  `json:"cache_write_input_tokens"`
 	CacheWrite5MInputTokens *int64  `json:"cache_write_5m_input_tokens"`
 	CacheWrite1HInputTokens *int64  `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64  `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64  `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64  `json:"audio_output_tokens"`
+	ImageInputTokens        *int64  `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64  `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64  `json:"image_output_tokens"`
 	MediaUnits              *string `json:"media_units"`
+	// ToolCalls counts metered server-side tool invocations by tool name, and
+	// Batch marks usage produced at batch terms, which a batch_multiplier
+	// prices. Both are omitted when absent.
+	ToolCalls map[string]int64 `json:"tool_calls,omitempty"`
+	Batch     bool             `json:"batch,omitempty"`
 }
 
 type wireDecision struct {
@@ -517,8 +555,20 @@ func (w wireEvent) decode() (*Event, error) {
 	event.CacheWriteInputTokens = w.CacheWriteInputTokens
 	event.CacheWrite5MInputTokens = w.CacheWrite5MInputTokens
 	event.CacheWrite1HInputTokens = w.CacheWrite1HInputTokens
+	event.AudioInputTokens = w.AudioInputTokens
+	event.CachedAudioInputTokens = w.CachedAudioInputTokens
+	event.AudioOutputTokens = w.AudioOutputTokens
+	event.ImageInputTokens = w.ImageInputTokens
+	event.CachedImageInputTokens = w.CachedImageInputTokens
+	event.ImageOutputTokens = w.ImageOutputTokens
 	if event.MediaUnits, err = optionalDecimal("media_units", w.MediaUnits); err != nil {
 		return nil, err
+	}
+	if w.ToolCalls != nil {
+		event.ToolCalls = *w.ToolCalls
+	}
+	if w.Batch != nil {
+		event.Batch = *w.Batch
 	}
 	if event.UsageComplete, err = requiredField("usage_complete", w.UsageComplete); err != nil {
 		return nil, err
@@ -605,6 +655,14 @@ func (w wireUsage) decode() (*AttemptUsage, error) {
 		CacheWriteInputTokens:   w.CacheWriteInputTokens,
 		CacheWrite5MInputTokens: w.CacheWrite5MInputTokens,
 		CacheWrite1HInputTokens: w.CacheWrite1HInputTokens,
+		AudioInputTokens:        w.AudioInputTokens,
+		CachedAudioInputTokens:  w.CachedAudioInputTokens,
+		AudioOutputTokens:       w.AudioOutputTokens,
+		ImageInputTokens:        w.ImageInputTokens,
+		CachedImageInputTokens:  w.CachedImageInputTokens,
+		ImageOutputTokens:       w.ImageOutputTokens,
+		ToolCalls:               w.ToolCalls,
+		Batch:                   w.Batch,
 	}
 	var err error
 	if usage.Observed, err = requiredField("usage.observed", w.Observed); err != nil {
@@ -896,7 +954,10 @@ func Validate(e *Event) (*Validated, error) {
 			e.FirstByteMS == nil && e.InputTokens == nil && e.OutputTokens == nil &&
 			e.CachedInputTokens == nil && e.CacheWriteInputTokens == nil &&
 			e.CacheWrite5MInputTokens == nil && e.CacheWrite1HInputTokens == nil &&
-			e.MediaUnits == nil && !e.UsageComplete)
+			e.AudioInputTokens == nil && e.CachedAudioInputTokens == nil &&
+			e.AudioOutputTokens == nil && e.ImageInputTokens == nil &&
+			e.CachedImageInputTokens == nil && e.ImageOutputTokens == nil &&
+			e.MediaUnits == nil && len(e.ToolCalls) == 0 && !e.Batch && !e.UsageComplete)
 	switch {
 	case e.RequestCompletedAt.Before(e.RequestStartedAt):
 		return nil, fmt.Errorf("%w: request completed before it started", ErrInvalidEvent)
@@ -918,8 +979,13 @@ func Validate(e *Event) (*Validated, error) {
 	if err := contentpolicy.ValidateDecisions(e.PolicyDecisions); err != nil {
 		return nil, fmt.Errorf("%w: policy decisions %w", ErrInvalidEvent, err)
 	}
-	if err := validateCacheCategories(e.InputTokens, e.CachedInputTokens, e.CacheWriteInputTokens,
-		e.CacheWrite5MInputTokens, e.CacheWrite1HInputTokens); err != nil {
+	if err := validateUsageDimensions(e.InputTokens, e.OutputTokens, e.CachedInputTokens,
+		e.CacheWriteInputTokens, e.CacheWrite5MInputTokens, e.CacheWrite1HInputTokens,
+		e.AudioInputTokens, e.CachedAudioInputTokens, e.AudioOutputTokens,
+		e.ImageInputTokens, e.CachedImageInputTokens, e.ImageOutputTokens); err != nil {
+		return nil, fmt.Errorf("%w: request %w", ErrInvalidEvent, err)
+	}
+	if err := validateToolCalls(e.ToolCalls); err != nil {
 		return nil, fmt.Errorf("%w: request %w", ErrInvalidEvent, err)
 	}
 
@@ -1004,18 +1070,28 @@ func validateUsage(usage *AttemptUsage, index int) (*AttemptUsage, error) {
 	hasValues := usage.InputTokens != nil || usage.OutputTokens != nil ||
 		usage.CachedInputTokens != nil || usage.CacheWriteInputTokens != nil ||
 		usage.CacheWrite5MInputTokens != nil || usage.CacheWrite1HInputTokens != nil ||
-		usage.MediaUnits != nil
+		usage.AudioInputTokens != nil || usage.CachedAudioInputTokens != nil ||
+		usage.AudioOutputTokens != nil || usage.ImageInputTokens != nil ||
+		usage.CachedImageInputTokens != nil || usage.ImageOutputTokens != nil ||
+		usage.MediaUnits != nil || len(usage.ToolCalls) > 0 || usage.Batch
 	if !usage.Observed && hasValues {
 		return nil, fmt.Errorf("%w: attempt %d reports usage it never observed", ErrInvalidEvent, index)
 	}
-	for _, tokens := range [6]*int64{usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
-		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens} {
+	for _, tokens := range [12]*int64{usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
+		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens,
+		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,
+		usage.ImageInputTokens, usage.CachedImageInputTokens, usage.ImageOutputTokens} {
 		if tokens != nil && *tokens < 0 {
 			return nil, fmt.Errorf("%w: attempt %d has a negative token count", ErrInvalidEvent, index)
 		}
 	}
-	if err := validateCacheCategories(usage.InputTokens, usage.CachedInputTokens, usage.CacheWriteInputTokens,
-		usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens); err != nil {
+	if err := validateUsageDimensions(usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
+		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens,
+		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,
+		usage.ImageInputTokens, usage.CachedImageInputTokens, usage.ImageOutputTokens); err != nil {
+		return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
+	}
+	if err := validateToolCalls(usage.ToolCalls); err != nil {
 		return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 	}
 	if usage.MediaUnits != nil {
@@ -1030,26 +1106,92 @@ func validateUsage(usage *AttemptUsage, index int) (*AttemptUsage, error) {
 	return usage, nil
 }
 
-func validateCacheCategories(input, read, write, write5m, write1h *int64) error {
-	hasCategory := read != nil || write != nil || write5m != nil || write1h != nil
-	if hasCategory && input == nil {
-		return errors.New("cache usage without input tokens")
-	}
+// validateUsageDimensions checks the counters against the subset invariants the
+// fact table enforces: every share belongs to a total that was reported, and no
+// combination of shares exceeds its total. The modality shares behave exactly
+// like the cache shares: they are subsets of the input and output counts.
+func validateUsageDimensions(input, output, read, write, write5m, write1h,
+	audio, cachedAudio, audioOut, image, cachedImage, imageOut *int64) error {
 	count := func(value *int64) int64 {
 		if value == nil {
 			return 0
 		}
 		return *value
 	}
+	hasInputShare := read != nil || write != nil || write5m != nil || write1h != nil ||
+		audio != nil || cachedAudio != nil || image != nil || cachedImage != nil
+	if hasInputShare && input == nil {
+		return errors.New("usage shares without input tokens")
+	}
+	if (audioOut != nil || imageOut != nil) && output == nil {
+		return errors.New("usage shares without output tokens")
+	}
 	if (write5m != nil || write1h != nil) && write == nil {
 		return errors.New("cache write detail without a cache write total")
 	}
+	if count(cachedAudio) > count(audio) {
+		return errors.New("cached audio exceeds the audio input total")
+	}
+	if count(cachedImage) > count(image) {
+		return errors.New("cached image exceeds the image input total")
+	}
+	if count(cachedAudio)+count(cachedImage) > count(read) {
+		return errors.New("cached modality tokens exceed the cached input total")
+	}
 	// Counts are non-negative, so subtracting cannot underflow where adding could overflow.
-	if input != nil && (count(read) > *input || count(write) > *input-count(read)) {
-		return errors.New("cache reads and writes exceed the input total")
+	if input != nil {
+		shares := count(read) + count(write) + count(audio) - count(cachedAudio) + count(image) - count(cachedImage)
+		if count(read) > *input || shares-count(read) > *input-count(read) {
+			return errors.New("usage shares exceed the input total")
+		}
 	}
 	if count(write5m) > count(write) || count(write1h) > count(write)-count(write5m) {
 		return errors.New("cache write detail exceeds the cache write total")
+	}
+	if output != nil && count(audioOut)+count(imageOut) > *output {
+		return errors.New("modality shares exceed the output total")
+	}
+	return nil
+}
+
+// toolNamePattern bounds a metered tool name, in prices and in usage.
+var toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
+// ConsistentUsage reports whether one attempt's counters satisfy the share
+// invariants accounting stores. The gateway checks provider-reported usage
+// against it before billing evidence leaves the process.
+func ConsistentUsage(usage *AttemptUsage) bool {
+	for _, tokens := range [12]*int64{usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
+		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens,
+		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,
+		usage.ImageInputTokens, usage.CachedImageInputTokens, usage.ImageOutputTokens} {
+		if tokens != nil && *tokens < 0 {
+			return false
+		}
+	}
+	if err := validateUsageDimensions(usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
+		usage.CacheWriteInputTokens, usage.CacheWrite5MInputTokens, usage.CacheWrite1HInputTokens,
+		usage.AudioInputTokens, usage.CachedAudioInputTokens, usage.AudioOutputTokens,
+		usage.ImageInputTokens, usage.CachedImageInputTokens, usage.ImageOutputTokens); err != nil {
+		return false
+	}
+	return validateToolCalls(usage.ToolCalls) == nil
+}
+
+// maxToolCalls bounds the tool fee set a price or an attempt may name.
+const maxToolCalls = 16
+
+func validateToolCalls(calls map[string]int64) error {
+	if len(calls) > maxToolCalls {
+		return errors.New("too many tool call counters")
+	}
+	for name, count := range calls {
+		if !toolNamePattern.MatchString(name) {
+			return errors.New("a tool call name is malformed")
+		}
+		if count < 0 {
+			return errors.New("a tool call count is negative")
+		}
 	}
 	return nil
 }

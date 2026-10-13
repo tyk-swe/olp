@@ -62,6 +62,7 @@ type Configuration struct {
 		ParameterDefaults map[string]json.RawMessage       `json:"parameter_defaults"`
 		VendorID          string                           `json:"vendor_id"`
 		PluginOptions     map[string]string                `json:"plugin_options,omitempty"`
+		Commitment        *Commitment                      `json:"commitment,omitempty"`
 		HealthProbe       *HealthProbe                     `json:"health_probe,omitempty"`
 	} `json:"options"`
 }
@@ -130,7 +131,8 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 		CloudRegion: cfg.CloudRegion, CloudProject: cfg.CloudProject, Deployment: cfg.Deployment, APIVersion: cfg.APIVersion,
 		Models: cfg.Options.Models, CredentialHeaders: cfg.Options.CredentialHeaders,
 		ParameterDefaults: cfg.Options.ParameterDefaults, VendorID: cfg.Options.VendorID,
-		Limits: cfg.Options.Limits, HealthProbe: cfg.Options.HealthProbe, Capabilities: []Capability{},
+		Limits: cfg.Options.Limits, HealthProbe: cfg.Options.HealthProbe, Commitment: cfg.Options.Commitment,
+		Capabilities: []Capability{},
 	}
 	for _, model := range models {
 		for _, capability := range model.Capabilities {

@@ -150,6 +150,9 @@ export type RoutingSimulationInput = Pick<
   preferences?: RoutingPreferences;
   apiKeyId?: string | null;
   seed?: string;
+  /** Overrides the counted estimate and the reply bound the request names. */
+  estimatedInputTokens?: number | null;
+  maxOutputTokensOverride?: number | null;
 };
 
 /**
@@ -188,7 +191,9 @@ export async function simulateRouting(
       mode: input.mode,
       preferences: input.preferences,
       api_key_id: input.apiKeyId ?? null,
-      seed: input.seed ?? ''
+      seed: input.seed ?? '',
+      estimated_input_tokens: input.estimatedInputTokens ?? null,
+      max_output_tokens: input.maxOutputTokensOverride ?? null
     },
     signal
   });

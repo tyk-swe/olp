@@ -8,20 +8,29 @@ export const limitFields = [
   { key: 'weekly_cost_limit', label: 'Weekly budget (USD)', numeric: false },
   { key: 'monthly_cost_limit', label: 'Monthly budget (USD)', numeric: false }
 ] as const;
-export type LimitForm = Record<(typeof limitFields)[number]['key'], string>;
+export type LimitForm = Record<
+  (typeof limitFields)[number]['key'] | 'cost_basis',
+  string
+>;
 export function limitForm(limits?: AdmissionLimits): LimitForm {
-  return Object.fromEntries(
-    limitFields.map(({ key }) => [key, limits?.[key]?.toString() ?? ''])
-  ) as LimitForm;
+  return {
+    ...Object.fromEntries(
+      limitFields.map(({ key }) => [key, limits?.[key]?.toString() ?? ''])
+    ),
+    cost_basis: limits?.cost_basis ?? 'cost'
+  } as LimitForm;
 }
 
 export function limitsInput(form: LimitForm): AdmissionLimits {
-  return Object.fromEntries(
-    limitFields.map(({ key, numeric }) => {
-      const value = form[key].trim();
-      return [key, value ? (numeric ? Number(value) : value) : null];
-    })
-  );
+  return {
+    ...Object.fromEntries(
+      limitFields.map(({ key, numeric }) => {
+        const value = form[key].trim();
+        return [key, value ? (numeric ? Number(value) : value) : null];
+      })
+    ),
+    cost_basis: (form.cost_basis || 'cost') as AdmissionLimits['cost_basis']
+  };
 }
 
 export function limitsError(limits: LimitForm): string {

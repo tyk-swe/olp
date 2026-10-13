@@ -71,6 +71,7 @@ describe('API key form state', () => {
       dailyCostLimit: '',
       monthlyCostLimit: '',
       weeklyCostLimit: '',
+      costBasis: 'cost',
       expiresAt: '',
       allowProviderState: false,
       responseMetadata: false,
@@ -84,6 +85,7 @@ describe('API key form state', () => {
           requests_per_minute: '',
           tokens_per_minute: '',
           max_concurrency: '',
+          cost_basis: 'cost',
           daily_cost_limit: '',
           weekly_cost_limit: '',
           monthly_cost_limit: ''

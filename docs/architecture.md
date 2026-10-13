@@ -139,4 +139,5 @@ stop workers and close dependencies. Expiry explicitly unblocks and reports
 incomplete joins rather than waiting without bound.
 
 See [security](security.md), [execution](gateway.md), [access](access.md),
-[operations](operations.md) and the [historical repair review](architecture-review.md).
+[pricing](pricing.md), [operations](operations.md) and the
+[historical repair review](architecture-review.md).
