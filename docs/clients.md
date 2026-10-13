@@ -52,7 +52,7 @@ of the gateway's module and runtime inventory.
 | --- | --- | --- | --- |
 | OpenAI Go | `github.com/openai/openai-go/v3` | v3.74.0 | Chat Completions and Responses, unary and streaming, tool loops, structured output, embeddings, model listing, typed errors |
 | Anthropic Go | `github.com/anthropics/anthropic-sdk-go` | v1.79.1 | Messages, unary and streaming, tool use loops with signed thinking, `count_tokens`, prompt caching, beta features, model listing, typed errors |
-| Google Gen AI Go | `google.golang.org/genai` | v1.72.0 | `generateContent`, unary and streaming, function calling, thoughts, structured output, `countTokens`, native batch embeddings, model listing, typed errors |
+| Google Gen AI Go | `google.golang.org/genai` | v1.73.0 | `generateContent`, unary and streaming, function calling, thoughts, structured output, `countTokens`, native batch embeddings, model listing, typed errors |
 
 ## What the suites assert
 
