@@ -27,7 +27,7 @@ jobs:
       - run: node scripts/check-release-version.mjs
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - run: ./scripts/check-helm.sh
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: management-contract
           path: openapi/management.json
@@ -74,7 +74,7 @@ jobs:
           BENCH_TIME: 500ms
           # A pull request that means to remove or rename a benchmark says so.
           BENCH_ALLOW_REMOVED: ${{ contains(github.event.pull_request.labels.*.name, 'allow-removed-benchmarks') && '1' || '0' }}
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: bench-gate
@@ -99,7 +99,7 @@ jobs:
           docker build --progress=plain --platform linux/${{ matrix.arch }} -f deploy/Dockerfile -t olp:candidate . 2>&1 | tee .local/evidence/build.log
       - name: Qualify native candidate
         run: ./scripts/smoke-image-services.sh olp:candidate ${{ matrix.arch }} 2>&1 | tee .local/evidence/smoke.log
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: native-${{ matrix.arch }}
