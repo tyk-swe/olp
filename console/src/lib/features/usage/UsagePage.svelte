@@ -558,7 +558,7 @@
                 >Estimated / reported input</th
               ><th scope="col">Estimate error</th><th scope="col"
                 >Estimated cost</th
-              ><th scope="col">Completeness</th></tr
+              ><th scope="col">Charge</th><th scope="col">Completeness</th></tr
             ></thead
           >
           <tbody

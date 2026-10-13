@@ -7,7 +7,7 @@
     emptyCursorHistory
   } from '$lib/lists/pagination';
   import { errorMessage } from '$lib/api/http';
-  import { dateTimeLocalValue, formatDate } from '$lib/format';
+  import { formatDate } from '$lib/format';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
   import { listOrganizations } from '$lib/features/access/organizations/api';
@@ -58,7 +58,7 @@
   // The revision form edits one card at a time.
   let publishCardId = $state('');
   let markup = $state('');
-  let effectiveAt = $state(dateTimeLocalValue(new Date()));
+  let effectiveAt = $state('');
   let publishing = $state(false);
   type PriceRow = {
     providerKind: string;
@@ -204,8 +204,7 @@
           .filter(([, value]) => decimalText(value) != null)
           .map(([key]) => key)
       ),
-      windows: windowsDraft(row.windowZone, row.windowPeriods),
-      currency: 'USD'
+      windows: windowsDraft(row.windowZone, row.windowPeriods)
     };
     return price;
   }
@@ -222,7 +221,9 @@
       .map(rowDraft)
       .filter((price): price is CardPriceDraft => price != null);
     const submission = publishIntent.prepare({
-      effective_at: new Date(effectiveAt).toISOString(),
+      effective_at: effectiveAt
+        ? new Date(effectiveAt).toISOString()
+        : undefined,
       markup: markup.trim(),
       prices: prices.length ? prices : undefined
     });
@@ -382,9 +383,11 @@
                           id={`revision-effective-${card.id}`}
                           bind:value={effectiveAt}
                           type="datetime-local"
-                          required
+                          aria-describedby="card-effective-help"
                           disabled={!canEdit}
-                        />
+                        /><small id="card-effective-help"
+                          >Leave blank to apply immediately.</small
+                        >
                       </div>
                     </div>
                     {#each rows as row, index (index)}

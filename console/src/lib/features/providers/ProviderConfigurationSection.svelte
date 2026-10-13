@@ -81,12 +81,6 @@
         disabled={!canManage}
         onChange={onTouch}
       />
-      <ProviderCommitmentEditor
-        bind:values={editValues}
-        idPrefix="detail"
-        disabled={!canManage}
-        onChange={onTouch}
-      />
     {/if}
     {#if current.configuration.kind === 'plugin'}<PluginProfileField
         values={editValues}

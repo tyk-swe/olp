@@ -208,6 +208,8 @@ it('publishes a revision with markup and an explicit price', async () => {
   const [cardId, draft] = vi.mocked(createRateCardRevision).mock.calls[0];
   expect(cardId).toBe('card-1');
   expect(draft.markup).toBe('1.5');
+  expect(draft.effective_at).toBeUndefined();
+  expect(draft.prices?.[0].currency).toBeUndefined();
   expect(draft.prices?.[0]).toMatchObject({
     provider_kind: 'openai',
     model: 'model-a',

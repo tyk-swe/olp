@@ -341,6 +341,18 @@ func BenchmarkPriceCost(b *testing.B) {
 // The card mirror prices a consumer as the SQL does: an explicit rate prices
 // the usage itself at discount one, a markup rounds the already-rounded cost,
 // and no explicit match plus an unpriced cost is no charge.
+func TestRoutingCostDiscountWithoutWindow(t *testing.T) {
+	price := &RoutingPrice{Price: Price{InputPerMillion: rate("3"), Currency: "USD"}}
+	for _, tc := range []struct{ multiplier, want string }{{"0", "0"}, {"0.5", "0.0015"}, {"1", "0.003"}} {
+		t.Run(tc.multiplier, func(t *testing.T) {
+			got, ok := price.Cost(AttemptUsage{Complete: true, InputTokens: tokens(1000)}, time.Now(), true, &RoutingDiscount{Multiplier: tc.multiplier})
+			if !ok || got.String() != tc.want {
+				t.Fatalf("cost = %v, priced = %v; want %s", got, ok, tc.want)
+			}
+		})
+	}
+}
+
 func TestRoutingCardCharge(t *testing.T) {
 	settledAt := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
 	explicit := &RoutingPrice{Price: Price{ProviderKind: "openai", Model: "m",

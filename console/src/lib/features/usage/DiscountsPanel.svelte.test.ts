@@ -134,6 +134,7 @@ it('lists discounts and submits a scoped multiplier', async () => {
   submit();
   await vi.waitFor(() => expect(vi.mocked(createDiscount)).toHaveBeenCalled());
   const [draft, requestId] = vi.mocked(createDiscount).mock.calls[0];
+  expect(draft.effective_at).toBeUndefined();
   expect(draft).toMatchObject({
     provider_kind: 'openai',
     multiplier: '0.8',

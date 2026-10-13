@@ -16,6 +16,27 @@ import (
 )
 
 func ptr[T any](v T) *T { return &v }
+
+func TestPlanRetainsDiscountForAttemptAccounting(t *testing.T) {
+	s, slug, ids := planningFixture()
+	inputs := pricedInputs(ids, "wire-model")
+	now := inputs.RefreshedAt
+	inputs.Discounts = []usage.RoutingDiscount{{ID: uuid.NewString(), ProviderKind: "openai", Multiplier: "0.5", EffectiveAt: now.Add(-time.Hour)}}
+	plan, err := PlanRequest(&s, slug, "generation", "openai", "unary", []byte("discount"), SelectionOptions{Inputs: inputs, Now: now})
+	if err != nil || len(plan.Attempts) != len(ids) {
+		t.Fatalf("plan = %+v, error = %v", plan, err)
+	}
+	for _, attempt := range plan.Attempts {
+		if attempt.Discount == nil || attempt.Discount.ID != inputs.Discounts[0].ID {
+			t.Fatalf("attempt lost the resolved discount: %+v", attempt)
+		}
+		cost, ok := attempt.Price.Cost(usage.AttemptUsage{Complete: true, InputTokens: ptr(int64(1000))}, now, true, attempt.Discount)
+		if !ok || cost.String() != "0.0005" {
+			t.Fatalf("attempt cost = %v, priced = %v; want 0.0005", cost, ok)
+		}
+	}
+}
+
 func planningFixture() (Snapshot, string, []string) {
 	ids := []string{uuid.NewString(), uuid.NewString(), uuid.NewString()}
 	s := Snapshot{Providers: map[string]Provider{}, Routes: map[string]Route{}}

@@ -149,6 +149,7 @@ func (a *Authority) BindLimitTemplates(t LimitTemplates) error {
 	a.Policy.RequestsPerMinute, a.Policy.TokensPerMinute, a.Policy.MaxConcurrency = local.RequestsPerMinute, local.TokensPerMinute, local.MaxConcurrency
 	a.Policy.DailyCostLimit, a.Policy.MonthlyCostLimit = local.DailyCostLimit, local.MonthlyCostLimit
 	a.Policy.WeeklyCostLimit = local.WeeklyCostLimit
+	a.Policy.CostBasis = local.CostBasis
 	if a.Policy.EndUserPolicy, err = t.endUser(a.Policy.EndUserPolicy); err != nil {
 		return err
 	}

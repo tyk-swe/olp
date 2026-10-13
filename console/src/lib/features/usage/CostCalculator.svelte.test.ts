@@ -182,8 +182,10 @@ it('sends every usage dimension and validates shares', async () => {
   put('calc-input', '100');
   put('calc-output', '10');
   put('calc-cached', '20');
+  put('calc-cache-write', '5');
   put('calc-cache-write-1h', '5');
-  put('calc-audio-input', '30');
+  put('calc-audio-input', '90');
+  put('calc-cached-audio-input', '20');
   put('calc-image-output', '5');
   host
     .querySelector<HTMLDetailsElement>('.more-usage')!
@@ -200,7 +202,7 @@ it('sends every usage dimension and validates shares', async () => {
   });
   expect(quoteUsage).not.toHaveBeenCalled();
   // Valid shares plus a tool-call row reach the quote request.
-  put('calc-audio-input', '30');
+  put('calc-audio-input', '90');
   flushSync();
   Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
     .find((b) => b.textContent === 'Add tool call')!
@@ -223,8 +225,10 @@ it('sends every usage dimension and validates shares', async () => {
     input_tokens: 100,
     output_tokens: 10,
     cached_input_tokens: 20,
+    cache_write_input_tokens: 5,
     cache_write_1h_input_tokens: 5,
-    audio_input_tokens: 30,
+    audio_input_tokens: 90,
+    cached_audio_input_tokens: 20,
     image_output_tokens: 5,
     tool_calls: { web_search: 2 }
   });

@@ -243,6 +243,10 @@ func CreateCardRevision(ctx context.Context, tx pgx.Tx, actor, cardID, markup st
 func createCardRevision(ctx context.Context, tx pgx.Tx, actor, cardID, markup string,
 	effectiveAt time.Time, prices []Price) (CardRevision, error) {
 	var revision CardRevision
+	// Serialize revision allocation on the parent, including its first revision.
+	if err := tx.QueryRow(ctx, "SELECT id::text FROM olp.rate_cards WHERE id=$1::uuid FOR UPDATE", cardID).Scan(&cardID); err != nil {
+		return revision, fmt.Errorf("lock rate card: %w", err)
+	}
 	err := tx.QueryRow(ctx, `INSERT INTO olp.rate_card_revisions
             (id, rate_card_id, revision, markup, effective_at, created_by)
         VALUES ($1::uuid, $2::uuid,
@@ -321,15 +325,17 @@ func (s *Server) listRateCards(r *http.Request, _ access.Principal) (access.Repl
 		if err != nil {
 			return access.Reply{}, err
 		}
-		revisions, err := loadCardRevisionSummaries(r.Context(), s.Access.Pool, card.ID)
+		items = append(items, card)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return access.Reply{}, err
+	}
+	for index := range items {
+		items[index].Revisions, err = loadCardRevisionSummaries(r.Context(), s.Access.Pool, items[index].ID)
 		if err != nil {
 			return access.Reply{}, err
 		}
-		card.Revisions = revisions
-		items = append(items, card)
-	}
-	if err = rows.Err(); err != nil {
-		return access.Reply{}, err
 	}
 	return access.ListReplyBy(items, page, func(c RateCard) string { return c.ID }), nil
 }
@@ -484,13 +490,17 @@ func (s *Server) listRateCardRevisions(r *http.Request, _ access.Principal) (acc
 		if err != nil {
 			return access.Reply{}, err
 		}
-		if revision.Prices, err = loadCardPrices(r.Context(), s.Access.Pool, revision.ID); err != nil {
-			return access.Reply{}, err
-		}
 		items = append(items, revision)
 	}
+	rows.Close()
 	if err = rows.Err(); err != nil {
 		return access.Reply{}, err
+	}
+	for index := range items {
+		items[index].Prices, err = loadCardPrices(r.Context(), s.Access.Pool, items[index].ID)
+		if err != nil {
+			return access.Reply{}, err
+		}
 	}
 	var next *string
 	if len(items) > limit {

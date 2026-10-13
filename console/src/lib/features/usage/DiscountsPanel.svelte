@@ -7,7 +7,7 @@
     emptyCursorHistory
   } from '$lib/lists/pagination';
   import { errorMessage } from '$lib/api/http';
-  import { dateTimeLocalValue, formatDate } from '$lib/format';
+  import { formatDate } from '$lib/format';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
@@ -31,7 +31,7 @@
   let vendorId = $state('');
   let providerId = $state('');
   let multiplier = $state('');
-  let effectiveAt = $state(dateTimeLocalValue(new Date()));
+  let effectiveAt = $state('');
   let saving = $state(false);
   let error = $state('');
   let notice = $state('');
@@ -85,7 +85,9 @@
       vendor_id: vendorId || null,
       provider_id: providerId || null,
       multiplier: multiplier.trim(),
-      effective_at: new Date(effectiveAt).toISOString()
+      effective_at: effectiveAt
+        ? new Date(effectiveAt).toISOString()
+        : undefined
     });
     saving = true;
     try {
@@ -170,9 +172,11 @@
           id="discount-effective"
           bind:value={effectiveAt}
           type="datetime-local"
-          required
+          aria-describedby="discount-effective-help"
           disabled={!canEdit}
-        />
+        /><small id="discount-effective-help"
+          >Leave blank to apply immediately.</small
+        >
       </div>
     </div>
     <button

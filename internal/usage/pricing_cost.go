@@ -412,7 +412,7 @@ func (r *priceRates) cost(u AttemptUsage, startedAt time.Time, successful bool, 
 	if u.Batch && r.batch == nil {
 		return Cost{}, false
 	}
-	if window == nil && !u.Batch {
+	if window == nil && !u.Batch && discount == nil {
 		// total is in units of 10^-18: round half up, which is half away from
 		// zero for an amount that cannot be negative.
 		total.Add(total, big.NewInt(500_000))

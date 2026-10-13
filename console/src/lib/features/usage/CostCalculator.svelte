@@ -135,18 +135,26 @@
       }
       // Shares stay inside the totals they are part of, as events require.
       const total = (key: string) => Number(usage[key] ?? 0);
+      const cached = total('cached_input_tokens');
+      const cachedAudio = total('cached_audio_input_tokens');
+      const cachedImage = total('cached_image_input_tokens');
+      const audio = total('audio_input_tokens');
+      const image = total('image_input_tokens');
+      const writes = total('cache_write_input_tokens');
       const inputs =
-        total('cached_input_tokens') +
-        total('cache_write_input_tokens') +
-        total('cache_write_5m_input_tokens') +
-        total('cache_write_1h_input_tokens') +
-        total('audio_input_tokens') +
-        total('cached_audio_input_tokens') +
-        total('image_input_tokens') +
-        total('cached_image_input_tokens');
+        cached + writes + audio - cachedAudio + image - cachedImage;
       const outputs =
         total('audio_output_tokens') + total('image_output_tokens');
-      if (inputs > total('input_tokens') || outputs > total('output_tokens')) {
+      if (
+        inputs > total('input_tokens') ||
+        outputs > total('output_tokens') ||
+        cachedAudio > audio ||
+        cachedImage > image ||
+        cachedAudio + cachedImage > cached ||
+        total('cache_write_5m_input_tokens') +
+          total('cache_write_1h_input_tokens') >
+          writes
+      ) {
         quoteError =
           'Token shares must fit inside the input and output totals.';
         quoteBusy = false;

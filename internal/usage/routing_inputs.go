@@ -375,6 +375,10 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
 		}
 		in.Performance[PerformanceKey(provider, model, op, mode)] = p
 	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
 	if len(in.Performance) > 100000 {
 		return nil, errors.New("routing performance catalogue exceeds bounded capacity")
 	}
@@ -387,12 +391,19 @@ func LoadRoutingInputs(ctx context.Context, q access.Queryer, now time.Time) (*R
 	return in, rows.Err()
 }
 
-// loadRoutingDiscounts reads the multipliers in force plus every scheduled
-// one; a bounded catalogue keeps each plan's pin lookup cheap.
+// loadRoutingDiscounts reads the multipliers in force plus those scheduled
+// within 90 days; a bounded catalogue keeps each plan's pin lookup cheap.
 func loadRoutingDiscounts(ctx context.Context, q access.Queryer, now time.Time, in *RoutingInputs) error {
 	rows, err := q.Query(ctx, `SELECT id::text,provider_kind,vendor_id,provider_id::text,
  multiplier::text,effective_at,created_at
- FROM olp.pricing_discounts WHERE effective_at<=$1::timestamptz+interval '90 days' ORDER BY id LIMIT 100001`, now)
+ FROM (
+  (SELECT DISTINCT ON (provider_kind,vendor_id,provider_id) *
+   FROM olp.pricing_discounts WHERE effective_at<=$1
+   ORDER BY provider_kind,vendor_id,provider_id,effective_at DESC,created_at DESC,id DESC)
+  UNION ALL
+  (SELECT * FROM olp.pricing_discounts
+   WHERE effective_at>$1 AND effective_at<=$1::timestamptz+interval '90 days')
+ ) discounts ORDER BY id LIMIT 100001`, now)
 	if err != nil {
 		return err
 	}
@@ -435,6 +446,9 @@ func loadRoutingRateCards(ctx context.Context, q access.Queryer, _ time.Time, in
 		in.ProjectOrganizations[project] = organization
 	}
 	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
 
 	cards := map[string]*RoutingRateCard{}
 	order := []string{}
@@ -544,6 +558,9 @@ func loadRoutingRateCards(ctx context.Context, q access.Queryer, _ time.Time, in
 		return err
 	}
 	for _, id := range order {
+		for _, revision := range cardRevisions[id] {
+			cards[id].Revisions = append(cards[id].Revisions, *revision)
+		}
 		in.RateCards = append(in.RateCards, *cards[id])
 	}
 	return nil
