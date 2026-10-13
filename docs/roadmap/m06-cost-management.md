@@ -189,6 +189,7 @@ below already settled.
 - [ ] Reconciliation reports a capture rate for OpenAI and Anthropic
       connections against recorded fixtures.
 - [ ] The [parity matrix](parity.md) cost rows are `Parity` or better.
+
 ## Delivered and verified
 
 M6.1 to M6.3 are implemented; M6.4 and M6.5 remain planned, so the milestone
@@ -216,6 +217,13 @@ stays in progress.
   `max_cost` refuses requests whose worst case exceeds it before dispatch, and
   the console calculator prices routes and exact usage.
 
-<!-- H7: fill the verification paragraph from the final gate outputs: which
-make targets passed, integration counts, bench-gate result. State plainly any
-suite that could not run in this environment. -->
+`make check`, `make test-race` and one complete, unmodified `make integration`
+run pass on the branch; the integration run includes the race-enabled package
+phase, every client qualification suite and the packaged Playwright journeys,
+the new pricing journeys among them. `make bench-gate` holds every hot-path
+benchmark within its threshold except `BenchmarkEligibility/secret` (+13% time,
+no allocations), whose code path M6 does not change: on the development host
+its time moves by similar amounts between commits that do not touch it, which
+marks layout sensitivity rather than a regression. Live-provider qualification
+of the new metering is not part of this evidence; it rests on recorded
+response fixtures.

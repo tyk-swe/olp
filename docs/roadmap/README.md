@@ -26,8 +26,9 @@ exact attempt accounting, confined plugins and content-free diagnostics.
 
 ### Where it falls short
 
-Remaining work includes FinOps and billing exports, invoice reconciliation, streaming/extensible
-guardrails, response caching, API-surface completion and agent/tool execution.
+Remaining work includes FinOps and billing exports, invoice reconciliation,
+streaming/extensible guardrails, response caching, API-surface completion and
+agent/tool execution.
 M1's harness/gate exists, but full-rate reference-hardware results remain uncollected.
 The [parity matrix](parity.md) owns capability-by-capability status.
 
@@ -81,7 +82,10 @@ recomputed whenever a milestone closes:
 At the 0.1.0 baseline the matrix has 150 rows: 15 `Ahead`, 33 `Parity`, 30
 `Partial`, 70 `Gap` and 2 `Excluded`, a parity coverage of 48 of 148 (32%).
 This historical scorecard is preserved for comparison.
-
+The current 149 capability rows reflect M1–M5, M11 and M6.1–M6.3: 22 `Ahead`,
+85 `Parity`, 10 `Partial`, 30 `Gap`, 2 `Excluded`; coverage is 107/147 (73%).
+Status rows in the legend are not capabilities. Definitions/registrations alone
+do not close broader guardrail-execution or agent-gateway workstreams.
 
 ## Definition of done
 

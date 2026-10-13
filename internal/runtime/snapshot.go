@@ -83,7 +83,6 @@ type Limits struct {
 	Supply
 }
 
-// Provider is the serving view of one active provider revision.
 // CommitmentPeriods are the UTC calendar periods a commitment can bill on.
 var CommitmentPeriods = map[string]bool{"hour": true, "day": true, "month": true}
 
@@ -95,6 +94,7 @@ type Commitment struct {
 	Period string `json:"period"`
 }
 
+// Provider is the serving view of one active provider revision.
 type Provider struct {
 	CredentialSource string                    `json:"credential_source,omitempty"`
 	Network          *egress.ConnectionOptions `json:"network,omitempty"`
@@ -136,7 +136,8 @@ type Provider struct {
 	// Commitment is the provisioned capacity this connection pays for: its
 	// attempts price at zero marginal cost and share the commitment amount
 	// across each calendar period by list-cost weight.
-	Commitment  *Commitment  `json:"commitment,omitempty"`
+	Commitment *Commitment `json:"commitment,omitempty"`
+	// HealthProbe, when set, opts the connection into active probing.
 	HealthProbe *HealthProbe `json:"health_probe,omitempty"`
 	Slots       []Slot       `json:"slots,omitempty"`
 	// ObservedPrincipal is the upstream principal every slot of a provider
