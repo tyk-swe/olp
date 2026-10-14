@@ -2,6 +2,7 @@ package export
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -28,17 +31,18 @@ type Management struct {
 }
 
 type Sink struct {
-	ID                   string   `json:"export_sink_id"`
-	Name                 string   `json:"name"`
-	ProjectID            *string  `json:"project_id"`
-	Type                 string   `json:"type"`
-	Destination          string   `json:"destination"`
-	Streams              []string `json:"streams"`
-	Format               string   `json:"format"`
-	Filter               *Filter  `json:"filter"`
-	Enabled              bool     `json:"enabled"`
-	CredentialConfigured bool     `json:"credential_configured"`
-	ETag                 string   `json:"etag"`
+	ID                   string          `json:"export_sink_id"`
+	Name                 string          `json:"name"`
+	ProjectID            *string         `json:"project_id"`
+	Type                 string          `json:"type"`
+	Destination          string          `json:"destination"`
+	Streams              []string        `json:"streams"`
+	Format               string          `json:"format"`
+	Filter               *Filter         `json:"filter"`
+	Settings             json.RawMessage `json:"settings"`
+	Enabled              bool            `json:"enabled"`
+	CredentialConfigured bool            `json:"credential_configured"`
+	ETag                 string          `json:"etag"`
 }
 
 type Filter struct {
@@ -56,8 +60,22 @@ type Gap struct {
 	Reason      string `json:"reason"`
 }
 
-var sinkFormats = map[string]string{"https": "json", "otlp_logs": "otlp", "s3": "jsonl", "gcs": "jsonl", "azure_blob": "jsonl"}
-var sinkStreams = map[string]bool{"requests": true, "attempts": true, "usage_rollups": true, "guardrail_decisions": true, "audit": true}
+// sinkFormats pairs each sink type with the encodings it can speak.
+var sinkFormats = map[string][]string{
+	"https":        {"json", "cloudevents"},
+	"otlp_logs":    {"otlp"},
+	"s3":           {"jsonl", "csv_gzip"},
+	"gcs":          {"jsonl", "csv_gzip"},
+	"azure_blob":   {"jsonl", "csv_gzip"},
+	"stripe_meter": {"stripe"},
+}
+
+var sinkStreams = map[string]bool{"requests": true, "attempts": true, "usage_rollups": true,
+	"guardrail_decisions": true, "audit": true, "metering": true, "focus": true}
+
+// captureFormats are the encodings payload capture can write; the metering
+// formats never carry request payloads.
+var captureFormats = []string{"json", "jsonl", "otlp"}
 
 const maxSinks = 1000
 
@@ -68,6 +86,7 @@ func (m *Management) Register(mux *http.ServeMux) {
 	m.Access.Route(mux, "PATCH /api/v1/observability/sinks/{export_sink_id}", m.updateSink)
 	m.Access.Route(mux, "DELETE /api/v1/observability/sinks/{export_sink_id}", m.deleteSink)
 	m.Access.Route(mux, "GET /api/v1/observability/sinks/{export_sink_id}/gaps", m.sinkGaps)
+	m.Access.Route(mux, "GET /api/v1/observability/sinks/{export_sink_id}/focus-datasets", m.focusDatasets)
 	m.Access.Route(mux, "GET /api/v1/observability/capture-sinks", m.listCaptureSinks)
 	m.Access.Route(mux, "GET /api/v1/observability/capture", m.captureConfiguration)
 	m.Access.Route(mux, "PATCH /api/v1/observability/capture", m.updateCaptureConfiguration)
@@ -204,6 +223,7 @@ func (m *Management) createSink(r *http.Request, _ access.Principal) (access.Rep
 		Streams     []string        `json:"streams"`
 		Format      string          `json:"format"`
 		Filter      json.RawMessage `json:"filter"`
+		Settings    json.RawMessage `json:"settings"`
 		Credential  json.RawMessage `json:"credential"`
 		Enabled     *bool           `json:"enabled"`
 	}
@@ -217,7 +237,7 @@ func (m *Management) createSink(r *http.Request, _ access.Principal) (access.Rep
 		}
 		input.ProjectID = &project
 	}
-	sink := Sink{ID: access.NewID(), ETag: access.NewID(), Name: strings.TrimSpace(input.Name), ProjectID: input.ProjectID, Type: input.Type, Destination: input.Destination, Streams: input.Streams, Format: input.Format, Enabled: true}
+	sink := Sink{ID: access.NewID(), ETag: access.NewID(), Name: strings.TrimSpace(input.Name), ProjectID: input.ProjectID, Type: input.Type, Destination: input.Destination, Streams: input.Streams, Format: input.Format, Settings: input.Settings, Enabled: true}
 	if input.Enabled != nil {
 		sink.Enabled = *input.Enabled
 	}
@@ -228,6 +248,15 @@ func (m *Management) createSink(r *http.Request, _ access.Principal) (access.Rep
 	sink.Filter = filter
 	if err := m.validateSink(&sink); err != nil {
 		return access.Reply{}, err
+	}
+	if sink.Settings, err = m.resolveSettings(r.Context(), m.Pool, &sink, nil); err != nil {
+		return access.Reply{}, err
+	}
+	if err := validateSinkCredential(sink.Type, input.Credential); err != nil {
+		return access.Reply{}, err
+	}
+	if sink.Type == "stripe_meter" && sink.Enabled && !credentialPresent(input.Credential) {
+		return access.Reply{}, access.Invalid("credential", "an enabled stripe_meter sink requires a credential")
 	}
 	tx, err := m.Access.Begin(r)
 	if err != nil {
@@ -255,7 +284,7 @@ func (m *Management) createSink(r *http.Request, _ access.Principal) (access.Rep
 	if count >= maxSinks {
 		return access.Reply{}, access.Invalid("sinks", "This installation already has 1000 export sinks.")
 	}
-	if _, err := tx.Exec(r.Context(), createSinkSQL, sink.ID, sink.Name, sink.ProjectID, sink.Type, sink.Destination, sink.Streams, sink.Format, canonicalFilter(sink.Filter), sink.Enabled, sink.ETag, p.UserID()); err != nil {
+	if _, err := tx.Exec(r.Context(), createSinkSQL, sink.ID, sink.Name, sink.ProjectID, sink.Type, sink.Destination, sink.Streams, sink.Format, canonicalFilter(sink.Filter), sink.Settings, sink.Enabled, sink.ETag, p.UserID()); err != nil {
 		return access.Reply{}, err
 	}
 	if len(input.Credential) > 0 && string(input.Credential) != "null" {
@@ -290,6 +319,7 @@ func (m *Management) updateSink(r *http.Request, _ access.Principal) (access.Rep
 		Name        *string         `json:"name"`
 		Destination *string         `json:"destination"`
 		Filter      json.RawMessage `json:"filter"`
+		Settings    json.RawMessage `json:"settings"`
 		Credential  json.RawMessage `json:"credential"`
 		Enabled     *bool           `json:"enabled"`
 		Type        *string         `json:"type"`
@@ -348,6 +378,17 @@ func (m *Management) updateSink(r *http.Request, _ access.Principal) (access.Rep
 		}
 		updated.Filter = filter
 	}
+	if input.Settings != nil {
+		updated.Settings = input.Settings
+		canonical, err := m.resolveSettings(r.Context(), tx, &updated, current.Settings)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if updated.Format == "csv_gzip" && settingsCostBasis(canonical) != settingsCostBasis(current.Settings) {
+			return access.Reply{}, access.Invalid("settings.cost_basis", "cost_basis is immutable on a focus sink")
+		}
+		updated.Settings = canonical
+	}
 	if err := m.validateSink(&updated); err != nil {
 		return access.Reply{}, err
 	}
@@ -355,7 +396,7 @@ func (m *Management) updateSink(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, access.Invalid("credential", "changing the destination requires a replacement credential or null")
 	}
 	etag = access.NewID()
-	if _, err := tx.Exec(r.Context(), updateSinkSQL, current.ID, updated.Name, updated.Destination, updated.Streams, canonicalFilter(updated.Filter), updated.Enabled, etag); err != nil {
+	if _, err := tx.Exec(r.Context(), updateSinkSQL, current.ID, updated.Name, updated.Destination, updated.Streams, canonicalFilter(updated.Filter), updated.Enabled, etag, updated.Settings); err != nil {
 		return access.Reply{}, err
 	}
 	if input.Credential != nil {
@@ -373,6 +414,9 @@ func (m *Management) updateSink(r *http.Request, _ access.Principal) (access.Rep
 			if len(input.Credential) > 65536 {
 				return access.Reply{}, access.Invalid("credential", "credential must be at most 65536 bytes")
 			}
+			if err := validateSinkCredential(current.Type, input.Credential); err != nil {
+				return access.Reply{}, err
+			}
 			newID := access.NewID()
 			if err := m.Keys.Store(r.Context(), tx, m.Installation, newID, secrets.SinkCredential, input.Credential, nil); err != nil {
 				return access.Reply{}, err
@@ -387,6 +431,9 @@ func (m *Management) updateSink(r *http.Request, _ access.Principal) (access.Rep
 			}
 			updated.CredentialConfigured = true
 		}
+	}
+	if updated.Type == "stripe_meter" && updated.Enabled && !updated.CredentialConfigured {
+		return access.Reply{}, access.Invalid("credential", "an enabled stripe_meter sink requires a credential")
 	}
 	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "export_sink.update", "export_sink", current.ID, "success", projectID); err != nil {
 		return access.Reply{}, err
@@ -473,6 +520,54 @@ func (m *Management) sinkGaps(r *http.Request, p access.Principal) (access.Reply
 	return access.ListReplyBy(items, page, func(g Gap) string { return g.ID }), rows.Err()
 }
 
+// focusDatasets lists a sink's delivered and pending FOCUS days, newest
+// charge date first. Its cursor encodes the charge_date, not an id.
+func (m *Management) focusDatasets(r *http.Request, p access.Principal) (access.Reply, error) {
+	_, _, projectID, err := scanSinkDetail(m.Pool.QueryRow(r.Context(), getSinkSQL, r.PathValue("export_sink_id")))
+	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(projectID, access.View); err != nil {
+		return access.Reply{}, err
+	}
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 200 {
+			return access.Reply{}, access.Invalid("limit", "Use a page size from 1 to 200.")
+		}
+		limit = n
+	}
+	before := "9999-12-31"
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(raw)
+		if err != nil {
+			return access.Reply{}, access.Invalid("cursor", "Invalid pagination cursor.")
+		}
+		if _, err := time.Parse("2006-01-02", string(decoded)); err != nil {
+			return access.Reply{}, access.Invalid("cursor", "Invalid pagination cursor.")
+		}
+		before = string(decoded)
+	}
+	rows, err := m.Pool.Query(r.Context(), focusDatasetsSQL, r.PathValue("export_sink_id"), before, limit+1)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	items, err := access.JSONRows(rows)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	var next any
+	if len(items) > limit {
+		items = items[:limit]
+		next = base64.RawURLEncoding.EncodeToString([]byte(items[len(items)-1]["charge_date"].(string)))
+	}
+	if items == nil {
+		items = []map[string]any{}
+	}
+	return access.OK(map[string]any{"items": items, "next_cursor": next}), nil
+}
+
 func (m *Management) requireSinkScope(r *http.Request, q access.Queryer, p access.Principal, projectID *string) error {
 	if projectID == nil {
 		return p.Authorize(access.Settings)
@@ -484,25 +579,42 @@ func (m *Management) requireSinkScope(r *http.Request, q access.Queryer, p acces
 }
 
 func (m *Management) validateSink(sink *Sink) error {
-	format, ok := sinkFormats[sink.Type]
+	formats, ok := sinkFormats[sink.Type]
 	if !ok {
-		return access.Invalid("type", "type must be https, otlp_logs, s3, gcs or azure_blob")
+		return access.Invalid("type", "type must be https, otlp_logs, s3, gcs, azure_blob or stripe_meter")
 	}
-	if sink.Format != format {
-		return access.Invalid("format", fmt.Sprintf("%s sinks require format %s", sink.Type, format))
+	if !slices.Contains(formats, sink.Format) {
+		return access.Invalid("format", fmt.Sprintf("%s sinks support format %s", sink.Type, strings.Join(formats, " or ")))
 	}
 	if sink.Name == "" || len(sink.Name) > 100 {
 		return access.Invalid("name", "name must be from 1 to 100 characters")
 	}
-	if len(sink.Streams) < 1 || len(sink.Streams) > 5 {
-		return access.Invalid("streams", "streams must contain from 1 to 5 entries")
+	if len(sink.Streams) < 1 || len(sink.Streams) > 6 {
+		return access.Invalid("streams", "streams must contain from 1 to 6 entries")
 	}
 	seen := map[string]bool{}
 	for _, stream := range sink.Streams {
 		if !sinkStreams[stream] || seen[stream] {
-			return access.Invalid("streams", "streams must contain distinct requests, attempts, usage_rollups, guardrail_decisions or audit entries")
+			return access.Invalid("streams", "streams must contain distinct requests, attempts, usage_rollups, guardrail_decisions, audit, metering or focus entries")
 		}
 		seen[stream] = true
+	}
+	switch sink.Format {
+	case "cloudevents", "stripe":
+		if len(sink.Streams) != 1 || sink.Streams[0] != "metering" {
+			return access.Invalid("streams", fmt.Sprintf("%s sinks carry only the metering stream", sink.Format))
+		}
+	case "csv_gzip":
+		if len(sink.Streams) != 1 || sink.Streams[0] != "focus" {
+			return access.Invalid("streams", "csv_gzip sinks carry only the focus stream")
+		}
+	default:
+		if seen["focus"] {
+			return access.Invalid("streams", "the focus stream requires a csv_gzip object sink")
+		}
+	}
+	if sink.Format == "csv_gzip" && sink.Filter != nil && sink.Filter.Outcome != nil {
+		return access.Invalid("filter.outcome", "focus datasets do not filter by outcome")
 	}
 	if sink.Destination == "" || len(sink.Destination) > 2048 {
 		return access.Invalid("destination", "destination must be from 1 to 2048 characters")

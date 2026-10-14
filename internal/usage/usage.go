@@ -88,6 +88,10 @@ const (
 	// TaskHealthProbes sends the active health probes connections opt into.
 	TaskHealthProbes   Task = "health_probes"
 	TaskExportDelivery Task = "export_delivery"
+	// TaskBillingImport imports provider invoices and reports its liveness.
+	TaskBillingImport Task = "billing_import"
+	// TaskFocusExport delivers the daily FOCUS datasets to csv_gzip sinks.
+	TaskFocusExport Task = "focus_export"
 )
 
 // Outcome is what one worker pass achieved.

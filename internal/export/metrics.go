@@ -9,7 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 )
 
-func WriteMetrics(ctx context.Context, q access.Queryer, worker *Worker, capture *Manager, body *strings.Builder) {
+func WriteMetrics(ctx context.Context, q access.Queryer, worker *Worker, focus *FocusWorker, capture *Manager, body *strings.Builder) {
 	rows, err := q.Query(ctx, exportMetricsSQL)
 	if err == nil {
 		defer rows.Close()
@@ -52,6 +52,36 @@ func WriteMetrics(ctx context.Context, q access.Queryer, worker *Worker, capture
 	var pending int64
 	if err := q.QueryRow(ctx, exportPendingMetricsSQL).Scan(&pending); err == nil {
 		fmt.Fprintf(body, "# HELP olp_export_pending Export records currently awaiting delivery.\n# TYPE olp_export_pending gauge\nolp_export_pending %d\n", pending)
+	}
+	if focus != nil {
+		// Pending datasets: any row mid-retry or restating a dirty day.
+		pending, err := q.Query(ctx, `SELECT sink_id::text, count(*) FROM olp.focus_datasets fd
+			LEFT JOIN olp.focus_dirty_days dd ON dd.day=fd.charge_date
+			WHERE fd.last_error_code IS NOT NULL OR fd.delivered_at IS NULL
+			   OR COALESCE(dd.version,0) IS DISTINCT FROM fd.dirty_version
+			GROUP BY sink_id`)
+		if err == nil {
+			type pend struct {
+				sink string
+				n    int64
+			}
+			var items []pend
+			for pending.Next() {
+				var item pend
+				if err := pending.Scan(&item.sink, &item.n); err == nil {
+					items = append(items, item)
+				}
+			}
+			pending.Close()
+			body.WriteString("# HELP olp_focus_pending_datasets FOCUS datasets awaiting delivery or restatement per sink.\n# TYPE olp_focus_pending_datasets gauge\n")
+			for _, item := range items {
+				fmt.Fprintf(body, "olp_focus_pending_datasets{sink=%s} %d\n", strconv.Quote(item.sink), item.n)
+			}
+		}
+		body.WriteString("# HELP olp_focus_dataset_deliveries_total FOCUS dataset deliveries by sink and outcome.\n# TYPE olp_focus_dataset_deliveries_total counter\n")
+		for key, n := range focus.FocusMetrics() {
+			fmt.Fprintf(body, "olp_focus_dataset_deliveries_total{sink=%s,outcome=%s} %d\n", strconv.Quote(key[0]), strconv.Quote(key[1]), n)
+		}
 	}
 	if worker != nil {
 		attempts, _, failed := worker.Metrics()

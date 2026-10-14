@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/config"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -208,6 +209,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	var business *telemetry.BusinessMetrics
 	var exporter *export.Worker
 	var capturer *export.Manager
+	var importer *billing.Importer
+	var focusWorker *export.FocusWorker
 	// The public listener's process-local admission pools. The inference pool
 	// is shared with the gateway so middleware and direct handler calls bound
 	// one capacity; media reconciliation gaps and durable metadata loss are
@@ -235,7 +238,10 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		sender := export.NewSender(&policy)
 		sender.Installation = installation
 		exporter = &export.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
+		export.FocusGeneratorVersion = Version
+		focusWorker = &export.FocusWorker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		capturer = &export.Manager{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
+		importer = &billing.Importer{Pool: pool, Keys: keys, Installation: installation, Egress: &policy, Log: log}
 		rt = runtime.NewManager(pool, installation, auth, keys, log)
 		rt.ReadPool = readPool
 		rt.Region = c.Region
@@ -490,7 +496,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	}
 	if pool != nil {
 		obsState.Export = func(ctx context.Context, body *strings.Builder) {
-			export.WriteMetrics(ctx, pool, exporter, capturer, body)
+			export.WriteMetrics(ctx, pool, exporter, focusWorker, capturer, body)
+			billing.WriteMetrics(ctx, pool, importer, body)
 		}
 	}
 	configureObservability(obsState, rt, gw, emitter, mediaSpool, &policy)
@@ -535,7 +542,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, limiter, workerStream, mediaService, pluginHost, keys, installation, c.Region, &policy, log, exporter, referenceCatalog)
+		workersStopped = startWorkers(workers, pool, reader, limiter, workerStream, mediaService, pluginHost, keys, installation, c.Region, &policy, log, exporter, focusWorker, importer, referenceCatalog)
 	}
 	// Probes produce accounting events, so they stop before delivery closes;
 	// the consumer and recovery workers remain alive until delivery drains.

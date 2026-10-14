@@ -205,6 +205,46 @@ const server = createServer(async (request, response) => {
   if (method === 'GET' && url.pathname === '/__test__/requests') {
     return json(response, 200, { requests: recorded, unexpected });
   }
+  // The billing importer reads the admin costs API with the billing key, not
+  // the inference credential, so this path predates the credential check.
+  if (method === 'GET' && url.pathname === '/v1/organization/costs') {
+    recorded.push({
+      method,
+      path: url.pathname,
+      query: url.searchParams.toString(),
+      headers: request.headers,
+      body
+    });
+    if (!String(request.headers.authorization ?? '').startsWith('Bearer ')) {
+      unexpected.push(`${method} ${url.pathname}: missing bearer credential`);
+      return openaiError(response, 401, 'invalid_api_key', 'no credential');
+    }
+    const bucketStart = new Date();
+    bucketStart.setUTCDate(bucketStart.getUTCDate() - 1);
+    bucketStart.setUTCHours(0, 0, 0, 0);
+    const start = Math.floor(bucketStart.getTime() / 1000);
+    return json(response, 200, {
+      object: 'page',
+      data: [
+        {
+          object: 'bucket',
+          start_time: start,
+          end_time: start + 86400,
+          results: [
+            {
+              object: 'organization.costs.result',
+              amount: { value: 12.34, currency: 'usd' },
+              line_item: 'e2e-model, input_tokens',
+              project_id: null,
+              organization_id: 'org-mock'
+            }
+          ]
+        }
+      ],
+      has_more: false,
+      next_page: null
+    });
+  }
   recorded.push({
     method,
     path: url.pathname,

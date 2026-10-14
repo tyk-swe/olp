@@ -1,0 +1,37 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "start_time": 1759276800,
+      "end_time": 1759363200,
+      "results": [
+        {
+          "object": "organization.costs.result",
+          "amount": {
+            "value": "0.0000000001",
+            "currency": "USD"
+          },
+          "line_item": "gpt-4o-mini, input_tokens",
+          "project_id": "proj_bbb222",
+          "organization_id": "org-demo",
+          "group_by": "line_item",
+          "api_source": "api"
+        },
+        {
+          "object": "organization.costs.result",
+          "amount": {
+            "value": 0.0005,
+            "currency": "usd"
+          },
+          "line_item": "gpt-4o-mini, input_tokens",
+          "project_id": "proj_bbb222",
+          "organization_id": "org-demo",
+          "group_by": "line_item",
+          "api_source": "api"
+        }
+      ]
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

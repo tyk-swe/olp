@@ -33,8 +33,19 @@ type attemptPricing struct {
 	commitmentAmount *string
 	commitmentPeriod *string
 	// listCost is the undiscounted, uncommitted price the charge and weight
-	// are measured from.
-	listCost *string
+	// are measured from; contractedCost is the discounted provider cost
+	// before a commitment zeroes what is estimated.
+	listCost       *string
+	contractedCost *string
+	// costLines decomposes list/contracted cost into the SKU price lines
+	// FOCUS exports; chargeLines does the same for charge. Either is nil when
+	// the lines cannot re-derive the stored amount exactly.
+	costLines   []byte
+	chargeLines []byte
+	// unguardedLines keep what the pricing call returned before the equality
+	// guard, so a dropped decomposition can be told from a missing one.
+	unguardedCostLines   []byte
+	unguardedChargeLines []byte
 	// discountID is the discount the cost was priced under; charge is what
 	// the attempt's consumer was billed under the rate card revision named.
 	discountID         *string
@@ -144,7 +155,10 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
              THEN discount.id::text END AS discount_id,
         cardrev.rate_card_revision_id::text,
         charge.charge,
-        priced.list_cost::text
+        priced.list_cost::text,
+        priced.cost::text,
+        priced_lines.lines,
+        charge_lines.lines
     FROM olp.providers provider
     LEFT JOIN olp.provider_revisions provider_revision
         ON provider_revision.id = COALESCE($9::uuid, provider.active_revision_id)
@@ -191,6 +205,12 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
         SELECT * FROM olp.price_usage(selected.price_doc, $5::jsonb, $6::timestamptz, $7::boolean,
                                       COALESCE(discount.multiplier, 1))
     ) priced
+    CROSS JOIN LATERAL (
+        -- The SKU lines that same cost decomposes into; NULL exactly where
+        -- the pricing call cannot cover the attempt's dimensions.
+        SELECT olp.price_usage_lines(selected.price_doc, $5::jsonb, $6::timestamptz,
+                                     $7::boolean, COALESCE(discount.multiplier, 1)) AS lines
+    ) priced_lines
     CROSS JOIN LATERAL (
         SELECT CASE WHEN provider_revision.id IS NOT NULL
                     THEN provider_revision.configuration->'options'->'commitment'
@@ -244,6 +264,26 @@ var priceAttemptSQL = `SELECT selected.pricing_revision_id::text,
                        * cardrev.markup, 12)
         END AS charge
     ) charge
+    LEFT JOIN LATERAL (
+        -- The charge leg mirrors the charge CASE branch for branch: an
+        -- explicit card price decomposes on its own rates, otherwise the
+        -- attempt's own lines scale by the card's markup — or by zero when a
+        -- commitment already covered the cost.
+        SELECT CASE
+            WHEN explicit.doc IS NOT NULL
+                THEN olp.price_usage_lines(explicit.doc, $5::jsonb,
+                              $6::timestamptz, $7::boolean, 1)
+            WHEN cardrev.rate_card_revision_id IS NULL
+                THEN CASE WHEN committed.present AND priced.cost IS NOT NULL
+                    THEN olp.scale_price_lines(priced_lines.lines, 0)
+                    ELSE olp.scale_price_lines(priced_lines.lines, 1) END
+            WHEN CASE WHEN committed.present AND priced.cost IS NOT NULL
+                THEN '0'::numeric ELSE priced.cost END IS NULL THEN NULL
+            ELSE olp.scale_price_lines(priced_lines.lines,
+                CASE WHEN committed.present AND priced.cost IS NOT NULL
+                    THEN 0 ELSE cardrev.markup END)
+        END AS lines
+    ) charge_lines ON true
     WHERE provider.id = $1::uuid`
 
 // priceAttempt resolves what one attempt cost. A provider that no longer exists
@@ -303,7 +343,8 @@ func priceUsageQuoted(ctx context.Context, tx pgx.Tx, event *Event, usage Attemp
 		return attemptPricing{}, fmt.Errorf("price attempt: %w", err)
 	}
 	var pricing attemptPricing
-	var cost *string
+	var cost, contracted *string
+	var costLines, chargeLines []byte
 	err = tx.QueryRow(ctx, priceAttemptSQL,
 		providerID, model, event.Operation, event.ObservedAt,
 		string(document), startedAt, successful,
@@ -312,22 +353,32 @@ func priceUsageQuoted(ctx context.Context, tx pgx.Tx, event *Event, usage Attemp
 		event.APIKeyID, event.RouteSlug, consumer.set, consumer.project,
 	).Scan(&pricing.pricingRevisionID, &pricing.currency, &pricing.complete, &cost,
 		&pricing.components, &pricing.commitmentWeight, &pricing.commitmentAmount, &pricing.commitmentPeriod,
-		&pricing.discountID, &pricing.rateCardRevisionID, &pricing.charge, &pricing.listCost)
+		&pricing.discountID, &pricing.rateCardRevisionID, &pricing.charge, &pricing.listCost, &contracted,
+		&costLines, &chargeLines)
 	if err != nil {
 		return attemptPricing{}, fmt.Errorf("price attempt: %w", err)
 	}
 	if usage.Complete && pricing.complete {
 		pricing.estimatedCost = cost
+		pricing.contractedCost = contracted
+		// The lines stand only when they re-derive the stored costs exactly;
+		// a fact with nil lines is legitimate and the export handles it.
+		pricing.unguardedCostLines = costLines
+		pricing.costLines = costLinesKept(costLines, pricing.listCost, pricing.contractedCost)
 	} else {
 		pricing.components = nil
 		pricing.commitmentWeight, pricing.commitmentAmount, pricing.commitmentPeriod = nil, nil, nil
 		pricing.discountID = nil
+		pricing.listCost, pricing.contractedCost = nil, nil
 	}
+	pricing.unguardedChargeLines = chargeLines
 	if !usage.Complete {
 		// A charge, like a cost, is recorded only when the usage it bills is
 		// complete; an explicit rate that cannot price returns NULL either way.
 		pricing.charge = nil
+		chargeLines = nil
 	}
+	pricing.chargeLines = chargeLinesKept(chargeLines, pricing.charge)
 	if pricing.currency != nil {
 		currency := strings.TrimSpace(*pricing.currency)
 		pricing.currency = &currency

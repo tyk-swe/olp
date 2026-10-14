@@ -1,5 +1,6 @@
 <script lang="ts">
   import SavedFilters from './SavedFilters.svelte';
+  import ReconciliationPanel from './ReconciliationPanel.svelte';
   import { usageKeys } from '$lib/features/usage/usageKeys';
 
   import { goto } from '$app/navigation';
@@ -600,6 +601,10 @@
       </div>
     {/if}
   </section>
+  <ReconciliationPanel
+    start={applied.filters.start}
+    end={applied.filters.end}
+  />
   <CostCalculator />
 {/if}
 

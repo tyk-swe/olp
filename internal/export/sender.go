@@ -33,10 +33,12 @@ const maxCredentialBytes = 65536
 const maxDeliveryResponseBytes = 65536
 
 type Destination struct {
+	ID           string
 	Type         string
 	URL          string
 	Format       string
 	CredentialID *string
+	Settings     json.RawMessage
 }
 
 type Record struct {
@@ -102,11 +104,21 @@ func (s *Sender) Send(ctx context.Context, destination Destination, credential [
 	}
 	switch destination.Type {
 	case "https":
+		if destination.Format == "cloudevents" {
+			return s.sendCloudEvent(ctx, endpoint, destination, credential, record)
+		}
 		return s.sendHTTPS(ctx, endpoint, credential, record)
 	case "otlp_logs":
 		return s.sendOTLP(ctx, endpoint, credential, record)
 	case "s3", "gcs", "azure_blob":
+		if destination.Format == "csv_gzip" {
+			// FOCUS datasets are committed manifests, not stream records;
+			// their worker owns delivery.
+			return sendError("endpoint", errors.New("focus sinks deliver through the focus worker"))
+		}
 		return s.sendObject(ctx, endpoint, destination, credential, record)
+	case "stripe_meter":
+		return s.sendStripe(ctx, endpoint, destination, credential, record)
 	default:
 		return sendError("endpoint", fmt.Errorf("unknown sink type %q", destination.Type))
 	}
@@ -134,6 +146,7 @@ type credentialDocument struct {
 	Region        string            `json:"region"`
 	AuthMode      string            `json:"auth_mode"`
 	Secret        json.RawMessage   `json:"secret"`
+	APIKey        string            `json:"api_key"`
 }
 
 func parseCredential(raw []byte) (credentialDocument, error) {
@@ -174,6 +187,24 @@ func applyCredentialHeaders(header http.Header, headers map[string]string) error
 	return nil
 }
 
+// applySignature signs the exact body bytes with the sink's secret, under the
+// rules every envelope signer shares.
+func applySignature(header http.Header, secret string, body []byte) error {
+	if secret == "" {
+		return nil
+	}
+	if len(secret) < 16 {
+		return errors.New("signing_secret must be at least 16 bytes")
+	}
+	if strings.ContainsAny(secret, "\r\n") {
+		return errors.New("signing_secret must not contain newlines")
+	}
+	sum := hmac.New(sha256.New, []byte(secret))
+	sum.Write(body)
+	header.Set("X-OLP-Signature", "sha256="+hex.EncodeToString(sum.Sum(nil)))
+	return nil
+}
+
 func (s *Sender) sendHTTPS(ctx context.Context, endpoint *url.URL, credential []byte, record Record) error {
 	credentialDoc, err := parseCredential(credential)
 	if err != nil {
@@ -185,16 +216,8 @@ func (s *Sender) sendHTTPS(ctx context.Context, endpoint *url.URL, credential []
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-OLP-Event-ID", record.ID)
-	if credentialDoc.SigningSecret != "" {
-		if len(credentialDoc.SigningSecret) < 16 {
-			return sendError("credential", errors.New("signing_secret must be at least 16 bytes"))
-		}
-		if strings.ContainsAny(credentialDoc.SigningSecret, "\r\n") {
-			return sendError("credential", errors.New("signing_secret must not contain newlines"))
-		}
-		sum := hmac.New(sha256.New, []byte(credentialDoc.SigningSecret))
-		sum.Write(record.Data)
-		request.Header.Set("X-OLP-Signature", "sha256="+hex.EncodeToString(sum.Sum(nil)))
+	if err := applySignature(request.Header, credentialDoc.SigningSecret, record.Data); err != nil {
+		return sendError("credential", err)
 	}
 	if err := applyCredentialHeaders(request.Header, credentialDoc.Headers); err != nil {
 		return sendError("credential", err)
@@ -246,18 +269,25 @@ func (s *Sender) sendObject(ctx context.Context, endpoint *url.URL, destination 
 	if destination.Format != "jsonl" {
 		return sendError("endpoint", errors.New("object sinks export jsonl only"))
 	}
+	body := append(append([]byte{}, record.Data...), '\n')
+	return s.putObject(ctx, endpoint, destination, credential, objectKey(record), "application/x-ndjson", body)
+}
+
+// putObject PUTs one object under the destination prefix. The whole object
+// storage auth ladder lives here so any writer (stream records, and later
+// FOCUS parts) shares it.
+func (s *Sender) putObject(ctx context.Context, endpoint *url.URL, destination Destination, credential []byte, key, contentType string, body []byte) error {
 	credentialDoc, err := parseCredential(credential)
 	if err != nil {
 		return sendError("credential", err)
 	}
 	object := *endpoint
-	object.Path = strings.TrimRight(endpoint.Path, "/") + "/" + objectKey(record)
-	body := append(append([]byte{}, record.Data...), '\n')
+	object.Path = strings.TrimRight(endpoint.Path, "/") + "/" + key
 	request, err := http.NewRequestWithContext(ctx, http.MethodPut, object.String(), bytes.NewReader(body))
 	if err != nil {
 		return sendError("network", err)
 	}
-	request.Header.Set("Content-Type", "application/x-ndjson")
+	request.Header.Set("Content-Type", contentType)
 	switch destination.Type {
 	case "s3":
 		region := credentialDoc.Region

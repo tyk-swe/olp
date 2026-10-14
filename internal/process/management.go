@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/branding"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/configuration"
@@ -104,6 +105,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	// its catch-all, which answers everything no surface claims.
 	(&usage.Server{Access: m.Access, VendorKind: providers.VendorKind, Egress: m.Egress, Catalog: m.Catalog, CatalogKeys: signing.Trusted()}).Register(mux)
 	(&export.Management{Access: m.Access, Pool: m.Access.Pool, Keys: m.Access.Keys, Installation: m.Access.Installation, Egress: m.Egress}).Register(mux)
+	(&billing.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&configuration.Server{
 		Limiter:                m.Limiter,
 		Access:                 m.Access,

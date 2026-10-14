@@ -43,6 +43,7 @@
   } from '$lib/forms/concurrentEdit';
   import ProviderConfigurationSection from '$lib/features/providers/ProviderConfigurationSection.svelte';
   import ProviderCredentialsSection from '$lib/features/providers/ProviderCredentialsSection.svelte';
+  import BillingImportSection from '$lib/features/providers/BillingImportSection.svelte';
   import ProviderModelsSection from '$lib/features/providers/ProviderModelsSection.svelte';
   import ProviderRevisionsSection from '$lib/features/providers/ProviderRevisionsSection.svelte';
   import ProviderValidationIssues from '$lib/features/providers/ProviderValidationIssues.svelte';
@@ -401,6 +402,7 @@
         onResetModelPage={resetModelPage}
         onNotice={reportNotice}
       />
+      <BillingImportSection provider={current} {canManage} />
     </div>
     {#if canManage}<a
         class="button button-secondary"

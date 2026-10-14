@@ -50,6 +50,24 @@ Destination changes require explicit replacement/removal of write-only credentia
 GCS/Azure tokens stay on their respective public storage HTTPS/443 hosts; provider
 egress exceptions cannot widen these bindings.
 
+FOCUS datasets and metering deliveries add `olp_focus_dataset_deliveries_total`,
+`olp_focus_pending_datasets`, `olp_billing_imports_total` and
+`olp_billing_capture_rate`; see [finops](finops.md) for object layout,
+restatement and the reconciliation report.
+
+A FOCUS day stuck with a `last_error_code` stays in `focus_datasets` with a
+future `next_attempt_at`; the worker retries it automatically (same revision
+keys, manifest last). Clear the cause (endpoint, credential, egress) rather
+than editing the row — `current` false means a dirty day awaiting restatement.
+A billing import's `last_error_code` follows the shared categories:
+`credential` means the sealed admin key is absent or invalid for the source —
+replace it; `status`/`response` are upstream answers, `endpoint` a missing
+provider or egress refusal. Imported costs are purged at
+`retention.usage_days`. Stripe meter posts and the OpenAI/Anthropic admin cost
+APIs run under the provider egress policy; restricted-egress deployments
+listing specific hosts need `api.stripe.com`, `api.openai.com` and
+`api.anthropic.com` reachable or the calls report `status`/`network`.
+
 Owner-enabled payload capture is best-effort and memory-only. Policies select
 sink, input/output/tool calls, deterministic sample ratio and scope selectors.
 Limits: 1 MiB/record, 256 collectors, 64 queued records, 4 MiB/project/minute;
@@ -80,9 +98,11 @@ or `all`; configured capability flags do not establish live worker health.
 | Maintenance | 60-second advisory-lock pass: roll up before purge; bounded resource expiry/savepoints |
 | Cost reconciliation | 60-second region-scoped leader pass |
 | Notifications | 60-second claims, durable attempt evidence, up to five retries with exponential minute backoff |
+| FOCUS dataset export | 60-second pass; PostgreSQL leases, no Valkey; at most four due days per sink |
+| Billing import | 60-second scan; each due import runs hourly after success, five-minute geometric backoff on failure |
 
 Media/grant/consumer/epoch checkpoints stale at 20 seconds; maintenance/cost/
-notification checkpoints at 180. Follower skips do not prove leader success.
+notification/focus-export/billing-import checkpoints at 180. Follower skips do not prove leader success.
 Healthy async status requires expected current tasks and zero pending/lag;
 backlogged is not lost, and missing evidence is unknown. Unsupported integer
 metadata versions remain pending; invalid supported formats create gaps.

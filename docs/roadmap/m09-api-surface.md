@@ -149,11 +149,22 @@ failover are refused on them, and the console marks them as uncertified. They
 serve vendor APIs OLP does not model, never as a substitute for a modeled
 operation.
 
+### M9.10 Decisions API
+
+The Decisions API serves typed yes/no, choice and score questions in the two
+formats LiteLLM introduced: OpenAI Decisions (`input` plus a list of
+`predicate`, `choice` and `score` questions) and System One (`state` plus a
+map of `noul`, `choice` and `score` questions). One provider list backs both
+routes, and any decision model on it serves either. Decision calls go through
+the same fidelity, pricing and attempt-accounting rules as other surfaces;
+they are unary only and count as inference attempts.
+
 ## Change map
 
 | Change | Start here |
 | --- | --- |
 | New endpoints and codecs | `internal/gateway/`, `internal/protocols/`, `internal/operations/` |
+| Decisions surfaces | `internal/gateway/`, `internal/protocols/` |
 | Provider-resource families | `internal/resources/`, `internal/durablecontract/` |
 | Batch settlement | `internal/resources/`, `internal/process/workers.go` |
 | Realtime | `internal/gateway/realtime.go`, `internal/realtimecontract/` |

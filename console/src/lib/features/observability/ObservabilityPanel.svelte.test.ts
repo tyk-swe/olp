@@ -11,6 +11,7 @@ import {
   listCapturePolicies,
   listCaptureSinkOptions,
   listExportSinks,
+  listExportSinkFocusDatasets,
   listExportSinkGaps,
   updateCapturePolicy,
   updateExportSink
@@ -89,6 +90,7 @@ vi.mock('$lib/features/observability/api', () => ({
   listCapturePolicies: vi.fn(),
   listCaptureSinkOptions: vi.fn(),
   listExportSinks: vi.fn(),
+  listExportSinkFocusDatasets: vi.fn(),
   listExportSinkGaps: vi.fn(),
   updateCaptureConfiguration: vi.fn(),
   updateCapturePolicy: vi.fn(),
@@ -135,6 +137,54 @@ const httpsSink: ExportSink = {
     }
   ]
 };
+
+const focusSink: ExportSink = {
+  ...httpsSink,
+  export_sink_id: '01980000-0000-7000-8000-000000000610',
+  name: 'FOCUS export',
+  type: 's3',
+  streams: ['focus'],
+  format: 'csv_gzip',
+  settings: { cost_basis: 'cost', start_date: '2026-10-01' },
+  status: [
+    {
+      stream: 'focus',
+      delivered_days: 2,
+      latest_delivered_date: '2026-10-08',
+      last_success_at: '2026-10-08T12:00:00Z',
+      pending_error_codes: []
+    }
+  ]
+};
+
+const focusDatasets = [
+  {
+    charge_date: '2026-10-08',
+    revision: 2,
+    generated_at: '2026-10-09T03:00:00Z',
+    delivered_at: '2026-10-09T03:05:00Z',
+    row_count: 128,
+    part_count: 1,
+    billed_cost: '12.5',
+    effective_cost: '10',
+    attempts: 1,
+    last_error_code: null,
+    current: true
+  },
+  {
+    charge_date: '2026-10-07',
+    revision: 1,
+    generated_at: null,
+    delivered_at: null,
+    row_count: 0,
+    part_count: 0,
+    billed_cost: null,
+    effective_cost: null,
+    attempts: 2,
+    last_error_code: 'status',
+    current: false
+  }
+];
 
 const projectSink: ExportSink = {
   ...httpsSink,
@@ -668,3 +718,170 @@ it.each(['sink', 'policy'])(
     expect(receipts.every((receipt) => !receipt.unresolved)).toBe(true);
   }
 );
+
+it('locks streams for cloudevents, stripe and csv_gzip formats', async () => {
+  await render();
+
+  choose('#sink-format', 'json');
+  choose('#sink-type', 's3');
+  choose('#sink-format', 'csv_gzip');
+  const focusCheckbox = [
+    ...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+  ].find((box) => box.closest('label')?.textContent === 'FOCUS')!;
+  expect(focusCheckbox.checked).toBe(true);
+  expect(focusCheckbox.disabled).toBe(true);
+  // The outcome filter is hidden for FOCUS.
+  expect(host.querySelector('#sink-filter-outcome')).toBeNull();
+
+  choose('#sink-format', 'jsonl');
+  const focusGone = [
+    ...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+  ].find((box) => box.closest('label')?.textContent === 'FOCUS');
+  expect(focusGone).toBeUndefined();
+
+  choose('#sink-type', 'stripe_meter');
+  const metering = [
+    ...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+  ].find((box) => box.closest('label')?.textContent === 'Metering')!;
+  expect(metering.checked).toBe(true);
+  expect(metering.disabled).toBe(true);
+  expect(host.querySelector<HTMLInputElement>('#sink-destination')!.value).toBe(
+    'https://api.stripe.com'
+  );
+});
+
+it('creates a FOCUS sink with cost basis and start date settings', async () => {
+  vi.mocked(createExportSink).mockResolvedValue(focusSink);
+  await render();
+
+  choose('#sink-name', 'FOCUS');
+  choose('#sink-type', 's3');
+  choose('#sink-format', 'csv_gzip');
+  choose('#sink-destination', 'https://objects.example.com/bucket');
+  choose('#sink-cost-basis', 'charge');
+  choose('#sink-focus-start', '2026-10-01');
+  host
+    .querySelector<HTMLFormElement>('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(createExportSink).toHaveBeenCalledWith(
+    expect.objectContaining({
+      type: 's3',
+      format: 'csv_gzip',
+      streams: ['focus'],
+      settings: { cost_basis: 'charge', start_date: '2026-10-01' }
+    }),
+    expect.any(String)
+  );
+});
+
+it('creates a CloudEvents sink locked to metering with a source', async () => {
+  vi.mocked(createExportSink).mockResolvedValue(httpsSink);
+  await render();
+
+  choose('#sink-name', 'Events');
+  choose('#sink-format', 'cloudevents');
+  choose('#sink-destination', 'https://events.example.com');
+  choose('#sink-ce-source', 'https://example.com/olp');
+  host
+    .querySelector<HTMLFormElement>('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(createExportSink).toHaveBeenCalledWith(
+    expect.objectContaining({
+      format: 'cloudevents',
+      streams: ['metering'],
+      settings: { source: 'https://example.com/olp' }
+    }),
+    expect.any(String)
+  );
+});
+
+it('creates a Stripe sink with the api_key credential and customer map', async () => {
+  vi.mocked(createExportSink).mockResolvedValue(httpsSink);
+  await render();
+
+  choose('#sink-name', 'Stripe');
+  choose('#sink-type', 'stripe_meter');
+  choose('#sink-stripe-key', 'rk_test_123');
+  choose('#sink-stripe-event', 'olp.charge');
+  choose('#sink-stripe-value', 'charge');
+  const projectSelect = host.querySelector<HTMLSelectElement>(
+    '.customer-row select'
+  )!;
+  projectSelect.value = projectId;
+  projectSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+  const customerInput = host.querySelector<HTMLInputElement>(
+    '.customer-row input'
+  )!;
+  customerInput.value = 'cus_ABC123';
+  customerInput.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  clickButton('Advanced');
+  choose('#sink-stripe-customer-key', 'olp_project');
+  choose('#sink-stripe-value-key', 'olp_value');
+  host
+    .querySelector<HTMLFormElement>('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(createExportSink).toHaveBeenCalledWith(
+    expect.objectContaining({
+      type: 'stripe_meter',
+      format: 'stripe',
+      streams: ['metering'],
+      credential: { api_key: 'rk_test_123' },
+      settings: {
+        event_name: 'olp.charge',
+        value: 'charge',
+        customers: { [projectId]: 'cus_ABC123' },
+        customer_key: 'olp_project',
+        value_key: 'olp_value'
+      }
+    }),
+    expect.any(String)
+  );
+});
+
+it('requires a Stripe key and at least one customer mapping', async () => {
+  await render();
+  choose('#sink-name', 'Stripe');
+  choose('#sink-type', 'stripe_meter');
+  host
+    .querySelector<HTMLFormElement>('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(createExportSink).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('restricted API key');
+
+  choose('#sink-stripe-key', 'rk_test_123');
+  host
+    .querySelector<HTMLFormElement>('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(createExportSink).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('Map at least one project');
+});
+
+it('shows a FOCUS sink settings summary and its datasets table', async () => {
+  vi.mocked(listExportSinks).mockResolvedValue([focusSink]);
+  vi.mocked(listExportSinkFocusDatasets).mockResolvedValue(focusDatasets);
+  await render();
+
+  expect(host.textContent).toContain('Cost basis: cost');
+  expect(host.textContent).toContain('from 2026-10-01');
+
+  clickButton('Datasets');
+  await vi.waitFor(() => expect(host.textContent).toContain('2026-10-08'));
+  const text = host.textContent!;
+  expect(text).toContain('Current');
+  expect(text).toContain('status');
+  expect(text).toContain('128');
+  expect(listExportSinkFocusDatasets).toHaveBeenCalledWith(
+    focusSink.export_sink_id,
+    expect.any(AbortSignal)
+  );
+});

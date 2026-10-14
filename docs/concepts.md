@@ -158,6 +158,14 @@ These are key/route/revision/credential-bound operational state, excluded from
 request history and telemetry; revocation/expiry fails closed. See
 [retained-state security](security.md#gateway-keys).
 
+Cost facts additionally keep the price-line decomposition (`cost_lines`,
+`charge_lines`), list and contracted cost, and the caller-credential marker;
+provider invoice imports store summed daily line items under
+`provider_invoiced_costs`. FOCUS datasets themselves are generated on demand to
+the sink — OLP stores only their delivery ledger (`focus_datasets`, revision,
+row and error state); metering payloads stay in the export queue until
+delivered. See [finops](finops.md) and [pricing](pricing.md).
+
 [Content policies](gateway.md#content-policy) inspect supported text in memory.
 Only `{rule_id, phase, action, outcome}` decisions persist, without matched
 text, offsets, patterns, or replacement strings. Unsupported surfaces refuse a

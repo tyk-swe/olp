@@ -1,0 +1,72 @@
+{
+  "data": [
+    {
+      "starting_at": "2025-10-01T00:00:00Z",
+      "ending_at": "2025-10-02T00:00:00Z",
+      "results": [
+        {
+          "amount": "123.45",
+          "currency": "USD",
+          "cost_type": "tokens",
+          "description": "claude-sonnet-4-5 input tokens",
+          "workspace_id": "wrkspc_alpha01",
+          "model": "claude-sonnet-4-5",
+          "service_tier": "standard",
+          "context_window": "0-200k",
+          "usage_type": "server_tool"
+        },
+        {
+          "amount": "67.89",
+          "currency": "USD",
+          "cost_type": "tokens",
+          "description": "claude-sonnet-4-5 input tokens",
+          "workspace_id": "wrkspc_beta02",
+          "model": "claude-sonnet-4-5",
+          "service_tier": "standard",
+          "context_window": "0-200k",
+          "usage_type": "server_tool"
+        },
+        {
+          "amount": "10.00",
+          "currency": "USD",
+          "cost_type": "search_requests",
+          "description": "web search requests",
+          "workspace_id": null,
+          "model": null,
+          "service_tier": null,
+          "context_window": null,
+          "usage_type": null
+        },
+        {
+          "amount": "0.01",
+          "currency": "USD",
+          "cost_type": "tokens",
+          "description": null,
+          "workspace_id": "wrkspc_alpha01",
+          "model": "claude-sonnet-4-5",
+          "service_tier": "standard",
+          "context_window": "0-200k",
+          "usage_type": "server_tool"
+        },
+        {
+          "amount": "123456.78901234",
+          "currency": "USD",
+          "cost_type": "tokens",
+          "description": "claude-opus-4-1 output tokens",
+          "workspace_id": "wrkspc_alpha01",
+          "model": "claude-opus-4-1",
+          "service_tier": "standard",
+          "context_window": "0-200k",
+          "usage_type": "server_tool"
+        }
+      ]
+    },
+    {
+      "starting_at": "2025-10-02T00:00:00Z",
+      "ending_at": "2025-10-03T00:00:00Z",
+      "results": []
+    }
+  ],
+  "has_more": true,
+  "next_page": "page-2-token"
+}

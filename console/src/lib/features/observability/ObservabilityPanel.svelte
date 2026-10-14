@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
@@ -6,7 +7,7 @@
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
   import { listProjectMemberships } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
-  import { formatDate } from '$lib/format';
+  import { formatCost, formatDate } from '$lib/format';
   import {
     createCapturePolicy,
     createExportSink,
@@ -16,12 +17,14 @@
     listCapturePolicies,
     listCaptureSinkOptions,
     listExportSinks,
+    listExportSinkFocusDatasets,
     listExportSinkGaps,
     updateCaptureConfiguration,
     updateCapturePolicy,
     updateExportSink,
     type CapturePolicy,
-    type ExportSink
+    type ExportSink,
+    type FocusDataset
   } from '$lib/features/observability/api';
   import { observabilityKeys } from '$lib/features/observability/observabilityKeys';
 
@@ -77,19 +80,60 @@
   let notice = $state('');
 
   const typeFormats: Record<string, { value: string; label: string }[]> = {
-    https: [{ value: 'json', label: 'JSON' }],
+    https: [
+      { value: 'json', label: 'JSON' },
+      { value: 'cloudevents', label: 'CloudEvents' }
+    ],
     otlp_logs: [{ value: 'otlp', label: 'OTLP logs' }],
-    s3: [{ value: 'jsonl', label: 'JSON Lines' }],
-    gcs: [{ value: 'jsonl', label: 'JSON Lines' }],
-    azure_blob: [{ value: 'jsonl', label: 'JSON Lines' }]
+    s3: [
+      { value: 'jsonl', label: 'JSON Lines' },
+      { value: 'csv_gzip', label: 'FOCUS 1.4 (gzip CSV)' }
+    ],
+    gcs: [
+      { value: 'jsonl', label: 'JSON Lines' },
+      { value: 'csv_gzip', label: 'FOCUS 1.4 (gzip CSV)' }
+    ],
+    azure_blob: [
+      { value: 'jsonl', label: 'JSON Lines' },
+      { value: 'csv_gzip', label: 'FOCUS 1.4 (gzip CSV)' }
+    ],
+    stripe_meter: [{ value: 'stripe', label: 'Stripe meter events' }]
+  };
+  const typeLabels: Record<string, string> = {
+    https: 'HTTPS',
+    otlp_logs: 'OTLP logs',
+    s3: 'S3',
+    gcs: 'GCS',
+    azure_blob: 'Azure Blob',
+    stripe_meter: 'Stripe meter'
   };
   const streamOptions = [
     { value: 'requests', label: 'Requests' },
     { value: 'attempts', label: 'Attempts' },
     { value: 'usage_rollups', label: 'Usage rollups' },
     { value: 'guardrail_decisions', label: 'Guardrail decisions' },
-    { value: 'audit', label: 'Audit' }
+    { value: 'audit', label: 'Audit' },
+    { value: 'metering', label: 'Metering' },
+    { value: 'focus', label: 'FOCUS' }
   ];
+  const stripeMeterValues = [
+    { value: 'charge', label: 'Charge' },
+    { value: 'cost', label: 'Cost' },
+    { value: 'input_tokens', label: 'Input tokens' },
+    { value: 'output_tokens', label: 'Output tokens' },
+    { value: 'total_tokens', label: 'Total tokens' },
+    { value: 'requests', label: 'Requests' }
+  ];
+  const isoDay = (offset: number) =>
+    new Date(Date.now() - offset * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+  const focusStartMin = isoDay(89);
+  const focusStartMax = isoDay(0);
+
+  const stripeEventPattern = /^[A-Za-z0-9_.:-]{1,100}$/;
+  const stripeCustomerPattern = /^cus_[A-Za-z0-9]{1,250}$/;
+  const stripeFieldPattern = /^[A-Za-z0-9_]{1,64}$/;
 
   let editingSink = $state<ExportSink | null>(null);
   let sinkName = $state('');
@@ -103,7 +147,31 @@
   let sinkFilterOutcome = $state('');
   let sinkCredential = $state('');
   let sinkClearCredential = $state(false);
+  let sinkStripeKey = $state('');
+  let sinkFocusCostBasis = $state<'cost' | 'charge'>('cost');
+  let sinkFocusStartDate = $state('');
+  let sinkCeSource = $state('');
+  let sinkStripeEvent = $state('olp.charge');
+  let sinkStripeValue = $state('charge');
+  let sinkCustomers = $state<{ project: string; customer: string }[]>([
+    { project: '', customer: '' }
+  ]);
+  let sinkStripeCustomerKey = $state('');
+  let sinkStripeValueKey = $state('');
+  let sinkStripeAdvanced = $state(false);
   let sinkBusy = $state(false);
+
+  // The server's pairing matrix: cloudevents and stripe carry exactly
+  // metering, csv_gzip carries exactly FOCUS, and FOCUS is not selectable on
+  // any other format.
+  const streamLock = $derived.by((): string[] | null => {
+    if (sinkFormat === 'cloudevents' || sinkFormat === 'stripe')
+      return ['metering'];
+    if (sinkFormat === 'csv_gzip') return ['focus'];
+    return null;
+  });
+  const focusVisible = $derived(sinkFormat === 'csv_gzip');
+  const outcomeVisible = $derived(sinkFormat !== 'csv_gzip');
 
   $effect(() => {
     const formats = typeFormats[sinkType] ?? typeFormats.https;
@@ -111,17 +179,108 @@
       sinkFormat = formats[0].value;
   });
 
+  $effect(() => {
+    // Equal-content writes stay untouched so this effect settles.
+    if (
+      streamLock &&
+      (sinkStreams.length !== streamLock.length ||
+        sinkStreams.some((stream, index) => stream !== streamLock[index]))
+    )
+      sinkStreams = [...streamLock];
+    if (!focusVisible && sinkStreams.includes('focus'))
+      sinkStreams = sinkStreams.filter((stream) => stream !== 'focus');
+  });
+
+  $effect(() => {
+    // Stripe destinations default to the meter API but stay editable.
+    const stripe = !editingSink && sinkType === 'stripe_meter';
+    untrack(() => {
+      if (stripe && !sinkDestination)
+        sinkDestination = 'https://api.stripe.com';
+    });
+  });
+
   function toggleStream(stream: string) {
+    if (streamLock) return;
     sinkStreams = sinkStreams.includes(stream)
       ? sinkStreams.filter((value) => value !== stream)
       : [...sinkStreams, stream];
+  }
+
+  // sinkSettings builds the format-specific settings document; null means no
+  // settings field is sent.
+  function sinkSettings(): Record<string, unknown> | null {
+    if (sinkFormat === 'csv_gzip') {
+      const settings: Record<string, unknown> = {
+        cost_basis: sinkFocusCostBasis
+      };
+      if (sinkFocusStartDate) settings.start_date = sinkFocusStartDate;
+      return settings;
+    }
+    if (sinkFormat === 'cloudevents') {
+      return sinkCeSource.trim() ? { source: sinkCeSource.trim() } : null;
+    }
+    if (sinkFormat === 'stripe') {
+      const settings: Record<string, unknown> = {
+        event_name: sinkStripeEvent.trim(),
+        value: sinkStripeValue,
+        customers: Object.fromEntries(
+          sinkCustomers
+            .filter((row) => row.project && row.customer.trim())
+            .map((row) => [row.project, row.customer.trim()])
+        )
+      };
+      if (sinkStripeCustomerKey.trim())
+        settings.customer_key = sinkStripeCustomerKey.trim();
+      if (sinkStripeValueKey.trim())
+        settings.value_key = sinkStripeValueKey.trim();
+      return settings;
+    }
+    return null;
+  }
+
+  // validateSinkSettings mirrors the server's settings rules so a bad form
+  // stops at the browser rather than the API.
+  function validateSinkSettings(): string {
+    if (sinkFormat === 'csv_gzip' && sinkFocusStartDate) {
+      const start = Date.parse(sinkFocusStartDate + 'T00:00:00Z');
+      const earliest = Date.now() - 89 * 24 * 60 * 60 * 1000;
+      if (!Number.isFinite(start) || start < earliest)
+        return 'Start date must be within the last 90 days.';
+    }
+    if (sinkFormat === 'stripe') {
+      if (!editingSink && !sinkStripeKey.trim())
+        return 'An enabled Stripe sink needs a restricted API key.';
+      if (!stripeEventPattern.test(sinkStripeEvent.trim()))
+        return 'The Stripe event name must be 1-100 characters of letters, digits, _, ., : or -.';
+      const rows = sinkCustomers.filter(
+        (row) => row.project || row.customer.trim()
+      );
+      if (!rows.length) return 'Map at least one project to a Stripe customer.';
+      for (const row of rows) {
+        if (!row.project) return 'Each customer mapping needs a project.';
+        if (!stripeCustomerPattern.test(row.customer.trim()))
+          return 'Stripe customer IDs look like cus_….';
+      }
+      if (
+        sinkStripeCustomerKey.trim() &&
+        !stripeFieldPattern.test(sinkStripeCustomerKey.trim())
+      )
+        return 'The customer key must be 1-64 letters, digits or underscores.';
+      if (
+        sinkStripeValueKey.trim() &&
+        !stripeFieldPattern.test(sinkStripeValueKey.trim())
+      )
+        return 'The value key must be 1-64 letters, digits or underscores.';
+    }
+    return '';
   }
 
   function sinkFilterValue() {
     const filter: Record<string, unknown> = {};
     if (sinkFilterProject) filter.project = sinkFilterProject;
     if (sinkFilterRoute.trim()) filter.route = sinkFilterRoute.trim();
-    if (sinkFilterOutcome) filter.outcome = sinkFilterOutcome;
+    if (sinkFilterOutcome && outcomeVisible) filter.outcome = sinkFilterOutcome;
     return Object.keys(filter).length ? filter : null;
   }
 
@@ -141,6 +300,27 @@
     sinkFormat = sink.format;
     sinkCredential = '';
     sinkClearCredential = false;
+    sinkStripeKey = '';
+    const settings = (sink.settings ?? {}) as Record<string, unknown>;
+    sinkFocusCostBasis = settings.cost_basis === 'charge' ? 'charge' : 'cost';
+    sinkFocusStartDate =
+      typeof settings.start_date === 'string' ? settings.start_date : '';
+    sinkCeSource = typeof settings.source === 'string' ? settings.source : '';
+    sinkStripeEvent =
+      typeof settings.event_name === 'string'
+        ? settings.event_name
+        : 'olp.charge';
+    sinkStripeValue =
+      typeof settings.value === 'string' ? settings.value : 'charge';
+    sinkCustomers = Object.entries(
+      (settings.customers ?? {}) as Record<string, string>
+    ).map(([project, customer]) => ({ project, customer }));
+    if (!sinkCustomers.length) sinkCustomers = [{ project: '', customer: '' }];
+    sinkStripeCustomerKey =
+      typeof settings.customer_key === 'string' ? settings.customer_key : '';
+    sinkStripeValueKey =
+      typeof settings.value_key === 'string' ? settings.value_key : '';
+    sinkStripeAdvanced = !!(sinkStripeCustomerKey || sinkStripeValueKey);
     error = '';
   }
 
@@ -154,6 +334,15 @@
     sinkFilterProject = '';
     sinkCredential = '';
     sinkClearCredential = false;
+    sinkStripeKey = '';
+    sinkFocusCostBasis = 'cost';
+    sinkFocusStartDate = '';
+    sinkCeSource = '';
+    sinkStripeEvent = 'olp.charge';
+    sinkStripeValue = 'charge';
+    sinkCustomers = [{ project: '', customer: '' }];
+    sinkStripeCustomerKey = sinkStripeValueKey = '';
+    sinkStripeAdvanced = false;
   }
 
   function cancelSinkEdit() {
@@ -173,8 +362,17 @@
     error = notice = '';
     let committed = false;
     try {
+      const settingsError = validateSinkSettings();
+      if (settingsError) {
+        error = settingsError;
+        return;
+      }
       let credential: unknown;
-      if (sinkCredential.trim()) {
+      if (sinkType === 'stripe_meter') {
+        // A Stripe sink carries exactly one credential shape.
+        if (sinkStripeKey.trim())
+          credential = { api_key: sinkStripeKey.trim() };
+      } else if (sinkCredential.trim()) {
         try {
           credential = JSON.parse(sinkCredential);
         } catch {
@@ -187,6 +385,7 @@
           name: sinkName.trim(),
           destination: sinkDestination.trim(),
           filter: sinkFilterValue(),
+          ...(sinkSettings() ? { settings: sinkSettings()! } : {}),
           ...(sinkClearCredential
             ? { credential: null }
             : credential !== undefined
@@ -208,6 +407,7 @@
           streams: sinkStreams as ExportSink['streams'],
           format: sinkFormat as ExportSink['format'],
           filter: sinkFilterValue(),
+          settings: sinkSettings(),
           ...(credential !== undefined
             ? { credential: credential as Record<string, unknown> }
             : {})
@@ -497,6 +697,47 @@
     gapSinkId = gapSinkId === sink.export_sink_id ? '' : sink.export_sink_id;
   }
 
+  let datasetSinkId = $state('');
+  const focusDatasets = createQuery(() => ({
+    queryKey: observabilityKeys.focusDatasets(datasetSinkId),
+    queryFn: ({ signal }) => listExportSinkFocusDatasets(datasetSinkId, signal),
+    enabled: datasetSinkId !== ''
+  }));
+
+  function toggleDatasets(sink: ExportSink) {
+    datasetSinkId =
+      datasetSinkId === sink.export_sink_id ? '' : sink.export_sink_id;
+  }
+
+  function focusDatasetStatus(dataset: FocusDataset): string {
+    if (dataset.last_error_code) return dataset.last_error_code;
+    return dataset.current ? 'Current' : 'Restatement pending';
+  }
+
+  // A one-line summary of the sink's format-specific settings.
+  function sinkSettingsSummary(sink: ExportSink): string {
+    const settings = (sink.settings ?? {}) as Record<string, unknown>;
+    const parts: string[] = [];
+    if (sink.format === 'csv_gzip') {
+      parts.push(
+        `Cost basis: ${settings.cost_basis === 'charge' ? 'charge' : 'cost'}`
+      );
+      if (settings.start_date)
+        parts.push(`from ${settings.start_date as string}`);
+    } else if (sink.format === 'cloudevents') {
+      if (settings.source) parts.push(`Source: ${settings.source as string}`);
+    } else if (sink.format === 'stripe') {
+      parts.push(
+        `Meter: ${(settings.event_name as string) ?? ''} (${(settings.value as string) ?? ''})`
+      );
+      const customers = (settings.customers ?? {}) as Record<string, string>;
+      parts.push(
+        `${Object.keys(customers).length} customer${Object.keys(customers).length === 1 ? '' : 's'}`
+      );
+    }
+    return parts.join(' · ');
+  }
+
   function sinkOptionLabel(id: string) {
     const option = (sinkOptions.data ?? []).find(
       (s) => s.export_sink_id === id
@@ -537,7 +778,7 @@
               bind:value={sinkType}
               disabled={!!editingSink}
               >{#each Object.keys(typeFormats) as type (type)}<option
-                  value={type}>{type}</option
+                  value={type}>{typeLabels[type] ?? type}</option
                 >{/each}</select
             >
           </div>
@@ -568,15 +809,20 @@
           <fieldset class="form-field">
             <legend>Streams</legend>
             {#each streamOptions as stream (stream.value)}
-              <label class="inline-check"
-                ><input
-                  type="checkbox"
-                  checked={sinkStreams.includes(stream.value)}
-                  disabled={!!editingSink}
-                  onchange={() => toggleStream(stream.value)}
-                />{stream.label}</label
-              >
+              {#if stream.value !== 'focus' || focusVisible}
+                <label class="inline-check"
+                  ><input
+                    type="checkbox"
+                    checked={sinkStreams.includes(stream.value)}
+                    disabled={!!editingSink || streamLock !== null}
+                    onchange={() => toggleStream(stream.value)}
+                  />{stream.label}</label
+                >
+              {/if}
             {/each}
+            {#if streamLock}<small
+                >This format carries {streamLock[0]} only.</small
+              >{/if}
           </fieldset>
           <div class="form-field">
             <label for="sink-filter-project">Filter project</label><input
@@ -593,31 +839,153 @@
               placeholder="Optional route slug"
             />
           </div>
-          <div class="form-field">
-            <label for="sink-filter-outcome">Outcome filter</label><select
-              id="sink-filter-outcome"
-              bind:value={sinkFilterOutcome}
-              ><option value="">All outcomes</option><option value="success"
-                >Success</option
-              ><option value="failure">Failure</option></select
+          {#if outcomeVisible}<div class="form-field">
+              <label for="sink-filter-outcome">Outcome filter</label><select
+                id="sink-filter-outcome"
+                bind:value={sinkFilterOutcome}
+                ><option value="">All outcomes</option><option value="success"
+                  >Success</option
+                ><option value="failure">Failure</option></select
+              >
+            </div>{/if}
+          {#if sinkType === 'stripe_meter'}
+            <div class="form-field">
+              <label for="sink-stripe-key">Restricted API key</label><input
+                id="sink-stripe-key"
+                type="password"
+                autocomplete="off"
+                bind:value={sinkStripeKey}
+                placeholder={editingSink
+                  ? 'Blank keeps the stored key'
+                  : 'rk_…'}
+              />
+            </div>
+          {:else}<div class="form-field">
+              <label for="sink-credential">Credential JSON</label><textarea
+                id="sink-credential"
+                bind:value={sinkCredential}
+                rows="2"
+                placeholder={editingSink
+                  ? 'Optional sealed replacement — blank keeps current'
+                  : 'Optional sealed credential object'}></textarea>
+              {#if editingSink}<label class="inline-check"
+                  ><input
+                    type="checkbox"
+                    aria-label="Clear stored credential"
+                    bind:checked={sinkClearCredential}
+                  />Clear stored credential</label
+                >{/if}
+            </div>{/if}
+          {#if sinkFormat === 'csv_gzip'}
+            <div class="form-field">
+              <label for="sink-cost-basis">FOCUS cost basis</label><select
+                id="sink-cost-basis"
+                bind:value={sinkFocusCostBasis}
+                disabled={!!editingSink}
+                ><option value="cost">Provider cost</option><option
+                  value="charge">Charge</option
+                ></select
+              >{#if editingSink}<small
+                  >Cost basis cannot change after creation.</small
+                >{/if}
+            </div>
+            <div class="form-field">
+              <label for="sink-focus-start">FOCUS start date</label><input
+                id="sink-focus-start"
+                type="date"
+                bind:value={sinkFocusStartDate}
+                min={focusStartMin}
+                max={focusStartMax}
+              /><small>Optional — earlier than 90 days ago is rejected.</small>
+            </div>
+          {:else if sinkFormat === 'cloudevents'}
+            <div class="form-field">
+              <label for="sink-ce-source">CloudEvents source</label><input
+                id="sink-ce-source"
+                bind:value={sinkCeSource}
+                placeholder="https://example.com/olp"
+              />
+            </div>
+          {:else if sinkFormat === 'stripe'}
+            <div class="form-field">
+              <label for="sink-stripe-event">Stripe event name</label><input
+                id="sink-stripe-event"
+                bind:value={sinkStripeEvent}
+                required
+                placeholder="olp.charge"
+              />
+            </div>
+            <div class="form-field">
+              <label for="sink-stripe-value">Meter value</label><select
+                id="sink-stripe-value"
+                bind:value={sinkStripeValue}
+                >{#each stripeMeterValues as option (option.value)}<option
+                    value={option.value}>{option.label}</option
+                  >{/each}</select
+              >
+            </div>
+            <fieldset class="form-field">
+              <legend>Stripe customers</legend>
+              {#each sinkCustomers as row, i (i)}
+                <div class="customer-row">
+                  <select aria-label="Project" bind:value={row.project}
+                    >{#each memberships.data ?? [] as membership (membership.id)}<option
+                        value={membership.id}
+                        >{membership.name ?? membership.id}</option
+                      >{/each}</select
+                  ><input
+                    aria-label="Stripe customer"
+                    class="mono"
+                    bind:value={row.customer}
+                    placeholder="cus_…"
+                  /><button
+                    class="text-button"
+                    type="button"
+                    aria-label="Remove mapping"
+                    disabled={sinkCustomers.length <= 1}
+                    onclick={() =>
+                      (sinkCustomers = sinkCustomers.filter(
+                        (_, index) => index !== i
+                      ))}>&times;</button
+                  >
+                </div>
+              {/each}
+              <button
+                class="text-button"
+                type="button"
+                onclick={() =>
+                  (sinkCustomers = [
+                    ...sinkCustomers,
+                    { project: '', customer: '' }
+                  ])}>Add mapping</button
+              >
+            </fieldset>
+            <button
+              class="text-button"
+              type="button"
+              aria-expanded={sinkStripeAdvanced}
+              onclick={() => (sinkStripeAdvanced = !sinkStripeAdvanced)}
+              >Advanced</button
             >
-          </div>
-          <div class="form-field">
-            <label for="sink-credential">Credential JSON</label><textarea
-              id="sink-credential"
-              bind:value={sinkCredential}
-              rows="2"
-              placeholder={editingSink
-                ? 'Optional sealed replacement — blank keeps current'
-                : 'Optional sealed credential object'}></textarea>
-            {#if editingSink}<label class="inline-check"
-                ><input
-                  type="checkbox"
-                  aria-label="Clear stored credential"
-                  bind:checked={sinkClearCredential}
-                />Clear stored credential</label
-              >{/if}
-          </div>
+            {#if sinkStripeAdvanced}
+              <div class="form-field">
+                <label for="sink-stripe-customer-key">Customer key</label><input
+                  id="sink-stripe-customer-key"
+                  class="mono"
+                  bind:value={sinkStripeCustomerKey}
+                  placeholder="olp_project"
+                />
+              </div>
+              <div class="form-field">
+                <label for="sink-stripe-value-key">Value key</label><input
+                  id="sink-stripe-value-key"
+                  class="mono"
+                  bind:value={sinkStripeValueKey}
+                  placeholder="olp_value"
+                />
+              </div>
+            {/if}
+          {/if}
         </div>
         <div class="form-actions">
           {#if editingSink}<button
@@ -673,7 +1041,9 @@
               ><td
                 ><strong>{sink.name}</strong><br /><small class="mono"
                   >{sink.destination}</small
-                ></td
+                >{#if sinkSettingsSummary(sink)}<br /><small
+                    >{sinkSettingsSummary(sink)}</small
+                  >{/if}</td
               ><td>{sink.type} · {sink.format}</td><td
                 >{sink.project_id ? 'Project' : 'Installation-wide'}</td
               ><td>{sink.streams.join(', ')}</td><td
@@ -701,7 +1071,11 @@
                   class="text-button"
                   type="button"
                   onclick={() => toggleGaps(sink)}>Gaps</button
-                >{#if canMutate(sink.project_id)}<button
+                >{#if sink.format === 'csv_gzip'}<button
+                    class="text-button"
+                    type="button"
+                    onclick={() => toggleDatasets(sink)}>Datasets</button
+                  >{/if}{#if canMutate(sink.project_id)}<button
                     class="text-button"
                     type="button"
                     disabled={sinkBusy}
@@ -735,6 +1109,46 @@
                           )}: {gap.reason}
                         </li>{/each}
                     </ul>{/if}</td
+                ></tr
+              >
+            {/if}
+            {#if datasetSinkId === sink.export_sink_id}
+              <tr class="gap-row"
+                ><td colspan="7"
+                  >{#if focusDatasets.isPending}<span class="inline-status"
+                      >Loading datasets…</span
+                    >{:else if focusDatasets.isError}<span
+                      class="inline-problem"
+                      >Focus datasets are unavailable.</span
+                    >{:else if !(focusDatasets.data ?? []).length}<span
+                      class="section-help">No datasets delivered yet.</span
+                    >{:else}<table class="data-table focus-datasets">
+                      <thead
+                        ><tr
+                          ><th scope="col">Charge date</th><th scope="col"
+                            >Revision</th
+                          ><th scope="col">Delivered</th><th scope="col"
+                            >Rows</th
+                          ><th scope="col">Billed cost</th><th scope="col"
+                            >Status</th
+                          ></tr
+                        ></thead
+                      ><tbody>
+                        {#each focusDatasets.data ?? [] as dataset (dataset.charge_date)}
+                          <tr
+                            ><td class="mono">{dataset.charge_date}</td><td
+                              >{dataset.revision}</td
+                            ><td
+                              >{dataset.delivered_at
+                                ? formatDate(dataset.delivered_at)
+                                : 'pending'}</td
+                            ><td>{dataset.row_count}</td><td
+                              >{formatCost(dataset.billed_cost, null)}</td
+                            ><td>{focusDatasetStatus(dataset)}</td></tr
+                          >
+                        {/each}
+                      </tbody>
+                    </table>{/if}</td
                 ></tr
               >
             {/if}
@@ -1023,5 +1437,16 @@
   td small {
     color: var(--foreground-muted);
     font-size: var(--text-caption);
+  }
+  .customer-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.4rem;
+  }
+  .customer-row select,
+  .customer-row input {
+    flex: 1;
+    min-width: 0;
   }
 </style>

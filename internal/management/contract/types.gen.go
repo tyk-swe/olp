@@ -232,6 +232,24 @@ func (e AuditEventResponseActorType) Valid() bool {
 	}
 }
 
+// Defines values for BillingImportSource.
+const (
+	AnthropicCostReport BillingImportSource = "anthropic_cost_report"
+	OpenaiCosts         BillingImportSource = "openai_costs"
+)
+
+// Valid indicates whether the value is a known member of the BillingImportSource enum.
+func (e BillingImportSource) Valid() bool {
+	switch e {
+	case AnthropicCostReport:
+		return true
+	case OpenaiCosts:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BudgetGroupBudgetResponseCostBasis.
 const (
 	BudgetGroupBudgetResponseCostBasisCharge BudgetGroupBudgetResponseCostBasis = "charge"
@@ -946,6 +964,7 @@ const (
 	ConfigurationPlanItemActionBlocker    ConfigurationPlanItemAction = "blocker"
 	ConfigurationPlanItemActionConflict   ConfigurationPlanItemAction = "conflict"
 	ConfigurationPlanItemActionCreate     ConfigurationPlanItemAction = "create"
+	ConfigurationPlanItemActionDelete     ConfigurationPlanItemAction = "delete"
 	ConfigurationPlanItemActionEnd        ConfigurationPlanItemAction = "end"
 	ConfigurationPlanItemActionEnroll     ConfigurationPlanItemAction = "enroll"
 	ConfigurationPlanItemActionNeutralize ConfigurationPlanItemAction = "neutralize"
@@ -966,6 +985,8 @@ func (e ConfigurationPlanItemAction) Valid() bool {
 	case ConfigurationPlanItemActionConflict:
 		return true
 	case ConfigurationPlanItemActionCreate:
+		return true
+	case ConfigurationPlanItemActionDelete:
 		return true
 	case ConfigurationPlanItemActionEnd:
 		return true
@@ -990,6 +1011,7 @@ func (e ConfigurationPlanItemAction) Valid() bool {
 
 // Defines values for ConfigurationPlanItemKind.
 const (
+	ConfigurationPlanItemKindBillingImport      ConfigurationPlanItemKind = "billing_import"
 	ConfigurationPlanItemKindCatalogPublication ConfigurationPlanItemKind = "catalog_publication"
 	ConfigurationPlanItemKindConfiguration      ConfigurationPlanItemKind = "configuration"
 	ConfigurationPlanItemKindCredential         ConfigurationPlanItemKind = "credential"
@@ -1010,6 +1032,8 @@ const (
 // Valid indicates whether the value is a known member of the ConfigurationPlanItemKind enum.
 func (e ConfigurationPlanItemKind) Valid() bool {
 	switch e {
+	case ConfigurationPlanItemKindBillingImport:
+		return true
 	case ConfigurationPlanItemKindCatalogPublication:
 		return true
 	case ConfigurationPlanItemKindConfiguration:
@@ -1344,19 +1368,28 @@ func (e CreateExportSinkRequestFilterOutcome) Valid() bool {
 
 // Defines values for CreateExportSinkRequestFormat.
 const (
-	CreateExportSinkRequestFormatJson  CreateExportSinkRequestFormat = "json"
-	CreateExportSinkRequestFormatJsonl CreateExportSinkRequestFormat = "jsonl"
-	CreateExportSinkRequestFormatOtlp  CreateExportSinkRequestFormat = "otlp"
+	CreateExportSinkRequestFormatCloudevents CreateExportSinkRequestFormat = "cloudevents"
+	CreateExportSinkRequestFormatCsvGzip     CreateExportSinkRequestFormat = "csv_gzip"
+	CreateExportSinkRequestFormatJson        CreateExportSinkRequestFormat = "json"
+	CreateExportSinkRequestFormatJsonl       CreateExportSinkRequestFormat = "jsonl"
+	CreateExportSinkRequestFormatOtlp        CreateExportSinkRequestFormat = "otlp"
+	CreateExportSinkRequestFormatStripe      CreateExportSinkRequestFormat = "stripe"
 )
 
 // Valid indicates whether the value is a known member of the CreateExportSinkRequestFormat enum.
 func (e CreateExportSinkRequestFormat) Valid() bool {
 	switch e {
+	case CreateExportSinkRequestFormatCloudevents:
+		return true
+	case CreateExportSinkRequestFormatCsvGzip:
+		return true
 	case CreateExportSinkRequestFormatJson:
 		return true
 	case CreateExportSinkRequestFormatJsonl:
 		return true
 	case CreateExportSinkRequestFormatOtlp:
+		return true
+	case CreateExportSinkRequestFormatStripe:
 		return true
 	default:
 		return false
@@ -1367,7 +1400,9 @@ func (e CreateExportSinkRequestFormat) Valid() bool {
 const (
 	CreateExportSinkRequestStreamsAttempts           CreateExportSinkRequestStreams = "attempts"
 	CreateExportSinkRequestStreamsAudit              CreateExportSinkRequestStreams = "audit"
+	CreateExportSinkRequestStreamsFocus              CreateExportSinkRequestStreams = "focus"
 	CreateExportSinkRequestStreamsGuardrailDecisions CreateExportSinkRequestStreams = "guardrail_decisions"
+	CreateExportSinkRequestStreamsMetering           CreateExportSinkRequestStreams = "metering"
 	CreateExportSinkRequestStreamsRequests           CreateExportSinkRequestStreams = "requests"
 	CreateExportSinkRequestStreamsUsageRollups       CreateExportSinkRequestStreams = "usage_rollups"
 )
@@ -1379,7 +1414,11 @@ func (e CreateExportSinkRequestStreams) Valid() bool {
 		return true
 	case CreateExportSinkRequestStreamsAudit:
 		return true
+	case CreateExportSinkRequestStreamsFocus:
+		return true
 	case CreateExportSinkRequestStreamsGuardrailDecisions:
+		return true
+	case CreateExportSinkRequestStreamsMetering:
 		return true
 	case CreateExportSinkRequestStreamsRequests:
 		return true
@@ -1392,11 +1431,12 @@ func (e CreateExportSinkRequestStreams) Valid() bool {
 
 // Defines values for CreateExportSinkRequestType.
 const (
-	CreateExportSinkRequestTypeAzureBlob CreateExportSinkRequestType = "azure_blob"
-	CreateExportSinkRequestTypeGcs       CreateExportSinkRequestType = "gcs"
-	CreateExportSinkRequestTypeHttps     CreateExportSinkRequestType = "https"
-	CreateExportSinkRequestTypeOtlpLogs  CreateExportSinkRequestType = "otlp_logs"
-	CreateExportSinkRequestTypeS3        CreateExportSinkRequestType = "s3"
+	CreateExportSinkRequestTypeAzureBlob   CreateExportSinkRequestType = "azure_blob"
+	CreateExportSinkRequestTypeGcs         CreateExportSinkRequestType = "gcs"
+	CreateExportSinkRequestTypeHttps       CreateExportSinkRequestType = "https"
+	CreateExportSinkRequestTypeOtlpLogs    CreateExportSinkRequestType = "otlp_logs"
+	CreateExportSinkRequestTypeS3          CreateExportSinkRequestType = "s3"
+	CreateExportSinkRequestTypeStripeMeter CreateExportSinkRequestType = "stripe_meter"
 )
 
 // Valid indicates whether the value is a known member of the CreateExportSinkRequestType enum.
@@ -1411,6 +1451,8 @@ func (e CreateExportSinkRequestType) Valid() bool {
 	case CreateExportSinkRequestTypeOtlpLogs:
 		return true
 	case CreateExportSinkRequestTypeS3:
+		return true
+	case CreateExportSinkRequestTypeStripeMeter:
 		return true
 	default:
 		return false
@@ -1578,19 +1620,28 @@ func (e ExportSinkFilterOutcome) Valid() bool {
 
 // Defines values for ExportSinkFormat.
 const (
-	ExportSinkFormatJson  ExportSinkFormat = "json"
-	ExportSinkFormatJsonl ExportSinkFormat = "jsonl"
-	ExportSinkFormatOtlp  ExportSinkFormat = "otlp"
+	ExportSinkFormatCloudevents ExportSinkFormat = "cloudevents"
+	ExportSinkFormatCsvGzip     ExportSinkFormat = "csv_gzip"
+	ExportSinkFormatJson        ExportSinkFormat = "json"
+	ExportSinkFormatJsonl       ExportSinkFormat = "jsonl"
+	ExportSinkFormatOtlp        ExportSinkFormat = "otlp"
+	ExportSinkFormatStripe      ExportSinkFormat = "stripe"
 )
 
 // Valid indicates whether the value is a known member of the ExportSinkFormat enum.
 func (e ExportSinkFormat) Valid() bool {
 	switch e {
+	case ExportSinkFormatCloudevents:
+		return true
+	case ExportSinkFormatCsvGzip:
+		return true
 	case ExportSinkFormatJson:
 		return true
 	case ExportSinkFormatJsonl:
 		return true
 	case ExportSinkFormatOtlp:
+		return true
+	case ExportSinkFormatStripe:
 		return true
 	default:
 		return false
@@ -1601,7 +1652,9 @@ func (e ExportSinkFormat) Valid() bool {
 const (
 	ExportSinkStreamsAttempts           ExportSinkStreams = "attempts"
 	ExportSinkStreamsAudit              ExportSinkStreams = "audit"
+	ExportSinkStreamsFocus              ExportSinkStreams = "focus"
 	ExportSinkStreamsGuardrailDecisions ExportSinkStreams = "guardrail_decisions"
+	ExportSinkStreamsMetering           ExportSinkStreams = "metering"
 	ExportSinkStreamsRequests           ExportSinkStreams = "requests"
 	ExportSinkStreamsUsageRollups       ExportSinkStreams = "usage_rollups"
 )
@@ -1613,7 +1666,11 @@ func (e ExportSinkStreams) Valid() bool {
 		return true
 	case ExportSinkStreamsAudit:
 		return true
+	case ExportSinkStreamsFocus:
+		return true
 	case ExportSinkStreamsGuardrailDecisions:
+		return true
+	case ExportSinkStreamsMetering:
 		return true
 	case ExportSinkStreamsRequests:
 		return true
@@ -1626,11 +1683,12 @@ func (e ExportSinkStreams) Valid() bool {
 
 // Defines values for ExportSinkType.
 const (
-	ExportSinkTypeAzureBlob ExportSinkType = "azure_blob"
-	ExportSinkTypeGcs       ExportSinkType = "gcs"
-	ExportSinkTypeHttps     ExportSinkType = "https"
-	ExportSinkTypeOtlpLogs  ExportSinkType = "otlp_logs"
-	ExportSinkTypeS3        ExportSinkType = "s3"
+	ExportSinkTypeAzureBlob   ExportSinkType = "azure_blob"
+	ExportSinkTypeGcs         ExportSinkType = "gcs"
+	ExportSinkTypeHttps       ExportSinkType = "https"
+	ExportSinkTypeOtlpLogs    ExportSinkType = "otlp_logs"
+	ExportSinkTypeS3          ExportSinkType = "s3"
+	ExportSinkTypeStripeMeter ExportSinkType = "stripe_meter"
 )
 
 // Valid indicates whether the value is a known member of the ExportSinkType enum.
@@ -1645,6 +1703,8 @@ func (e ExportSinkType) Valid() bool {
 	case ExportSinkTypeOtlpLogs:
 		return true
 	case ExportSinkTypeS3:
+		return true
+	case ExportSinkTypeStripeMeter:
 		return true
 	default:
 		return false
@@ -2532,19 +2592,19 @@ func (e PluginGrantAuthenticationInput) Valid() bool {
 
 // Defines values for PluginRewriteOp.
 const (
-	Default PluginRewriteOp = "default"
-	Delete  PluginRewriteOp = "delete"
-	Set     PluginRewriteOp = "set"
+	PluginRewriteOpDefault PluginRewriteOp = "default"
+	PluginRewriteOpDelete  PluginRewriteOp = "delete"
+	PluginRewriteOpSet     PluginRewriteOp = "set"
 )
 
 // Valid indicates whether the value is a known member of the PluginRewriteOp enum.
 func (e PluginRewriteOp) Valid() bool {
 	switch e {
-	case Default:
+	case PluginRewriteOpDefault:
 		return true
-	case Delete:
+	case PluginRewriteOpDelete:
 		return true
-	case Set:
+	case PluginRewriteOpSet:
 		return true
 	default:
 		return false
@@ -2950,6 +3010,30 @@ func (e RateCardRequestOwnerKind) Valid() bool {
 	case RateCardRequestOwnerKindOrganization:
 		return true
 	case RateCardRequestOwnerKindProject:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReconciliationReportItemsCaptureRateUnavailableReason.
+const (
+	ReconciliationReportItemsCaptureRateUnavailableReasonCurrencyMismatch ReconciliationReportItemsCaptureRateUnavailableReason = "currency_mismatch"
+	ReconciliationReportItemsCaptureRateUnavailableReasonLessThannil      ReconciliationReportItemsCaptureRateUnavailableReason = "<nil>"
+	ReconciliationReportItemsCaptureRateUnavailableReasonNotImported      ReconciliationReportItemsCaptureRateUnavailableReason = "not_imported"
+	ReconciliationReportItemsCaptureRateUnavailableReasonZeroInvoice      ReconciliationReportItemsCaptureRateUnavailableReason = "zero_invoice"
+)
+
+// Valid indicates whether the value is a known member of the ReconciliationReportItemsCaptureRateUnavailableReason enum.
+func (e ReconciliationReportItemsCaptureRateUnavailableReason) Valid() bool {
+	switch e {
+	case ReconciliationReportItemsCaptureRateUnavailableReasonCurrencyMismatch:
+		return true
+	case ReconciliationReportItemsCaptureRateUnavailableReasonLessThannil:
+		return true
+	case ReconciliationReportItemsCaptureRateUnavailableReasonNotImported:
+		return true
+	case ReconciliationReportItemsCaptureRateUnavailableReasonZeroInvoice:
 		return true
 	default:
 		return false
@@ -4453,6 +4537,31 @@ type BTreeMap map[string][]struct {
 	Message string `json:"message"`
 }
 
+// BillingImport defines model for BillingImport.
+type BillingImport struct {
+	CredentialConfigured bool               `json:"credential_configured"`
+	Enabled              bool               `json:"enabled"`
+	Etag                 string             `json:"etag"`
+	ProviderId           openapi_types.UUID `json:"provider_id"`
+
+	// Scope Source-shaped import scope; {} reads the whole organization.
+	Scope  map[string]interface{} `json:"scope"`
+	Source BillingImportSource    `json:"source"`
+	Status struct {
+		ImportedFrom    nullable.Nullable[openapi_types.Date] `json:"imported_from"`
+		ImportedThrough nullable.Nullable[openapi_types.Date] `json:"imported_through"`
+
+		// LastErrorCode Stable content-free failure code: credential, status, network, timeout, response or endpoint.
+		LastErrorCode nullable.Nullable[string]    `json:"last_error_code"`
+		LastImportAt  nullable.Nullable[time.Time] `json:"last_import_at"`
+		LastSuccessAt nullable.Nullable[time.Time] `json:"last_success_at"`
+		NextImportAt  nullable.Nullable[time.Time] `json:"next_import_at"`
+	} `json:"status"`
+}
+
+// BillingImportSource defines model for BillingImport.Source.
+type BillingImportSource string
+
 // BudgetGroupBudgetResponse defines model for BudgetGroupBudgetResponse.
 type BudgetGroupBudgetResponse struct {
 	CostBasis *BudgetGroupBudgetResponseCostBasis `json:"cost_basis,omitempty"`
@@ -5201,6 +5310,14 @@ type Commitment struct {
 // CommitmentPeriod The UTC calendar period the amount covers.
 type CommitmentPeriod string
 
+// ConfigurationBillingImport defines model for ConfigurationBillingImport.
+type ConfigurationBillingImport struct {
+	// CredentialRef Portable secret binding name, provider name followed by /billing; supply the credential through secret_bindings.
+	CredentialRef string                 `json:"credential_ref"`
+	Enabled       bool                   `json:"enabled"`
+	Scope         map[string]interface{} `json:"scope"`
+}
+
 // ConfigurationCapabilityEntry defines model for ConfigurationCapabilityEntry.
 type ConfigurationCapabilityEntry struct {
 	Mode      ConfigurationCapabilityEntryMode `json:"mode"`
@@ -5437,9 +5554,10 @@ type ConfigurationPromotionRequest struct {
 
 // ConfigurationProviderEntry defines model for ConfigurationProviderEntry.
 type ConfigurationProviderEntry struct {
-	Configuration ProviderConfiguration     `json:"configuration"`
-	Models        []ConfigurationModelEntry `json:"models"`
-	Name          string                    `json:"name"`
+	BillingImport *ConfigurationBillingImport `json:"billing_import,omitempty"`
+	Configuration ProviderConfiguration       `json:"configuration"`
+	Models        []ConfigurationModelEntry   `json:"models"`
+	Name          string                      `json:"name"`
 
 	// NetworkCredentialRef Portable secret binding name, conventionally provider name followed by /network. Export omits runtime network credential UUIDs; supply this reference through secret_bindings when applying the artifact.
 	NetworkCredentialRef *string `json:"network_credential_ref,omitempty"`
@@ -5878,8 +5996,11 @@ type CreateExportSinkRequest struct {
 	Format    CreateExportSinkRequestFormat         `json:"format"`
 	Name      string                                `json:"name"`
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id,omitempty"`
-	Streams   []CreateExportSinkRequestStreams      `json:"streams"`
-	Type      CreateExportSinkRequestType           `json:"type"`
+
+	// Settings Format-specific sink settings; csv_gzip accepts cost_basis (cost|charge) and start_date (YYYY-MM-DD).
+	Settings nullable.Nullable[map[string]interface{}] `json:"settings,omitempty"`
+	Streams  []CreateExportSinkRequestStreams          `json:"streams"`
+	Type     CreateExportSinkRequestType               `json:"type"`
 }
 
 // CreateExportSinkRequestFilterOutcome defines model for CreateExportSinkRequest.Filter.Outcome.
@@ -6348,9 +6469,12 @@ type ExportSink struct {
 	Format    ExportSinkFormat                      `json:"format"`
 	Name      string                                `json:"name"`
 	ProjectId nullable.Nullable[openapi_types.UUID] `json:"project_id"`
-	Status    []map[string]interface{}              `json:"status"`
-	Streams   []ExportSinkStreams                   `json:"streams"`
-	Type      ExportSinkType                        `json:"type"`
+
+	// Settings Format-specific sink settings; csv_gzip accepts cost_basis (cost|charge) and start_date (YYYY-MM-DD).
+	Settings nullable.Nullable[map[string]interface{}] `json:"settings,omitempty"`
+	Status   []map[string]interface{}                  `json:"status"`
+	Streams  []ExportSinkStreams                       `json:"streams"`
+	Type     ExportSinkType                            `json:"type"`
 }
 
 // ExportSinkFilterOutcome defines model for ExportSink.Filter.Outcome.
@@ -6411,6 +6535,27 @@ type FallbackStep struct {
 	// Outcome planned when the fallback ranked attempts, standby when only a failed attempt could start it, or the reason it was skipped: fallback_route_unavailable, fallback_route_forbidden, fallback_route_repeated or the route's selection refusal
 	Outcome string `json:"outcome"`
 	Route   string `json:"route"`
+}
+
+// FocusDataset defines model for FocusDataset.
+type FocusDataset struct {
+	Attempts      int32                        `json:"attempts"`
+	BilledCost    nullable.Nullable[string]    `json:"billed_cost"`
+	ChargeDate    openapi_types.Date           `json:"charge_date"`
+	Current       bool                         `json:"current"`
+	DeliveredAt   nullable.Nullable[time.Time] `json:"delivered_at"`
+	EffectiveCost nullable.Nullable[string]    `json:"effective_cost"`
+	GeneratedAt   nullable.Nullable[time.Time] `json:"generated_at"`
+	LastErrorCode nullable.Nullable[string]    `json:"last_error_code"`
+	PartCount     int32                        `json:"part_count"`
+	Revision      int32                        `json:"revision"`
+	RowCount      int64                        `json:"row_count"`
+}
+
+// FocusDatasetListResponse defines model for FocusDatasetListResponse.
+type FocusDatasetListResponse struct {
+	Items      []FocusDataset            `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
 // GrantDeviceAuthorization A device authorization the operator approves upstream: they open the verification URL, on any device, enter the user code and approve, while status requests poll the enrollment.
@@ -6739,6 +6884,18 @@ type InvitationResponse struct {
 	RevokedByEmail nullable.Nullable[string] `json:"revoked_by_email,omitempty"`
 	Role           string                    `json:"role"`
 	Status         string                    `json:"status"`
+}
+
+// InvoicedCostListResponse defines model for InvoicedCostListResponse.
+type InvoicedCostListResponse struct {
+	Items []struct {
+		Amount    string             `json:"amount"`
+		Currency  string             `json:"currency"`
+		Day       openapi_types.Date `json:"day"`
+		FetchedAt time.Time          `json:"fetched_at"`
+		LineItem  string             `json:"line_item"`
+		Source    string             `json:"source"`
+	} `json:"items"`
 }
 
 // KeyExpiringEvent defines model for KeyExpiringEvent.
@@ -8842,6 +8999,18 @@ type PublishPricingSourceRequest struct {
 	Overrides *[]PriceRequest `json:"overrides,omitempty"`
 }
 
+// PutBillingImportRequest defines model for PutBillingImportRequest.
+type PutBillingImportRequest struct {
+	// Credential Vendor admin credential, sealed as a billing_credential secret. Required on create; omitted keeps the stored credential; null is rejected - delete the import instead.
+	Credential *string `json:"credential,omitempty"`
+
+	// Enabled Defaults to true when omitted.
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Scope openai_costs: {"project_ids":["proj_..."]}; anthropic_cost_report: {"workspace_ids":["wrkspc_...","default"]}; {} reads the whole organization. Omitted keeps the stored scope.
+	Scope *map[string]interface{} `json:"scope,omitempty"`
+}
+
 // PutProjectMemberRequest defines model for PutProjectMemberRequest.
 type PutProjectMemberRequest struct {
 	Role PutProjectMemberRequestRole `json:"role"`
@@ -9001,6 +9170,55 @@ type RecentAuthenticationRequest struct {
 	Purpose    string                                `json:"purpose"`
 	ResourceId nullable.Nullable[openapi_types.UUID] `json:"resource_id,omitempty"`
 }
+
+// ReconciliationReport defines model for ReconciliationReport.
+type ReconciliationReport struct {
+	Currency string             `json:"currency"`
+	End      openapi_types.Date `json:"end"`
+	Items    []struct {
+		// AttributedCost Exact decimal: estimated cost plus allocated commitment, excluding caller-paid and budget-exempt attempts.
+		AttributedCost string `json:"attributed_cost"`
+
+		// CaptureRate attributed_cost / invoiced_cost rounded to 6 decimals.
+		CaptureRate                  nullable.Nullable[string]                                                `json:"capture_rate"`
+		CaptureRateUnavailableReason nullable.Nullable[ReconciliationReportItemsCaptureRateUnavailableReason] `json:"capture_rate_unavailable_reason"`
+		Day                          openapi_types.Date                                                       `json:"day"`
+		ExcludedCallerAttempts       int                                                                      `json:"excluded_caller_attempts"`
+		Import                       nullable.Nullable[struct {
+			LastErrorCode nullable.Nullable[string]    `json:"last_error_code,omitempty"`
+			LastSuccessAt nullable.Nullable[time.Time] `json:"last_success_at,omitempty"`
+		}] `json:"import"`
+		IncompleteAttempts int `json:"incomplete_attempts"`
+
+		// InvoicedCost Exact decimal; null outside the imported range.
+		InvoicedCost     nullable.Nullable[string] `json:"invoiced_cost"`
+		InvoicedCurrency nullable.Nullable[string] `json:"invoiced_currency"`
+		PricedAttempts   int                       `json:"priced_attempts"`
+		ProviderId       openapi_types.UUID        `json:"provider_id"`
+
+		// Provisional True within two days of the current date or when the last successful import is stale for the day.
+		Provisional      bool `json:"provisional"`
+		UnpricedAttempts int  `json:"unpriced_attempts"`
+
+		// UnpricedShare unpriced/(priced+unpriced) to 6 decimals.
+		UnpricedShare nullable.Nullable[string] `json:"unpriced_share"`
+	} `json:"items"`
+	Start  openapi_types.Date `json:"start"`
+	Totals []struct {
+		AttributedCost string `json:"attributed_cost"`
+
+		// AttributedCostCovered Attributed spend over covered days only; the numerator capture_rate uses, since uninvoiced days cannot be billed.
+		AttributedCostCovered        string                    `json:"attributed_cost_covered"`
+		CaptureRate                  nullable.Nullable[string] `json:"capture_rate"`
+		CaptureRateUnavailableReason nullable.Nullable[string] `json:"capture_rate_unavailable_reason"`
+		InvoicedCost                 nullable.Nullable[string] `json:"invoiced_cost"`
+		ProviderId                   openapi_types.UUID        `json:"provider_id"`
+		UnpricedShare                nullable.Nullable[string] `json:"unpriced_share"`
+	} `json:"totals"`
+}
+
+// ReconciliationReportItemsCaptureRateUnavailableReason defines model for ReconciliationReport.Items.CaptureRateUnavailableReason.
+type ReconciliationReportItemsCaptureRateUnavailableReason string
 
 // ReferenceCatalog The signed reference catalog this release ships, verified at start-up.
 type ReferenceCatalog struct {
@@ -10726,6 +10944,9 @@ type UpdateExportSinkRequest struct {
 		Route   nullable.Nullable[string]                               `json:"route,omitempty"`
 	}] `json:"filter,omitempty"`
 	Name *string `json:"name,omitempty"`
+
+	// Settings Format-specific sink settings; csv_gzip accepts cost_basis (cost|charge) and start_date (YYYY-MM-DD).
+	Settings nullable.Nullable[map[string]interface{}] `json:"settings,omitempty"`
 }
 
 // UpdateExportSinkRequestFilterOutcome defines model for UpdateExportSinkRequest.Filter.Outcome.
@@ -11745,6 +11966,15 @@ type UpdateExportSinkParams struct {
 	IfMatch string `json:"If-Match"`
 }
 
+// ListExportSinkFocusDatasetsParams defines parameters for ListExportSinkFocusDatasets.
+type ListExportSinkFocusDatasetsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListExportSinkGapsParams defines parameters for ListExportSinkGaps.
 type ListExportSinkGapsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -12157,6 +12387,22 @@ type ActivateProviderParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// DeleteProviderBillingImportParams defines parameters for DeleteProviderBillingImport.
+type DeleteProviderBillingImportParams struct {
+	IfMatch string `json:"If-Match"`
+}
+
+// PutProviderBillingImportParams defines parameters for PutProviderBillingImport.
+type PutProviderBillingImportParams struct {
+	IfMatch        string `json:"If-Match"`
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// RunProviderBillingImportParams defines parameters for RunProviderBillingImport.
+type RunProviderBillingImportParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // AcceptProviderCatalogSuggestionsParams defines parameters for AcceptProviderCatalogSuggestions.
 type AcceptProviderCatalogSuggestionsParams struct {
 	// IfMatch Current provider ETag
@@ -12220,6 +12466,12 @@ type DiscoverProviderModelsParams struct {
 type StartGrantEnrollmentParams struct {
 	// IfMatch Current provider draft ETag
 	IfMatch string `json:"If-Match"`
+}
+
+// ListProviderInvoicedCostsParams defines parameters for ListProviderInvoicedCosts.
+type ListProviderInvoicedCostsParams struct {
+	Start openapi_types.Date `form:"start" json:"start"`
+	End   openapi_types.Date `form:"end" json:"end"`
 }
 
 // ListProviderModelsParams defines parameters for ListProviderModels.
@@ -12717,6 +12969,13 @@ type ExportUsageCsvParams struct {
 // ExportUsageCsvParamsDimension defines parameters for ExportUsageCsv.
 type ExportUsageCsvParamsDimension string
 
+// GetUsageReconciliationParams defines parameters for GetUsageReconciliation.
+type GetUsageReconciliationParams struct {
+	Start      openapi_types.Date  `form:"start" json:"start"`
+	End        openapi_types.Date  `form:"end" json:"end"`
+	ProviderId *openapi_types.UUID `form:"provider_id,omitempty" json:"provider_id,omitempty"`
+}
+
 // UsageSelectorSavingsParams defines parameters for UsageSelectorSavings.
 type UsageSelectorSavingsParams struct {
 	Start time.Time `form:"start" json:"start"`
@@ -13149,6 +13408,9 @@ type CreateProviderJSONRequestBody = CreateProviderRequest
 
 // UpdateProviderJSONRequestBody defines body for UpdateProvider for application/json ContentType.
 type UpdateProviderJSONRequestBody = UpdateProviderRequest
+
+// PutProviderBillingImportJSONRequestBody defines body for PutProviderBillingImport for application/json ContentType.
+type PutProviderBillingImportJSONRequestBody = PutBillingImportRequest
 
 // AcceptProviderCatalogSuggestionsJSONRequestBody defines body for AcceptProviderCatalogSuggestions for application/json ContentType.
 type AcceptProviderCatalogSuggestionsJSONRequestBody = AcceptCatalogSuggestionsRequest

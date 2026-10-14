@@ -81,6 +81,7 @@ type SlotEntry struct {
 
 type ProviderEntry struct {
 	NetworkCredentialRef *string                 `json:"network_credential_ref,omitempty"`
+	BillingImport        *BillingImportEntry     `json:"billing_import,omitempty"`
 	Name                 string                  `json:"name"`
 	Project              *string                 `json:"project"`
 	Configuration        providers.Configuration `json:"configuration"`

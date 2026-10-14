@@ -1,0 +1,66 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "start_time": 1759104000,
+      "end_time": 1759190400,
+      "results": [
+        {
+          "object": "organization.costs.result",
+          "amount": {
+            "value": 0.1,
+            "currency": "usd"
+          },
+          "line_item": "gpt-4o, input_tokens",
+          "project_id": "proj_aaa111",
+          "organization_id": "org-demo",
+          "group_by": "line_item",
+          "api_source": "api"
+        },
+        {
+          "object": "organization.costs.result",
+          "amount": {
+            "value": 0.2,
+            "currency": "usd"
+          },
+          "line_item": "gpt-4o, input_tokens",
+          "project_id": "proj_bbb222",
+          "organization_id": "org-demo",
+          "group_by": "line_item",
+          "api_source": "api"
+        },
+        {
+          "object": "organization.costs.result",
+          "amount": {
+            "value": 1234.5678901234,
+            "currency": "usd"
+          },
+          "line_item": "gpt-4o, output_tokens",
+          "project_id": "proj_aaa111",
+          "organization_id": "org-demo",
+          "group_by": "line_item",
+          "api_source": "api"
+        },
+        {
+          "object": "organization.costs.result",
+          "amount": {
+            "value": 5,
+            "currency": "usd"
+          },
+          "line_item": null,
+          "project_id": "proj_ccc333",
+          "organization_id": "org-demo",
+          "group_by": "line_item",
+          "api_source": "admin"
+        }
+      ]
+    },
+    {
+      "start_time": 1759190400,
+      "end_time": 1759276800,
+      "results": []
+    }
+  ],
+  "has_more": true,
+  "next_page": "page-2-token"
+}

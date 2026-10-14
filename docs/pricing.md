@@ -119,7 +119,13 @@ tool counts and the batch marker) plus `pricing_components`: the name of every
 rate actually charged with a nonzero quantity after fallback (for example
 `input_per_million` for audio billed at the text rate), `tool_calls.<name>`
 per charged tool, and `tiers`, `windows`, `batch_multiplier` and `per_request`
-when they applied.
+when they applied. It also keeps the money decomposition: `list_cost`
+(list-price equivalent before any discount), `contracted_cost`, `cost_lines`
+and `charge_lines` — the per-component quantity/unit/list and contracted unit
+prices FOCUS and the calculator read — and `caller_credential` marking
+attempts the caller paid. When the stored lines' totals do not match the
+fact's cost and charge, accounting discards them and records the attempt
+unpriced rather than persist inconsistent lines.
 
 ## Metering
 

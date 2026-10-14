@@ -130,6 +130,25 @@ use MCP tools:
   rendered prompts and variable values are request content and are never
   stored.
 
+### M10.5 Agent traces
+
+- Agents send OTLP traces to a gateway ingestion endpoint that accepts spans
+  the way the export worker consumes them today: metadata-only, correlated to
+  attempt accounting by the trace's attempt, key and project attributes.
+- An investigation is an operator-authored query over stored traces —
+  duration, error and tool-call grouping across a run set — with findings
+  linked back to the trace ids they cite. Trace content stays out of request
+  history; investigations store only metadata and evidence links.
+
+### M10.6 Agent identities
+
+- An agent identity registers a project-scoped principal bound to an external
+  identity provider's agent-capable issuer, alongside the workload JWT
+  principals of [M4.5](m04-tenancy-identity.md#m45-enterprise-identity).
+- A delegated request authenticates the agent's own credential and the user's
+  delegation token together; the attempt records both, and budget and rate
+  limits apply to the delegated pair, not the issuer's pool.
+
 ## Change map
 
 | Change | Start here |
@@ -138,6 +157,8 @@ use MCP tools:
 | Gateway-executed tools | `internal/gateway/`, `internal/protocols/` |
 | A2A agents | new `internal/agents/` |
 | Prompt registry | new `internal/prompts/`, `internal/providerinvoke/` |
+| Agent traces | `internal/traces/`, `internal/export/` |
+| Agent identities | `internal/identity/`, `internal/access/` |
 | Console | new `console/src/lib/features/agents/` |
 
 ## Decisions to settle

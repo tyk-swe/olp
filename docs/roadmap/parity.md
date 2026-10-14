@@ -1,10 +1,10 @@
 # Parity matrix
 
-Released LiteLLM gateway documentation reviewed 2026-10-01 is compared with OLP
-0.1.0 after M1–M5, M11 and M6.1–M6.3. This is the [roadmap](README.md)'s
+Released LiteLLM gateway documentation reviewed 2026-10-13 is compared with OLP
+0.1.0 after M1–M6 and M11. This is the [roadmap](README.md)'s
 capability scope, not a live-provider/released-image qualification claim.
-OLP-only additions have no comparative row. Current counts: 22 Ahead,
-85 Parity, 10 Partial, 30 Gap, 2 Excluded (149 capabilities; legend rows
+OLP-only additions have no comparative row. Current counts: 23 Ahead,
+87 Parity, 10 Partial, 31 Gap, 2 Excluded (153 capabilities; legend rows
 excluded).
 
 | Status | Meaning |
@@ -25,6 +25,7 @@ of [M3](m03-routing-resilience.md).
 | OpenAI Chat Completions | [/chat/completions](https://docs.litellm.ai/docs/completion) | Native and translated for every connector kind | `Parity` | |
 | OpenAI Responses | [/responses](https://docs.litellm.ai/docs/response_api), bridged to chat providers | Native, translated, and stored responses for OpenAI and Azure; Codex CLI and the OpenAI Agents SDK are [qualified](../clients.md) | `Parity` | |
 | Responses compaction and Conversations | [/responses/compact](https://docs.litellm.ai/docs/response_api_compact) | Neither | `Gap` | M9.5 |
+| Decisions API | [/v1/decisions and /v1/systemone](https://docs.litellm.ai/docs/decisions) | Not served | `Gap` | M9.10 |
 | Anthropic Messages and token counting | [/v1/messages](https://docs.litellm.ai/docs/anthropic_unified/), [count_tokens](https://docs.litellm.ai/docs/anthropic_count_tokens) | Native and translated; Claude Code is [qualified](../clients.md) | `Parity` | |
 | Gemini generation, counting and embeddings | [/generateContent](https://docs.litellm.ai/docs/generateContent) | Native and translated generation and counting; `embedContent` and `batchEmbedContents` on strict routes to Gemini targets; Gemini CLI is [qualified](../clients.md) | `Parity` | |
 | Gemini Interactions | [/interactions](https://docs.litellm.ai/docs/interactions) | Native `gemini-interactions` profile | `Parity` | |
@@ -152,8 +153,8 @@ of [M3](m03-routing-resilience.md).
 | Off-peak pricing | [Off-peak pricing](https://docs.litellm.ai/docs/proxy/off_peak_pricing) | Time-of-day and day-of-week [window multipliers](../pricing.md#windows) in an IANA time zone, priced exactly by accounting and admission | `Parity` | M6.1 |
 | Provisioned throughput costs | [PTU flat cost](https://docs.litellm.ai/docs/proxy/ptu_flat_cost) | Connection [commitments](../pricing.md#commitments) per UTC hour, day or month: zero marginal cost, allocated in usage reports by list-price-weighted share | `Parity` | M6.1 |
 | Pricing calculator | [Pricing calculator](https://docs.litellm.ai/docs/proxy/pricing_calculator) | Route simulation states each target's minimum and maximum cost, `max_cost` refuses requests whose worst case exceeds it before dispatch, and the console calculator prices routes and exact usage | `Parity` | M6.3 |
-| Billing integrations | [Lago](https://docs.litellm.ai/docs/observability/lago), [OpenMeter](https://docs.litellm.ai/docs/observability/openmeter), [billing](https://docs.litellm.ai/docs/proxy/billing) | Not available | `Gap` | M6.4 |
-| FOCUS cost export | [FOCUS](https://docs.litellm.ai/docs/observability/focus) | Not available | `Gap` | M6.4 |
+| Billing integrations | [Lago](https://docs.litellm.ai/docs/observability/lago), [OpenMeter](https://docs.litellm.ai/docs/observability/openmeter), [billing](https://docs.litellm.ai/docs/proxy/billing) | [CloudEvents metering](../finops.md#cloudevents-sinks) for OpenMeter and other CloudEvents consumers, and [Stripe Billing meter events](../finops.md#stripe-meter-sinks) with idempotent identifiers and per-sink customer maps | `Parity` | M6.4 |
+| FOCUS cost export | [FOCUS](https://docs.litellm.ai/docs/observability/focus) | Daily [FOCUS 1.4](../finops.md#focus-14-datasets) gzip-CSV datasets on S3, GCS and Azure Blob in cost or charge basis, with revisioned restatement, conformance-checked against the 1.4 requirements model | `Parity` | M6.4 |
 
 ## Guardrails
 
@@ -200,6 +201,8 @@ of [M3](m03-routing-resilience.md).
 | MCP cost tracking | [MCP cost](https://docs.litellm.ai/docs/mcp_cost) | Not available | `Gap` | M10.1 |
 | A2A agent gateway | [A2A](https://docs.litellm.ai/docs/a2a), with [iteration budgets](https://docs.litellm.ai/docs/a2a_iteration_budgets) and a [kill switch](https://docs.litellm.ai/docs/a2a_kill_switch) | Not available | `Gap` | M10.3 |
 | Prompt management | [Prompt management](https://docs.litellm.ai/docs/proxy/prompt_management) | Not available | `Gap` | M10.4 |
+| Agent traces and investigations | [Lens and Agent Traces (beta)](https://docs.litellm.ai/docs/proxy/lens) | OTLP trace export only; no trace ingestion or investigations | `Gap` | M10.5 |
+| Agent identities | [Entra ID agent identities with delegated requests](https://docs.litellm.ai/release_notes/v1.105.0/v1-105-0) | Workload JWT principals; no delegated agent identities | `Gap` | M10.6 |
 
 ## Administration and deployment
 

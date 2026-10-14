@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/budgetcalendar"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/mcpservers"
@@ -91,6 +92,7 @@ type existingSlot struct {
 
 type existingProvider struct {
 	NetworkCredentialID *string
+	BillingImport       *billing.ImportState
 	ID                  string
 	Name                string
 	Kind                string
@@ -171,21 +173,37 @@ func loadState(ctx context.Context, q access.Queryer) (*stateView, error) {
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	providers, err := q.Query(ctx, "SELECT p.id::text,p.name,p.kind,p.state,p.project_id::text,(SELECT c.id::text FROM olp.provider_network_credentials c WHERE c.id::text=p.configuration#>>'{options,network,credential_id}' AND c.provider_id=p.id AND c.revoked_at IS NULL) FROM olp.providers p")
+	providers, err := q.Query(ctx, `SELECT p.id::text,p.name,p.kind,p.state,p.project_id::text,
+		(SELECT c.id::text FROM olp.provider_network_credentials c WHERE c.id::text=p.configuration#>>'{options,network,credential_id}' AND c.provider_id=p.id AND c.revoked_at IS NULL),
+		(SELECT bi.credential_id::text FROM olp.provider_billing_imports bi WHERE bi.provider_id=p.id) IS NOT NULL
+		FROM olp.providers p`)
 	if err != nil {
 		return nil, err
 	}
 	defer providers.Close()
+	var withImport []*existingProvider
 	for providers.Next() {
 		var p existingProvider
-		if err = providers.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &p.ProjectID, &p.NetworkCredentialID); err != nil {
+		var hasImport bool
+		if err = providers.Scan(&p.ID, &p.Name, &p.Kind, &p.State, &p.ProjectID, &p.NetworkCredentialID, &hasImport); err != nil {
 			return nil, err
 		}
 		p.Slots = map[string]existingSlot{}
 		v.providers[strings.ToLower(p.Name)] = &p
+		if hasImport {
+			withImport = append(withImport, v.providers[strings.ToLower(p.Name)])
+		}
 	}
 	if err = providers.Err(); err != nil {
 		return nil, err
+	}
+	// ReadImportState runs another query on the same connection, so the
+	// providers cursor has to be closed first.
+	providers.Close()
+	for _, p := range withImport {
+		if p.BillingImport, err = billing.ReadImportState(ctx, q, p.ID); err != nil {
+			return nil, err
+		}
 	}
 	// A lapsed grant serves no more: the slot's credential reads as absent, so
 	// a grant provider plans its enrollment again.
@@ -480,6 +498,15 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 			}
 			refs[*p.NetworkCredentialRef] = true
 		}
+		if err := validateBillingImport(prefix, &doc.Providers[i]); err != nil {
+			return nil, err
+		}
+		if p.BillingImport != nil {
+			if refs[p.BillingImport.CredentialRef] {
+				return nil, access.Invalid(prefix+".billing_import.credential_ref", "Credential references must be distinct.")
+			}
+			refs[p.BillingImport.CredentialRef] = true
+		}
 		if refusal != "" {
 			unavailable[p.Configuration.ProfileRevision] = refusal
 		} else if err := p.Configuration.Validate(s.Egress); err != nil {
@@ -721,9 +748,14 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 			sinkRefs[*entry.CredentialRef] = true
 		}
 	}
+	billingRefs := map[string]bool{}
 	for _, p := range doc.Providers {
 		if p.NetworkCredentialRef != nil {
 			refs[*p.NetworkCredentialRef] = true
+		}
+		if p.BillingImport != nil {
+			refs[p.BillingImport.CredentialRef] = true
+			billingRefs[p.BillingImport.CredentialRef] = true
 		}
 		for _, slot := range p.Slots {
 			if slot.CredentialRef != nil {
@@ -746,6 +778,15 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 		if sinkRefs[name] {
 			if secret.reference != nil || len(secret.secret) < 1 || len(secret.secret) > 4096 {
 				return access.Invalid("secret_bindings", "Sink signing credentials require 1–4096 sealed bytes.")
+			}
+			continue
+		}
+		if billingRefs[name] {
+			if secret.reference != nil {
+				return access.Invalid("external_credential_bindings", "Billing credentials require sealed secret bindings.")
+			}
+			if err := billing.ValidCredential(secret.secret); err != nil {
+				return err
 			}
 			continue
 		}
@@ -940,6 +981,19 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			} else {
 				result.blocker("network_credential", ref, "secret_binding_required")
 			}
+		}
+		switch {
+		case p.BillingImport != nil:
+			ref := p.BillingImport.CredentialRef
+			if _, supplied := bindings[ref]; supplied {
+				result.item("billing_import", ref, "bind", "")
+			} else if ok && existing.BillingImport != nil && existing.BillingImport.CredentialID != nil {
+				result.item("billing_import", ref, "reuse", "")
+			} else {
+				result.blocker("billing_import", ref, "secret_binding_required")
+			}
+		case ok && existing.BillingImport != nil:
+			result.item("billing_import", billingRef(p.Name), "delete", "")
 		}
 		for j := range p.Slots {
 			slot := &p.Slots[j]
@@ -1186,6 +1240,9 @@ func (s *Server) currentProviderEntry(ctx context.Context, q access.Queryer, p *
 	entry.Slots = slots
 	portableNetwork(entry)
 	referenceGrants(entry)
+	if err := attachBillingImport(ctx, q, entry, p.ID); err != nil {
+		return nil, err
+	}
 	return entry, nil
 }
 

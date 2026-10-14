@@ -125,6 +125,9 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 			}
 			portableNetwork(&entry)
 			referenceGrants(&entry)
+			if err = attachBillingImport(ctx, q, &entry, id); err != nil {
+				return nil, err
+			}
 			live[len(doc.Providers)] = id
 			doc.Providers = append(doc.Providers, entry)
 			continue
@@ -160,6 +163,9 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		pp.entry.Slots = slots
 		portableNetwork(pp.entry)
 		referenceGrants(pp.entry)
+		if err = attachBillingImport(ctx, q, pp.entry, pp.id); err != nil {
+			return nil, err
+		}
 		doc.Providers = append(doc.Providers, *pp.entry)
 	}
 	routes, err := q.Query(ctx, `SELECT r.slug,pr.name,r.state='retired',v.operations,v.overall_timeout_ms,v.max_attempts,v.targets,v.routing_policy,v.content_policy,v.fidelity,v.behavior,COALESCE((SELECT expose_upstream_models FROM olp.model_catalog_route_settings WHERE route_id=r.id),false)

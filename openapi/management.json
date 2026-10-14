@@ -1791,7 +1791,8 @@
               "blocker",
               "end",
               "revision",
-              "neutralize"
+              "neutralize",
+              "delete"
             ],
             "type": "string"
           },
@@ -1819,7 +1820,8 @@
               "sink",
               "mcp_server",
               "discount",
-              "rate_card"
+              "rate_card",
+              "billing_import"
             ],
             "type": "string"
           }
@@ -2239,6 +2241,9 @@
               "$ref": "#/components/schemas/ConfigurationSlotEntry"
             },
             "type": "array"
+          },
+          "billing_import": {
+            "$ref": "#/components/schemas/ConfigurationBillingImport"
           }
         },
         "required": [
@@ -22172,7 +22177,8 @@
               "otlp_logs",
               "s3",
               "gcs",
-              "azure_blob"
+              "azure_blob",
+              "stripe_meter"
             ],
             "type": "string"
           },
@@ -22186,7 +22192,9 @@
                 "attempts",
                 "usage_rollups",
                 "guardrail_decisions",
-                "audit"
+                "audit",
+                "metering",
+                "focus"
               ],
               "type": "string"
             },
@@ -22195,8 +22203,11 @@
           "format": {
             "enum": [
               "json",
+              "cloudevents",
               "otlp",
-              "jsonl"
+              "jsonl",
+              "csv_gzip",
+              "stripe"
             ],
             "type": "string"
           },
@@ -22248,6 +22259,14 @@
               "additionalProperties": true
             },
             "type": "array"
+          },
+          "settings": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Format-specific sink settings; csv_gzip accepts cost_basis (cost|charge) and start_date (YYYY-MM-DD)."
           }
         },
         "required": [
@@ -22284,7 +22303,8 @@
               "otlp_logs",
               "s3",
               "gcs",
-              "azure_blob"
+              "azure_blob",
+              "stripe_meter"
             ],
             "type": "string"
           },
@@ -22298,7 +22318,9 @@
                 "attempts",
                 "usage_rollups",
                 "guardrail_decisions",
-                "audit"
+                "audit",
+                "metering",
+                "focus"
               ],
               "type": "string"
             },
@@ -22307,8 +22329,11 @@
           "format": {
             "enum": [
               "json",
+              "cloudevents",
               "otlp",
-              "jsonl"
+              "jsonl",
+              "csv_gzip",
+              "stripe"
             ],
             "type": "string"
           },
@@ -22354,6 +22379,14 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "settings": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Format-specific sink settings; csv_gzip accepts cost_basis (cost|charge) and start_date (YYYY-MM-DD)."
           }
         },
         "required": [
@@ -22414,6 +22447,14 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "settings": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Format-specific sink settings; csv_gzip accepts cost_basis (cost|charge) and start_date (YYYY-MM-DD)."
           }
         }
       },
@@ -23303,6 +23344,465 @@
             ]
           }
         }
+      },
+      "BillingImport": {
+        "type": "object",
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "openai_costs",
+              "anthropic_cost_report"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "object",
+            "description": "Source-shaped import scope; {} reads the whole organization."
+          },
+          "credential_configured": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string"
+          },
+          "status": {
+            "type": "object",
+            "properties": {
+              "next_import_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "last_import_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "last_success_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "last_error_code": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Stable content-free failure code: credential, status, network, timeout, response or endpoint."
+              },
+              "imported_from": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date"
+              },
+              "imported_through": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date"
+              }
+            },
+            "required": [
+              "next_import_at",
+              "last_import_at",
+              "last_success_at",
+              "last_error_code",
+              "imported_from",
+              "imported_through"
+            ]
+          }
+        },
+        "required": [
+          "provider_id",
+          "source",
+          "enabled",
+          "scope",
+          "credential_configured",
+          "etag",
+          "status"
+        ]
+      },
+      "PutBillingImportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Defaults to true when omitted."
+          },
+          "scope": {
+            "type": "object",
+            "description": "openai_costs: {\"project_ids\":[\"proj_...\"]}; anthropic_cost_report: {\"workspace_ids\":[\"wrkspc_...\",\"default\"]}; {} reads the whole organization. Omitted keeps the stored scope."
+          },
+          "credential": {
+            "type": "string",
+            "description": "Vendor admin credential, sealed as a billing_credential secret. Required on create; omitted keeps the stored credential; null is rejected - delete the import instead.",
+            "minLength": 20,
+            "maxLength": 512
+          }
+        }
+      },
+      "InvoicedCostListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "day": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "line_item": {
+                  "type": "string"
+                },
+                "currency": {
+                  "type": "string"
+                },
+                "amount": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "fetched_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "day",
+                "line_item",
+                "currency",
+                "amount",
+                "source",
+                "fetched_at"
+              ]
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ReconciliationReport": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date"
+          },
+          "end": {
+            "type": "string",
+            "format": "date"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "day": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "attributed_cost": {
+                  "type": "string",
+                  "description": "Exact decimal: estimated cost plus allocated commitment, excluding caller-paid and budget-exempt attempts."
+                },
+                "invoiced_cost": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Exact decimal; null outside the imported range."
+                },
+                "invoiced_currency": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "capture_rate": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "attributed_cost / invoiced_cost rounded to 6 decimals."
+                },
+                "capture_rate_unavailable_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "not_imported",
+                    "zero_invoice",
+                    "currency_mismatch",
+                    null
+                  ]
+                },
+                "priced_attempts": {
+                  "type": "integer"
+                },
+                "unpriced_attempts": {
+                  "type": "integer"
+                },
+                "incomplete_attempts": {
+                  "type": "integer"
+                },
+                "unpriced_share": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "unpriced/(priced+unpriced) to 6 decimals."
+                },
+                "excluded_caller_attempts": {
+                  "type": "integer"
+                },
+                "provisional": {
+                  "type": "boolean",
+                  "description": "True within two days of the current date or when the last successful import is stale for the day."
+                },
+                "import": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "last_success_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "last_error_code": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              },
+              "required": [
+                "provider_id",
+                "day",
+                "attributed_cost",
+                "invoiced_cost",
+                "invoiced_currency",
+                "capture_rate",
+                "capture_rate_unavailable_reason",
+                "priced_attempts",
+                "unpriced_attempts",
+                "incomplete_attempts",
+                "unpriced_share",
+                "excluded_caller_attempts",
+                "provisional",
+                "import"
+              ]
+            }
+          },
+          "totals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "attributed_cost": {
+                  "type": "string"
+                },
+                "attributed_cost_covered": {
+                  "type": "string",
+                  "description": "Attributed spend over covered days only; the numerator capture_rate uses, since uninvoiced days cannot be billed."
+                },
+                "invoiced_cost": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "capture_rate": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "capture_rate_unavailable_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "unpriced_share": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "provider_id",
+                "attributed_cost",
+                "attributed_cost_covered",
+                "invoiced_cost",
+                "capture_rate",
+                "capture_rate_unavailable_reason",
+                "unpriced_share"
+              ]
+            }
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "currency",
+          "items",
+          "totals"
+        ]
+      },
+      "ConfigurationBillingImport": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "object"
+          },
+          "credential_ref": {
+            "type": "string",
+            "description": "Portable secret binding name, provider name followed by /billing; supply the credential through secret_bindings."
+          }
+        },
+        "required": [
+          "enabled",
+          "scope",
+          "credential_ref"
+        ]
+      },
+      "FocusDataset": {
+        "type": "object",
+        "properties": {
+          "charge_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "generated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "delivered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "row_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "part_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "billed_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effective_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "last_error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "current": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "charge_date",
+          "revision",
+          "generated_at",
+          "delivered_at",
+          "row_count",
+          "part_count",
+          "billed_cost",
+          "effective_cost",
+          "attempts",
+          "last_error_code",
+          "current"
+        ]
+      },
+      "FocusDatasetListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FocusDataset"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
       }
     },
     "securitySchemes": {
@@ -55339,6 +55839,700 @@
         ],
         "tags": [
           "usage"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/billing-import": {
+      "get": {
+        "operationId": "get_provider_billing_import",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks access to this provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The provider or billing import does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      },
+      "put": {
+        "operationId": "put_provider_billing_import",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutBillingImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingImport"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks access to this provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The provider does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match does not match the current etag",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The provider kind, scope or credential is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      },
+      "delete": {
+        "operationId": "delete_provider_billing_import",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "Malformed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks access to this provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The provider or billing import does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match does not match the current etag",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/billing-import/run": {
+      "post": {
+        "operationId": "run_provider_billing_import",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks access to this provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The provider or billing import does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/invoiced-costs": {
+      "get": {
+        "operationId": "list_provider_invoiced_costs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoicedCostListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or out-of-range start/end",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks access to this provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The provider does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/usage/reconciliation": {
+      "get": {
+        "operationId": "get_usage_reconciliation",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or out-of-range start/end",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the usage scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The named provider has no visible billing import",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "usage"
+            ]
+          },
+          {
+            "managementToken": [
+              "usage"
+            ]
+          }
+        ],
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/api/v1/observability/sinks/{export_sink_id}/focus-datasets": {
+      "get": {
+        "operationId": "list_export_sink_focus_datasets",
+        "description": "Delivered and pending FOCUS dataset revisions for the sink, newest charge date first.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "export_sink_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FocusDatasetListResponse"
+                }
+              }
+            },
+            "description": "Delivered and pending FOCUS datasets for the sink"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Caller lacks management read access"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sink not found or outside the caller's scope"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "tags": [
+          "observability"
         ]
       }
     }
