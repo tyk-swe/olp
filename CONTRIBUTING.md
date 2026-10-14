@@ -24,6 +24,9 @@ unqualified.
 | `make bench-gate` | Hot-path `testing.B` benchmarks against the merge base, as the CI `bench` job runs them |
 | `make api` | Generate Go and TypeScript types without building the gateway |
 | `make build` | Versioned `.local/bin/olp` plus separate `console/build` assets |
+| `make build-go` | Build the native Go binary from generated contracts |
+| `make catalog` | Rewrite the reference catalog and plugin index in canonical form |
+| `make catalog-sign` | Sign the reference catalog and plugin index with the development key |
 | `make fmt` | Format Go and console source |
 
 Required CI includes `check`, `integration`, `dependencies`, and both native
