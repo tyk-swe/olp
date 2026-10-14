@@ -22,7 +22,8 @@ func WorkerStaleAfter(task string) int64 {
 	switch task {
 	case "request_metadata_consumer", "request_metadata_gateway_epoch_detection", "media_reconciliation", "grant_refresh":
 		return 20
-	case "maintenance", "cost_reconciliation", "notification_delivery", "health_probes", "managed_export_delivery":
+	case "maintenance", "cost_reconciliation", "notification_delivery", "health_probes", "managed_export_delivery",
+		"billing_import", "focus_export":
 		return 180
 	case "export_delivery":
 		return 30

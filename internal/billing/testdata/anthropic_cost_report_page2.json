@@ -1,0 +1,34 @@
+{
+  "data": [
+    {
+      "starting_at": "2025-10-03T00:00:00Z",
+      "ending_at": "2025-10-04T00:00:00Z",
+      "results": [
+        {
+          "amount": "0.10",
+          "currency": "USD",
+          "cost_type": "code_execution",
+          "description": "code execution tool calls",
+          "workspace_id": "wrkspc_beta02",
+          "model": "claude-sonnet-4-5",
+          "service_tier": "standard",
+          "context_window": "0-200k",
+          "usage_type": "server_tool"
+        },
+        {
+          "amount": "1.00",
+          "currency": "usd",
+          "cost_type": null,
+          "description": null,
+          "workspace_id": "wrkspc_gamma03",
+          "model": null,
+          "service_tier": null,
+          "context_window": null,
+          "usage_type": null
+        }
+      ]
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

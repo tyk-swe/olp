@@ -86,4 +86,6 @@ signing material. Queued events, delivery counters, and history remain local.
 Promotion requires the ordinary sink scope's write authority in addition to
 configuration authority. Endpoint and stream validation is shared with direct
 management writes. See [configuration promotion](configuration.md) and
-[Terraform workflows](terraform.md).
+[Terraform workflows](terraform.md). For the FOCUS datasets, CloudEvents
+metering and Stripe meter sinks the observability API offers, see
+[finops](finops.md).

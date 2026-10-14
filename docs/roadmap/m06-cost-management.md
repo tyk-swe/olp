@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| In progress | [M2](m02-provider-catalog.md), [M4](m04-tenancy-identity.md), [M5](m05-observability.md) | FinOps adoption |
+| Implemented | [M2](m02-provider-catalog.md), [M4](m04-tenancy-identity.md), [M5](m05-observability.md) | FinOps adoption |
 
 OLP already has exact-decimal pinned prices, fail-closed hierarchical budgets,
 completeness evidence and M5 metadata exports. This milestone adds remaining
@@ -172,6 +172,47 @@ below already settled.
     reserves for an attempt. A candidate with no price cannot be shown to fit
     and is skipped.
 
+## Settled during implementation
+
+1. **Price lines.** Every fact stores its exact `cost_lines`/`charge_lines`
+   decomposition — quantity, unit and list/contracted unit price per component
+   and tier — because FOCUS 1.4 requires `ListUnitPrice` and
+   `ContractedUnitPrice` per row, and a recomputed average cannot reproduce a
+   tier boundary or fallback. When a fact's stored lines do not sum to its
+   totals, exports fall back to one `attempt` line and the manifest counts it.
+2. **Conformance interpreter.** `internal/export/focusspec` interprets every
+   Static rule of the pinned 1.4 requirements model; the official
+   focus-validator 2.2.1 crashes on a dependency cycle through the Dynamic
+   CommitmentDiscountQuantity rules and mis-evaluates removed and conditional
+   rules, so it cannot serve. The interpreter applies the documented errata:
+   deprecated ProviderName/PublisherName presence rules skipped and null-safe
+   requirement comparisons.
+3. **One metering stream.** CloudEvents and Stripe meter sinks both consume
+   the `metering` stream, so the priced-attempt payload, consumer resolution
+   and retention are shared, and Stripe-only filtering (mapped customer,
+   positive value) happens at enqueue.
+4. **Stripe idempotency.** A deterministic `olp-<sink>-<attempt>` identifier
+   doubles as `Idempotency-Key`; `duplicate_meter_event` counts as delivered.
+5. **Caller-paid exclusion.** Caller-credential and budget-exempt attempts are
+   excluded from the FOCUS cost basis and from reconciliation attributed cost,
+   because the provider does not invoice the installation for them; the charge
+   basis and usage reports keep them.
+6. **FOCUS restatement.** A dirty day regenerates no sooner than one hour
+   after its previous delivery, as the next revision under `revision=NNNN`
+   keys; retries rewrite the same revision so revisions never gap, and the
+   manifest is always the last object written.
+7. **Commitments in FOCUS.** Covered usage reports `CommitmentDiscountStatus`
+   `Used` with an allocated `EffectiveCost`, and each bucket with committed
+   usage adds one `Purchase` row on its start date. A period with no committed
+   usage produces no rows, so `CAU-CostAndUsage-D-082-C` (unused commitment
+   charges) is not met — the documented limitation.
+8. **Reconciliation compare.** `capture_rate` divides attributed cost over
+   covered days only (`attributed_cost_covered`) by invoiced cost; daily
+   `unavailable_reason` distinguishes `not_imported`, `zero_invoice` and
+   `currency_mismatch`. Hourly rollup rows only approximate priced/incomplete
+   counts and cannot identify caller-paid attempts, so the budget-exempt share
+   of their request count is counted as excluded.
+
 ## Exit criteria
 
 - [x] Every price component above round-trips through revisions, sources,
@@ -184,16 +225,15 @@ below already settled.
       allocated.
 - [x] `max_cost` refuses requests whose worst case exceeds the ceiling, before
       dispatch, in integration tests.
-- [ ] A FOCUS dataset validates against the pinned specification's schema, and
+- [x] A FOCUS dataset validates against the pinned specification's schema, and
       CloudEvents and Stripe meter deliveries are idempotent under redelivery.
-- [ ] Reconciliation reports a capture rate for OpenAI and Anthropic
+- [x] Reconciliation reports a capture rate for OpenAI and Anthropic
       connections against recorded fixtures.
-- [ ] The [parity matrix](parity.md) cost rows are `Parity` or better.
+- [x] The [parity matrix](parity.md) cost rows are `Parity` or better.
 
 ## Delivered and verified
 
-M6.1 to M6.3 are implemented; M6.4 and M6.5 remain planned, so the milestone
-stays in progress.
+M6.1 to M6.5 are implemented. The gates below ran on the branch.
 
 - **Price components.** Pricing revisions, price-list sources, catalog
   snapshots and configuration documents carry modality and cached-modality
@@ -201,29 +241,50 @@ stays in progress.
   fees and the batch multiplier. One PostgreSQL function prices every attempt
   and the gateway's Go mirror reproduces it exactly for reservations,
   settlement and `X-OLP-Cost`; a parity suite holds the two together.
+- **Price lines.** Every priced fact stores `list_cost`, `contracted_cost`,
+  `cost_lines` and `charge_lines` — the exact decomposition FOCUS needs;
+  mismatched lines fail closed to a counted fallback.
 - **Metering.** OpenAI, Anthropic and Gemini usage populates audio and image
   shares and server-side tool calls; inconsistent provider detail settles the
-  attempt incomplete rather than at text rates.
+  attempt incomplete rather than at text rates. A `metering` export stream
+  feeds CloudEvents sinks and `stripe_meter` sinks with deterministic,
+  idempotent event identifiers; `duplicate_meter_event` counts as delivered
+  and redelivery integration tests prove no double reporting.
+- **FOCUS 1.4.** Object sinks deliver daily gzip-CSV cost-and-usage datasets
+  in cost or charge basis with a last-written manifest, revisioned
+  restatement, commitment `Used` allocations plus Purchase rows and a
+  completeness record. `internal/export/focusspec` interprets the pinned 1.4
+  requirements model; every generated part validates with zero violations
+  (302 rules evaluated, 135 dynamic, 48 not applicable).
+- **Discounts, rate cards and charge.** Usage records carry cost and charge
+  with their provenance; reports, exports and request history show both, and
+  every consumer budget enforces either.
+- **Estimation.** Route simulation states minimum and maximum cost per
+  target, `max_cost` refuses requests whose worst case exceeds it before
+  dispatch, and the console calculator prices routes and exact usage.
+- **Invoice reconciliation.** OpenAI and Anthropic billing imports run on a
+  worker task against vendor admin APIs; `/api/v1/usage/reconciliation`
+  reports attributed versus invoiced cost with covered-day capture rate,
+  unpriced share and provisional marking, and the console exposes the import
+  configuration and the panel.
 - **Commitments.** Connection commitments bill nothing per attempt and are
-  allocated in usage reports by list-price-weighted share.
+  allocated in usage reports by list-price-weighted share; FOCUS reports them
+  as commitment-discount `Used` rows and Purchase rows.
 - **Reference catalog v2.** Every component the catalog listed as
   unrepresentable in a structure OLP now prices is transcribed, independently
   checked against the vendor figures it came from; what remains carries an
   accurate residual name.
-- **Discounts, rate cards and charge.** Usage records carry cost and charge
-  with their provenance; reports, exports and request history show both, and
-  every consumer budget enforces either.
-- **Estimation.** Route simulation states minimum and maximum cost per target,
-  `max_cost` refuses requests whose worst case exceeds it before dispatch, and
-  the console calculator prices routes and exact usage.
 
-`make check`, `make test-race` and one complete, unmodified `make integration`
-run pass on the branch; the integration run includes the race-enabled package
-phase, every client qualification suite and the packaged Playwright journeys,
-the new pricing journeys among them. `make bench-gate` holds every hot-path
-benchmark within its threshold except `BenchmarkEligibility/secret` (+13% time,
-no allocations), whose code path M6 does not change: on the development host
-its time moves by similar amounts between commits that do not touch it, which
-marks layout sensitivity rather than a regression. Live-provider qualification
-of the new metering is not part of this evidence; it rests on recorded
-response fixtures.
+`make check`, `go mod tidy -diff`, `scripts/check-dependencies.sh` and one
+complete, unmodified `make integration` pass on the branch; the integration
+run includes the race-enabled package phases, the client qualification
+suites, the packaged Playwright suite and the hosted journeys. Two gate
+failures found during the run were fixed and re-verified green: the worker
+task list in `TestProcessModesPrivateProbesAndShutdown` lacked
+`billing_import` and `focus_export`, and `TestIntegrationFocusLifecycle`
+asserted an exact delivered-days count that a newly eligible empty day could
+exceed. `make bench-gate` reports no significant regression above its 10% threshold
+(several admission and one resource benchmark show tolerated slowdowns of
+5–8%, consistent with the added price-line bookkeeping). Live-provider qualification of
+the metering is not part of this evidence; it rests on recorded response
+fixtures, including the importer's OpenAI and Anthropic cost fixtures.

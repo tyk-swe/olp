@@ -184,7 +184,7 @@ func (w *Worker) deliverOne(ctx context.Context, sinkID, stream string) (bool, e
 	}
 	var destination Destination
 	var credentialID *string
-	if err = tx.QueryRow(claimCtx, readDestinationSQL, sinkID, stream).Scan(&destination.Type, &destination.URL, &credentialID, &destination.Format); err != nil {
+	if err = tx.QueryRow(claimCtx, readDestinationSQL, sinkID, stream).Scan(&destination.Type, &destination.URL, &credentialID, &destination.Format, &destination.ID, &destination.Settings); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return true, nil
 		}

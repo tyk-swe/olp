@@ -3,5 +3,7 @@ export const observabilityKeys = {
   sinks: () => ['observability', 'sinks'] as const,
   capture: () => ['observability', 'capture'] as const,
   capturePolicies: () => ['observability', 'capture-policies'] as const,
-  captureSinks: () => ['observability', 'capture-sinks'] as const
+  captureSinks: () => ['observability', 'capture-sinks'] as const,
+  focusDatasets: (sink: string) =>
+    ['observability', 'sinks', sink, 'focus-datasets'] as const
 };

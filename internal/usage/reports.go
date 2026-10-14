@@ -306,7 +306,19 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" commitment_amount::numeric AS commitment_amount," +
 		" commitment_period," +
 		" CASE WHEN commitment_period IS NOT NULL THEN date_trunc(commitment_period, observed_at AT TIME ZONE 'UTC')" +
-		" END AS commitment_bucket" +
+		" END AS commitment_bucket," +
+		// Reconciliation attributes spend only to operator-cost rows: caller
+		// credentials bill the caller and budget-exempt attempts sit outside
+		// what the provider invoices for.
+		" budget_exempt, caller_credential," +
+		" CASE WHEN charge_status <> 'not_billable' AND usage_complete AND estimated_cost IS NOT NULL" +
+		" THEN 1 ELSE 0 END::bigint AS reconcil_priced_attempts," +
+		" CASE WHEN charge_status <> 'not_billable' AND unpriced" +
+		" THEN 1 ELSE 0 END::bigint AS reconcil_unpriced_attempts," +
+		" CASE WHEN charge_status <> 'not_billable' AND NOT usage_complete" +
+		" THEN 1 ELSE 0 END::bigint AS reconcil_incomplete_attempts," +
+		" CASE WHEN charge_status <> 'not_billable' AND (caller_credential OR budget_exempt)" +
+		" THEN 1 ELSE 0 END::bigint AS reconcil_caller_attempts" +
 		" FROM olp.attempt_usage_facts WHERE true")
 	q.pushBind(" AND observed_at >= ", f.Start)
 	q.pushBind(" AND observed_at < ", f.End)
@@ -323,7 +335,16 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 		" estimate_reported_input_tokens, estimate_attempt_count, commitment_weight," +
 		" commitment_amount, commitment_period," +
 		" CASE WHEN commitment_period IS NOT NULL THEN date_trunc(commitment_period, bucket AT TIME ZONE 'UTC')" +
-		" END FROM olp.attempt_usage_hourly WHERE true")
+		" END, budget_exempt, false," +
+		// Hourly rows keep only request-grain counts beyond unpriced attempts:
+		// the priced and incomplete attempt counts reconciliation reports for
+		// rolled-up hours approximate them with provider-scope request counts.
+		" GREATEST(0::bigint, provider_request_count - provider_unpriced_count - provider_incomplete_count)," +
+		" unpriced_attempt_count, provider_incomplete_count," +
+		// An hourly row cannot tell caller-paid from budget-exempt, so the
+		// excluded count for rolled-up hours is the exempt request count.
+		" CASE WHEN budget_exempt THEN provider_request_count ELSE 0 END::bigint" +
+		" FROM olp.attempt_usage_hourly WHERE true")
 	q.pushBind(" AND bucket >= ", ceilHour(f.Start))
 	q.pushBind(" AND bucket + interval '1 hour' <= ", f.End)
 	f.dimensions(q)
@@ -338,23 +359,7 @@ func (f Filters) usageRows(q *filterQuery, scope countScope) {
 	q.push(", commitment_shares AS (" +
 		" SELECT p.provider_id, p.commitment_period, p.commitment_bucket, w.period_weight, w.latest_amount" +
 		" FROM commitment_periods p" +
-		" CROSS JOIN LATERAL (" +
-		"   SELECT SUM(rows.weight) AS period_weight," +
-		"          (ARRAY_AGG(rows.amount ORDER BY rows.at DESC, rows.amount DESC))[1] AS latest_amount" +
-		"   FROM (" +
-		"     SELECT f.commitment_weight AS weight, f.commitment_amount AS amount, f.observed_at AS at" +
-		"     FROM olp.attempt_usage_facts f" +
-		"     WHERE f.provider_id = p.provider_id AND f.commitment_period = p.commitment_period" +
-		"       AND f.observed_at >= p.commitment_bucket AT TIME ZONE 'UTC'" +
-		"       AND f.observed_at < (p.commitment_bucket + ('1 ' || p.commitment_period)::interval) AT TIME ZONE 'UTC'" +
-		"     UNION ALL" +
-		"     SELECT h.commitment_weight, h.commitment_amount, h.bucket" +
-		"     FROM olp.attempt_usage_hourly h" +
-		"     WHERE h.provider_id = p.provider_id AND h.commitment_period = p.commitment_period" +
-		"       AND h.bucket >= p.commitment_bucket AT TIME ZONE 'UTC'" +
-		"       AND h.bucket < (p.commitment_bucket + ('1 ' || p.commitment_period)::interval) AT TIME ZONE 'UTC'" +
-		"   ) rows" +
-		" ) w)")
+		" CROSS JOIN LATERAL (" + commitmentShareLateral() + ") w)")
 	q.push(", report_rows AS (" +
 		" SELECT usage_rows.*," +
 		" round(shares.latest_amount * usage_rows.commitment_weight / NULLIF(shares.period_weight, 0), 12)" +
@@ -696,4 +701,31 @@ func ceilHour(value time.Time) time.Time {
 		return floor
 	}
 	return floor.Add(time.Hour)
+}
+
+// CommitmentSharesLateral is the bucket-scoped commitment aggregation used by
+// both the usage reports' shares CTE and the FOCUS generator: per driver row
+// (p.provider_id, p.commitment_period, p.commitment_bucket) it sums the whole
+// bucket's commitment weight across facts and retained hourly rows and takes
+// the latest row's amount. The driver columns must be named as listed.
+func CommitmentSharesLateral() string {
+	return commitmentShareLateral()
+}
+
+func commitmentShareLateral() string {
+	return "   SELECT SUM(rows.weight) AS period_weight," +
+		"          (ARRAY_AGG(rows.amount ORDER BY rows.at DESC, rows.amount DESC))[1] AS latest_amount" +
+		"   FROM (" +
+		"     SELECT f.commitment_weight AS weight, f.commitment_amount AS amount, f.observed_at AS at" +
+		"     FROM olp.attempt_usage_facts f" +
+		"     WHERE f.provider_id = p.provider_id AND f.commitment_period = p.commitment_period" +
+		"       AND f.observed_at >= p.commitment_bucket AT TIME ZONE 'UTC'" +
+		"       AND f.observed_at < (p.commitment_bucket + ('1 ' || p.commitment_period)::interval) AT TIME ZONE 'UTC'" +
+		"     UNION ALL" +
+		"     SELECT h.commitment_weight, h.commitment_amount, h.bucket" +
+		"     FROM olp.attempt_usage_hourly h" +
+		"     WHERE h.provider_id = p.provider_id AND h.commitment_period = p.commitment_period" +
+		"       AND h.bucket >= p.commitment_bucket AT TIME ZONE 'UTC'" +
+		"       AND h.bucket < (p.commitment_bucket + ('1 ' || p.commitment_period)::interval) AT TIME ZONE 'UTC'" +
+		"   ) rows"
 }

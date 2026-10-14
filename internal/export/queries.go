@@ -1,7 +1,7 @@
 package export
 
 const sinkProjection = `jsonb_build_object('id',s.id,'name',s.name,'project_id',s.project_id,'type',s.type,'destination',s.destination,
- 'streams',s.streams,'format',s.format,'filter',s.filter,'enabled',s.enabled,'credential_configured',s.credential_id IS NOT NULL,
+ 'streams',s.streams,'format',s.format,'filter',s.filter,'settings',s.settings,'enabled',s.enabled,'credential_configured',s.credential_id IS NOT NULL,
  'etag',s.etag,'created_by',s.created_by,'created_at',s.created_at,'updated_at',s.updated_at)`
 
 const listSinksSQL = `SELECT ` + sinkProjection + ` FROM olp.export_sinks s
@@ -9,9 +9,9 @@ const listSinksSQL = `SELECT ` + sinkProjection + ` FROM olp.export_sinks s
 
 const getSinkSQL = `SELECT ` + sinkProjection + `,s.etag::text,s.project_id::text FROM olp.export_sinks s WHERE s.id=$1`
 const lockSinkSQL = `SELECT ` + sinkProjection + `,s.etag::text,s.project_id::text,s.credential_id::text FROM olp.export_sinks s WHERE s.id=$1 FOR UPDATE`
-const createSinkSQL = `INSERT INTO olp.export_sinks(id,name,project_id,type,destination,streams,format,filter,enabled,etag,created_by)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`
-const updateSinkSQL = `UPDATE olp.export_sinks SET name=$2,destination=$3,streams=$4,filter=$5,enabled=$6,etag=$7,updated_at=now() WHERE id=$1`
+const createSinkSQL = `INSERT INTO olp.export_sinks(id,name,project_id,type,destination,streams,format,filter,settings,enabled,etag,created_by)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`
+const updateSinkSQL = `UPDATE olp.export_sinks SET name=$2,destination=$3,streams=$4,filter=$5,enabled=$6,etag=$7,settings=$8,updated_at=now() WHERE id=$1`
 const setCredentialSQL = `UPDATE olp.export_sinks SET credential_id=$2 WHERE id=$1`
 const deleteCredentialSQL = `DELETE FROM olp.secrets WHERE id=$1 AND purpose=$2`
 const deleteSinkSQL = `DELETE FROM olp.export_sinks WHERE id=$1`
@@ -21,21 +21,38 @@ const filterRouteScopeSQL = `SELECT project_id::text FROM olp.routes WHERE slug=
 const listGapsSQL = `SELECT to_jsonb(g) FROM olp.export_gaps g JOIN olp.export_sinks s ON s.id=g.sink_id
  WHERE g.sink_id=$1 AND g.id<$2::uuid AND ($3 OR s.project_id=ANY($4::uuid[])) ORDER BY g.id DESC LIMIT $5`
 const listCursorsSQL = `SELECT to_jsonb(c) FROM olp.export_cursors c WHERE c.sink_id=$1 ORDER BY c.stream`
-const sinkStatusSQL = `SELECT jsonb_build_object('stream',st.stream,'cursor',c.cursor,'delivered_total',COALESCE(c.delivered_total,0),
+const sinkStatusSQL = `SELECT CASE WHEN st.stream='focus' THEN
+  jsonb_build_object('stream','focus','delivered_days',COALESCE(focusd.delivered_days,0),
+   'latest_delivered_date',focusd.latest_delivered_date,'last_success_at',focusd.last_success_at,
+   'pending_error_codes',COALESCE(focusd.error_codes,'{}'::text[]))
+ ELSE jsonb_build_object('stream',st.stream,'cursor',c.cursor,'delivered_total',COALESCE(c.delivered_total,0),
  'failures_total',COALESCE(c.failed_total,0),'gaps_total',COALESCE(c.gaps_total,0),'last_success_at',c.last_success_at,
  'last_attempt_at',pending.last_attempt_at,'pending',COALESCE(pending.pending,0),'oldest_pending_at',pending.oldest_pending_at,
- 'pending_error_codes',COALESCE(pending.error_codes,'{}'::text[]))
+ 'pending_error_codes',COALESCE(pending.error_codes,'{}'::text[])) END
  FROM olp.export_sinks s CROSS JOIN LATERAL unnest(s.streams) st(stream)
  LEFT JOIN olp.export_cursors c ON c.sink_id=s.id AND c.stream=st.stream
  LEFT JOIN LATERAL (SELECT count(*) FILTER(WHERE p.delivered_at IS NULL) AS pending,
  min(r.queued_at) FILTER(WHERE p.delivered_at IS NULL) AS oldest_pending_at,max(p.last_attempt_at) AS last_attempt_at,
  array_agg(DISTINCT p.last_error_code) FILTER(WHERE p.delivered_at IS NULL AND p.last_error_code IS NOT NULL) AS error_codes
  FROM olp.export_pending p JOIN olp.export_records r ON r.id=p.record_id WHERE p.sink_id=s.id AND r.stream=st.stream) pending ON true
+ LEFT JOIN LATERAL (SELECT count(*) FILTER(WHERE fd.delivered_at IS NOT NULL) AS delivered_days,
+ max(fd.charge_date) FILTER(WHERE fd.delivered_at IS NOT NULL) AS latest_delivered_date,
+ array_agg(DISTINCT fd.last_error_code) FILTER(WHERE fd.last_error_code IS NOT NULL) AS error_codes,
+ max(fd.delivered_at) AS last_success_at
+ FROM olp.focus_datasets fd WHERE fd.sink_id=s.id AND st.stream='focus') focusd ON true
  WHERE s.id=$1 ORDER BY st.stream`
+
+const focusDatasetsSQL = `SELECT jsonb_build_object('charge_date',fd.charge_date::text,'revision',fd.revision,
+ 'generated_at',fd.generated_at,'delivered_at',fd.delivered_at,'row_count',fd.row_count,'part_count',fd.part_count,
+ 'billed_cost',trim_scale(fd.billed_cost)::text,'effective_cost',trim_scale(fd.effective_cost)::text,
+ 'attempts',fd.attempts,'last_error_code',fd.last_error_code,
+ 'current',fd.delivered_at IS NOT NULL AND fd.dirty_version=COALESCE(dd.version,0))
+ FROM olp.focus_datasets fd LEFT JOIN olp.focus_dirty_days dd ON dd.day=fd.charge_date
+ WHERE fd.sink_id=$1::uuid AND fd.charge_date < $2::date ORDER BY fd.charge_date DESC LIMIT $3`
 
 const activeSinksSQL = `SELECT id::text,type,destination,credential_id::text,streams,format FROM olp.export_sinks WHERE enabled ORDER BY id LIMIT 1001`
 const lockStreamSQL = `SELECT pg_try_advisory_xact_lock(hashtextextended($1,501))`
-const readDestinationSQL = `SELECT type,destination,credential_id::text,format FROM olp.export_sinks WHERE id=$1 AND enabled AND $2=ANY(streams) FOR SHARE`
+const readDestinationSQL = `SELECT type,destination,credential_id::text,format,id::text,settings FROM olp.export_sinks WHERE id=$1 AND enabled AND $2=ANY(streams) FOR SHARE`
 const pendingRecordsSQL = `SELECT r.id::text,r.stream,r.occurred_at,r.queued_at,
  jsonb_build_object('version',1,'event_id',r.id,'stream',r.stream,'source_id',r.source_id,'project_id',r.project_id,
  'route',r.route,'outcome',r.outcome,'occurred_at',r.occurred_at,'data',r.payload),p.attempts

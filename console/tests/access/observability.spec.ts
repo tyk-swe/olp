@@ -274,3 +274,121 @@ test('owner manages export sinks, capture policies and notifications through the
     });
   }
 });
+
+test('owner creates FOCUS, CloudEvents and Stripe sinks with format settings', async ({
+  page
+}, testInfo) => {
+  test.setTimeout(240_000);
+  await signInGatewayOwner(page);
+
+  const project = await manage(page, 'POST', '/api/v1/projects', {
+    body: { name: `E2E billing ${run}` },
+    idempotency: crypto.randomUUID()
+  });
+  expect(project.status).toBe(201);
+  const projectId = (project.body as { id: string }).id;
+
+  await page.goto('/settings');
+  const panel = page.locator('.observability-panel');
+  await expect(
+    panel.getByRole('heading', { name: 'Export sinks and payload capture' })
+  ).toBeVisible();
+
+  // FOCUS: object storage + gzip CSV locks streams to FOCUS, hides the
+  // outcome filter and reveals the cost-basis settings.
+  await panel.locator('#sink-name').fill(`FOCUS ${run}`);
+  await panel.locator('#sink-type').selectOption('s3');
+  await panel.locator('#sink-destination').fill(`${receiverUrl}/focus-bucket`);
+  await panel.locator('#sink-format').selectOption('csv_gzip');
+  await expect(panel.locator('#sink-filter-outcome')).toHaveCount(0);
+  await panel.locator('#sink-cost-basis').selectOption('cost');
+  await panel.getByRole('button', { name: 'Create sink' }).click();
+  const focusRow = panel.getByRole('row', {
+    name: new RegExp(`FOCUS ${run}`)
+  });
+  await expect(focusRow).toBeVisible();
+  await expect(focusRow).toContainText('Cost basis: cost');
+  await focusRow.getByRole('button', { name: 'Datasets' }).click();
+  await expect(panel.getByText('No datasets delivered yet.')).toBeVisible();
+
+  // CloudEvents on the https type locks the metering stream.
+  await panel.locator('#sink-name').fill(`Events ${run}`);
+  await panel.locator('#sink-type').selectOption('https');
+  await panel.locator('#sink-format').selectOption('cloudevents');
+  await panel.locator('#sink-destination').fill(`${receiverUrl}/events`);
+  await panel.locator('#sink-ce-source').fill('https://e2e.example.com/olp');
+  await panel.getByRole('button', { name: 'Create sink' }).click();
+  await expect(
+    panel.getByRole('row', { name: new RegExp(`Events ${run}`) })
+  ).toBeVisible();
+
+  // Stripe: restricted-key credential plus a customer map and advanced keys.
+  await panel.locator('#sink-name').fill(`Stripe ${run}`);
+  await panel.locator('#sink-type').selectOption('stripe_meter');
+  await expect(panel.locator('#sink-destination')).toHaveValue(
+    'https://api.stripe.com'
+  );
+  await panel.locator('#sink-destination').fill(`${receiverUrl}/stripe`);
+  await panel.locator('#sink-stripe-key').fill('rk_test_e2e_browser_key');
+  await panel.locator('#sink-stripe-event').fill('olp.e2e.charge');
+  await panel.locator('#sink-stripe-value').selectOption('cost');
+  await panel
+    .locator('.customer-row select')
+    .selectOption({ label: `E2E billing ${run}` });
+  await panel.locator('.customer-row input').fill('cus_e2e123');
+  await panel.getByRole('button', { name: 'Advanced' }).click();
+  await panel.locator('#sink-stripe-customer-key').fill('olp_project');
+  await panel.getByRole('button', { name: 'Create sink' }).click();
+  await expect(
+    panel.getByRole('row', { name: new RegExp(`Stripe ${run}`) })
+  ).toBeVisible();
+  await expect(
+    panel.getByRole('row', { name: new RegExp(`Stripe ${run}`) })
+  ).toContainText('Meter: olp.e2e.charge (cost)');
+
+  // The persisted settings match what the forms posted.
+  const sinks = await manage(
+    page,
+    'GET',
+    '/api/v1/observability/sinks?limit=50'
+  );
+  const items = (
+    sinks.body as {
+      items: {
+        name: string;
+        settings?: Record<string, unknown>;
+        format: string;
+        streams: string[];
+      }[];
+    }
+  ).items;
+  const focus = items.find((s) => s.name === `FOCUS ${run}`)!;
+  expect(focus.format).toBe('csv_gzip');
+  expect(focus.streams).toEqual(['focus']);
+  expect(focus.settings?.cost_basis).toBe('cost');
+  const events = items.find((s) => s.name === `Events ${run}`)!;
+  expect(events.settings?.source).toBe('https://e2e.example.com/olp');
+  const stripe = items.find((s) => s.name === `Stripe ${run}`)!;
+  expect(stripe.format).toBe('stripe');
+  expect(stripe.streams).toEqual(['metering']);
+  expect(stripe.settings?.event_name).toBe('olp.e2e.charge');
+  expect(stripe.settings?.value).toBe('cost');
+  expect(
+    (stripe.settings?.customers as Record<string, string>)[projectId]
+  ).toBe('cus_e2e123');
+  expect(stripe.settings?.customer_key).toBe('olp_project');
+
+  await panel.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath('settings-finops.png'),
+    fullPage: true
+  });
+  await testInfo.attach('settings-finops', {
+    path: testInfo.outputPath('settings-finops.png'),
+    contentType: 'image/png'
+  });
+  const axe = await new AxeBuilder({ page })
+    .include('.observability-panel')
+    .analyze();
+  expect(axe.violations).toEqual([]);
+});

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 )
 
 // parityCase is one price and one attempt's usage to bill against it.
@@ -51,7 +52,7 @@ func TestIntegrationPricingParity(t *testing.T) {
 		}
 		defer tx.Rollback(t.Context())
 		event := &Event{Operation: "generation", ObservedAt: observed}
-		var pricedCases, unpricedCases int
+		var pricedCases, unpricedCases, droppedLines int
 		for index, c := range cases {
 			usage := c.usage
 			status := int32(200)
@@ -83,10 +84,62 @@ func TestIntegrationPricingParity(t *testing.T) {
 			if sqlCost := parityCost(t, stored); sqlCost.Cmp(want) != 0 {
 				t.Fatalf("case %d: SQL cost %s, Go cost %s\nprice %s\nusage %s", index, stored, want, describePrice(c.price), describe(usage))
 			}
+			// The persisted SKU decomposition must re-derive the stored costs
+			// exactly; the guard drops lines that cannot — legitimately only
+			// when the numeric /1000000 inside price_usage rounded a sum past
+			// its division scale, which the unguarded document then cannot
+			// re-derive at twelve places either.
+			if got.costLines == nil {
+				if got.unguardedCostLines == nil {
+					t.Fatalf("case %d: priced attempt produced NULL cost lines\nprice %s\nusage %s",
+						index, describePrice(c.price), describe(usage))
+				}
+				lineList, lineContracted, lerr := sumPriceLines(got.unguardedCostLines)
+				if lerr != nil {
+					t.Fatalf("case %d: lines do not decode: %v", index, lerr)
+				}
+				l, _ := decimal.NewFromString(*got.listCost)
+				cc, _ := decimal.NewFromString(*got.contractedCost)
+				if lineList.Round(12).Equal(l) && lineContracted.Round(12).Equal(cc) {
+					t.Fatalf("case %d: guard dropped lines that re-derive the costs\nprice %s\nusage %s",
+						index, describePrice(c.price), describe(usage))
+				}
+				droppedLines++
+			} else {
+				lineList, lineContracted, lerr := sumPriceLines(got.costLines)
+				if lerr != nil {
+					t.Fatalf("case %d: lines do not decode: %v", index, lerr)
+				}
+				if l, err := decimal.NewFromString(*got.listCost); err != nil ||
+					!lineList.Round(12).Equal(l) {
+					t.Fatalf("case %d: line list %s vs stored %s\nprice %s\nusage %s",
+						index, lineList, *got.listCost, describePrice(c.price), describe(usage))
+				}
+				if cc, err := decimal.NewFromString(*got.contractedCost); err != nil ||
+					!lineContracted.Round(12).Equal(cc) {
+					t.Fatalf("case %d: line contracted %s vs stored %s\nprice %s\nusage %s",
+						index, lineContracted, *got.contractedCost, describePrice(c.price), describe(usage))
+				}
+			}
+			if got.charge != nil && got.chargeLines == nil && got.unguardedChargeLines != nil {
+				lineCharge, _, lerr := sumPriceLines(got.unguardedChargeLines)
+				if lerr != nil {
+					t.Fatalf("case %d: charge lines do not decode: %v", index, lerr)
+				}
+				if want, _ := decimal.NewFromString(*got.charge); lineCharge.Round(12).Equal(want) {
+					t.Fatalf("case %d: guard dropped charge lines that re-derive the charge\nprice %s\nusage %s",
+						index, describePrice(c.price), describe(usage))
+				}
+				droppedLines++
+			}
 		}
 		if pricedCases < len(cases)/2 || unpricedCases < len(cases)/20 {
 			t.Fatalf("the generator exercised %d priced and %d unpriced cases, want both well covered", pricedCases, unpricedCases)
 		}
+		// A dropped lines document is the legitimate response to the /1000000
+		// division rounding a giant sum; each drop above proved its sums could
+		// not re-derive the stored amount.
+		t.Logf("priced %d cases, %d unpriced, %d line drops from division rounding", pricedCases, unpricedCases, droppedLines)
 	})
 
 	// An event that names cached tokens without their input is refused when it is

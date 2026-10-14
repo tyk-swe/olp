@@ -173,11 +173,17 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 				if err := s.bindNetwork(ctx, tx, providerID, entry, existing, bindings); err != nil {
 					return err
 				}
+				if err := s.applyBillingImport(ctx, tx, providerID, entry, bindings, p.UserID()); err != nil {
+					return err
+				}
 				providerIDs[strings.ToLower(entry.Name)] = providerID
 				continue
 			}
 		}
 		if err := s.bindNetwork(ctx, tx, providerID, entry, existing, bindings); err != nil {
+			return err
+		}
+		if err := s.applyBillingImport(ctx, tx, providerID, entry, bindings, p.UserID()); err != nil {
 			return err
 		}
 		resolved, err := s.resolveSlots(ctx, tx, providerID, entry, existing, ok, bindings)

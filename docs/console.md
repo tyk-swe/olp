@@ -24,10 +24,17 @@ and timing.
 
 The observability panel on Settings manages export sinks and payload capture.
 Sinks create/update/enable/delete with the legal stream/format matrix — HTTPS
-sinks send JSON, OTLP log sinks send OTLP, object-store sinks send JSONL —
+sinks send JSON or CloudEvents, OTLP log sinks send OTLP, object-store sinks
+send JSONL or FOCUS 1.4 gzip CSV, and Stripe meter sinks send meter events —
 with destination, project scope, route and outcome filters, and an optional
 sealed credential document (transport headers and workload-identity material
-travel inside it; it is never read back). A sink's type, stream set, format
+travel inside it; it is never read back). Format-specific settings render as
+their own controls: a FOCUS sink asks for cost basis (immutable after
+creation) and an optional start date, a CloudEvents sink an optional source,
+and a Stripe sink an event name, metered value, project-to-customer map and
+optional payload keys with a restricted-key password field. Each row summarizes
+its settings, and a FOCUS sink expands a datasets view of charge dates,
+revisions, delivery state and status. A sink's type, stream set, format
 and project scope are fixed at creation; edits cover name, destination,
 per-event filters and credential replacement or clearing only. Per-stream
 status rows show pending counts, bounded pending error categories (status,
@@ -58,6 +65,14 @@ every target's minimum/maximum bound and exclusion reason. *Usage* mode prices
 an attempt's token/media/tool usage against a provider's price, discount,
 commitment and the applicable rate card, including the recorded components and
 provenance; nothing is written or retained.
+
+The **reconciliation panel** compares attributed spend with imported provider
+invoices per UTC day for the page's range — clamped to 93 days — showing
+attributed and invoiced cost, capture rate, unpriced share, provisional marks
+and the unavailable reason, plus per-provider covered-day totals. An OpenAI or
+Anthropic provider's detail page carries a **billing import** section for
+configuring its admin key and scope, running an import on demand and removing
+it; read-only roles see status only. See [finops](finops.md).
 
 Creates own stable mutation ID plus submitted payload/ETag through ambiguous
 retry; changed intent gets a new ID. Confirmed writes never repeat on refresh

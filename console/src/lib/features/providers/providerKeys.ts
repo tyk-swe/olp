@@ -42,5 +42,6 @@ export const providerKeys = {
     ['bulk-provider-models', id, etag] as const,
   networkCredentials: (id: string) =>
     ['providers', 'network-credentials', id] as const,
-  bulkRoutePreview: () => ['provider-bulk-route-preview'] as const
+  bulkRoutePreview: () => ['provider-bulk-route-preview'] as const,
+  billingImport: (id: string) => ['providers', 'billing-import', id] as const
 };

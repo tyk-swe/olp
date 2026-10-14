@@ -9,6 +9,9 @@ semantic versioning and take their source from root `package.json`;
 
 ### Security
 
+- Billing-import admin keys are sealed under the dedicated `billing_credential`
+  purpose, readable only by the import worker and never used for inference.
+  Stripe meter keys are sealed as `sink_credential` and validated to `sk_`/`rk_`.
 - Preserve native credential destinations and trust settings across provider
   edits, imports and restores; validate Vertex hosting before acquiring or
   sending Google credentials. Bind enrolled grants to their plugin digest and
@@ -45,8 +48,15 @@ semantic versioning and take their source from root `package.json`;
 - An attempt that used a metered server-side tool its price has no fee for is
   recorded unpriced; publish the catalog snapshot or add tool fees (a fee may be
   `0`) to price such attempts.
-- Migrations 0063 to 0066 add the price components, commitments, discounts,
-  rate cards, charges and budget cost bases.
+- Observability sink credentials are validated against the sink's type at
+  create and update; capture sinks accept only the `json`, `jsonl` and `otlp`
+  formats.
+- The `focus_export` and `billing_import` worker tasks join the health,
+  staleness and notification registries.
+- Migrations 0063 to 0067 add the price components, commitments, discounts,
+  rate cards, charges, budget cost bases, per-attempt price lines, the
+  caller-credential marker, metering/FOCUS sink types and settings, the FOCUS
+  delivery ledger and the billing-import tables.
 
 ### Added
 
@@ -64,6 +74,22 @@ semantic versioning and take their source from root `package.json`;
   or charge (`cost_basis`).
 - Cost estimates in route simulation, the `max_cost` routing control, a
   pricing quote endpoint and a console cost calculator.
+- The `metering` export stream: one record per priced attempt, to CloudEvents
+  consumers on HTTPS sinks and Stripe Billing meter events on `stripe_meter`
+  sinks with idempotent identifiers and per-sink project-to-customer maps.
+- Daily FOCUS 1.4 gzip-CSV datasets on object sinks in provider-cost or charge
+  basis, with revisioned restatement and in-repo conformance checking; see
+  [finops](docs/finops.md).
+- Per-attempt price lines (`cost_lines`, `charge_lines`) recording each
+  billed component's quantity, unit and unit prices.
+- OpenAI and Anthropic billing imports and a usage reconciliation report
+  (`/api/v1/usage/reconciliation`) comparing attributed and invoiced spend by
+  UTC day with capture rate, unpriced share and provisional marking.
+- Console surfaces: the observability sink forms and FOCUS datasets view, the
+  provider billing-import section and the Usage reconciliation panel.
+- Process metrics `olp_focus_dataset_deliveries_total`,
+  `olp_focus_pending_datasets`, `olp_billing_imports_total` and
+  `olp_billing_capture_rate`.
 - Project-scoped code-mode accounts, explicit pools, published native-model
   routes, conversation-tree pins, token budgets and metadata-only diagnostics,
   with management APIs and console controls.

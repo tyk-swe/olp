@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 
@@ -399,7 +400,8 @@ func (m *Management) validateCapturePolicy(r *http.Request, q access.Queryer, p 
 	}
 	var sinkProject *string
 	var sinkEnabled bool
-	if err := q.QueryRow(r.Context(), captureSinkScopeSQL, sinkID).Scan(&sinkProject, &sinkEnabled); err != nil {
+	var sinkFormat string
+	if err := q.QueryRow(r.Context(), captureSinkScopeSQL, sinkID).Scan(&sinkProject, &sinkEnabled, &sinkFormat); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return access.Invalid("sink", "capture requires an installation-owned enabled sink")
 		}
@@ -407,6 +409,9 @@ func (m *Management) validateCapturePolicy(r *http.Request, q access.Queryer, p 
 	}
 	if sinkProject != nil || !sinkEnabled {
 		return access.Invalid("sink", "capture requires an installation-owned enabled sink")
+	}
+	if !slices.Contains(captureFormats, sinkFormat) {
+		return access.Invalid("sink", "capture requires a json, jsonl or otlp sink")
 	}
 	if p.Route != nil {
 		var routeProject *string

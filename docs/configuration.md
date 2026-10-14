@@ -108,6 +108,11 @@ conventions' well-known values where the provider kind or request surface maps
 to one (`openai`, `anthropic`, `gcp.gemini`, `gcp.vertex_ai`, `aws.bedrock`,
 `azure.ai.openai`, `ibm.watsonx.ai`; `chat`, `generate_content`,
 `text_completion`, `embeddings`), and the gateway's own names otherwise.
+
+FOCUS cost-and-usage datasets are pinned at specification 1.4, requirements
+model asset sha256 `3dd2c0c6fcc2c3d1792060fcbebba4ae074cd4dade8cde72958bd37a9a8b183f`;
+the checker interprets it rather than depending on a released validator.
+See [finops](finops.md).
 Prompt, output, and tool payload capture stays out of spans.
 
 All HTTP modes (`all`, `gateway`, `control`) require PostgreSQL and the
@@ -407,7 +412,11 @@ routes), `markup`, `prices` in the price-entry shape minus provider scope.
 Apply creates missing cards and publishes a new now-effective revision when
 the listed revision differs; a listed card is neutralized by publishing
 `markup` "1" with no prices, and cards the document omits are untouched. Connection commitments ride provider `options` and each budget's `cost_basis`
-rides its `budget_policy`, so they promote with their owners. Feature-specific
+rides its `budget_policy`, so they promote with their owners. A provider's
+`billing_import` entry (`enabled`, `scope`, `credential_ref` as
+`<provider>/billing`) promotes the same way — the admin key binds via
+`secret_bindings` like other provider secrets, a missing binding blocks apply,
+and an entry's absence deletes the import and its sealed key. Feature-specific
 budget/group/calendar omission semantics are in [access](access.md), not a
 global merge rule. `expected_digest` fences destination drift; remaining blockers return
 409 with plan body, successful staging records one digest-only audit event.

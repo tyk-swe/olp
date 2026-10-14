@@ -157,7 +157,7 @@ names are bound into stored data and never change:
 | Kind | Purposes |
 | --- | --- |
 | Digest | `saml_state`, `saml_cookie`, `saml_assertion`, `mfa_challenge`, `mfa_recovery`, `api_key`, `workload_identity`, `end_user`, `management_token`, `session`, `recent_auth`, `csrf`, `oidc_state`, `oidc_cookie`, `invitation`, `admission`, `mutation`, `installation` |
-| Seal | `saml_key`, `saml_flow`, `mfa_totp`, `mfa_webauthn`, `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source`, `provider_grant_refresh`, `grant_enrollment`, `sink_credential`, `mcp_credential` |
+| Seal | `saml_key`, `saml_flow`, `mfa_totp`, `mfa_webauthn`, `provider_credential`, `provider_continuation`, `notification_secret`, `mutation_replay`, `oidc_client`, `oidc_flow`, `media_job_source`, `provider_grant_refresh`, `grant_enrollment`, `sink_credential`, `mcp_credential`, `billing_credential` |
 <!-- /purposes -->
 
 Passwords are hashed with Argon2id, with at most four concurrent hashes per
@@ -188,6 +188,21 @@ expiry and client-address checks remain in force. A consumer principal cannot
 authorize any management mutation or other management read. Public project
 catalogs require owner publication; price publication and upstream-model
 disclosure are independent explicit choices. See [model catalog](model-catalog.md).
+
+## FinOps and billing data
+
+FOCUS datasets and metering records are content-free like other exports, but
+they do carry provider, connection and project names, API key ids, route
+slugs, attribution labels and, in metering payloads, end-user digests; object
+sinks and endpoints are operator-declared and egress-validated, and sink
+signing/API credentials are write-only `sink_credential` secrets validated
+against the sink type — Stripe meter keys must be `sk_`/`rk_` prefixed.
+Billing-import admin keys are a dedicated `billing_credential` seal purpose
+read only by the import worker; they are never returned by any read, never
+exported, and never serve inference. Stripe meter posts and the OpenAI and
+Anthropic admin cost APIs go through the provider egress policy, so
+`OLP_PROVIDER_EGRESS_*` exceptions govern them like provider traffic. See
+[finops](finops.md).
 
 ## Public perimeter
 

@@ -72,6 +72,7 @@ const CAPABILITY_ROUTES = {
   'users.read': 'GET /api/v1/users',
   'users.manage': 'PATCH /api/v1/users/{user_id}',
   'operations.read': 'GET /api/v1/requests',
+  'usage.read': 'GET /api/v1/usage/reconciliation',
   'media.manage': 'DELETE /api/v1/media-jobs/{job_id}',
   'playground.use': 'POST /api/v1/playground',
   'settings.read': 'GET /api/v1/settings',

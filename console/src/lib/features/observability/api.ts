@@ -14,6 +14,7 @@ export type CapturePolicy = Schemas['CapturePolicy'];
 export type CreateCapturePolicyInput = Schemas['CreateCapturePolicyRequest'];
 export type UpdateCapturePolicyInput = Schemas['UpdateCapturePolicyRequest'];
 export type CaptureConfiguration = Schemas['CaptureConfiguration'];
+export type FocusDataset = Schemas['FocusDataset'];
 
 export async function listExportSinks(
   signal?: AbortSignal
@@ -98,6 +99,23 @@ async function listExportSinkGapPage(
     }
   );
   return unwrapPage(response);
+}
+
+export async function listExportSinkFocusDatasets(
+  sinkId: string,
+  signal?: AbortSignal
+): Promise<FocusDataset[]> {
+  const response = await apiClient.GET(
+    '/api/v1/observability/sinks/{export_sink_id}/focus-datasets',
+    {
+      params: {
+        path: { export_sink_id: sinkId },
+        query: { limit: 50 }
+      },
+      signal
+    }
+  );
+  return unwrapPage(response).items;
 }
 
 export async function getCaptureConfiguration(

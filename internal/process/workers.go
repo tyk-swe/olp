@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -31,7 +32,7 @@ import (
 // returned function waits for all of them to have stopped.
 // vk is the consumer's own Valkey client: its blocking stream reads would
 // otherwise stall every command the gateway sends on a shared connection.
-func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, pluginHost *plugins.Host, keys *secrets.KeyRing, installation, region string, policy *egress.Policy, log *slog.Logger, exporter *export.Worker, reference *catalog.Signed) func() {
+func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Client, limiter *limits.Limiter, stream string, mediaService *media.Service, pluginHost *plugins.Host, keys *secrets.KeyRing, installation, region string, policy *egress.Policy, log *slog.Logger, exporter *export.Worker, focusWorker *export.FocusWorker, importer *billing.Importer, reference *catalog.Signed) func() {
 	ctx = usage.WithWorkerRegion(ctx, region)
 	var wg sync.WaitGroup
 	managedExporter := &sinks.Worker{Pool: pool, Keys: keys, Installation: installation, Egress: policy}
@@ -42,6 +43,14 @@ func startWorkers(ctx context.Context, pool *pgxpool.Pool, vk *coordination.Clie
 	wg.Go(func() { refresher.Run(ctx) })
 	if exporter != nil {
 		wg.Go(func() { exporter.Run(ctx) })
+	}
+	if focusWorker != nil {
+		wg.Go(func() { focusWorker.Run(ctx) })
+	}
+	// The billing importer needs only PostgreSQL and provider egress, so it
+	// runs on every worker replica, coordination store or not.
+	if importer != nil {
+		wg.Go(func() { importer.Run(ctx) })
 	}
 	wg.Go(func() {
 		usage.RunNotificationDelivery(ctx, pool, keys, installation, policy, log,

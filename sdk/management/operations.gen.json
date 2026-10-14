@@ -1602,6 +1602,9 @@
                 "$ref": "#/$defs/ConfigurationSlotEntry"
               },
               "type": "array"
+            },
+            "billing_import": {
+              "$ref": "#/$defs/ConfigurationBillingImport"
             }
           },
           "required": [
@@ -2392,6 +2395,27 @@
             "allowed_models"
           ],
           "type": "object"
+        },
+        "ConfigurationBillingImport": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "scope": {
+              "type": "object"
+            },
+            "credential_ref": {
+              "type": "string",
+              "description": "Portable secret binding name, provider name followed by /billing; supply the credential through secret_bindings."
+            }
+          },
+          "required": [
+            "enabled",
+            "scope",
+            "credential_ref"
+          ]
         },
         "ConfigurationRouteEntry": {
           "properties": {
@@ -5020,7 +5044,8 @@
                 "otlp_logs",
                 "s3",
                 "gcs",
-                "azure_blob"
+                "azure_blob",
+                "stripe_meter"
               ],
               "type": "string"
             },
@@ -5034,7 +5059,9 @@
                   "attempts",
                   "usage_rollups",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "metering",
+                  "focus"
                 ],
                 "type": "string"
               },
@@ -5043,8 +5070,11 @@
             "format": {
               "enum": [
                 "json",
+                "cloudevents",
                 "otlp",
-                "jsonl"
+                "jsonl",
+                "csv_gzip",
+                "stripe"
               ],
               "type": "string"
             },
@@ -5090,6 +5120,14 @@
             },
             "enabled": {
               "type": "boolean"
+            },
+            "settings": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": true,
+              "description": "Format-specific sink settings; csv_gzip accepts cost_basis (cost|charge) and start_date (YYYY-MM-DD)."
             }
           },
           "required": [
@@ -10507,6 +10545,65 @@
     }
   },
   {
+    "name": "delete_provider_billing_import",
+    "group": "providers",
+    "method": "DELETE",
+    "read_only": false,
+    "path": "/api/v1/providers/{provider_id}/billing-import",
+    "description": "delete provider billing import",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match"
+      ]
+    }
+  },
+  {
     "name": "delete_route_draft",
     "group": "routes",
     "method": "DELETE",
@@ -13049,6 +13146,53 @@
     }
   },
   {
+    "name": "get_provider_billing_import",
+    "group": "providers",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/providers/{provider_id}/billing-import",
+    "description": "get provider billing import",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_provider_revision",
     "group": "providers",
     "method": "GET",
@@ -13643,6 +13787,74 @@
       "additionalProperties": false,
       "required": [
         "path"
+      ]
+    }
+  },
+  {
+    "name": "get_usage_reconciliation",
+    "group": "usage",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/usage/reconciliation",
+    "description": "get usage reconciliation",
+    "scopes": [
+      [
+        "usage"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "start",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "end",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "provider_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "start": {
+              "format": "date",
+              "type": "string"
+            },
+            "end": {
+              "format": "date",
+              "type": "string"
+            },
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "end"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "query"
       ]
     }
   },
@@ -14857,6 +15069,80 @@
         }
       },
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_export_sink_focus_datasets",
+    "group": "observability",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/observability/sinks/{export_sink_id}/focus-datasets",
+    "description": "Delivered and pending FOCUS dataset revisions for the sink, newest charge date first.",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "export_sink_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "export_sink_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "export_sink_id"
+          ]
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
     }
   },
   {
@@ -16126,6 +16412,84 @@
       "additionalProperties": false,
       "required": [
         "path"
+      ]
+    }
+  },
+  {
+    "name": "list_provider_invoiced_costs",
+    "group": "providers",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/providers/{provider_id}/invoiced-costs",
+    "description": "list provider invoiced costs",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "start",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "end",
+        "in": "query",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "start": {
+              "format": "date",
+              "type": "string"
+            },
+            "end": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "end"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "query"
       ]
     }
   },
@@ -19638,6 +20002,9 @@
                 "$ref": "#/$defs/ConfigurationSlotEntry"
               },
               "type": "array"
+            },
+            "billing_import": {
+              "$ref": "#/$defs/ConfigurationBillingImport"
             }
           },
           "required": [
@@ -20428,6 +20795,27 @@
             "allowed_models"
           ],
           "type": "object"
+        },
+        "ConfigurationBillingImport": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "scope": {
+              "type": "object"
+            },
+            "credential_ref": {
+              "type": "string",
+              "description": "Portable secret binding name, provider name followed by /billing; supply the credential through secret_bindings."
+            }
+          },
+          "required": [
+            "enabled",
+            "scope",
+            "credential_ref"
+          ]
         },
         "ConfigurationRouteEntry": {
           "properties": {
@@ -24380,6 +24768,103 @@
     }
   },
   {
+    "name": "put_provider_billing_import",
+    "group": "providers",
+    "method": "PUT",
+    "read_only": false,
+    "path": "/api/v1/providers/{provider_id}/billing-import",
+    "description": "put provider billing import",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/PutBillingImportRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "PutBillingImportRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Defaults to true when omitted."
+            },
+            "scope": {
+              "type": "object",
+              "description": "openai_costs: {\"project_ids\":[\"proj_...\"]}; anthropic_cost_report: {\"workspace_ids\":[\"wrkspc_...\",\"default\"]}; {} reads the whole organization. Omitted keeps the stored scope."
+            },
+            "credential": {
+              "type": "string",
+              "description": "Vendor admin credential, sealed as a billing_credential secret. Required on create; omitted keeps the stored credential; null is rejected - delete the import instead.",
+              "minLength": 20,
+              "maxLength": 512
+            }
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "put_route_catalog_exposure",
     "group": "model-catalog",
     "method": "PUT",
@@ -27870,6 +28355,65 @@
           "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
         }
       }
+    }
+  },
+  {
+    "name": "run_provider_billing_import",
+    "group": "providers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/providers/{provider_id}/billing-import/run",
+    "description": "run provider billing import",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "idempotency_key"
+      ]
     }
   },
   {
@@ -31607,6 +32151,14 @@
             },
             "enabled": {
               "type": "boolean"
+            },
+            "settings": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": true,
+              "description": "Format-specific sink settings; csv_gzip accepts cost_basis (cost|charge) and start_date (YYYY-MM-DD)."
             }
           }
         }
