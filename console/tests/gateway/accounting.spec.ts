@@ -455,11 +455,12 @@ test('retained media records expose metadata, filters, and accessible details', 
   );
   for (const width of [320, 1440]) {
     await page.setViewportSize({ width, height: 900 });
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth - innerWidth
+    // The viewport can change before the header's responsive layout settles.
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
       )
-    ).toBeLessThanOrEqual(0);
+      .toBeLessThanOrEqual(0);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await page.screenshot({
       path: info.outputPath(`retained-media-${width}.png`),
