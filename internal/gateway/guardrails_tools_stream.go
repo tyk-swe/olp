@@ -223,7 +223,17 @@ func (g *guardrailStream) collectTools(frame []byte) (bool, error) {
 func jsonObject(v any) map[string]any { m, _ := v.(map[string]any); return m }
 func jsonArray(v any) []any           { a, _ := v.([]any); return a }
 func jsonText(v any) string           { s, _ := v.(string); return s }
-func jsonIndex(v any) string          { n, _ := v.(float64); return strconv.Itoa(int(n)) }
+func jsonIndex(v any) string {
+	n, _ := v.(json.Number)
+	i, _ := n.Int64()
+	return strconv.FormatInt(i, 10)
+}
+
+func decodeGuardrailJSON(data []byte, value any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	return decoder.Decode(value)
+}
 
 // rewriteTools places each complete validated argument document in its first
 // argument delta. Later deltas become empty, and terminal snapshots are kept
@@ -264,7 +274,7 @@ func (g *guardrailStream) rewriteTools() error {
 			continue
 		}
 		var root map[string]any
-		if json.Unmarshal(data, &root) != nil {
+		if decodeGuardrailJSON(data, &root) != nil {
 			return guardrails.ErrSurface
 		}
 		switch g.family {
@@ -292,7 +302,9 @@ func (g *guardrailStream) rewriteTools() error {
 					if call.chunks {
 						input = map[string]any{}
 					} else {
-						_ = json.Unmarshal([]byte(call.arguments), &input)
+						if decodeGuardrailJSON([]byte(call.arguments), &input) != nil {
+							return guardrails.ErrSurface
+						}
 					}
 					block["input"] = input
 				}
@@ -324,7 +336,9 @@ func (g *guardrailStream) rewriteTools() error {
 				for pi, value := range jsonArray(content["parts"]) {
 					if fn := jsonObject(jsonObject(value)["functionCall"]); fn != nil {
 						var args any
-						_ = json.Unmarshal([]byte(g.calls[strconv.Itoa(ci)+"_"+strconv.Itoa(pi)].arguments), &args)
+						if decodeGuardrailJSON([]byte(g.calls[strconv.Itoa(ci)+"_"+strconv.Itoa(pi)].arguments), &args) != nil {
+							return guardrails.ErrSurface
+						}
 						fn["args"] = args
 					}
 				}

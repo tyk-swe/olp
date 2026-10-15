@@ -188,28 +188,29 @@ func (x *call) preparedProvider(provider *routing.Provider, targetID, model stri
 	}
 	var guardrailSegments []guardrails.Segment
 	if x.guardrailEngine != nil {
-		if !protocols.InputInspectable(invocation.Wire) {
+		if coverage := interaction.CheckGuardrailCoverage(invocation.Wire, native.OIF().Document()); coverage != nil {
 			result, e := x.guardrailEngine.Unavailable("")
 			x.recordGuardrails(result.Decisions)
 			if e != nil {
 				return preparedProvider{}, e
 			}
-		}
-		document, segments, err := x.inspectGuardrailInput(native.OIF().Document())
-		if err != nil {
-			return preparedProvider{}, err
-		}
-		guardrailSegments = segments
-		if document != native.OIF().Document() {
-			native, err = wire.NewRequest(invocation.Wire, native.Route, native.Stream, document)
+		} else {
+			document, segments, err := x.inspectGuardrailInput(native.OIF().Document())
 			if err != nil {
 				return preparedProvider{}, err
 			}
-			changed, err := oif.PrepareDestination(invocation.Prepared.Request(), invocation.Prepared.Descriptor(), document, oif.ExplicitTransform, "guardrail transformation")
-			if err != nil {
-				return preparedProvider{}, err
+			guardrailSegments = segments
+			if document != native.OIF().Document() {
+				native, err = wire.NewRequest(invocation.Wire, native.Route, native.Stream, document)
+				if err != nil {
+					return preparedProvider{}, err
+				}
+				changed, err := oif.PrepareDestination(invocation.Prepared.Request(), invocation.Prepared.Descriptor(), document, oif.ExplicitTransform, "guardrail transformation")
+				if err != nil {
+					return preparedProvider{}, err
+				}
+				invocation.Prepared = changed.WithProvenance(invocation.Prepared.Provenance()...)
 			}
-			invocation.Prepared = changed.WithProvenance(invocation.Prepared.Provenance()...)
 		}
 	}
 	effective := x.summarize(native)

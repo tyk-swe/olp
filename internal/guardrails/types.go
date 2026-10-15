@@ -93,6 +93,9 @@ type Evaluation struct {
 	// InternalModel prevents recursive evaluator invocations. It is not accepted
 	// from an HTTP caller and is set only by the gateway's evaluator runner.
 	InternalModel bool `json:"-"`
+	// Partial marks a streaming suffix whose final word boundary is not yet known.
+	Partial          bool `json:"-"`
+	completeSegments map[string]bool
 }
 
 type Redaction struct {

@@ -287,21 +287,31 @@ func applyGuardrailPolicies(ctx context.Context, tx pgx.Tx, p access.Principal, 
 			entries = append(entries, guardrails.Entry{GuardrailID: gid, RevisionID: rid, Phase: entry.Phase, Action: entry.Action, Monitor: entry.Monitor, Mandatory: entry.Mandatory})
 		}
 		var id, rid string
+		var active *string
 		var version int64
 		var current []guardrails.Entry
-		err = tx.QueryRow(ctx, `SELECT p.id::text,v.id::text,v.revision,v.entries FROM olp.guardrail_policies p JOIN olp.guardrail_policy_revisions v ON v.id=p.active_revision_id WHERE p.project_id IS NOT DISTINCT FROM $1::uuid AND lower(p.name)=lower($2) AND p.retired_at IS NULL`, project, policy.Name).Scan(&id, &rid, &version, &current)
+		err = tx.QueryRow(ctx, `SELECT p.id::text,v.id::text,v.revision,v.entries,p.active_revision_id::text FROM olp.guardrail_policies p JOIN olp.guardrail_policy_revisions v ON v.id=p.latest_revision_id WHERE p.project_id IS NOT DISTINCT FROM $1::uuid AND lower(p.name)=lower($2) AND p.retired_at IS NULL`, project, policy.Name).Scan(&id, &rid, &version, &current, &active)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		if err != nil {
 			id, rid, version = access.NewID(), access.NewID(), 1
 			_, err = tx.Exec(ctx, "INSERT INTO olp.guardrail_policies(id,project_id,name,latest_revision_id,active_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$4,$5,$6)", id, project, policy.Name, rid, access.NewID(), p.UserID())
-		} else if !reflect.DeepEqual(entries, current) {
+		} else if reflect.DeepEqual(entries, current) {
+			if active != nil && *active == rid {
+				continue
+			}
+			if _, err = tx.Exec(ctx, "UPDATE olp.guardrail_policies SET active_revision_id=$2,etag=$3 WHERE id=$1", id, rid, access.NewID()); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, "INSERT INTO olp.guardrail_policy_revision_activations(revision_id,activated_by) VALUES($1,$2) ON CONFLICT DO NOTHING", rid, p.UserID()); err != nil {
+				return err
+			}
+			continue
+		} else {
 			rid = access.NewID()
 			version++
 			_, err = tx.Exec(ctx, "UPDATE olp.guardrail_policies SET latest_revision_id=$2,active_revision_id=$2,etag=$3 WHERE id=$1", id, rid, access.NewID())
-		} else {
-			continue
 		}
 		if err != nil {
 			return err

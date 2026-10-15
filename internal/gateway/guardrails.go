@@ -258,6 +258,11 @@ func nilIfParallel(p *parallelGuardrail) error {
 func (s *Server) applyGuardrails(w http.ResponseWriter, r *http.Request) {
 	req := s.begin(w, r)
 	s.cors(w, r)
+	if !s.admit(r.Context()) {
+		writeError(w, overloaded)
+		return
+	}
+	defer s.release(r.Context())
 	authority, e := s.authenticate(r, "guardrails")
 	if e != nil {
 		writeError(w, e)
@@ -288,6 +293,10 @@ func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, in guar
 	if s == nil || s.Runtime == nil {
 		return guardrails.Result{}, access.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")
 	}
+	if !s.admit(r.Context()) {
+		return guardrails.Result{}, access.Fail(overloaded.Status, overloaded.Code, overloaded.Message)
+	}
+	defer s.release(r.Context())
 	x := &call{request: request{id: uuid.Must(uuid.NewV7()).String(), minted: true, startedAt: s.now(), release: s.Runtime.Release()}, actor: "playground", origin: usage.OriginPlayground, userID: p.UserID(), family: wire.Chat, operationOverride: "guardrail"}
 	x.authorize = func(route *routing.Route) *Error {
 		if err := p.Authorize(access.Playground); err != nil {

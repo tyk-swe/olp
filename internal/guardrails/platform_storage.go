@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
 )
@@ -48,11 +49,32 @@ func ReadRegistry(ctx context.Context, q access.Queryer) (*Registry, error) {
 		return nil, err
 	}
 	for _, d := range r.Definitions {
-		if d.Type != "plugin" {
+		if strings.HasPrefix(d.Type, "builtin.") {
 			continue
 		}
 		var c ExternalConfig
-		_ = json.Unmarshal(d.Configuration, &c)
+		if err = json.Unmarshal(d.Configuration, &c); err != nil {
+			return nil, err
+		}
+		refs := []string{c.CredentialRef}
+		if c.Network != nil {
+			refs = append(refs, c.Network.CredentialID)
+		}
+		for _, id := range refs {
+			if id == "" {
+				continue
+			}
+			var owned bool
+			if err = q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.guardrail_credentials WHERE id=$1 AND project_id IS NOT DISTINCT FROM $2::uuid)", id, projectPointer(d.ProjectID)).Scan(&owned); err != nil {
+				return nil, err
+			}
+			if !owned {
+				return nil, errors.New("guardrail credential boundary mismatch")
+			}
+		}
+		if d.Type != "plugin" {
+			continue
+		}
 		var approved bool
 		if err = q.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.plugins WHERE digest=$1 AND approved_at IS NOT NULL AND module IS NOT NULL AND manifest->>'name'=$2 AND manifest->>'guardrail'='true')", c.PluginVersion, c.PluginID).Scan(&approved); err != nil {
 			return nil, err

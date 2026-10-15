@@ -159,21 +159,29 @@ func applyGuardrails(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Do
 		if err := p.Project(project, access.Change); err != nil {
 			return err
 		}
+		if projectID == "" {
+			projectID = "installation"
+		}
 		current, err := guardrails.FindActive(ctx, tx, projectID, entry.Name)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if current != nil && current.Name == entry.Name && current.Type == entry.Type && guardrailEqual(current, entry) {
-			continue
-		}
 		next := &guardrails.Definition{ProjectID: projectID, Name: entry.Name, Type: entry.Type, Policy: entry.Policy, Configuration: entry.Configuration, TimeoutMS: entry.TimeoutMS, OnError: entry.OnError}
-		if err := guardrails.Save(ctx, tx, p.UserID(), current, next); err != nil {
-			return err
+		if current != nil && current.Name == entry.Name && current.Type == entry.Type && guardrailEqual(current, entry) {
+			if current.ActiveRevisionID != nil && *current.ActiveRevisionID == current.RevisionID {
+				continue
+			}
+			next = current
+			next.ETag = access.NewID()
+		} else {
+			if err := guardrails.Save(ctx, tx, p.UserID(), current, next); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.Exec(ctx, "INSERT INTO olp.guardrail_revision_activations(revision_id,activated_by) VALUES($1,$2) ON CONFLICT DO NOTHING", next.RevisionID, p.UserID()); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, "UPDATE olp.guardrails SET active_revision_id=$2 WHERE id=$1", next.ID, next.RevisionID); err != nil {
+		if _, err := tx.Exec(ctx, "UPDATE olp.guardrails SET active_revision_id=$2,etag=$3 WHERE id=$1", next.ID, next.RevisionID, next.ETag); err != nil {
 			return err
 		}
 	}

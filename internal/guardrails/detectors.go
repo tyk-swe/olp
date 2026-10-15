@@ -209,7 +209,17 @@ func maximumPatternWidth(patterns []entityPattern) int {
 func regexpWidth(r *syntax.Regexp) int {
 	switch r.Op {
 	case syntax.OpLiteral:
-		return max(1, len(string(r.Rune)))
+		width := 0
+		for _, c := range r.Rune {
+			w := utf8.RuneLen(c)
+			if r.Flags&syntax.FoldCase != 0 {
+				for folded := unicode.SimpleFold(c); folded != c; folded = unicode.SimpleFold(folded) {
+					w = max(w, utf8.RuneLen(folded))
+				}
+			}
+			width += w
+		}
+		return max(1, width)
 	case syntax.OpCharClass, syntax.OpAnyChar, syntax.OpAnyCharNotNL:
 		return utf8.UTFMax
 	case syntax.OpCapture:

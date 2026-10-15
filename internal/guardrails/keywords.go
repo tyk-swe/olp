@@ -99,6 +99,9 @@ func (k *keywordDetector) detect(ctx context.Context, e Evaluation) (Verdict, er
 			for _, length := range k.nodes[state].lengths {
 				start := starts[(position-length+1)%len(starts)]
 				if !k.config.Substrings {
+					if e.Partial && !e.completeSegments[s.ID] && end == len(s.Text) {
+						continue
+					}
 					if !wholeEnd || position >= length && starts[(position-length)%len(starts)] == start {
 						continue
 					}

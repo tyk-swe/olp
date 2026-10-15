@@ -9,6 +9,10 @@ semantic versioning and take their source from root `package.json`;
 
 ### Security
 
+- Validate guardrail credential ownership before publication, reject opaque
+  transformed input, and enforce admission for standalone evaluations. Preserve
+  streaming redaction across Unicode and word boundaries, independent candidates,
+  completion snapshots and exact tool-argument numbers.
 - Billing-import admin keys are sealed under the dedicated `billing_credential`
   purpose, readable only by the import worker and never used for inference.
   Stripe meter keys are sealed as `sink_credential` and validated to `sk_`/`rk_`.
@@ -39,6 +43,8 @@ semantic versioning and take their source from root `package.json`;
 
 ### Changed
 
+- Configuration promotion activates matching guardrail drafts, advances policy
+  revisions past existing drafts and supports installation definition updates.
 - Configuration exports use `openllmproxy.dev/config/v2` for guardrail
   definitions, policies and attachments; version 1 imports are normalized into
   the new format. Migration 0068 adds the guardrail platform and converts
