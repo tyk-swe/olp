@@ -71,6 +71,7 @@ func TestReferencePluginDeclaresItsManifest(t *testing.T) {
 	headers := map[string]string{"Authorization": "Token {credential}", "X-Reference-Client": "olp"}
 	want := abi.Manifest{
 		Name:        "reference",
+		Guardrail:   true,
 		Version:     "0.1.0",
 		Description: "Reference plugin for the OpenLLMProxy plugin SDK.",
 		Origins:     []string{"https://api.example.com", "https://login.example.com"},

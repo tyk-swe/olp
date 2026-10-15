@@ -151,7 +151,24 @@ func TestContentPolicy(t *testing.T) {
 	if exportedRoute == nil {
 		t.Fatalf("export missing route %s: %v", slug, exported)
 	}
-	policyRulesEqual(t, exportedRoute["content_policy"], rules)
+	if exportedRoute["content_policy"] != nil {
+		t.Fatal("v2 exports must normalize content policy")
+	}
+	platform := exported["document"].(map[string]any)
+	policies, ok := platform["guardrail_policies"].([]any)
+	if !ok || len(policies) == 0 {
+		t.Fatal("export omitted migrated guardrail policies")
+	}
+	entries, _ := policies[0].(map[string]any)["entries"].([]any)
+	if len(entries) != len(rules) {
+		t.Fatal("export changed legacy rule order or count", entries)
+	}
+	for i, entry := range entries {
+		value := entry.(map[string]any)
+		if value["phase"] != rules[i]["phase"] || value["action"] != rules[i]["action"] {
+			t.Fatal("export changed legacy behavior", value)
+		}
+	}
 
 	requestID := access.NewID()
 	now := time.Now().UTC()

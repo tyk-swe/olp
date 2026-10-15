@@ -606,7 +606,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		fail(invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow realtime sessions.", nil))
 		return
 	}
-	if e := policySurfaceGate(&route); e != nil {
+	if e := x.guardrailSurfaceGate(&route); e != nil {
 		fail(e)
 		return
 	}

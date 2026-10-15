@@ -21,6 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/budgetcalendar"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
@@ -365,8 +366,11 @@ func normalizeDocument(doc *Document) {
 // plugin profiles its plugin providers name. It returns the plugins this
 // installation can't use yet, by digest, with why: they block the plan.
 func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Document) (map[string]string, error) {
-	if doc.APIVersion != APIVersion {
+	if doc.APIVersion != APIVersion && doc.APIVersion != LegacyAPIVersion {
 		return nil, access.Fail(422, "unsupported_api_version", "The artifact declares an unsupported api_version.")
+	}
+	if err := normalizeGuardrailVersion(doc); err != nil {
+		return nil, err
 	}
 	normalizeDocument(doc)
 	if err := s.validateMCPServers(doc); err != nil {
@@ -376,6 +380,9 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		return nil, err
 	}
 	if err := validateGuardrails(doc); err != nil {
+		return nil, err
+	}
+	if err := validateGuardrailPolicies(doc); err != nil {
 		return nil, err
 	}
 	if err := validateSCIMMappings(doc); err != nil {
@@ -735,6 +742,23 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 
 func validateBindings(doc *Document, bindings bindingSet) error {
 	refs, grants := map[string]bool{}, map[string]bool{}
+	guardrailRefs, guardrailNetworkRefs := map[string]bool{}, map[string]bool{}
+	for _, entry := range doc.Guardrails {
+		if strings.HasPrefix(entry.Type, "builtin.") {
+			continue
+		}
+		var config guardrails.ExternalConfig
+		if json.Unmarshal(entry.Configuration, &config) != nil {
+			return access.Invalid("guardrails", "Invalid guardrail configuration.")
+		}
+		if config.CredentialRef != "" {
+			refs[config.CredentialRef], guardrailRefs[config.CredentialRef] = true, true
+		}
+		if config.Network != nil && config.Network.CredentialID != "" {
+			name := config.Network.CredentialID
+			refs[name], guardrailRefs[name], guardrailNetworkRefs[name] = true, true, true
+		}
+	}
 	mcpRefs := map[string]bool{}
 	for _, e := range doc.MCPServers {
 		if e.CredentialRef != nil {
@@ -766,6 +790,18 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 		}
 	}
 	for name, secret := range bindings {
+		if guardrailRefs[name] {
+			if secret.reference != nil {
+				return access.Invalid("external_credential_bindings", "Guardrail credentials require sealed secret bindings.")
+			}
+			if err := guardrails.ValidateCredential([]byte(secret.secret)); err != nil || len(secret.secret) > maxSecretBytes {
+				return access.Invalid("secret_bindings."+name, "Supply a bounded guardrail credential object.")
+			}
+			if guardrailNetworkRefs[name] && egress.ValidateConnectionSecret([]byte(secret.secret)) != nil {
+				return access.Invalid("secret_bindings."+name, "Supply a valid network credential object.")
+			}
+			continue
+		}
 		if mcpRefs[name] {
 			if secret.reference != nil {
 				return access.Invalid("external_credential_bindings", "MCP static bearer material uses sealed bindings.")
@@ -853,6 +889,9 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		return nil, err
 	}
 	if err = s.planSinks(ctx, q, doc, bindings, result); err != nil {
+		return nil, err
+	}
+	if err = planGuardrailPolicies(ctx, q, doc, state, result); err != nil {
 		return nil, err
 	}
 	if err = planGuardrails(ctx, q, doc, state, result); err != nil {

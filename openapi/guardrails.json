@@ -1,0 +1,224 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "OLP Guardrails API",
+    "version": "2.0.0"
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/v1/guardrails/apply": {
+      "post": {
+        "operationId": "applyGuardrails",
+        "summary": "Evaluate a pinned guardrail policy without a model request",
+        "security": [
+          {
+            "apiKeyBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailApplyInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Evaluation result, including a blocked verdict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailApplyResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "API key required"
+          },
+          "403": {
+            "description": "The key requires guardrails scope"
+          },
+          "422": {
+            "description": "Unsupported phase, unavailable policy or inspection surface"
+          },
+          "429": {
+            "description": "Key limit exceeded"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKeyBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An OLP API key with the guardrails scope"
+      }
+    },
+    "schemas": {
+      "GuardrailApplyInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "policy_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "input",
+              "input_parallel",
+              "output",
+              "output_stream"
+            ]
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailSegment"
+            },
+            "maxItems": 2048
+          }
+        },
+        "required": [
+          "policy_revision_id",
+          "phase",
+          "segments"
+        ]
+      },
+      "GuardrailApplyResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailSegment"
+            },
+            "maxItems": 2048
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailEvidence"
+            },
+            "maxItems": 512
+          },
+          "blocked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "segments",
+          "decisions",
+          "blocked"
+        ]
+      },
+      "GuardrailSegment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "role": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8388608
+          },
+          "kind": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "untrusted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ]
+      },
+      "GuardrailEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "guardrail_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "input",
+              "input_parallel",
+              "output",
+              "output_stream"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "block",
+              "redact",
+              "mask",
+              "annotate"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "blocked",
+              "redacted",
+              "masked",
+              "annotated",
+              "monitored",
+              "failed_open",
+              "failed_closed",
+              "skipped"
+            ]
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32
+          },
+          "latency_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "guardrail_id",
+          "revision",
+          "phase",
+          "action",
+          "outcome",
+          "latency_ms"
+        ]
+      }
+    }
+  }
+}

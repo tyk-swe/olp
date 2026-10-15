@@ -264,6 +264,9 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	if err := q.QueryRow(ctx, "SELECT COALESCE((SELECT value='true' FROM olp.settings WHERE key='auth.mfa_required'),false)").Scan(&doc.RequireLocalMFA); err != nil {
 		return doc, err
 	}
+	if err := exportGuardrailPlatform(ctx, q, doc); err != nil {
+		return nil, err
+	}
 	return doc, nil
 }
 

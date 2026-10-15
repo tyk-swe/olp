@@ -42,6 +42,11 @@ func (s *Server) updateSetting(r *http.Request, _ Principal) (Reply, error) {
 		if err != nil || n < 1 || n > 3650 {
 			return Reply{}, Invalid("value", "Use an integer from 1 to 3650.")
 		}
+	case "guardrails.stream_window_bytes":
+		n, err := strconv.Atoi(input.Value)
+		if err != nil || n < 256 || n > 1<<20 {
+			return Reply{}, Invalid("value", "Use a byte window between 256 and 1048576.")
+		}
 	case "budgets.time_zone":
 		if _, err := budgetcalendar.New(input.Value); err != nil {
 			return Reply{}, Invalid("value", "Use a supported IANA time zone.")
@@ -95,6 +100,11 @@ func (s *Server) updateSetting(r *http.Request, _ Principal) (Reply, error) {
 	if key == "auth.local_login_enabled" {
 		if err = s.usableOwner(r, tx); err != nil {
 			return Reply{}, err
+		}
+	}
+	if key == "guardrails.stream_window_bytes" && s.RuntimePublisher != nil {
+		if err = s.RuntimePublisher(r.Context(), tx, p.UserID()); err != nil {
+			return Reply{}, Invalid("value", "The window is incompatible with published guardrails.")
 		}
 	}
 	if err = Audit(r.Context(), tx, r, p.Actor(), "setting.update", "setting", key, "success"); err != nil {

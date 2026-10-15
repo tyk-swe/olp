@@ -60,7 +60,10 @@ func validateManifest(m abi.Manifest, unconfined bool) error {
 			return invalidManifest(field, "Declare each origin once.")
 		}
 	}
-	if len(m.Profiles) < 1 || len(m.Profiles) > 16 {
+	if m.Guardrail && unconfined {
+		return invalidManifest("manifest.guardrail", "Guardrails require a confined WASM plugin.")
+	}
+	if (!m.Guardrail && len(m.Profiles) < 1) || len(m.Profiles) > 16 {
 		return invalidManifest("manifest.profiles", "Declare 1–16 profiles.")
 	}
 	for i, p := range m.Profiles {

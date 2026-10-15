@@ -265,6 +265,25 @@ func (s *Server) promote(ctx context.Context, tx pgx.Tx, current *draft, actor s
 	if _, err = tx.Exec(ctx, "UPDATE olp.routes SET latest_revision=$2,latest_revision_id=$3,state='active',retired_at=NULL,retired_by=NULL,etag=$4 WHERE id=$1", routeID, revision, revisionID, access.NewID()); err != nil {
 		return promotion{}, err
 	}
+	// Configuration imports stage policies with the draft. A promotion may
+	// advance the revision of that same policy, but must not displace another.
+	var conflict bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.guardrail_draft_attachments d
+ JOIN olp.guardrail_attachments a ON a.scope='route' AND a.scope_id=$2 AND a.position=d.position
+ JOIN olp.guardrail_policy_revisions old ON old.id=a.policy_revision_id
+ JOIN olp.guardrail_policy_revisions next ON next.id=d.policy_revision_id
+ WHERE d.draft_id=$1 AND old.policy_id<>next.policy_id)`, current.ID, routeID).Scan(&conflict); err != nil {
+		return promotion{}, err
+	}
+	if conflict {
+		return promotion{}, access.Invalid("guardrail_attachments", "A promoted attachment cannot remove an existing policy.")
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by)
+ SELECT gen_random_uuid(),'route',$2,policy_revision_id,position,gen_random_uuid(),$3 FROM olp.guardrail_draft_attachments WHERE draft_id=$1
+ ON CONFLICT(scope,scope_id,position) DO UPDATE SET policy_revision_id=excluded.policy_revision_id,etag=excluded.etag
+ WHERE olp.guardrail_attachments.policy_revision_id<>excluded.policy_revision_id`, current.ID, routeID, actor); err != nil {
+		return promotion{}, err
+	}
 	var exposure *bool
 	if err = tx.QueryRow(ctx, "SELECT catalog_expose_upstream_models FROM olp.route_drafts WHERE id=$1", current.ID).Scan(&exposure); err != nil {
 		return promotion{}, err

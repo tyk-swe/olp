@@ -58,7 +58,7 @@ func TestConfigurationPromotion(t *testing.T) {
 			t.Fatalf("export leaks %q: %s", forbidden, encoded)
 		}
 	}
-	if document["api_version"] != "openllmproxy.dev/config/v1" {
+	if document["api_version"] != "openllmproxy.dev/config/v2" {
 		t.Fatal("unexpected api_version", document)
 	}
 	for _, item := range document["providers"].([]any) {
@@ -179,9 +179,12 @@ func TestConfigurationPromotion(t *testing.T) {
 		t.Fatal("routing policy must be staged on the draft", stagedPolicy)
 	}
 	stagedDraftDetail := destination.want(destinationOwner, "GET", "/api/v1/route-drafts/"+stagedDraft["id"].(string), nil, nil, 200)
-	stagedRules, ok := stagedDraftDetail["content_policy"].(map[string]any)["rules"].([]any)
-	if !ok || len(stagedRules) != 1 || stagedRules[0].(map[string]any)["id"] != "promo-block" {
-		t.Fatal("applied configuration must preserve the content policy", stagedDraftDetail)
+	if stagedDraftDetail["content_policy"] != nil {
+		t.Fatal("version 2 must use guardrail policies", stagedDraftDetail)
+	}
+	var stagedRules int
+	if err := destination.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp.guardrail_draft_attachments WHERE draft_id=$1", stagedDraft["id"]).Scan(&stagedRules); err != nil || stagedRules != 1 {
+		t.Fatal("applied configuration must stage the migrated guardrail policy", stagedRules, err)
 	}
 
 	status, revisions := destination.browserOn(destinationUsage.URL, destinationOwner, "GET", "/api/v1/pricing/revisions", nil, nil)

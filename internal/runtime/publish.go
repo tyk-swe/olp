@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -129,6 +130,10 @@ func ReadSnapshot(ctx context.Context, tx pgx.Tx) (*routing.Snapshot, error) {
 	rows.Close()
 	if err = rows.Err(); err != nil {
 		return snapshot, err
+	}
+	snapshot.Guardrails, err = guardrails.ReadRegistry(ctx, tx)
+	if err != nil {
+		return nil, err
 	}
 	return snapshot, compileCodeMode(ctx, tx, snapshot)
 }

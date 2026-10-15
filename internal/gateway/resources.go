@@ -644,7 +644,7 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow batch operations.", nil), x.family)
 		return
 	}
-	if e := policySurfaceGate(&route); e != nil {
+	if e := x.guardrailSurfaceGate(&route); e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
@@ -1334,7 +1334,7 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	if e := policySurfaceGate(route); e != nil {
+	if e := x.guardrailSurfaceGate(route); e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
 	}

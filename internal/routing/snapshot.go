@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/durablecontract"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
@@ -163,6 +164,7 @@ type Target struct {
 
 // Route is the latest published revision of one slug.
 type Route struct {
+	guardrailMigrated     bool
 	compiledContentPolicy *contentpolicy.Compiled
 	ID                    string    `json:"id"`
 	Slug                  string    `json:"slug"`
@@ -184,6 +186,8 @@ type Route struct {
 
 // Snapshot is the complete immutable serving configuration.
 type Snapshot struct {
+	Guardrails         *guardrails.Registry `json:"guardrails,omitempty"`
+	guardrailEngines   map[string]*guardrails.Engine
 	hasBodyLimits      bool
 	CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
 	CodeConnections    map[string]Configuration  `json:"code_connections,omitempty"`
@@ -205,13 +209,14 @@ type Snapshot struct {
 // configuration yields the same digest.
 func (s *Snapshot) Digest() (string, error) {
 	encoded, err := json.Marshal(struct {
+		Guardrails         *guardrails.Registry      `json:"guardrails,omitempty"`
 		CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
 		CodeConnections    map[string]Configuration  `json:"code_connections,omitempty"`
 		Providers          map[string]Provider       `json:"providers"`
 		Routes             map[string]Route          `json:"routes"`
 		InstallationPolicy *Policy                   `json:"installation_policy,omitempty"`
 		KeyPolicies        map[string]*Policy        `json:"key_policies,omitempty"`
-	}{s.CodeRoutes, s.CodeConnections, s.Providers, s.Routes, s.InstallationPolicy, s.KeyPolicies})
+	}{s.Guardrails, s.CodeRoutes, s.CodeConnections, s.Providers, s.Routes, s.InstallationPolicy, s.KeyPolicies})
 	if err != nil {
 		return "", err
 	}
@@ -232,6 +237,9 @@ func (p *Provider) Supports(model, operation, surface, mode string) bool {
 // validate rejects snapshots that could not serve safely: dangling references,
 // non-positive budgets, malformed identifiers.
 func (s *Snapshot) validate() error {
+	if err := s.Guardrails.Validate(); err != nil {
+		return err
+	}
 	if err := s.validateCodeMode(); err != nil {
 		return err
 	}
@@ -314,6 +322,10 @@ func (s *Snapshot) Compile() error {
 	}
 	next := *s
 	next.Routes = maps.Clone(s.Routes)
+	next.Guardrails = s.Guardrails.Clone()
+	if err := next.compileGuardrails(); err != nil {
+		return err
+	}
 	if err := next.compileCodeMode(); err != nil {
 		return err
 	}
@@ -330,6 +342,7 @@ func (s *Snapshot) Compile() error {
 	next.durable = make(map[string]map[string]*durablecontract.Template)
 	next.realtime = make(map[string]map[string]*realtimecontract.Template)
 	for slug, r := range next.Routes {
+		r.guardrailMigrated = next.Guardrails != nil && next.Guardrails.MigratedRoutes[r.ID]
 		templates, policy, err := next.compileRouteExecution(r)
 		if err != nil {
 			return fmt.Errorf("route %q interaction: %w", slug, err)

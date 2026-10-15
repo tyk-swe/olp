@@ -9,6 +9,14 @@ semantic versioning and take their source from root `package.json`;
 
 ### Security
 
+- Reject uninspectable streamed log-probability output and isolate tool-call
+  completion by candidate. Enforce system budgets for playground model evaluators,
+  preserve their pinned routes and end-user attribution, and persist their parent
+  request links through a forward-only database migration.
+- Validate guardrail credential ownership before publication, reject opaque
+  transformed input, and enforce admission for standalone evaluations. Preserve
+  streaming redaction across Unicode and word boundaries, independent candidates,
+  completion snapshots and exact tool-argument numbers.
 - Billing-import admin keys are sealed under the dedicated `billing_credential`
   purpose, readable only by the import worker and never used for inference.
   Stripe meter keys are sealed as `sink_credential` and validated to `sk_`/`rk_`.
@@ -39,6 +47,12 @@ semantic versioning and take their source from root `package.json`;
 
 ### Changed
 
+- Configuration promotion activates matching guardrail drafts, advances policy
+  revisions past existing drafts and supports installation definition updates.
+- Configuration exports use `openllmproxy.dev/config/v2` for guardrail
+  definitions, policies and attachments; version 1 imports are normalized into
+  the new format. Migration 0068 adds the guardrail platform and converts
+  historical route policies without changing their source revisions.
 - Condense and refresh operational/developer documentation; move repository
   guidance into contributor/console guides and remove `AGENTS.md`.
 - The reference catalog is `openllmproxy.dev/catalog/v2`, carrying the new
@@ -60,6 +74,11 @@ semantic versioning and take their source from root `package.json`;
 
 ### Added
 
+- A guardrail platform with immutable definitions and policies, scoped
+  attachments, built-in detectors, external and model evaluators, confined WASM
+  plugins, streaming enforcement and content-free decision evidence. The
+  console includes editors and a playground; `/v1/guardrails/apply` has generated
+  Go and TypeScript clients. See [guardrails](docs/guardrails.md).
 - Price components for every structure the major vendors publish: audio and
   image rates with cached shares, input-token tiers, time-of-day windows,
   per-request and per-tool-call fees and a batch multiplier, priced exactly in

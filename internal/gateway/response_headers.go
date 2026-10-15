@@ -42,7 +42,7 @@ const (
 // in the spelling the headers are documented in. Header names match without
 // regard to case, so this is the list of the names above and of those a request
 // already carried.
-const exposedHeaders = "X-Request-Id, Retry-After, X-Should-Retry, X-OLP-Delivery-Replay, " +
+const exposedHeaders = "X-OLP-Guardrails, X-Request-Id, Retry-After, X-Should-Retry, X-OLP-Delivery-Replay, " +
 	"X-OLP-Attempts, X-OLP-Route-Revision, X-OLP-Provider, X-OLP-Cost, " +
 	"x-ratelimit-limit-requests, x-ratelimit-remaining-requests, x-ratelimit-reset-requests, " +
 	"x-ratelimit-limit-tokens, x-ratelimit-remaining-tokens, x-ratelimit-reset-tokens, " +
@@ -234,6 +234,7 @@ func (l *headerList) metadata(text []byte, x *call, streamed bool) []byte {
 // A key that limits nothing, a request that was admitted without a reservation,
 // and a surface with no rate-limit headers add none.
 func (x *call) responseHeaders(h http.Header, streamed bool) {
+	x.guardrailHeaders(h, streamed, false)
 	surface, state := x.clientSurface(), x.lease.RateState()
 	if !x.responseMetadata && (rateHeadersOf(surface) == nil || !state.Limited()) {
 		return

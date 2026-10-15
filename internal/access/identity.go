@@ -266,7 +266,7 @@ func (s *Server) setup(r *http.Request) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.installation SET name=$1,setup_complete=true WHERE singleton", strings.TrimSpace(input.Name)); err != nil {
 		return Reply{}, err
 	}
-	for key, value := range map[string]string{"retention.requests_days": "30", "retention.usage_days": "90", "retention.audit_days": "365", "limits.valkey_unavailable": "fail_closed", "budgets.time_zone": "UTC", "auth.mfa_required": "false", "auth.local_login_enabled": "true"} {
+	for key, value := range map[string]string{"retention.requests_days": "30", "retention.usage_days": "90", "retention.audit_days": "365", "limits.valkey_unavailable": "fail_closed", "budgets.time_zone": "UTC", "guardrails.stream_window_bytes": "65536", "auth.mfa_required": "false", "auth.local_login_enabled": "true"} {
 		if _, err = tx.Exec(r.Context(), "INSERT INTO olp.settings(key,value,etag,updated_by) VALUES($1,$2,$3,$4)", key, value, NewID(), id); err != nil {
 			return Reply{}, err
 		}

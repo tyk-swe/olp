@@ -20,29 +20,41 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 )
 
-type Server struct{ Access *access.Server }
+type Server struct {
+	Access   *access.Server
+	Publish  func(context.Context, pgx.Tx, string) error
+	Evaluate func(*http.Request, access.Principal, ApplyInput) (Result, error)
+}
 
 type Definition struct {
-	ID         string                `json:"id"`
-	ProjectID  string                `json:"project_id"`
-	Name       string                `json:"name"`
-	Type       string                `json:"type"`
-	ETag       string                `json:"etag"`
-	RevisionID string                `json:"revision_id"`
-	Revision   int64                 `json:"revision"`
-	Policy     *contentpolicy.Policy `json:"policy"`
-	RetiredAt  *time.Time            `json:"retired_at"`
+	Configuration    json.RawMessage       `json:"configuration"`
+	TimeoutMS        int64                 `json:"timeout_ms"`
+	OnError          string                `json:"on_error"`
+	ActiveRevisionID *string               `json:"active_revision_id"`
+	ID               string                `json:"id"`
+	ProjectID        string                `json:"project_id"`
+	Name             string                `json:"name"`
+	Type             string                `json:"type"`
+	ETag             string                `json:"etag"`
+	RevisionID       string                `json:"revision_id"`
+	Revision         int64                 `json:"revision"`
+	Policy           *contentpolicy.Policy `json:"policy"`
+	RetiredAt        *time.Time            `json:"retired_at"`
 }
 
 type input struct {
-	Name      string          `json:"name"`
-	Type      string          `json:"type,omitempty"`
-	ProjectID *string         `json:"project_id,omitempty"`
-	Policy    json.RawMessage `json:"policy"`
+	Configuration json.RawMessage `json:"configuration,omitempty"`
+	TimeoutMS     int64           `json:"timeout_ms,omitempty"`
+	OnError       string          `json:"on_error,omitempty"`
+	Name          string          `json:"name"`
+	Type          string          `json:"type,omitempty"`
+	ProjectID     *string         `json:"project_id,omitempty"`
+	Policy        json.RawMessage `json:"policy"`
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
 	a := s.Access
+	s.registerPlatform(mux)
 	a.Route(mux, "GET /api/v1/guardrails", s.list)
 	a.Route(mux, "POST /api/v1/guardrails", s.create, access.MaxBody(128<<10))
 	a.Route(mux, "GET /api/v1/guardrails/{guardrail_id}", s.get)
@@ -70,19 +82,22 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	var version int64
 	var policy json.RawMessage
 	var created time.Time
-	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT revision,policy,created_at FROM olp.guardrail_revisions WHERE guardrail_id=$1 AND id=$2", id, revisionID).Scan(&version, &policy, &created); err != nil {
+	var configuration json.RawMessage
+	var timeout int64
+	var onError string
+	if err = s.Access.Pool.QueryRow(r.Context(), "SELECT revision,policy,created_at,configuration,timeout_ms,on_error FROM olp.guardrail_revisions WHERE guardrail_id=$1 AND id=$2", id, revisionID).Scan(&version, &policy, &created, &configuration, &timeout, &onError); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Detail(map[string]any{"id": revisionID, "guardrail_id": id, "revision": version, "policy": policy, "created_at": created}, revisionID), nil
+	return access.Detail(map[string]any{"id": revisionID, "guardrail_id": id, "revision": version, "policy": policy, "created_at": created, "configuration": configuration, "timeout_ms": timeout, "on_error": onError}, revisionID), nil
 }
 
-const columns = "g.id::text,g.project_id::text,g.name,g.type,g.etag::text,v.id::text,v.revision,v.policy,g.retired_at"
+const columns = "g.id::text,COALESCE(g.project_id::text,'installation'),g.name,g.type,g.etag::text,v.id::text,v.revision,v.policy,g.retired_at,v.configuration,v.timeout_ms,v.on_error,g.active_revision_id::text"
 const joined = " FROM olp.guardrails g JOIN olp.guardrail_revisions v ON v.id=g.latest_revision_id"
 
 func scan(row pgx.Row) (*Definition, error) {
 	var value Definition
 	var policy []byte
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.Type, &value.ETag, &value.RevisionID, &value.Revision, &policy, &value.RetiredAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.Type, &value.ETag, &value.RevisionID, &value.Revision, &policy, &value.RetiredAt, &value.Configuration, &value.TimeoutMS, &value.OnError, &value.ActiveRevisionID); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(policy, &value.Policy); err != nil {
@@ -119,7 +134,7 @@ func (s *Server) list(r *http.Request, p access.Principal) (access.Reply, error)
 		if err != nil {
 			return access.Reply{}, err
 		}
-		items = append(items, map[string]any{"id": value.ID, "project_id": value.ProjectID, "name": value.Name, "type": value.Type, "etag": value.ETag, "revision_id": value.RevisionID, "revision": value.Revision, "policy": value.Policy, "retired_at": value.RetiredAt})
+		items = append(items, map[string]any{"id": value.ID, "project_id": value.ProjectID, "name": value.Name, "type": value.Type, "etag": value.ETag, "revision_id": value.RevisionID, "revision": value.Revision, "policy": value.Policy, "retired_at": value.RetiredAt, "configuration": value.Configuration, "timeout_ms": value.TimeoutMS, "on_error": value.OnError, "active_revision_id": value.ActiveRevisionID})
 	}
 	return access.ListReply(items, page), rows.Err()
 }
@@ -143,6 +158,12 @@ func validate(in *input) (*contentpolicy.Policy, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if !utf8.ValidString(in.Name) || utf8.RuneCountInString(in.Name) < 1 || utf8.RuneCountInString(in.Name) > 100 || strings.ContainsFunc(in.Name, unicode.IsControl) {
 		return nil, access.Invalid("name", "Choose a name of 1–100 characters without control characters.")
+	}
+	if len(in.Configuration) > 0 {
+		if len(in.Policy) > 0 {
+			return nil, access.Invalid("configuration", "Do not mix legacy policy and typed configuration.")
+		}
+		return nil, nil
 	}
 	raw := bytes.TrimSpace(in.Policy)
 	if len(raw) == 0 || raw[0] != '{' {
@@ -208,8 +229,8 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 			return access.Reply{}, err
 		}
 	} else {
-		if in.Type != "builtin.regex" {
-			return access.Reply{}, access.Invalid("type", "Use builtin.regex.")
+		if in.Type == "" {
+			return access.Reply{}, access.Invalid("type", "Choose a guardrail type.")
 		}
 		if in.ProjectID == nil {
 			return access.Reply{}, access.Invalid("project_id", "Choose the owning project.")
@@ -240,7 +261,7 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 	if retire {
 		_, err = tx.Exec(r.Context(), "UPDATE olp.guardrails SET retired_at=now(),etag=$2 WHERE id=$1", id, etag)
 	} else {
-		next := &Definition{Name: in.Name, Policy: policy}
+		next := &Definition{Name: in.Name, Policy: policy, Configuration: in.Configuration, TimeoutMS: in.TimeoutMS, OnError: in.OnError}
 		if current == nil {
 			next.ProjectID, next.Type = *in.ProjectID, in.Type
 		} else {
@@ -275,6 +296,14 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 		reply = access.Detail(value, etag)
 		if current == nil {
 			reply.Status, reply.Location = http.StatusCreated, "/api/v1/guardrails/"+id
+		}
+	}
+	if !retire && len(in.Configuration) > 0 {
+		var c ExternalConfig
+		if json.Unmarshal(in.Configuration, &c) == nil && c.ContentEgress {
+			if err = access.Audit(r.Context(), tx, r, p.Actor(), "guardrail.content_egress_acknowledged", "guardrail", id, "success"); err != nil {
+				return access.Reply{}, err
+			}
 		}
 	}
 	if err = a.CompleteReplay(r, tx, claim, reply); err != nil {

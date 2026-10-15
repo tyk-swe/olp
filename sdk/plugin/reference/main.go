@@ -22,8 +22,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/url"
+	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/sdk/plugin"
@@ -51,6 +53,7 @@ func (reference) Manifest() plugin.Manifest {
 	headers := map[string]string{"Authorization": "Token {credential}", "X-Reference-Client": "olp"}
 	return plugin.Manifest{
 		Name:        "reference",
+		Guardrail:   runtime.GOOS == "wasip1",
 		Version:     version,
 		Description: "Reference plugin for the OpenLLMProxy plugin SDK.",
 		Origins:     slices.Compact([]string{api, origin(authority)}),
@@ -160,3 +163,13 @@ func origin(address string) string {
 func init() { plugin.Register(reference{}) }
 
 func main() { plugin.Serve() }
+
+// EvaluateGuardrail illustrates the optional confined segment/verdict method.
+func (reference) EvaluateGuardrail(ctx context.Context, request abi.GuardrailRequest) (abi.GuardrailVerdict, error) {
+	for _, segment := range request.Segments {
+		if strings.Contains(segment.Text, "forbidden") {
+			return abi.GuardrailVerdict{Action: "block", Categories: []string{"reference.policy"}}, nil
+		}
+	}
+	return abi.GuardrailVerdict{Action: "pass"}, nil
+}

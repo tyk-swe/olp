@@ -170,7 +170,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client.SetReadLimit(bodylimit.Lower(limit, route.MaxBodyBytes))
-	if e := policySurfaceGate(&route); e != nil {
+	if e := x.guardrailSurfaceGate(&route); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "policy unavailable")
 		x.failure, status = e, e.Status
 		return

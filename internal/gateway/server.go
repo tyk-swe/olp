@@ -30,6 +30,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -95,6 +96,7 @@ type Runtime interface {
 
 // Server serves the native OpenAI surface from pinned runtime releases.
 type Server struct {
+	GuardrailEvaluator guardrails.Evaluator
 	// CodeLedger and CodeAuthorizer enable raw code-mode forwarding. Register
 	// mounts the code routes only when both are set.
 	CodeLedger     CodeLedger
@@ -158,7 +160,7 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 	health := newHealthTracker(time.Now)
 	health.changes = make(chan circuitChange, 64)
 	fleet := &fleetHealth{now: time.Now}
-	return &Server{
+	server := &Server{
 		Runtime:     rt,
 		Sink:        LogSink{Log: log},
 		log:         log,
@@ -174,6 +176,8 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 		shadows:     newShadowing(cfg.MaxShadowInFlight),
 		now:         time.Now,
 	}
+	server.initGuardrails()
+	return server
 }
 
 // Health exposes windowed attempt statistics for the management API.
@@ -191,6 +195,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	if s.CodeLedger != nil && s.CodeAuthorizer != nil {
 		s.RegisterCode(mux)
 	}
+	mux.HandleFunc("POST /v1/guardrails/apply", s.applyGuardrails)
 	s.registerNative(mux)
 	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
@@ -209,10 +214,11 @@ var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 // request carries per-request identity shared by handlers.
 type request struct {
-	callerCredential *callerCredential
-	body             *measuredBody
-	id               string
-	durableID        string
+	guardrailMetadata bool
+	callerCredential  *callerCredential
+	body              *measuredBody
+	id                string
+	durableID         string
 	// minted records that this gateway chose the request id. A caller may name
 	// its own, and nothing stops two callers from naming the same one.
 	minted    bool
@@ -260,7 +266,7 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 		measured = &measuredBody{ReadCloser: r.Body, declared: r.ContentLength}
 		r.Body = measured
 	}
-	return request{callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
+	return request{guardrailMetadata: r.Header.Get("X-OLP-Guardrails") == "true", callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
 }
 
 // cors permits browser SDK clients only from explicitly configured origins.
@@ -282,7 +288,7 @@ func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 	s.cors(w, r)
 	h := w.Header()
 	h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-	h.Set("Access-Control-Allow-Headers", "Authorization, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-OLP-API-Key, X-OLP-Client-Contract, X-OLP-Route, X-OLP-Attribution, X-OLP-End-User, X-OLP-Provider-Credential, X-OLP-Continuation, X-OLP-Continuation-Handle, X-OLP-Submission-ID, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
+	h.Set("Access-Control-Allow-Headers", "Authorization, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-OLP-API-Key, X-OLP-Client-Contract, X-OLP-Route, X-OLP-Attribution, X-OLP-Guardrails, X-OLP-End-User, X-OLP-Provider-Credential, X-OLP-Continuation, X-OLP-Continuation-Handle, X-OLP-Submission-ID, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
 	h.Set("Access-Control-Max-Age", "600")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -462,6 +468,10 @@ func routingPreferences(r *http.Request) (*routing.Preferences, *Error) {
 	return p, nil
 }
 func requestError(err error) *Error {
+	var guard *guardrails.Error
+	if errors.As(err, &guard) {
+		return guardrailError(guard)
+	}
 	if gatewayError, ok := errors.AsType[*Error](err); ok {
 		return gatewayError
 	}
@@ -783,6 +793,9 @@ func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.R
 // content policy to it. A selector that delegates moves the request on to its
 // route, which is planned in turn.
 func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
+	if e := s.bindGuardrails(ctx, x); e != nil {
+		return e
+	}
 	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
 		return e
 	}
@@ -812,10 +825,13 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 	// would serve it counts it, so the demand follows the target.
 	options.Parameters = source.parameters
 	options.Demand = func(_ routing.Provider, t routing.Target) *routing.TokenDemand {
+		if x.guardrailEngine.HasAction(guardrails.Input, guardrails.Redact) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
+			return nil
+		}
 		return x.sourceDemand(t.ProviderModel)
 	}
 	options.Effective = func(p routing.Provider, t routing.Target) (routing.Names, *routing.TokenDemand) {
-		if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil {
+		if p.ProfileID == "" && !x.strict() && route.ContentPolicy == nil && x.guardrailEngine == nil {
 			return source.parameters, x.sourceDemand(t.ProviderModel)
 		}
 		prepared, err := x.preparedProvider(&p, t.ID, t.ProviderModel)
@@ -845,7 +861,7 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 			}
 		}
 		var e error
-		if p.ProfileID != "" || x.strict() || route.ContentPolicy != nil {
+		if p.ProfileID != "" || x.strict() || (route.ContentPolicy != nil || x.guardrailEngine != nil) {
 			var prepared preparedProvider
 			prepared, e = x.preparedProvider(&p, t.ID, t.ProviderModel)
 			if e != nil {
@@ -859,7 +875,7 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 		}
 		return e
 	}
-	if !x.strict() && route.ContentPolicy == nil {
+	if !x.strict() && route.ContentPolicy == nil && x.guardrailEngine == nil {
 		hasProfile := false
 		for _, target := range route.Targets {
 			hasProfile = hasProfile || snapshot.Providers[target.ProviderID].ProfileID != ""
@@ -1055,6 +1071,9 @@ func (sw *streamWriter) emit(frame []byte) error {
 
 // finish completes the client response and returns the status it carried.
 func (sw *streamWriter) finish(out *outcome) int {
+	if sw.x != nil {
+		sw.x.guardrailHeaders(sw.w.Header(), true, sw.committed)
+	}
 	if out.err == nil {
 		return http.StatusOK
 	}

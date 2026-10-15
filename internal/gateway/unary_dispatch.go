@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operations"
@@ -22,7 +23,11 @@ import (
 )
 
 func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
+	if x.guardrailEngine != nil {
+		x.guardrailCtx = context.WithValue(ctx, guardrailCallerKey{}, x)
+	}
 	state := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: true}}
+	var parallel *parallelGuardrail
 	attemptCtx, trace := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finish := func() {
 		if trace != nil {
@@ -35,6 +40,9 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	fail := func(class string, f *attemptFailure) (AttemptFact, operationplan.Result, *attemptFailure) {
 		if f == nil {
 			f = &attemptFailure{}
+		}
+		if err := parallel.join(x, true); err != nil {
+			class, f.policyCode, f.noRetry, f.overall = classPolicy, guardrailError(err).Code, true, true
 		}
 		f.dispatched = state.dispatched.Load()
 		f.acceptance = state.evidence().Acceptance()
@@ -95,6 +103,10 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 	if err != nil {
 		return fail(classCredential, nil)
 	}
+	parallel = x.startParallel(actx, cancel)
+	if parallel != nil {
+		defer parallel.cancel()
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		return fail(state.classify(err, false), nil)
@@ -140,6 +152,22 @@ func (s *Server) unaryAttempt(ctx context.Context, x *call, a routing.Attempt, p
 			return fail(classPolicy, &attemptFailure{policyCode: incompatible.Code})
 		}
 		return fail(classProtocol, &attemptFailure{contractCode: "fidelity_protocol_violation"})
+	}
+	if guardErr := parallel.join(x, true); guardErr != nil {
+		return fail(classPolicy, &attemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
+	}
+	if x.guardrailEngine.HasPhase(guardrails.Output) {
+		texts, guardErr := plan.GuardrailOutput(result)
+		if guardErr != nil {
+			unavailable, e := x.guardrailEngine.Unavailable(guardrails.Output)
+			x.recordGuardrails(unavailable.Decisions)
+			guardErr = e
+		} else {
+			guardErr = x.inspectOperationOutput(texts)
+		}
+		if guardErr != nil {
+			return fail(classPolicy, &attemptFailure{policyCode: guardrailError(guardErr).Code, noRetry: true, overall: true})
+		}
 	}
 	fact.Class = classSuccess
 	fact.Duration = s.now().Sub(fact.StartedAt)

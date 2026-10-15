@@ -125,7 +125,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		fail(invalidRequest("invalid_request", "This route does not allow Interactions.", nil))
 		return
 	}
-	if e := policySurfaceGate(&route); e != nil {
+	if e := x.guardrailSurfaceGate(&route); e != nil {
 		fail(e)
 		return
 	}
@@ -490,7 +490,7 @@ func (s *Server) geminiInteractionResource(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	x.route = &current
-	if e := policySurfaceGate(&current); e != nil {
+	if e := x.guardrailSurfaceGate(&current); e != nil {
 		fail(e)
 		return
 	}

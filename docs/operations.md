@@ -514,3 +514,22 @@ pending flows and requires distributing the new public certificate. Do not solve
 callback failure by loosening session SameSite policy or allowing unsigned
 assertions. See [SAML console sign-in](access.md#saml-console-sign-in) for supported
 bindings, expiry, promotion and recovery semantics.
+
+## Guardrail operations
+
+Guardrail activation publishes a complete immutable release. If activation fails,
+inspect the definition's timeout, project references, route fidelity and required
+plugin or credential availability. A failed release does not replace the active
+snapshot. `guardrails.stream_window_bytes` is changed through installation
+settings and publishes a new release.
+
+Monitor `olp_guardrail_decisions_total` and `olp_guardrail_duration_seconds` by
+phase, action and outcome. `failed_open` means evaluation could not complete and
+the configured policy allowed continuation; `failed_closed` means continuation
+was refused. External circuit breakers are independent per definition revision.
+Do not enable provider or webhook body logging to diagnose guardrail failures.
+Use the content-free request/attempt evidence and explicit sandbox evaluations.
+
+External adapters are tested against local contract fakes. Live-account vendor
+qualification and M1 reference-hardware performance qualification must be recorded
+separately before declaring the M7 exit checklist complete.

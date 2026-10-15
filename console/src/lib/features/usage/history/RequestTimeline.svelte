@@ -218,6 +218,22 @@
         </dd>
       </div>
     </dl>
+    {#if detail.data.guardrail_decisions?.length}
+      <div class="policy-decisions">
+        <p class="eyebrow">Guardrail decisions</p>
+        <ul>
+          {#each detail.data.guardrail_decisions as decision (`${decision.guardrail_id}-${decision.revision}-${decision.phase}-${decision.outcome}`)}
+            <li>
+              <code>{decision.guardrail_id}</code> · {decision.phase} · {decision.action}
+              · {decision.outcome} · {decision.latency_ms} ms
+              {#if decision.categories?.length}<small
+                  >{decision.categories.join(', ')}</small
+                >{/if}
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
     {#if detail.data.policy_decisions.length}<div class="policy-decisions">
         <p class="eyebrow">Content policy decisions</p>
         <ul>

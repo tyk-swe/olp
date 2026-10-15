@@ -158,7 +158,7 @@ func (s *Server) pinAttempts(ctx context.Context, x *call) *Error {
 	}
 	historical.Targets = []routing.Target{p.target}
 	p.provider.Slots = []routing.Slot{p.slot}
-	retained := &routing.Snapshot{Generation: current.Generation, Providers: map[string]routing.Provider{p.provider.ID: p.provider}, Routes: map[string]routing.Route{historical.Slug: *historical}, InstallationPolicy: current.InstallationPolicy, KeyPolicies: current.KeyPolicies}
+	retained := &routing.Snapshot{Generation: current.Generation, Providers: map[string]routing.Provider{p.provider.ID: p.provider}, Routes: map[string]routing.Route{historical.Slug: *historical}, InstallationPolicy: current.InstallationPolicy, KeyPolicies: current.KeyPolicies, Guardrails: current.Guardrails}
 	if err := retained.Compile(); err != nil {
 		return pinUnavailable()
 	}

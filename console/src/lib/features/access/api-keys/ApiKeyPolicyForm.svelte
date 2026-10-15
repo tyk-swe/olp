@@ -288,7 +288,7 @@
     <h2 id="scope-heading">Scopes and route allowlist</h2>
     <fieldset class="checks">
       <legend>Scopes</legend
-      >{#each [['inference', 'Inference requests'], ['models_read', 'Model listing']] as scope (scope[0])}<label
+      >{#each [['inference', 'Inference requests'], ['models_read', 'Model listing'], ['guardrails', 'Guardrail evaluation']] as scope (scope[0])}<label
           ><input
             type="checkbox"
             checked={form.scopes.includes(scope[0])}

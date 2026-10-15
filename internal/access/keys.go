@@ -122,13 +122,13 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	if err := ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
-	if len(input.Scopes) < 1 || len(input.Scopes) > 2 {
+	if len(input.Scopes) < 1 || len(input.Scopes) > 3 {
 		return Invalid("scopes", "Select at least one unique scope.")
 	}
 	seen := map[string]bool{}
 	for _, scope := range input.Scopes {
-		if (scope != "inference" && scope != "models_read") || seen[scope] {
-			return Invalid("scopes", "Use unique inference and models_read scopes.")
+		if (scope != "inference" && scope != "models_read" && scope != "guardrails") || seen[scope] {
+			return Invalid("scopes", "Use unique inference, models_read and guardrails scopes.")
 		}
 		seen[scope] = true
 	}
@@ -675,7 +675,7 @@ func (a Authority) Allows(scope, route string, projectID *string, now time.Time)
 	if (a.ProjectID == nil) != (projectID == nil) || (a.ProjectID != nil && *a.ProjectID != *projectID) {
 		return false
 	}
-	if scope != "inference" && scope != "models_read" {
+	if scope != "inference" && scope != "models_read" && scope != "guardrails" {
 		return false
 	}
 	if a.RevokedAt != nil || (a.ExpiresAt != nil && !a.ExpiresAt.After(now)) {

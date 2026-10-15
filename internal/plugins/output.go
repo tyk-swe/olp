@@ -38,11 +38,12 @@ func callOutput(ctx context.Context) *output { return ctx.Value(outputKey{}).(*o
 // are served concurrently, and its process's redaction values change as calls
 // start and end.
 type output struct {
-	log      *slog.Logger
-	replacer atomic.Pointer[strings.Replacer]
-	mu       sync.Mutex
-	budget   int
-	streams  []*stream
+	suppressed bool
+	log        *slog.Logger
+	replacer   atomic.Pointer[strings.Replacer]
+	mu         sync.Mutex
+	budget     int
+	streams    []*stream
 }
 
 func newOutput(log *slog.Logger, secrets []string) *output {
@@ -87,6 +88,9 @@ func (o *output) redactSecrets(secrets []string) {
 }
 
 func (o *output) redact(text string) string {
+	if o.suppressed {
+		return "[suppressed]"
+	}
 	replacer := o.replacer.Load()
 	if replacer == nil {
 		return text

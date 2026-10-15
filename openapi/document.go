@@ -6,3 +6,8 @@ import _ "embed"
 
 //go:embed management.json
 var Document []byte
+
+// GuardrailsDocument describes the native API-key evaluation endpoint.
+//
+//go:embed guardrails.json
+var GuardrailsDocument []byte

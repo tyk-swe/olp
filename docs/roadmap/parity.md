@@ -160,17 +160,17 @@ of [M3](m03-routing-resilience.md).
 
 | Capability | LiteLLM | OLP today | Status | Milestone |
 | --- | --- | --- | --- | --- |
-| Guardrail framework | [Guardrails](https://docs.litellm.ai/docs/proxy/guardrails/quick_start): pre-call, during-call, post-call, logging-only | RE2 block and redact rules on input and unary output | `Partial` | M7.1 |
-| Decision privacy | Guardrail traces in logs | Only `{rule_id, phase, action, outcome}` persists | `Ahead` | |
-| PII masking | [PII masking](https://docs.litellm.ai/docs/proxy/guardrails/pii_masking_v2) | Pattern redaction only | `Partial` | M7.2 |
-| Secret detection | [Secret detection](https://docs.litellm.ai/docs/proxy/guardrails/secret_detection) | Not available | `Gap` | M7.2 |
-| Vendor guardrails | [About 50 providers](https://docs.litellm.ai/docs/guardrail_providers) | Not available | `Gap` | M7.4 |
-| Custom guardrails | [Custom guardrail](https://docs.litellm.ai/docs/proxy/guardrails/custom_guardrail) (in-process Python) | Not available | `Gap` | M7.3, M7.5 |
-| Model-based guardrails | [LLM as a judge](https://docs.litellm.ai/docs/proxy/guardrails/llm_as_a_judge) | Not available | `Gap` | M7.4 |
-| Key- and team-scoped guardrails | [Enterprise](https://docs.litellm.ai/docs/proxy/guardrails/quick_start), [policies](https://docs.litellm.ai/docs/proxy/guardrails/guardrail_policies) | Route-level content policy | `Partial` | M7.1 |
-| Streaming output guardrails | Supported by some guardrails | Output rules require unary responses | `Gap` | M7.1 |
-| Tool permissions and policies | [Tool permission](https://docs.litellm.ai/docs/proxy/guardrails/tool_permission), [tool policies](https://docs.litellm.ai/docs/proxy/tool_policies) | Not available | `Gap` | M7.6 |
-| Apply-guardrail endpoint | [/guardrails/apply_guardrail](https://docs.litellm.ai/docs/apply_guardrail) | Not available | `Gap` | M7.7 |
+| Guardrail framework | [Guardrails](https://docs.litellm.ai/docs/proxy/guardrails/quick_start): pre-call, during-call, post-call, logging-only | Versioned policies, four execution phases, block/redact/mask/annotate and monitoring | `Parity` | M7.1 |
+| Decision privacy | Guardrail traces in logs | Bounded identifiers, revisions, phase, action, outcome, categories and latency; no content | `Ahead` | |
+| PII masking | [PII masking](https://docs.litellm.ai/docs/proxy/guardrails/pii_masking_v2) | Built-in PII detection and request-local masking with output restoration | `Parity` | M7.2 |
+| Secret detection | [Secret detection](https://docs.litellm.ai/docs/proxy/guardrails/secret_detection) | PEM, JWT and nine vendor credential families with applicable checksums | `Parity` | M7.2 |
+| Vendor guardrails | [About 50 providers](https://docs.litellm.ai/docs/guardrail_providers) | Bedrock, Azure Content Safety/Prompt Shields, Model Armor, Lakera and Presidio; local-fake qualification, smaller vendor set | `Partial` | M7.4 |
+| Custom guardrails | [Custom guardrail](https://docs.litellm.ai/docs/proxy/guardrails/custom_guardrail) (in-process Python) | Signed bounded webhooks and approved confined WASM | `Parity` | M7.3, M7.5 |
+| Model-based guardrails | [LLM as a judge](https://docs.litellm.ai/docs/proxy/guardrails/llm_as_a_judge) | Authorized generation/moderation/classification evaluators with parent accounting and recursion protection | `Parity` | M7.4 |
+| Key- and team-scoped guardrails | [Enterprise](https://docs.litellm.ai/docs/proxy/guardrails/quick_start), [policies](https://docs.litellm.ai/docs/proxy/guardrails/guardrail_policies) | Additive installation, organization, project, route and API-key attachments | `Parity` | M7.1 |
+| Streaming output guardrails | Supported by some guardrails | UTF-8-safe byte holdback, split-chunk inspection, native in-band refusals; complete-result rules require unary | `Parity` | M7.1 |
+| Tool permissions and policies | [Tool permission](https://docs.litellm.ai/docs/proxy/guardrails/tool_permission), [tool policies](https://docs.litellm.ai/docs/proxy/tool_policies) | Deny-first glob rules, argument schemas and untrusted-to-privileged restrictions | `Parity` | M7.6 |
+| Apply-guardrail endpoint | [/guardrails/apply_guardrail](https://docs.litellm.ai/docs/apply_guardrail) | Scoped `/v1/guardrails/apply`, generated clients and a no-storage console playground | `Parity` | M7.7 |
 
 ## Observability and alerting
 

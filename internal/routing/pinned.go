@@ -55,6 +55,7 @@ func (s *Snapshot) PinnedCurrent(route Route, provider Provider, target Target, 
 		Generation: s.Generation, Providers: map[string]Provider{provider.ID: currentProvider},
 		Routes: map[string]Route{route.Slug: currentRoute}, InstallationPolicy: s.InstallationPolicy,
 		KeyPolicies: s.KeyPolicies, interactions: map[string]map[string]*interaction.Template{},
+		Guardrails: s.Guardrails, guardrailEngines: s.guardrailEngines,
 	}
 	if templates := s.interactions[route.Slug]; templates != nil {
 		retained.interactions[route.Slug] = map[string]*interaction.Template{target.ID: templates[target.ID]}

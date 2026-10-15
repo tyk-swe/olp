@@ -18,6 +18,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/export"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
@@ -218,6 +219,9 @@ func (f *attemptFailure) toError() (result *Error) {
 	}()
 	if f.contractCode != "" {
 		return serverError(http.StatusBadGateway, f.contractCode, "The provider result did not satisfy the admitted interaction contract.")
+	}
+	if f.policyCode == "guardrail_surface_unavailable" {
+		return guardrailError(guardrails.ErrSurface)
 	}
 	if f.policyCode != "" {
 		message := "The provider result was blocked by the route's content policy."
@@ -463,6 +467,9 @@ func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal 
 	if slot.CredentialVersion != nil && fact.CredentialSource != "caller" {
 		fact.CredentialVersion = *slot.CredentialVersion
 	}
+	if record := x.targets[preparationKey{target: a.TargetID, provider: a.ProviderID, revision: a.ProviderRevisionID, model: a.UpstreamModel}]; record != nil {
+		fact.GuardrailDecisions = append([]guardrails.Evidence(nil), record.guardrailDecisions...)
+	}
 	if x.strict() {
 		provider := x.snapshot().Providers[a.ProviderID]
 		if x.family == wire.GeminiInteractions || x.family == wire.GeminiLive {
@@ -512,12 +519,16 @@ func (s *Server) rejectedFact(x *call, a routing.Attempt, slot routing.Slot, ord
 
 // attempt performs one upstream call with one credential.
 func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, *wire.Completion, *attemptFailure) {
+	if x.guardrailEngine != nil {
+		x.guardrailCtx = context.WithValue(ctx, guardrailCallerKey{}, x)
+	}
 	cfg := provider.Connector()
 	fact.Carried = cfg.CarriedByPlugin()
 	// A plugin that carries the request reports only whether it was sent, so
 	// the attempt must not risk repeating work it may have done.
 	retainedResponse := x.family == wire.Responses && x.providerState && responseStoreRequested(x.generation.parsed)
 	st := &attemptState{parent: ctx, classifier: upstream.Classifier{ContextWindow: true, AtMostOnce: fact.Interaction != nil || fact.Carried || retainedResponse, Declared: cfg.Classification()}}
+	var parallel *parallelGuardrail
 	nativeDeliveryClass := ""
 	attemptCtx, atr := x.request.trace.Attempt(ctx, provider.Kind, a.ProviderRevisionID, a.UpstreamModel)
 	finishTrace := func() {
@@ -533,6 +544,14 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	fail := func(class string, f *attemptFailure) (AttemptFact, *wire.Completion, *attemptFailure) {
 		if f == nil {
 			f = &attemptFailure{}
+		}
+		if parallel != nil {
+			if guardErr := parallel.join(x, true); guardErr != nil {
+				class = classPolicy
+				f.policyCode = guardrailError(guardErr).Code
+				f.noRetry = true
+				f.overall = true
+			}
 		}
 		f.dispatched = st.dispatched.Load()
 		f.credentialRefused = st.credentialRefused
@@ -576,10 +595,11 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	var encodedWire wire.Format
 	var streamCandidates int64
 	var contract *interaction.Plan
-	if provider.ProfileID != "" || x.strict() || x.route.ContentPolicy != nil {
+	if provider.ProfileID != "" || x.strict() || x.route.ContentPolicy != nil || x.guardrailEngine != nil {
 		prepared, prepareErr := x.preparedProvider(provider, a.TargetID, a.UpstreamModel)
 		err = prepareErr
 		if err == nil {
+			x.guardrailInput = prepared.guardrailSegments
 			for _, decision := range prepared.policyDecisions {
 				recordDecision(x, decision)
 			}
@@ -661,6 +681,10 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			return fail(classProtocol, &attemptFailure{contractCode: "continuation_unavailable", noRetry: true})
 		}
 	}
+	parallel = x.startParallel(actx, cancel)
+	if parallel != nil {
+		defer parallel.cancel()
+	}
 	resp, err := client.Do(req)
 	if cfg.CarriedByPlugin() {
 		// The plugin reports whether it sent a request it failed; any other
@@ -704,6 +728,9 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			}
 		}()
 		emit := func(frame []byte) error {
+			if e := parallel.join(x, terminalGuardrailFrame(x.family, frame)); e != nil {
+				return e
+			}
 			if x.providerState {
 				mapped, mapErr := s.mapStreamResponseFrame(ctx, x, &fact, frame, encodedWire != wire.Responses)
 				if mapErr != nil {
@@ -747,6 +774,26 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 				fact.FirstOutput = &elapsed
 			}
 			return err
+		}
+		deliver := emit
+		var guarded *guardrailStream
+		if x.guardrailEngine.HasPhase(guardrails.OutputStream) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
+			guarded, err = newGuardrailStream(x)
+			if err != nil {
+				return fail(classPolicy, &attemptFailure{policyCode: guardrailError(err).Code, overall: true, noRetry: true})
+			}
+			emit = func(frame []byte) error {
+				frames, e := guarded.push(actx, frame)
+				if e != nil {
+					return e
+				}
+				for _, f := range frames {
+					if e = deliver(f); e != nil {
+						return e
+					}
+				}
+				return nil
+			}
 		}
 		strictResponseIncomplete := false
 		var observe func(oif.Event) error
@@ -825,6 +872,20 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		} else {
 			completion, err = protocols.StreamWithEvents(encodedWire, x.family, cfg.StreamPayload(resp.Body, int(s.cfg.MaxEventBytes)), int(s.cfg.MaxEventBytes), x.named().Slug, x.generation.parsed.IncludeUsage, emit, observe, streamCandidates)
 		}
+		if guarded != nil {
+			if err == nil {
+				var frames [][]byte
+				frames, err = guarded.finish(actx)
+				if err == nil {
+					for _, frame := range frames {
+						if err = deliver(frame); err != nil {
+							break
+						}
+					}
+				}
+			}
+			x.recordGuardrails(guarded.stream.Decisions())
+		}
 		if err == nil && strictResponseIncomplete {
 			st.settled = true
 			err = &wire.ProtocolError{Detail: "strict Responses stream ended incomplete"}
@@ -888,6 +949,12 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			}
 		}
 	}
+	if guardErr := parallel.join(x, true); guardErr != nil {
+		err = guardErr
+	}
+	if err == nil && completion != nil && !x.generation.parsed.Stream && x.guardrailEngine != nil {
+		completion.Body, err = x.inspectGuardrailOutput(completion.Body)
+	}
 	if completion != nil {
 		if x.generation.parsed.Stream || encodedWire == wire.Responses {
 			fact.observeUsage(completion.Usage, completion.UsageComplete)
@@ -939,9 +1006,15 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 			}
 			return fail(classAmbiguous, f)
 		}
+		var guardFailure *guardrails.Error
 		var ue *wire.UpstreamError
 		var violation *oif.Incompatibility
 		switch {
+		case errors.As(err, &guardFailure):
+			f.policyCode = guardFailure.Code
+			f.overall = true
+			f.noRetry = true
+			return fail(classPolicy, f)
 		case errors.As(err, &violation):
 			f.contractCode = "fidelity_protocol_violation"
 			return fail(classProtocol, f)
@@ -1033,27 +1106,27 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 		completedAt := s.now()
 		x.finalizePinned(out, completedAt)
 		env := Envelope{
-			RequestID:       x.request.id,
-			AccountingID:    x.request.accountingID(),
-			ClientIP:        x.request.clientIP,
-			Actor:           x.actor,
-			KeyID:           x.keyID,
-			EndUserDigest:   x.endUserDigest,
-			BudgetGroupID:   x.budgetGroupID,
-			Attribution:     x.attribution,
-			PolicyDecisions: x.policyDecisions,
-			UserID:          x.userID,
-			Family:          string(x.family),
-			Mode:            x.mode,
-			Operation:       x.operationName(),
-			Surface:         x.surfaceName(),
-			Outcome:         "failure",
-			Status:          status,
-			StartedAt:       x.request.startedAt,
-			CompletedAt:     completedAt,
-			Duration:        completedAt.Sub(x.request.startedAt),
-			FirstByte:       x.firstByte,
-			Attempts:        x.facts,
+			RequestID:            x.request.id,
+			AccountingID:         x.request.accountingID(),
+			ClientIP:             x.request.clientIP,
+			Actor:                x.actor,
+			KeyID:                x.keyID,
+			EndUserDigest:        x.endUserDigest,
+			BudgetGroupID:        x.budgetGroupID,
+			Attribution:          x.attribution,
+			EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guardrailEvidence(), PolicyDecisions: x.policyDecisions,
+			UserID:      x.userID,
+			Family:      string(x.family),
+			Mode:        x.mode,
+			Operation:   x.operationName(),
+			Surface:     x.surfaceName(),
+			Outcome:     "failure",
+			Status:      status,
+			StartedAt:   x.request.startedAt,
+			CompletedAt: completedAt,
+			Duration:    completedAt.Sub(x.request.startedAt),
+			FirstByte:   x.firstByte,
+			Attempts:    x.facts,
 		}
 		if x.request.release != nil {
 			env.ReleaseSequence = x.request.release.Sequence
@@ -1194,6 +1267,9 @@ func (s *Server) recordBusiness(env Envelope, x *call) {
 		project = *x.authority.ProjectID
 	} else if x.route != nil && x.route.ProjectID != nil {
 		project = *x.route.ProjectID
+	}
+	for _, decision := range env.GuardrailDecisions {
+		s.Business.Guardrail(telemetry.BusinessLabels{Route: env.Route, Project: project, Key: env.KeyID}, decision.Phase, decision.Action, decision.Outcome, decision.LatencyMS)
 	}
 	var snapshot *routing.Snapshot
 	if x.historicalSnapshot != nil {

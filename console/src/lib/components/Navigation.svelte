@@ -49,6 +49,12 @@
       label: 'Gateway',
       items: [
         {
+          label: 'Guardrails',
+          href: resolve('/guardrails'),
+          icon: 'route',
+          route: 'GET /api/v1/guardrails'
+        },
+        {
           label: 'Providers',
           href: resolve('/providers'),
           icon: 'provider',

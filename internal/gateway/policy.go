@@ -16,7 +16,7 @@ func policyUnavailable(code, message string) *Error {
 }
 
 func compiledPolicy(route *routing.Route) (*contentpolicy.Compiled, *Error) {
-	if route == nil || route.ContentPolicy == nil {
+	if route == nil || route.LegacyExecutionPolicy() == nil {
 		return nil, nil
 	}
 	if compiled := route.CompiledContentPolicy(); compiled != nil {

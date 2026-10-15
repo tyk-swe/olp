@@ -18,6 +18,13 @@ import (
 // ValidateRouteContracts validates the complete configured links of a route.
 // Request values are bound later; no provider request or discovery runs here.
 func (s *Snapshot) ValidateRouteContracts(route Route) error {
+	if s.Guardrails != nil {
+		view := *s
+		view.Routes = map[string]Route{route.Slug: route}
+		if err := view.compileGuardrails(); err != nil {
+			return err
+		}
+	}
 	_, _, err := s.compileRouteExecution(route)
 	if err == nil {
 		_, err = s.compileOperations(route)
@@ -38,7 +45,11 @@ func (s *Snapshot) compileRouteExecution(route Route) (map[string]*interaction.T
 	if err := ValidateRouteFidelity(route.Fidelity, route.ContentPolicy); err != nil {
 		return nil, nil, err
 	}
-	policy, err := contentpolicy.Compile(route.ContentPolicy)
+	legacy := route.ContentPolicy
+	if route.guardrailMigrated {
+		legacy = nil
+	}
+	policy, err := contentpolicy.Compile(legacy)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -59,7 +70,7 @@ func (s *Snapshot) compileRouteExecution(route Route) (map[string]*interaction.T
 		if provider.ProfileID == "gemini-interactions" {
 			continue
 		}
-		template, err := interaction.Compile(interaction.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.ContentPolicy})
+		template, err := interaction.Compile(interaction.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: legacy})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -123,7 +134,7 @@ func (s *Snapshot) compileOperations(route Route) (map[string]*operationplan.Tem
 			if !ok {
 				return nil, fmt.Errorf("route target references an unavailable provider")
 			}
-			template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, Policy: route.ContentPolicy})
+			template, err := operationplan.Compile(operationplan.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, Policy: route.LegacyExecutionPolicy()})
 			if err != nil {
 				return nil, err
 			}
@@ -153,7 +164,7 @@ func (s *Snapshot) compileRealtime(route Route) (map[string]*realtimecontract.Te
 		if len(provider.ParameterDefaults) > 0 {
 			return nil, fmt.Errorf("target %s has unqualified realtime parameter defaults", target.ID)
 		}
-		template, err := realtimecontract.Compile(realtimecontract.Config{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.ContentPolicy})
+		template, err := realtimecontract.Compile(realtimecontract.Config{Provider: provider.Connector(), Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
 		if err != nil {
 			return nil, err
 		}
@@ -181,7 +192,7 @@ func (s *Snapshot) compileMedia(route Route) (map[string]*mediacontract.Template
 			if !ok {
 				return nil, fmt.Errorf("route target references an unavailable provider")
 			}
-			template, err := mediacontract.Compile(mediacontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, Policy: route.ContentPolicy})
+			template, err := mediacontract.Compile(mediacontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Operation: op, Policy: route.LegacyExecutionPolicy()})
 			if err != nil {
 				return nil, err
 			}
@@ -206,7 +217,7 @@ func (s *Snapshot) compileDurable(route Route) (map[string]*durablecontract.Temp
 		if !ok {
 			return nil, fmt.Errorf("route target references an unavailable provider")
 		}
-		template, err := durablecontract.Compile(durablecontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.ContentPolicy})
+		template, err := durablecontract.Compile(durablecontract.Config{Provider: provider.Connector(), ProviderID: provider.ID, RevisionID: provider.RevisionID, Model: target.ProviderModel, Policy: route.LegacyExecutionPolicy()})
 		if err != nil {
 			return nil, err
 		}
@@ -222,4 +233,11 @@ func (s *Snapshot) DurableTemplate(slug, target string) (*durablecontract.Templa
 func (s *Snapshot) OperationTemplate(slug, target, operation string) (*operationplan.Template, bool) {
 	template, ok := s.operations[slug][operation+"/"+target]
 	return template, ok
+}
+
+func (r *Route) LegacyExecutionPolicy() *contentpolicy.Policy {
+	if r.guardrailMigrated {
+		return nil
+	}
+	return r.ContentPolicy
 }

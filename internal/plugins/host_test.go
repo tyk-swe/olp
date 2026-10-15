@@ -33,6 +33,7 @@ import (
 // a confined plugin's module or an unconfined plugin's executable. Its
 // manifest declares only its approved origins.
 type pluginTable struct {
+	guardrail  bool
 	mu         sync.Mutex
 	module     []byte
 	executable string
@@ -63,7 +64,7 @@ func (p *pluginTable) QueryRow(_ context.Context, _ string, args ...any) pgx.Row
 		p.modules++
 	}
 	module, executable := p.module, p.executable
-	manifest, err := json.Marshal(abi.Manifest{Origins: p.origins})
+	manifest, err := json.Marshal(abi.Manifest{Origins: p.origins, Guardrail: p.guardrail})
 	return scanner(func(dest ...any) error {
 		switch {
 		case module != nil:
@@ -645,5 +646,42 @@ func TestAPreparedPluginIsLoadedBeforeItsFirstCall(t *testing.T) {
 	table.install(nil)
 	if calls := signedCalls(t, host); calls != "1" || table.read() != 1 {
 		t.Fatalf("the prepared plugin signed %s calls after %d reads", calls, table.read())
+	}
+}
+
+func TestGuardrailPluginPreloadedAndNoConfigurationReads(t *testing.T) {
+	host, table := newTestHost(t, Interpreted, DefaultLimits, nil, testutil.BuildPlugin(t, "./sdk/plugin/reference"))
+	table.guardrail = true
+	release, err := host.PinGuardrail(t.Context(), "reference")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	// Fill the ordinary module cache. The release's pin keeps its guardrail
+	// available even when its LRU entry would otherwise be the first eviction.
+	host.mu.Lock()
+	for i := range maxHosted {
+		loaded := make(chan struct{})
+		close(loaded)
+		host.hosted[fmt.Sprint("idle-", i)] = &hosted{loaded: loaded, code: &heldCode{close: func() {}}, used: uint64(i + 100)}
+	}
+	evicted := host.evictExcess()
+	_, kept := host.hosted["reference"]
+	host.mu.Unlock()
+	for _, code := range evicted {
+		_ = code.Close(t.Context())
+	}
+	if !kept {
+		t.Fatal("pinned guardrail was evicted")
+	}
+	reads := table.read()
+	for i := 0; i < 2; i++ {
+		verdict, err := host.Guardrail(t.Context(), "reference", abi.GuardrailRequest{Guardrail: "policy", Phase: "input", Segments: []abi.GuardrailSegment{{ID: "s", Text: "forbidden"}}})
+		if err != nil || verdict.Action != "block" {
+			t.Fatal(verdict, err)
+		}
+	}
+	if table.read() != reads {
+		t.Fatal("guardrail serving performed a configuration lookup")
 	}
 }

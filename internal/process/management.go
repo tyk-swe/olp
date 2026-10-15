@@ -62,9 +62,18 @@ func (m Management) Register(mux *http.ServeMux) {
 	management.Register(mux)
 	(&management.MCP{Access: m.Access, API: mux}).Register(mux)
 	m.Access.Egress = m.Egress
+	m.Access.RuntimePublisher = func(ctx context.Context, tx pgx.Tx, actor string) error {
+		_, err := runtime.Publish(ctx, tx, actor)
+		return err
+	}
 	m.Access.Register(mux)
 	(&branding.Server{Access: m.Access}).Register(mux)
-	(&guardrails.Server{Access: m.Access}).Register(mux)
+	(&guardrails.Server{Access: m.Access, Publish: func(ctx context.Context, tx pgx.Tx, actor string) error {
+		_, err := runtime.Publish(ctx, tx, actor)
+		return err
+	}, Evaluate: func(r *http.Request, p access.Principal, in guardrails.ApplyInput) (guardrails.Result, error) {
+		return m.Gateway.EvaluateGuardrails(r, p, in)
+	}}).Register(mux)
 	(&mcpservers.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)

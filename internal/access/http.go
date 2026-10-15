@@ -34,6 +34,7 @@ const csrfHeader = "X-CSRF-Token"
 const sessionTTL = 24 * time.Hour
 
 type Server struct {
+	RuntimePublisher     func(context.Context, pgx.Tx, string) error
 	Pool                 *pgxpool.Pool
 	Installation, Origin string
 	Auth                 *secrets.AuthKey

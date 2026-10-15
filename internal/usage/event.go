@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
 // WireVersion is the envelope version this build writes and accepts. Every
@@ -45,11 +46,12 @@ func Keyless(origin string) bool {
 // Event is one request's content-free metadata. Every optional field is
 // serialized explicitly, so a reader can tell "absent" from "not yet known".
 type Event struct {
-	BudgetBoundary      string `json:"budget_boundary,omitempty"`
-	Version             int    `json:"version"`
-	EventID             string `json:"event_id"`
-	RequestID           string `json:"request_id"`
-	RuntimeGenerationID string `json:"runtime_generation_id"`
+	EvaluatorGuardrailID *string `json:"evaluator_guardrail_id,omitempty"`
+	BudgetBoundary       string  `json:"budget_boundary,omitempty"`
+	Version              int     `json:"version"`
+	EventID              string  `json:"event_id"`
+	RequestID            string  `json:"request_id"`
+	RuntimeGenerationID  string  `json:"runtime_generation_id"`
 	// EndUserDigest contains a project-scoped digest, never a caller identifier.
 	EndUserDigest string `json:"end_user_digest,omitempty"`
 	// APIKeyID is empty exactly when the origin is keyless.
@@ -60,6 +62,7 @@ type Event struct {
 	Origin          string  `json:"origin,omitempty"`
 	ParentRequestID *string `json:"parent_request_id,omitempty"`
 
+	GuardrailDecisions []guardrails.Evidence    `json:"guardrail_decisions,omitempty"`
 	PolicyDecisions    []contentpolicy.Decision `json:"policy_decisions,omitempty"`
 	BudgetGroupID      *string                  `json:"budget_group_id"`
 	ProviderID         *string                  `json:"provider_id"`
@@ -105,19 +108,20 @@ type Event struct {
 // usage are omitted entirely when absent: a pre-attempt event carries neither,
 // and the event contract does not require routing.
 type Attempt struct {
-	Routing       *Routing      `json:"routing,omitempty"`
-	ID            string        `json:"id"`
-	Ordinal       int           `json:"ordinal"`
-	ProviderID    string        `json:"provider_id"`
-	UpstreamModel string        `json:"upstream_model"`
-	StartedAt     time.Time     `json:"started_at"`
-	CompletedAt   time.Time     `json:"completed_at"`
-	StatusCode    *int          `json:"status_code"`
-	ErrorClass    *string       `json:"error_class"`
-	Committed     bool          `json:"committed"`
-	LatencyMS     int64         `json:"latency_ms"`
-	FirstByteMS   *int64        `json:"first_byte_ms"`
-	Usage         *AttemptUsage `json:"usage,omitempty"`
+	GuardrailDecisions []guardrails.Evidence `json:"guardrail_decisions,omitempty"`
+	Routing            *Routing              `json:"routing,omitempty"`
+	ID                 string                `json:"id"`
+	Ordinal            int                   `json:"ordinal"`
+	ProviderID         string                `json:"provider_id"`
+	UpstreamModel      string                `json:"upstream_model"`
+	StartedAt          time.Time             `json:"started_at"`
+	CompletedAt        time.Time             `json:"completed_at"`
+	StatusCode         *int                  `json:"status_code"`
+	ErrorClass         *string               `json:"error_class"`
+	Committed          bool                  `json:"committed"`
+	LatencyMS          int64                 `json:"latency_ms"`
+	FirstByteMS        *int64                `json:"first_byte_ms"`
+	Usage              *AttemptUsage         `json:"usage,omitempty"`
 	// EstimatedInputTokens is what admission estimated this attempt's input to
 	// be before the provider reported it, so a report can set the two side by
 	// side. EstimateProvenance says how it was produced, one of the Estimate*
@@ -318,66 +322,69 @@ func Decode(payload []byte) (*Event, error) {
 // The wire types mirror the event shape with every required field behind a
 // pointer, so an absent field is a decode failure instead of a zero value.
 type wireEvent struct {
-	HTTPOutcomePending      bool               `json:"http_outcome_pending,omitempty"`
-	PayloadCaptured         bool               `json:"payload_captured"`
-	BudgetBoundary          string             `json:"budget_boundary,omitempty"`
-	EventID                 *string            `json:"event_id"`
-	RequestID               *string            `json:"request_id"`
-	RuntimeGenerationID     *string            `json:"runtime_generation_id"`
-	EndUserDigest           *string            `json:"end_user_digest"`
-	APIKeyID                *string            `json:"api_key_id"`
-	Attribution             *map[string]string `json:"attribution"`
-	Origin                  *string            `json:"origin"`
-	ParentRequestID         *string            `json:"parent_request_id"`
-	PolicyDecisions         *[]wireDecision    `json:"policy_decisions"`
-	BudgetGroupID           *string            `json:"budget_group_id"`
-	ProviderID              *string            `json:"provider_id"`
-	RouteSlug               *string            `json:"route_slug"`
-	UpstreamModel           *string            `json:"upstream_model"`
-	Operation               *string            `json:"operation"`
-	Surface                 *string            `json:"surface"`
-	RequestStartedAt        *time.Time         `json:"request_started_at"`
-	RequestCompletedAt      *time.Time         `json:"request_completed_at"`
-	ObservedAt              *time.Time         `json:"observed_at"`
-	StatusCode              *uint16            `json:"status_code"`
-	ErrorClass              *string            `json:"error_class"`
-	Committed               *bool              `json:"committed"`
-	LatencyMS               *uint64            `json:"latency_ms"`
-	FirstByteMS             *uint64            `json:"first_byte_ms"`
-	InputTokens             *int64             `json:"input_tokens"`
-	OutputTokens            *int64             `json:"output_tokens"`
-	CachedInputTokens       *int64             `json:"cached_input_tokens"`
-	CacheWriteInputTokens   *int64             `json:"cache_write_input_tokens"`
-	CacheWrite5MInputTokens *int64             `json:"cache_write_5m_input_tokens"`
-	CacheWrite1HInputTokens *int64             `json:"cache_write_1h_input_tokens"`
-	AudioInputTokens        *int64             `json:"audio_input_tokens"`
-	CachedAudioInputTokens  *int64             `json:"cached_audio_input_tokens"`
-	AudioOutputTokens       *int64             `json:"audio_output_tokens"`
-	ImageInputTokens        *int64             `json:"image_input_tokens"`
-	CachedImageInputTokens  *int64             `json:"cached_image_input_tokens"`
-	ImageOutputTokens       *int64             `json:"image_output_tokens"`
-	MediaUnits              *string            `json:"media_units"`
-	ToolCalls               *map[string]int64  `json:"tool_calls"`
-	Batch                   *bool              `json:"batch"`
-	UsageComplete           *bool              `json:"usage_complete"`
-	Unpriced                *bool              `json:"unpriced"`
-	Attempts                *[]wireAttempt     `json:"attempts"`
+	EvaluatorGuardrailID    *string               `json:"evaluator_guardrail_id"`
+	HTTPOutcomePending      bool                  `json:"http_outcome_pending,omitempty"`
+	PayloadCaptured         bool                  `json:"payload_captured"`
+	BudgetBoundary          string                `json:"budget_boundary,omitempty"`
+	EventID                 *string               `json:"event_id"`
+	RequestID               *string               `json:"request_id"`
+	RuntimeGenerationID     *string               `json:"runtime_generation_id"`
+	EndUserDigest           *string               `json:"end_user_digest"`
+	APIKeyID                *string               `json:"api_key_id"`
+	Attribution             *map[string]string    `json:"attribution"`
+	Origin                  *string               `json:"origin"`
+	ParentRequestID         *string               `json:"parent_request_id"`
+	GuardrailDecisions      []guardrails.Evidence `json:"guardrail_decisions"`
+	PolicyDecisions         *[]wireDecision       `json:"policy_decisions"`
+	BudgetGroupID           *string               `json:"budget_group_id"`
+	ProviderID              *string               `json:"provider_id"`
+	RouteSlug               *string               `json:"route_slug"`
+	UpstreamModel           *string               `json:"upstream_model"`
+	Operation               *string               `json:"operation"`
+	Surface                 *string               `json:"surface"`
+	RequestStartedAt        *time.Time            `json:"request_started_at"`
+	RequestCompletedAt      *time.Time            `json:"request_completed_at"`
+	ObservedAt              *time.Time            `json:"observed_at"`
+	StatusCode              *uint16               `json:"status_code"`
+	ErrorClass              *string               `json:"error_class"`
+	Committed               *bool                 `json:"committed"`
+	LatencyMS               *uint64               `json:"latency_ms"`
+	FirstByteMS             *uint64               `json:"first_byte_ms"`
+	InputTokens             *int64                `json:"input_tokens"`
+	OutputTokens            *int64                `json:"output_tokens"`
+	CachedInputTokens       *int64                `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64                `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64                `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64                `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64                `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64                `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64                `json:"audio_output_tokens"`
+	ImageInputTokens        *int64                `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64                `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64                `json:"image_output_tokens"`
+	MediaUnits              *string               `json:"media_units"`
+	ToolCalls               *map[string]int64     `json:"tool_calls"`
+	Batch                   *bool                 `json:"batch"`
+	UsageComplete           *bool                 `json:"usage_complete"`
+	Unpriced                *bool                 `json:"unpriced"`
+	Attempts                *[]wireAttempt        `json:"attempts"`
 }
 
 type wireAttempt struct {
-	Routing       *wireRouting `json:"routing"`
-	ID            *string      `json:"id"`
-	Ordinal       *uint16      `json:"ordinal"`
-	ProviderID    *string      `json:"provider_id"`
-	UpstreamModel *string      `json:"upstream_model"`
-	StartedAt     *time.Time   `json:"started_at"`
-	CompletedAt   *time.Time   `json:"completed_at"`
-	StatusCode    *uint16      `json:"status_code"`
-	ErrorClass    *string      `json:"error_class"`
-	Committed     *bool        `json:"committed"`
-	LatencyMS     *uint64      `json:"latency_ms"`
-	FirstByteMS   *uint64      `json:"first_byte_ms"`
-	Usage         *wireUsage   `json:"usage"`
+	GuardrailDecisions []guardrails.Evidence `json:"guardrail_decisions"`
+	Routing            *wireRouting          `json:"routing"`
+	ID                 *string               `json:"id"`
+	Ordinal            *uint16               `json:"ordinal"`
+	ProviderID         *string               `json:"provider_id"`
+	UpstreamModel      *string               `json:"upstream_model"`
+	StartedAt          *time.Time            `json:"started_at"`
+	CompletedAt        *time.Time            `json:"completed_at"`
+	StatusCode         *uint16               `json:"status_code"`
+	ErrorClass         *string               `json:"error_class"`
+	Committed          *bool                 `json:"committed"`
+	LatencyMS          *uint64               `json:"latency_ms"`
+	FirstByteMS        *uint64               `json:"first_byte_ms"`
+	Usage              *wireUsage            `json:"usage"`
 	// The estimate fields are optional on the wire: an event written before
 	// estimates were recorded carries none of them.
 	EstimatedInputTokens *int64  `json:"estimated_input_tokens"`
@@ -443,7 +450,7 @@ var knownOperations = map[string]struct{}{
 	"image_edit": {}, "image_variation": {}, "speech": {}, "transcription": {}, "translation": {},
 	"video_create": {}, "video_list": {}, "video_get": {}, "video_content": {},
 	"video_delete": {}, "moderation": {}, "model_list": {}, "model_get": {}, "rerank": {},
-	"file": {}, "batch": {}, "realtime": {}, "bedrock_invoke": {},
+	"file": {}, "batch": {}, "realtime": {}, "bedrock_invoke": {}, "guardrail": {},
 }
 
 var knownSurfaces = map[string]struct{}{
@@ -480,7 +487,10 @@ func (w wireEvent) decode() (*Event, error) {
 	if event.ParentRequestID, err = optionalUUID("parent_request_id", w.ParentRequestID); err != nil {
 		return nil, err
 	}
-	if (event.ParentRequestID != nil) != (event.Origin == OriginShadow || event.Origin == OriginClassifier) {
+	if event.EvaluatorGuardrailID, err = optionalUUID("evaluator_guardrail_id", w.EvaluatorGuardrailID); err != nil {
+		return nil, err
+	}
+	if (event.ParentRequestID != nil) != (event.Origin == OriginShadow || event.Origin == OriginClassifier || event.EvaluatorGuardrailID != nil) {
 		return nil, errors.New("request metadata field parent_request_id belongs to shadow and classifier requests")
 	}
 	if w.EndUserDigest != nil {
@@ -495,6 +505,10 @@ func (w wireEvent) decode() (*Event, error) {
 			return nil, fmt.Errorf("request metadata field attribution is invalid: %w", err)
 		}
 	}
+	if err := guardrails.ValidateEvidence(w.GuardrailDecisions); err != nil {
+		return nil, err
+	}
+	event.GuardrailDecisions = w.GuardrailDecisions
 	if w.PolicyDecisions != nil {
 		for i, d := range *w.PolicyDecisions {
 			if d.RuleID == nil || d.Phase == nil || d.Action == nil || d.Outcome == nil {
@@ -592,7 +606,10 @@ func (w wireEvent) decode() (*Event, error) {
 }
 
 func (w wireAttempt) decode() (*Attempt, error) {
-	attempt := &Attempt{}
+	attempt := &Attempt{GuardrailDecisions: w.GuardrailDecisions}
+	if err := guardrails.ValidateEvidence(w.GuardrailDecisions); err != nil {
+		return nil, err
+	}
 	var err error
 	if w.Routing != nil {
 		if attempt.Routing, err = w.Routing.decode(); err != nil {
@@ -976,6 +993,9 @@ func Validate(e *Event) (*Validated, error) {
 	}
 	if err := ValidateAttribution(e.Attribution); err != nil {
 		return nil, fmt.Errorf("%w: attribution %w", ErrInvalidEvent, err)
+	}
+	if err := guardrails.ValidateEvidence(e.GuardrailDecisions); err != nil {
+		return nil, err
 	}
 	if err := contentpolicy.ValidateDecisions(e.PolicyDecisions); err != nil {
 		return nil, fmt.Errorf("%w: policy decisions %w", ErrInvalidEvent, err)
