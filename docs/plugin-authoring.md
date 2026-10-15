@@ -674,3 +674,14 @@ ends it, with no result, or with the error that stopped it. OLP waits for a
 
 A plugin that writes a line that is not such a frame, or a frame over 1 MiB,
 is stopped. When OLP closes standard input, the plugin exits.
+
+## Guardrail capability
+
+A confined WASM manifest may declare `guardrail: true` and implement the SDK's
+optional `Guardrail` interface. Requests carry bounded text segments and phase;
+verdicts contain `action`, category identifiers and optional UTF-8 byte spans.
+The shared engine validates every verdict. An approved module digest is pinned
+in a guardrail revision and preloaded with its runtime release. This method
+uses the existing memory/time limits, receives no HTTP capability, and suppresses
+plugin diagnostics that could contain inspected content. Existing plugins need
+not implement the new method.

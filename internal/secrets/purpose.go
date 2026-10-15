@@ -74,13 +74,14 @@ var (
 	GrantEnrollment = SealPurpose{"grant_enrollment"}
 	// BillingCredential is a provider admin/billing API key; only the billing
 	// importer reads it, and it never serves inference.
-	BillingCredential = SealPurpose{"billing_credential"}
+	BillingCredential   = SealPurpose{"billing_credential"}
+	GuardrailCredential = SealPurpose{"guardrail_credential"}
 )
 
 // SealPurposes lists every seal purpose.
 func SealPurposes() []SealPurpose {
 	return []SealPurpose{SAMLKey, SAMLFlow, MFATOTP, MFAWebAuthn, ProviderCredential, ProviderContinuation, NotificationSecret, MutationReplay,
-		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, BillingCredential}
+		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, BillingCredential, GuardrailCredential}
 }
 
 // ParseSealPurpose returns the seal purpose a stored record names.

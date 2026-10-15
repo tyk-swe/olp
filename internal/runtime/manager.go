@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -134,9 +136,10 @@ type authorityState struct {
 
 // Manager installs releases and refreshes key authority for one gateway.
 type Manager struct {
-	workloadKeys         *workload.Cache
-	workloadRegistration sync.Mutex
-	pool                 *pgxpool.Pool
+	PrepareGuardrailPlugin func(context.Context, string) (func(), error)
+	workloadKeys           *workload.Cache
+	workloadRegistration   sync.Mutex
+	pool                   *pgxpool.Pool
 	// ReadPool, when set before Start, supplies runtime release and authority
 	// reads. Writes and historical secret resolution always use the primary.
 	ReadPool *pgxpool.Pool
@@ -627,6 +630,51 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 				return nil, fmt.Errorf("credential %s for provider %s: %w", *slot.CredentialID, provider.ID, err)
 			}
 			release.credentials[*slot.CredentialID] = secret
+		}
+	}
+	if snapshot.Guardrails != nil {
+		pins := &guardrailPluginPins{}
+		goruntime.AddCleanup(release, func(p *guardrailPluginPins) { p.close() }, pins)
+		pinned := map[string]bool{}
+		for _, definition := range snapshot.Guardrails.Definitions {
+			if definition.Type == "plugin" {
+				var c guardrails.ExternalConfig
+				if json.Unmarshal(definition.Configuration, &c) != nil || m.PrepareGuardrailPlugin == nil {
+					return nil, errors.New("guardrail plugin unavailable")
+				}
+				if !pinned[c.PluginVersion] {
+					unpin, err := m.PrepareGuardrailPlugin(ctx, c.PluginVersion)
+					if err != nil {
+						return nil, errors.New("guardrail plugin could not be preloaded")
+					}
+					pins.add(unpin)
+					pinned[c.PluginVersion] = true
+				}
+			}
+			if !strings.HasPrefix(definition.Type, "builtin.") {
+				var config guardrails.ExternalConfig
+				if err := json.Unmarshal(definition.Configuration, &config); err != nil {
+					return nil, errors.New("invalid guardrail configuration")
+				}
+				ids := []string{config.CredentialRef}
+				if config.Network != nil {
+					ids = append(ids, config.Network.CredentialID)
+				}
+				for _, id := range ids {
+					if id == "" {
+						continue
+					}
+					var project string
+					if err := tx.QueryRow(ctx, "SELECT project_id::text FROM olp.guardrail_credentials WHERE id=$1", id).Scan(&project); err != nil || project != definition.ProjectID {
+						return nil, errors.New("guardrail credential boundary mismatch")
+					}
+					secret, err := m.keys.Read(ctx, tx, m.installation, id, secrets.GuardrailCredential)
+					if err != nil {
+						return nil, errors.New("guardrail credential unavailable")
+					}
+					release.credentials[id] = secret
+				}
+			}
 		}
 	}
 	// A newly published grant credential must already have a coherent token

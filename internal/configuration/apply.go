@@ -318,7 +318,13 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 	if err := s.applySinks(ctx, tx, p, doc, bindings); err != nil {
 		return err
 	}
+	if err := s.bindGuardrailCredentials(ctx, tx, p, doc, bindings); err != nil {
+		return err
+	}
 	if err := applyGuardrails(ctx, tx, p, doc); err != nil {
+		return err
+	}
+	if err := applyGuardrailPolicies(ctx, tx, p, doc); err != nil {
 		return err
 	}
 	return applyCatalogPolicies(ctx, tx, p, doc)

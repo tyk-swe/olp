@@ -16,6 +16,16 @@ The [gateway](gateway.md) applies shared admission and response bounds to these
 surfaces. Current protocol, connector, SDK, and media tests are described in
 [tests/README.md](../tests/README.md).
 
+## Guardrail compatibility
+
+[Guardrails](guardrails.md) inspect effective provider input and qualified unary
+output, including tool arguments and results. Enforcing streaming policies use
+a byte-bounded holdback; rules needing a complete result return
+`422 guardrail_surface_unavailable`. Strict routes accept block, annotation and
+monitoring. Redaction and request-local masking require transformed routes.
+Opaque media and retained surfaces without a complete inspection contract refuse
+enforcement; monitoring records the unavailable surface and continues.
+
 ## Legend
 
 | Cell | Meaning |

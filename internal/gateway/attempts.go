@@ -36,6 +36,9 @@ type attemptOutcome[Result any] struct {
 // the loop continues on the fallback route within the same deadline and
 // attempt budget.
 func runAttempts[Result any](ctx context.Context, s *Server, x *call, adapter attemptAdapter[Result]) attemptOutcome[Result] {
+	if x.guardrailEngine != nil {
+		x.guardrailCtx = context.WithValue(ctx, guardrailCallerKey{}, x)
+	}
 	var generation string
 	if x.request.release != nil && x.request.release.Snapshot != nil {
 		generation = x.request.release.Snapshot.Generation.ID

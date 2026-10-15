@@ -623,3 +623,14 @@ Cost refusals keep `budget_exhausted` and expose their boundary in messages and
 supported parameters. Request history's `budget_boundary` is a fixed hierarchy
 label without raw identifiers/label values. Unknown balances remain availability
 failures, distinct from budget exhaustion and ordinary rate limits.
+
+## Guardrail authority
+
+The API-key `guardrails` scope admits `POST /v1/guardrails/apply` for a policy
+revision in that key's project, subject to its request/token/concurrency limits.
+It does not grant inference. Model evaluator calls also require the caller's
+inference authority for the evaluator route. Console evaluation requires a
+session, playground authority and project visibility. Definition and policy
+writes require configuration authority; attachment writes additionally require
+the existing management permission for their installation, organization,
+project/route or key scope. All narrower attachments are additive.

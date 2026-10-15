@@ -268,3 +268,8 @@ func inspectableFormat(value oif.Value, responses bool) bool {
 	}
 	return false
 }
+
+// CheckGuardrailCoverage applies the native inspection contract to platform guardrails.
+func CheckGuardrailCoverage(format wire.Format, document oif.Document) error {
+	return checkInputCoverage(format, document)
+}

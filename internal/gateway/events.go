@@ -7,6 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -35,17 +36,19 @@ type Envelope struct {
 
 	Attribution map[string]string
 
-	PolicyDecisions []contentpolicy.Decision
-	UserID          string
-	Route           string
-	RouteRevisionID string
-	ReleaseSequence int64
-	Family          string
-	Mode            string // unary or streaming
-	Operation       string // shared operation
-	Surface         string // client wire protocol
-	Outcome         string // success, failure, or cancelled
-	Status          int    // status sent to the client; 0 when nothing was sent
+	EvaluatorGuardrailID string
+	GuardrailDecisions   []guardrails.Evidence
+	PolicyDecisions      []contentpolicy.Decision
+	UserID               string
+	Route                string
+	RouteRevisionID      string
+	ReleaseSequence      int64
+	Family               string
+	Mode                 string // unary or streaming
+	Operation            string // shared operation
+	Surface              string // client wire protocol
+	Outcome              string // success, failure, or cancelled
+	Status               int    // status sent to the client; 0 when nothing was sent
 	// ErrorClass is the terminal failure code the client was given, such as
 	// gateway_timeout or client_cancelled. It is empty on success.
 	ErrorClass     string

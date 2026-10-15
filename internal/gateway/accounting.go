@@ -109,29 +109,30 @@ func accountingEvent(e Envelope) *usage.Event {
 		return nil
 	}
 	event := &usage.Event{
-		Version:             usage.WireVersion,
-		EventID:             uuid.Must(uuid.NewV7()).String(),
-		RequestID:           e.AccountingID,
-		RuntimeGenerationID: e.RuntimeGenerationID,
-		APIKeyID:            e.KeyID,
-		Origin:              e.Origin,
-		ParentRequestID:     optionalText(e.ParentRequestID),
-		Attribution:         e.Attribution,
-		EndUserDigest:       e.EndUserDigest,
-		BudgetBoundary:      e.BudgetBoundary,
-		PolicyDecisions:     e.PolicyDecisions,
-		BudgetGroupID:       e.BudgetGroupID,
-		RouteSlug:           e.Route,
-		Operation:           e.Operation,
-		Surface:             e.Surface,
-		RequestStartedAt:    e.StartedAt,
-		RequestCompletedAt:  e.CompletedAt,
-		ObservedAt:          e.CompletedAt,
-		StatusCode:          optionalStatus(e.Status),
-		ErrorClass:          optionalText(e.ErrorClass),
-		LatencyMS:           milliseconds(e.Duration),
-		PayloadCaptured:     e.PayloadCaptured,
-		Attempts:            make([]usage.Attempt, 0, len(e.Attempts)),
+		EvaluatorGuardrailID: optionalText(e.EvaluatorGuardrailID),
+		Version:              usage.WireVersion,
+		EventID:              uuid.Must(uuid.NewV7()).String(),
+		RequestID:            e.AccountingID,
+		RuntimeGenerationID:  e.RuntimeGenerationID,
+		APIKeyID:             e.KeyID,
+		Origin:               e.Origin,
+		ParentRequestID:      optionalText(e.ParentRequestID),
+		Attribution:          e.Attribution,
+		EndUserDigest:        e.EndUserDigest,
+		BudgetBoundary:       e.BudgetBoundary,
+		GuardrailDecisions:   e.GuardrailDecisions, PolicyDecisions: e.PolicyDecisions,
+		BudgetGroupID:      e.BudgetGroupID,
+		RouteSlug:          e.Route,
+		Operation:          e.Operation,
+		Surface:            e.Surface,
+		RequestStartedAt:   e.StartedAt,
+		RequestCompletedAt: e.CompletedAt,
+		ObservedAt:         e.CompletedAt,
+		StatusCode:         optionalStatus(e.Status),
+		ErrorClass:         optionalText(e.ErrorClass),
+		LatencyMS:          milliseconds(e.Duration),
+		PayloadCaptured:    e.PayloadCaptured,
+		Attempts:           make([]usage.Attempt, 0, len(e.Attempts)),
 	}
 	for index := range e.Attempts {
 		event.Attempts = append(event.Attempts, accountingAttempt(e, index))
@@ -169,7 +170,8 @@ func accountingAttempt(e Envelope, index int) usage.Attempt {
 	fact := &e.Attempts[index]
 	evidence := attemptUsage(fact, e.Operation)
 	attempt := usage.Attempt{
-		ID: uuid.Must(uuid.NewV7()).String(),
+		GuardrailDecisions: e.GuardrailDecisions,
+		ID:                 uuid.Must(uuid.NewV7()).String(),
 		// The ordinal is the position in the sequence of attempts made.
 		Ordinal:       index + 1,
 		ProviderID:    fact.ProviderID,

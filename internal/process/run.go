@@ -271,6 +271,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "plugin runtime", hostRuntime.Close)
 		pluginHost = plugins.NewHost(hostRuntime, unconfined, pool)
+		if rt != nil {
+			rt.PrepareGuardrailPlugin = pluginHost.PinGuardrail
+		}
 		defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "plugin host", func(ctx context.Context) error { pluginHost.Close(ctx); return nil })
 		if c.Mode.Management() || c.Mode.Inference() {
 			gw = gateway.New(rt, &policy, gateway.Config{

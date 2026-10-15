@@ -96,6 +96,7 @@ const (
 	// log; a selector the plugin matches can only narrow the route's targets
 	// or delegate to a route the key may use.
 	MethodRoutePredicate = "route_predicate"
+	MethodGuardrail      = "guardrail"
 )
 
 // Capabilities a plugin calls on OLP. OLP grants each call only the
@@ -212,6 +213,7 @@ func (e *Error) Error() string { return e.Code + ": " + e.Message }
 
 // Manifest declares what a plugin offers and what it may reach.
 type Manifest struct {
+	Guardrail bool `json:"guardrail,omitempty"`
 	// Name identifies the plugin across its versions. Several digests of the
 	// same plugin may be installed side by side.
 	Name string `json:"name"`
@@ -650,3 +652,32 @@ func Pack(ptr, size uint32) uint64 { return uint64(ptr)<<32 | uint64(size) }
 
 // Unpack splits an i64 returned across the ABI into a pointer and a length.
 func Unpack(packed uint64) (ptr, size uint32) { return uint32(packed >> 32), uint32(packed) }
+
+// GuardrailRequest and GuardrailVerdict share the bounded segment/verdict wire
+// contract. Offsets are UTF-8 byte offsets within the named segment.
+type GuardrailSegment struct {
+	ID        string `json:"id"`
+	Role      string `json:"role,omitempty"`
+	Text      string `json:"text"`
+	Kind      string `json:"kind,omitempty"`
+	ToolName  string `json:"tool_name,omitempty"`
+	Untrusted bool   `json:"untrusted,omitempty"`
+}
+type GuardrailRequest struct {
+	Guardrail string             `json:"guardrail"`
+	Phase     string             `json:"phase"`
+	RequestID string             `json:"request_id"`
+	Route     string             `json:"route,omitempty"`
+	Segments  []GuardrailSegment `json:"segments"`
+}
+type GuardrailRedaction struct {
+	Segment     string `json:"segment"`
+	Start       int    `json:"start"`
+	End         int    `json:"end"`
+	Replacement string `json:"replacement"`
+}
+type GuardrailVerdict struct {
+	Action     string               `json:"action"`
+	Categories []string             `json:"categories,omitempty"`
+	Redactions []GuardrailRedaction `json:"redactions,omitempty"`
+}

@@ -9,6 +9,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operationregistry"
@@ -23,6 +24,9 @@ type unaryCall struct {
 }
 
 func (x *call) operationName() string {
+	if x.operationOverride != "" {
+		return x.operationOverride
+	}
 	if x.unary != nil {
 		return x.unary.dialect.Operation.ID
 	}
@@ -127,12 +131,29 @@ func (x *call) unaryPlan(p *routing.Provider, targetID, model string) (*operatio
 	if err != nil {
 		return nil, err
 	}
+	if x.guardrailEngine.HasPhase(guardrails.Input) || x.guardrailEngine.HasPhase(guardrails.InputParallel) {
+		texts, err := plan.GuardrailInput()
+		if err != nil {
+			result, unavailable := x.guardrailEngine.Unavailable(guardrails.Input)
+			x.recordGuardrails(result.Decisions)
+			parallel, parallelErr := x.guardrailEngine.Unavailable(guardrails.InputParallel)
+			x.recordGuardrails(parallel.Decisions)
+			if unavailable != nil {
+				return nil, unavailable
+			}
+			if parallelErr != nil {
+				return nil, parallelErr
+			}
+		} else if err = x.inspectOperationInput(texts); err != nil {
+			return nil, err
+		}
+	}
 	record.unary = unaryAdmission{plan: plan, estimate: plan.Estimate(), receipt: plan.Receipt(), parameters: routing.Listed(plan.Parameters())}
 	x.retainPreparation(record)
 	return plan, nil
 }
 func (s *Server) prepareUnary(ctx context.Context, x *call) *Error {
-	authorize := s.keyAuthorizer(x.authority)
+	authorize := guardrailAuthorizer(s, x)
 	if e := authorize(x.route); e != nil {
 		return e
 	}
@@ -148,6 +169,9 @@ func (s *Server) prepareUnary(ctx context.Context, x *call) *Error {
 
 // planUnary plans x.route for a registered native operation.
 func (s *Server) planUnary(ctx context.Context, x *call) *Error {
+	if e := s.bindGuardrails(ctx, x); e != nil {
+		return e
+	}
 	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
 		return e
 	}

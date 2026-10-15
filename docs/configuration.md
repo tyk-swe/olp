@@ -358,7 +358,7 @@ Production Compose can generate database credentials and their encoded URL using
 
 ## Configuration promotion artifacts
 
-Export/plan/apply carry nonsecret desired state (`openllmproxy.dev/config/v1`),
+Export/plan/apply carry nonsecret desired state (`openllmproxy.dev/config/v2`),
 not database backups. Identity is natural names: projects/providers case-insensitive,
 routes/models/credential refs exact. SHA-256 canonical digest blanks `exported_at`
 and sorts collections. Export includes active providers (otherwise draft), latest
@@ -432,3 +432,8 @@ Provider drafts pin profile/defaults/bindings/semantic headers and proxy/TLS int
 Network secrets have separately sealed provider references. See
 [profiles](provider-profiles.md) for public shapes and credential destination changes;
 omitted profiles select Automatic kind-derived endpoints and transformed routes.
+
+Guardrail configuration uses typed definitions, ordered `guardrail_policies`,
+and additive `guardrail_attachments`. Version 1 imports are normalized explicitly;
+version 2 artifacts cannot mix `content_policy` with the new fields. See
+[Guardrails](guardrails.md) for lifecycles, portable references and examples.

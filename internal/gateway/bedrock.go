@@ -117,7 +117,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 		fail(invalidRequest("invalid_request", "The model `"+route.Slug+"` does not allow this operation.", nil))
 		return
 	}
-	if e := policySurfaceGate(&route); e != nil {
+	if e := x.guardrailSurfaceGate(&route); e != nil {
 		fail(e)
 		return
 	}

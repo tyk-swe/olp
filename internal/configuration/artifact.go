@@ -18,15 +18,18 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-const APIVersion = "openllmproxy.dev/config/v1"
+const APIVersion = "openllmproxy.dev/config/v2"
+const LegacyAPIVersion = "openllmproxy.dev/config/v1"
 
 type Document struct {
-	MCPServers        []MCPServerEntry       `json:"mcp_servers,omitempty"`
-	Sinks             []SinkEntry            `json:"sinks,omitempty"`
-	Guardrails        []GuardrailEntry       `json:"guardrails,omitempty"`
-	SAML              *access.SAMLDefinition `json:"saml,omitempty"`
-	RequireLocalMFA   *bool                  `json:"require_local_mfa,omitempty"`
-	SCIMGroupMappings []SCIMGroupMapping     `json:"scim_group_mappings,omitempty"`
+	GuardrailPolicies    []GuardrailPolicyEntry     `json:"guardrail_policies,omitempty"`
+	GuardrailAttachments []GuardrailAttachmentEntry `json:"guardrail_attachments,omitempty"`
+	MCPServers           []MCPServerEntry           `json:"mcp_servers,omitempty"`
+	Sinks                []SinkEntry                `json:"sinks,omitempty"`
+	Guardrails           []GuardrailEntry           `json:"guardrails,omitempty"`
+	SAML                 *access.SAMLDefinition     `json:"saml,omitempty"`
+	RequireLocalMFA      *bool                      `json:"require_local_mfa,omitempty"`
+	SCIMGroupMappings    []SCIMGroupMapping         `json:"scim_group_mappings,omitempty"`
 	// Endpoint preflight runs before the mutation lock; these versions detect races.
 	preparedWorkloads  map[string]string
 	WorkloadIssuers    []WorkloadIssuerEntry `json:"workload_issuers,omitempty"`
@@ -115,7 +118,7 @@ type RouteEntry struct {
 	MaxAttempts          int                 `json:"max_attempts"`
 	Targets              []TargetEntry       `json:"targets"`
 	RoutingPolicy        *routing.Policy     `json:"routing_policy"`
-	ContentPolicy        json.RawMessage     `json:"content_policy"`
+	ContentPolicy        json.RawMessage     `json:"content_policy,omitempty"`
 	Fidelity             json.RawMessage     `json:"fidelity"`
 	Fallbacks            []routing.Fallback  `json:"fallbacks,omitempty"`
 	Selectors            []routing.Selector  `json:"selectors,omitempty"`
@@ -371,6 +374,21 @@ func (d *Document) canonicalize() {
 			return c
 		}
 		return strings.Compare(ka[1], kb[1])
+	})
+	slices.SortFunc(d.GuardrailPolicies, func(a, b GuardrailPolicyEntry) int {
+		if c := strings.Compare(strings.ToLower(a.Project), strings.ToLower(b.Project)); c != 0 {
+			return c
+		}
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	})
+	slices.SortFunc(d.GuardrailAttachments, func(a, b GuardrailAttachmentEntry) int {
+		if c := strings.Compare(a.Scope, b.Scope); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.Name, b.Name); c != 0 {
+			return c
+		}
+		return a.Order - b.Order
 	})
 	slices.SortFunc(d.Guardrails, func(a, b GuardrailEntry) int {
 		if order := strings.Compare(strings.ToLower(a.Project), strings.ToLower(b.Project)); order != 0 {

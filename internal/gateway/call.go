@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -23,6 +25,7 @@ import (
 // call owns authority, accounting and the shared attempt loop for one request.
 // Route changes replace routeLeg; operation state lives independently.
 type call struct {
+	evaluatorGuardrailID string
 	unary                *unaryCall
 	semanticHeaders      http.Header
 	semanticQuery        url.Values
@@ -77,7 +80,16 @@ type call struct {
 	parent   string
 	priority string
 
-	policyDecisions []contentpolicy.Decision
+	guardrailEngine    *guardrails.Engine
+	guardrailCtx       context.Context
+	guardrailMasks     *guardrails.Masking
+	guardrailInput     []guardrails.Segment
+	guardrailMu        sync.Mutex
+	guardrailDecisions []guardrails.Evidence
+	guardrailModels    map[[32]byte]guardrails.Verdict
+	internalGuardrail  bool
+	operationOverride  string
+	policyDecisions    []contentpolicy.Decision
 
 	capture    *export.Collector
 	estimate   int64
@@ -89,18 +101,19 @@ type call struct {
 	pinnedSlot    *routing.Slot
 	providerState bool
 
-	once             sync.Once
-	facts            []AttemptFact
-	exchange         *pinnedExchange
-	failure          *Error         // terminal error decided before the attempt loop ran
-	firstByte        *time.Duration // request start to the first payload byte the client received
-	lease            *limits.Lease  // the API key reservation, settled once the request ends
-	dispatched       bool           // at least one attempt was handed to a provider
-	responseMetadata bool
-	attemptCount     int
-	attemptVendor    string
-	grantGeneration  int64
-	sensitive        egress.Sensitive
+	once              sync.Once
+	facts             []AttemptFact
+	exchange          *pinnedExchange
+	failure           *Error         // terminal error decided before the attempt loop ran
+	firstByte         *time.Duration // request start to the first payload byte the client received
+	lease             *limits.Lease  // the API key reservation, settled once the request ends
+	dispatched        bool           // at least one attempt was handed to a provider
+	guardrailMetadata bool
+	responseMetadata  bool
+	attemptCount      int
+	attemptVendor     string
+	grantGeneration   int64
+	sensitive         egress.Sensitive
 	routeLeg
 
 	generation generationCall

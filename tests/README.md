@@ -53,6 +53,25 @@ for the exact upstream source/package pins and recorded qualification scope.
 A successful compile is not a passing fleet test. These shell suites do not run
 browser tests.
 
+### Guardrails
+
+`go test ./internal/guardrails ./internal/gateway -run 'Guardrail|Detector|PhaseAction|Streaming'`
+checks detection, action/phase compatibility, masking, split streams, cancellation
+and native errors. `go test ./internal/plugins -run Guardrail` exercises the WASM
+SDK and verifies that pinned guardrail calls do not read configuration.
+
+With disposable PostgreSQL and Valkey, run the `integration`-tagged
+`TestGuardrailPlatform`, `TestNamedGuardrail`, `TestContentPolicy` and
+`TestConfigurationPromotion` tests for activation, ownership, migration and SDK
+journeys. The normal management authorization and isolation sweeps include the
+new management endpoints.
+
+`pnpm --dir console exec playwright test --config playwright.guardrails.config.ts`
+runs the keyboard, accessibility and no-storage browser checks against bounded
+API fixtures. No provider account or persistent database is used by this check.
+Live-vendor certification and the reference-hardware S3 load run remain release
+qualification steps; microbenchmarks are development evidence only.
+
 ### Other focused suites
 
 Run individual suites or pass runner arguments through Make:

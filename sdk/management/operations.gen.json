@@ -148,6 +148,186 @@
     }
   },
   {
+    "name": "activate_guardrail",
+    "group": "guardrails",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/guardrails/{guardrail_id}/activate",
+    "description": "activate guardrail",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "guardrail_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "guardrail_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "guardrail_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/GuardrailActivation"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "GuardrailActivation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "revision_id"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "activate_guardrail_policy",
+    "group": "guardrails",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/guardrail-policies/{policy_id}/activate",
+    "description": "activate guardrail policy",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "policy_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "policy_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "policy_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/GuardrailActivation"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "GuardrailActivation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "revision_id"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "activate_provider",
     "group": "providers",
     "method": "POST",
@@ -370,7 +550,8 @@
           "properties": {
             "api_version": {
               "enum": [
-                "openllmproxy.dev/config/v1"
+                "openllmproxy.dev/config/v1",
+                "openllmproxy.dev/config/v2"
               ],
               "type": "string"
             },
@@ -499,6 +680,18 @@
               "maxItems": 128,
               "items": {
                 "$ref": "#/$defs/ConfigurationMCPServer"
+              }
+            },
+            "guardrail_policies": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ConfigurationGuardrailPolicyEntry"
+              }
+            },
+            "guardrail_attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ConfigurationGuardrailAttachment"
               }
             }
           },
@@ -2548,8 +2741,7 @@
             "overall_timeout_ms",
             "max_attempts",
             "targets",
-            "routing_policy",
-            "content_policy"
+            "routing_policy"
           ],
           "type": "object"
         },
@@ -3158,7 +3350,8 @@
                 "type": "string",
                 "enum": [
                   "inference",
-                  "models_read"
+                  "models_read",
+                  "guardrails"
                 ]
               }
             },
@@ -3325,24 +3518,54 @@
             },
             "project": {
               "type": "string",
-              "minLength": 1,
+              "minLength": 0,
               "maxLength": 100
             },
             "type": {
               "type": "string",
               "enum": [
-                "builtin.regex"
+                "builtin.regex",
+                "builtin.pii",
+                "builtin.secrets",
+                "builtin.keywords",
+                "builtin.schema",
+                "builtin.tools",
+                "webhook",
+                "bedrock",
+                "azure.content_safety",
+                "azure.prompt_shields",
+                "model_armor",
+                "lakera",
+                "presidio",
+                "model",
+                "plugin"
               ]
             },
             "policy": {
               "$ref": "#/$defs/ContentPolicy"
+            },
+            "configuration": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 300000
+            },
+            "on_error": {
+              "type": "string",
+              "enum": [
+                "fail_closed",
+                "fail_open"
+              ]
             }
           },
           "required": [
             "name",
             "project",
-            "type",
-            "policy"
+            "type"
           ]
         },
         "ConfigurationSink": {
@@ -3460,6 +3683,101 @@
               "description": "Logical destination sealed bearer binding; never source credential bytes."
             }
           }
+        },
+        "ConfigurationGuardrailPolicyEntry": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "guardrail": {
+                    "type": "string"
+                  },
+                  "phase": {
+                    "type": "string",
+                    "enum": [
+                      "input",
+                      "input_parallel",
+                      "output",
+                      "output_stream"
+                    ]
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "block",
+                      "redact",
+                      "mask",
+                      "annotate"
+                    ]
+                  },
+                  "monitor": {
+                    "type": "boolean"
+                  },
+                  "mandatory": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "guardrail",
+                  "phase",
+                  "action"
+                ]
+              }
+            }
+          },
+          "required": [
+            "name",
+            "project",
+            "entries"
+          ]
+        },
+        "ConfigurationGuardrailAttachment": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "scope": {
+              "type": "string",
+              "enum": [
+                "installation",
+                "organization",
+                "project",
+                "route",
+                "api-key"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            },
+            "policy": {
+              "type": "string"
+            },
+            "policy_project": {
+              "type": "string"
+            },
+            "order": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "scope",
+            "policy",
+            "policy_project",
+            "order"
+          ]
         },
         "ExternalCredentialReference": {
           "type": "object",
@@ -5195,7 +5513,21 @@
             "type": {
               "type": "string",
               "enum": [
-                "builtin.regex"
+                "builtin.regex",
+                "builtin.pii",
+                "builtin.secrets",
+                "builtin.keywords",
+                "builtin.schema",
+                "builtin.tools",
+                "webhook",
+                "bedrock",
+                "azure.content_safety",
+                "azure.prompt_shields",
+                "model_armor",
+                "lakera",
+                "presidio",
+                "model",
+                "plugin"
               ]
             },
             "project_id": {
@@ -5204,13 +5536,29 @@
             },
             "policy": {
               "$ref": "#/$defs/ContentPolicy"
+            },
+            "configuration": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 300000
+            },
+            "on_error": {
+              "type": "string",
+              "enum": [
+                "fail_closed",
+                "fail_open"
+              ]
             }
           },
           "required": [
             "name",
             "type",
-            "project_id",
-            "policy"
+            "project_id"
           ]
         },
         "ContentPolicy": {
@@ -5264,6 +5612,281 @@
             "action"
           ],
           "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "create_guardrail_attachment",
+    "group": "guardrails",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/guardrail-attachments",
+    "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route, and keys for an API key. Scope and project ownership are checked again during the write.",
+    "scopes": [
+      [
+        "configure"
+      ],
+      [
+        "keys"
+      ],
+      [
+        "manage_organization"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/GuardrailAttachment"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "GuardrailAttachment": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "installation",
+                "organization",
+                "project",
+                "route",
+                "api-key"
+              ]
+            },
+            "scope_id": {
+              "type": "string"
+            },
+            "policy_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "order": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "etag": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope",
+            "scope_id",
+            "policy_revision_id",
+            "order"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "create_guardrail_credential",
+    "group": "guardrails",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/guardrail-credentials",
+    "description": "create guardrail credential",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/GuardrailCredentialInput"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "GuardrailCredentialInput": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string"
+            },
+            "credential": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "project_id",
+            "name",
+            "credential"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "create_guardrail_policy",
+    "group": "guardrails",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/guardrail-policies",
+    "description": "create guardrail policy",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/GuardrailPolicyInput"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "GuardrailPolicyInput": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/GuardrailPolicyEntry"
+              },
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "name",
+            "entries"
+          ]
+        },
+        "GuardrailPolicyEntry": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "guardrail_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "input",
+                "input_parallel",
+                "output",
+                "output_stream"
+              ]
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "block",
+                "redact",
+                "mask",
+                "annotate"
+              ]
+            },
+            "monitor": {
+              "type": "boolean"
+            },
+            "mandatory": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "guardrail_id",
+            "revision_id",
+            "phase",
+            "action"
+          ]
         }
       }
     }
@@ -9981,6 +10604,158 @@
     }
   },
   {
+    "name": "delete_guardrail_attachment",
+    "group": "guardrails",
+    "method": "DELETE",
+    "read_only": false,
+    "path": "/api/v1/guardrail-attachments/{attachment_id}",
+    "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route, and keys for an API key. Scope and project ownership are checked again during the write.",
+    "scopes": [
+      [
+        "configure"
+      ],
+      [
+        "keys"
+      ],
+      [
+        "manage_organization"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "attachment_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "attachment_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "attachment_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
+    "name": "delete_guardrail_policy",
+    "group": "guardrails",
+    "method": "DELETE",
+    "read_only": false,
+    "path": "/api/v1/guardrail-policies/{policy_id}",
+    "description": "delete guardrail policy",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "policy_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "policy_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "policy_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "delete_mcp_server",
     "group": "mcp-servers",
     "method": "DELETE",
@@ -12196,6 +12971,111 @@
           "additionalProperties": false,
           "required": [
             "guardrail_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_guardrail_policy",
+    "group": "guardrails",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/guardrail-policies/{policy_id}",
+    "description": "get guardrail policy",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "policy_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "policy_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "policy_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_guardrail_policy_revision",
+    "group": "guardrails",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/guardrail-policies/{policy_id}/revisions/{revision_id}",
+    "description": "get guardrail policy revision",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "policy_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "revision_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "policy_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "policy_id",
+            "revision_id"
           ]
         }
       },
@@ -15268,6 +16148,52 @@
           "additionalProperties": false
         }
       },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_guardrail_attachments",
+    "group": "guardrails",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/guardrail-attachments",
+    "description": "list guardrail attachments",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_guardrail_policies",
+    "group": "guardrails",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/guardrail-policies",
+    "description": "list guardrail policies",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {},
       "additionalProperties": false
     }
   },
@@ -18770,7 +19696,8 @@
           "properties": {
             "api_version": {
               "enum": [
-                "openllmproxy.dev/config/v1"
+                "openllmproxy.dev/config/v1",
+                "openllmproxy.dev/config/v2"
               ],
               "type": "string"
             },
@@ -18899,6 +19826,18 @@
               "maxItems": 128,
               "items": {
                 "$ref": "#/$defs/ConfigurationMCPServer"
+              }
+            },
+            "guardrail_policies": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ConfigurationGuardrailPolicyEntry"
+              }
+            },
+            "guardrail_attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ConfigurationGuardrailAttachment"
               }
             }
           },
@@ -20948,8 +21887,7 @@
             "overall_timeout_ms",
             "max_attempts",
             "targets",
-            "routing_policy",
-            "content_policy"
+            "routing_policy"
           ],
           "type": "object"
         },
@@ -21558,7 +22496,8 @@
                 "type": "string",
                 "enum": [
                   "inference",
-                  "models_read"
+                  "models_read",
+                  "guardrails"
                 ]
               }
             },
@@ -21725,24 +22664,54 @@
             },
             "project": {
               "type": "string",
-              "minLength": 1,
+              "minLength": 0,
               "maxLength": 100
             },
             "type": {
               "type": "string",
               "enum": [
-                "builtin.regex"
+                "builtin.regex",
+                "builtin.pii",
+                "builtin.secrets",
+                "builtin.keywords",
+                "builtin.schema",
+                "builtin.tools",
+                "webhook",
+                "bedrock",
+                "azure.content_safety",
+                "azure.prompt_shields",
+                "model_armor",
+                "lakera",
+                "presidio",
+                "model",
+                "plugin"
               ]
             },
             "policy": {
               "$ref": "#/$defs/ContentPolicy"
+            },
+            "configuration": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 300000
+            },
+            "on_error": {
+              "type": "string",
+              "enum": [
+                "fail_closed",
+                "fail_open"
+              ]
             }
           },
           "required": [
             "name",
             "project",
-            "type",
-            "policy"
+            "type"
           ]
         },
         "ConfigurationSink": {
@@ -21860,6 +22829,101 @@
               "description": "Logical destination sealed bearer binding; never source credential bytes."
             }
           }
+        },
+        "ConfigurationGuardrailPolicyEntry": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "guardrail": {
+                    "type": "string"
+                  },
+                  "phase": {
+                    "type": "string",
+                    "enum": [
+                      "input",
+                      "input_parallel",
+                      "output",
+                      "output_stream"
+                    ]
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "block",
+                      "redact",
+                      "mask",
+                      "annotate"
+                    ]
+                  },
+                  "monitor": {
+                    "type": "boolean"
+                  },
+                  "mandatory": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "guardrail",
+                  "phase",
+                  "action"
+                ]
+              }
+            }
+          },
+          "required": [
+            "name",
+            "project",
+            "entries"
+          ]
+        },
+        "ConfigurationGuardrailAttachment": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "scope": {
+              "type": "string",
+              "enum": [
+                "installation",
+                "organization",
+                "project",
+                "route",
+                "api-key"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            },
+            "policy": {
+              "type": "string"
+            },
+            "policy_project": {
+              "type": "string"
+            },
+            "order": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "scope",
+            "policy",
+            "policy_project",
+            "order"
+          ]
         },
         "ExternalCredentialReference": {
           "type": "object",
@@ -22148,7 +23212,8 @@
                 "type": "string",
                 "enum": [
                   "inference",
-                  "models_read"
+                  "models_read",
+                  "guardrails"
                 ]
               }
             },
@@ -25684,7 +26749,8 @@
                 "type": "string",
                 "enum": [
                   "inference",
-                  "models_read"
+                  "models_read",
+                  "guardrails"
                 ]
               }
             },
@@ -32250,11 +33316,27 @@
             },
             "policy": {
               "$ref": "#/$defs/ContentPolicy"
+            },
+            "configuration": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 300000
+            },
+            "on_error": {
+              "type": "string",
+              "enum": [
+                "fail_closed",
+                "fail_open"
+              ]
             }
           },
           "required": [
-            "name",
-            "policy"
+            "name"
           ]
         },
         "ContentPolicy": {
@@ -32308,6 +33390,151 @@
             "action"
           ],
           "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "update_guardrail_policy",
+    "group": "guardrails",
+    "method": "PUT",
+    "read_only": false,
+    "path": "/api/v1/guardrail-policies/{policy_id}",
+    "description": "update guardrail policy",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "policy_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "policy_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "policy_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/GuardrailPolicyInput"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "GuardrailPolicyInput": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/GuardrailPolicyEntry"
+              },
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "name",
+            "entries"
+          ]
+        },
+        "GuardrailPolicyEntry": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "guardrail_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "input",
+                "input_parallel",
+                "output",
+                "output_stream"
+              ]
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "block",
+                "redact",
+                "mask",
+                "annotate"
+              ]
+            },
+            "monitor": {
+              "type": "boolean"
+            },
+            "mandatory": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "guardrail_id",
+            "revision_id",
+            "phase",
+            "action"
+          ]
         }
       }
     }

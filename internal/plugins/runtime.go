@@ -267,8 +267,9 @@ func hasSignature(f api.FunctionDefinition, params, results []api.ValueType) boo
 
 // Call is one invocation of plugin code.
 type Call struct {
-	Method string
-	Params any
+	SuppressDiagnostics bool
+	Method              string
+	Params              any
 	// Provider is the provider a call on behalf of one serves: the profile it
 	// uses and its option values, which the plugin receives with the call.
 	Provider *abi.Provider
@@ -285,7 +286,12 @@ func (c Call) output(log *slog.Logger, digest string) *output {
 	if c.out != nil {
 		return c.out
 	}
-	return newOutput(log.With("plugin_digest", digest, "plugin_method", c.Method), c.Secrets)
+	out := newOutput(log.With("plugin_digest", digest, "plugin_method", c.Method), c.Secrets)
+	if c.SuppressDiagnostics {
+		out.suppressed = true
+		out.budget = 0
+	}
+	return out
 }
 
 // Call serves call on an instance of the module and decodes its result into

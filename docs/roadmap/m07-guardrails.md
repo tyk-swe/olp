@@ -2,7 +2,7 @@
 
 | Status | Depends on | Unlocks |
 | --- | --- | --- |
-| Planned | [M1](m01-measured-advantage.md) | [M8](m08-caching.md), [M10](m10-agent-gateway.md), redaction for [M5.2](m05-observability.md#m52-payload-capture) |
+| In progress | [M1](m01-measured-advantage.md) | [M8](m08-caching.md), [M10](m10-agent-gateway.md), redaction for [M5.2](m05-observability.md#m52-payload-capture) |
 
 [Content policy](../gateway.md#content-policy) and [named regex definitions](../guardrails.md)
 already provide bounded input/unary block/redact with metadata-only evidence.
@@ -177,31 +177,61 @@ guardrail playground that stores nothing.
 | Plugin capability | `sdk/plugin/abi/`, `internal/plugins/` |
 | Console | new `console/src/lib/features/guardrails/` |
 
-## Decisions to settle
+## Confirmed execution choices
 
-1. Holdback window units for streaming output: bytes or estimated tokens
-   (recommended: bytes, which bound memory exactly).
-2. Whether `mask` placeholders are stable across a conversation (recommended:
-   no; placeholders are per request, which keeps the mapping in request
-   memory).
-3. The vendor adapter set beyond those above, which the webhook contract and
-   plugins otherwise cover.
+Streaming holdback is byte-bounded. Mask mappings and randomized placeholders
+exist only in request memory. The vendor set is the six adapters named above;
+webhooks and confined plugins cover additional integrations. Enforcing a rule
+that needs a complete result refuses streaming with `422`.
 
 ## Exit criteria
 
-- [ ] Existing content-policy fixtures pass unchanged as `builtin.regex`
+- [x] Existing content-policy fixtures pass unchanged as `builtin.regex`
       guardrails.
-- [ ] Every phase and action has unary and streaming tests, including
+- [x] Every phase and action has unary and streaming tests, including
       `input_parallel` cancellation before and after commitment.
-- [ ] Strict routes refuse `redact` and `mask` at validation, activation and
+- [x] Strict routes refuse `redact` and `mask` at validation, activation and
       configuration plan.
-- [ ] Built-in detectors pass a labelled corpus with no false negatives on
+- [x] Built-in detectors pass a labelled corpus with no false negatives on
       checksum-validated formats.
-- [ ] Each vendor adapter and the webhook contract pass integration tests
+- [x] Each vendor adapter and the webhook contract pass integration tests
       against local fakes, including timeouts under both failure policies.
-- [ ] A WebAssembly guardrail built with the SDK runs in the conformance suite.
-- [ ] Evidence contains no matched text in any record, export or log.
+- [x] A WebAssembly guardrail built with the SDK runs in the conformance suite.
+- [x] Evidence contains no matched text in any record, export or log.
 - [ ] Built-in detectors on 100K-token inputs stay within the
       [performance budget](m01-measured-advantage.md#performance-budget) for
       scenario S3.
 - [ ] The [parity matrix](parity.md) guardrail rows are `Parity` or better.
+
+## Implementation and qualification notes
+
+The platform implementation now includes immutable definitions and policies,
+additive attachments, snapshot compilation, built-in detectors, signed webhooks,
+vendor adapters, model evaluator calls, confined WASM support, standalone
+evaluation, console editing and content-free evidence. Legacy route policies
+are retained and converted without mutating their historical rows.
+
+The holdback unit is bytes; masking maps are request-local. Enforcement that
+requires a complete unary response is refused with 422 when streaming is requested.
+External adapters have local-fake contract coverage. Reference-hardware performance
+and live-vendor qualification remain separate release gates; this milestone is
+not marked implemented until its exit checklist has been reviewed.
+
+The local PII microbenchmark over 540 KB of ordinary prompt text measured
+0.36–0.39 ms/op and 480 B/6 allocations. The unconfigured engine path measured
+16–17 ns/op with zero allocations. These are development-machine measurements,
+not an S3 load qualification. The broader vendor parity row remains `Partial`
+because the implemented set is deliberately narrower than the reference's set.
+
+Local verification covers the full Go suite, the management authorization and
+isolation sweeps, legacy policy fixtures, configuration v2 migration/promotion,
+the generated apply client, WASM conformance and focused race tests. Console
+checks cover 1,316 unit/component assertions plus a Chromium keyboard and Axe
+accessibility journey across all four guardrail tabs. Contract regeneration is
+deterministic. These checks use local fakes, not live provider accounts.
+
+After replacing per-character Unicode allocations with a bounded source-offset
+buffer, the local streaming keyword benchmark processed 486 KB across 100
+frames in about 24 ms (20 MB/s), with 1.52 MB allocated across the entire run.
+Successful strict frames remain byte-identical. S3 throughput and latency still
+need reference-hardware qualification.

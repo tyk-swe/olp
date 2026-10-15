@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/interaction"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -21,12 +22,13 @@ type preparedProvider struct {
 	invocation providerinvoke.Invocation
 	// admitted is what the attempt is admitted under: the larger of the
 	// caller's request and the one this provider is sent.
-	admitted        admittedEstimate
-	parameters      routing.Names
-	demand          *routing.TokenDemand
-	plan            *interaction.Plan
-	receipt         *oif.Receipt
-	policyDecisions []contentpolicy.Decision
+	admitted          admittedEstimate
+	parameters        routing.Names
+	demand            *routing.TokenDemand
+	plan              *interaction.Plan
+	receipt           *oif.Receipt
+	policyDecisions   []contentpolicy.Decision
+	guardrailSegments []guardrails.Segment
 }
 
 // admittedEstimate is the estimate one attempt is admitted under. Reserve is the
@@ -111,9 +113,21 @@ func (x *call) preparedProvider(provider *routing.Provider, targetID, model stri
 			return preparedProvider{}, err
 		}
 		decisions, err := plan.CheckInput()
+		var guardrailSegments []guardrails.Segment
+		if err == nil && x.guardrailEngine != nil {
+			if coverage := interaction.CheckGuardrailCoverage(plan.Wire(), plan.EffectiveRequest().OIF().Document()); coverage != nil {
+				result, e := x.guardrailEngine.Unavailable("")
+				x.recordGuardrails(result.Decisions)
+				if e != nil {
+					return preparedProvider{}, e
+				}
+			} else {
+				_, guardrailSegments, err = x.inspectGuardrailInput(plan.EffectiveRequest().OIF().Document())
+			}
+		}
 		effective := x.summarize(plan.EffectiveRequest())
 		receipt := plan.Receipt()
-		prepared := preparedProvider{plan: plan, receipt: &receipt, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()}, parameters: effective.parameters, policyDecisions: decisions}
+		prepared := preparedProvider{plan: plan, receipt: &receipt, invocation: providerinvoke.Invocation{Prepared: plan.Prepared(), Wire: plan.Wire()}, parameters: effective.parameters, policyDecisions: decisions, guardrailSegments: guardrailSegments}
 		prepared.admitted, prepared.demand = x.preparedEstimate(model, effective)
 		if err != nil {
 			return prepared, err
@@ -172,8 +186,34 @@ func (x *call) preparedProvider(provider *routing.Provider, targetID, model stri
 			invocation.Prepared = prepared.WithProvenance(invocation.Prepared.Provenance()...)
 		}
 	}
+	var guardrailSegments []guardrails.Segment
+	if x.guardrailEngine != nil {
+		if !protocols.InputInspectable(invocation.Wire) {
+			result, e := x.guardrailEngine.Unavailable("")
+			x.recordGuardrails(result.Decisions)
+			if e != nil {
+				return preparedProvider{}, e
+			}
+		}
+		document, segments, err := x.inspectGuardrailInput(native.OIF().Document())
+		if err != nil {
+			return preparedProvider{}, err
+		}
+		guardrailSegments = segments
+		if document != native.OIF().Document() {
+			native, err = wire.NewRequest(invocation.Wire, native.Route, native.Stream, document)
+			if err != nil {
+				return preparedProvider{}, err
+			}
+			changed, err := oif.PrepareDestination(invocation.Prepared.Request(), invocation.Prepared.Descriptor(), document, oif.ExplicitTransform, "guardrail transformation")
+			if err != nil {
+				return preparedProvider{}, err
+			}
+			invocation.Prepared = changed.WithProvenance(invocation.Prepared.Provenance()...)
+		}
+	}
 	effective := x.summarize(native)
-	prepared := preparedProvider{invocation: invocation, parameters: effective.parameters, policyDecisions: decisions}
+	prepared := preparedProvider{invocation: invocation, parameters: effective.parameters, policyDecisions: decisions, guardrailSegments: guardrailSegments}
 	prepared.admitted, prepared.demand = x.preparedEstimate(model, effective)
 	record.provider = prepared
 	x.retainPreparation(record)
@@ -191,6 +231,10 @@ func (x *call) preparedEstimate(model string, effective requestSummary) (admitte
 	source := x.summarizeSource()
 	effective.prompt.Follow(source.prompt)
 	counter := estimate.ForModel(model)
+	if x.guardrailEngine.HasAction(guardrails.Input, guardrails.Redact) || x.guardrailEngine.HasAction(guardrails.Input, guardrails.Mask) {
+		to := effective.prompt.Estimate(counter, nil)
+		return admittedEstimate{reserve: to.Tokens(), input: to.Input, reply: to.Reply(), provenance: to.Provenance, family: to.Family}, demandOf(to)
+	}
 	from, to := source.prompt.Estimate(counter, nil), effective.prompt.Estimate(counter, nil)
 	admitted := admittedEstimate{
 		reserve:    max(from.Tokens(), to.Tokens()),
@@ -206,7 +250,7 @@ func (x *call) preparedEstimate(model string, effective requestSummary) (admitte
 // parameter defaults applied, and nothing a profile, a strict contract or a
 // content policy would rewrite.
 func (x *call) automatic(provider *routing.Provider) bool {
-	return provider.ProfileID == "" && !x.strict() && (x.route == nil || x.route.ContentPolicy == nil)
+	return provider.ProfileID == "" && !x.strict() && (x.route == nil || x.route.ContentPolicy == nil) && x.guardrailEngine == nil
 }
 
 // encodedRequest is the body a provider that takes the caller's request as it

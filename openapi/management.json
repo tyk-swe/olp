@@ -1592,7 +1592,8 @@
         "properties": {
           "api_version": {
             "enum": [
-              "openllmproxy.dev/config/v1"
+              "openllmproxy.dev/config/v1",
+              "openllmproxy.dev/config/v2"
             ],
             "type": "string"
           },
@@ -1722,6 +1723,18 @@
             "items": {
               "$ref": "#/components/schemas/ConfigurationMCPServer"
             }
+          },
+          "guardrail_policies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationGuardrailPolicyEntry"
+            }
+          },
+          "guardrail_attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationGuardrailAttachment"
+            }
           }
         },
         "required": [
@@ -1821,7 +1834,9 @@
               "mcp_server",
               "discount",
               "rate_card",
-              "billing_import"
+              "billing_import",
+              "guardrail_policy",
+              "guardrail_attachment"
             ],
             "type": "string"
           }
@@ -2386,8 +2401,7 @@
           "overall_timeout_ms",
           "max_attempts",
           "targets",
-          "routing_policy",
-          "content_policy"
+          "routing_policy"
         ],
         "type": "object"
       },
@@ -6548,6 +6562,9 @@
           "version": {
             "description": "The author's label for this build.",
             "type": "string"
+          },
+          "guardrail": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -10285,6 +10302,20 @@
               "string",
               "null"
             ]
+          },
+          "guardrail_decisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailEvidence"
+            },
+            "maxItems": 512
+          },
+          "evaluator_guardrail_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
@@ -18695,7 +18726,8 @@
               "type": "string",
               "enum": [
                 "inference",
-                "models_read"
+                "models_read",
+                "guardrails"
               ]
             }
           },
@@ -18982,7 +19014,8 @@
               "type": "string",
               "enum": [
                 "inference",
-                "models_read"
+                "models_read",
+                "guardrails"
               ]
             }
           },
@@ -21006,7 +21039,21 @@
           "type": {
             "type": "string",
             "enum": [
-              "builtin.regex"
+              "builtin.regex",
+              "builtin.pii",
+              "builtin.secrets",
+              "builtin.keywords",
+              "builtin.schema",
+              "builtin.tools",
+              "webhook",
+              "bedrock",
+              "azure.content_safety",
+              "azure.prompt_shields",
+              "model_armor",
+              "lakera",
+              "presidio",
+              "model",
+              "plugin"
             ]
           },
           "project_id": {
@@ -21015,13 +21062,29 @@
           },
           "policy": {
             "$ref": "#/components/schemas/ContentPolicy"
+          },
+          "configuration": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 300000
+          },
+          "on_error": {
+            "type": "string",
+            "enum": [
+              "fail_closed",
+              "fail_open"
+            ]
           }
         },
         "required": [
           "name",
           "type",
-          "project_id",
-          "policy"
+          "project_id"
         ]
       },
       "UpdateGuardrailRequest": {
@@ -21035,11 +21098,27 @@
           },
           "policy": {
             "$ref": "#/components/schemas/ContentPolicy"
+          },
+          "configuration": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 300000
+          },
+          "on_error": {
+            "type": "string",
+            "enum": [
+              "fail_closed",
+              "fail_open"
+            ]
           }
         },
         "required": [
-          "name",
-          "policy"
+          "name"
         ]
       },
       "GuardrailResponse": {
@@ -21062,7 +21141,21 @@
           "type": {
             "type": "string",
             "enum": [
-              "builtin.regex"
+              "builtin.regex",
+              "builtin.pii",
+              "builtin.secrets",
+              "builtin.keywords",
+              "builtin.schema",
+              "builtin.tools",
+              "webhook",
+              "bedrock",
+              "azure.content_safety",
+              "azure.prompt_shields",
+              "model_armor",
+              "lakera",
+              "presidio",
+              "model",
+              "plugin"
             ]
           },
           "etag": {
@@ -21086,6 +21179,30 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "configuration": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 300000
+          },
+          "on_error": {
+            "type": "string",
+            "enum": [
+              "fail_closed",
+              "fail_open"
+            ]
+          },
+          "active_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
@@ -21123,6 +21240,23 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "configuration": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 300000
+          },
+          "on_error": {
+            "type": "string",
+            "enum": [
+              "fail_closed",
+              "fail_open"
+            ]
           }
         },
         "required": [
@@ -21165,24 +21299,54 @@
           },
           "project": {
             "type": "string",
-            "minLength": 1,
+            "minLength": 0,
             "maxLength": 100
           },
           "type": {
             "type": "string",
             "enum": [
-              "builtin.regex"
+              "builtin.regex",
+              "builtin.pii",
+              "builtin.secrets",
+              "builtin.keywords",
+              "builtin.schema",
+              "builtin.tools",
+              "webhook",
+              "bedrock",
+              "azure.content_safety",
+              "azure.prompt_shields",
+              "model_armor",
+              "lakera",
+              "presidio",
+              "model",
+              "plugin"
             ]
           },
           "policy": {
             "$ref": "#/components/schemas/ContentPolicy"
+          },
+          "configuration": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 300000
+          },
+          "on_error": {
+            "type": "string",
+            "enum": [
+              "fail_closed",
+              "fail_open"
+            ]
           }
         },
         "required": [
           "name",
           "project",
-          "type",
-          "policy"
+          "type"
         ]
       },
       "CreateSinkRequest": {
@@ -23802,6 +23966,459 @@
         "required": [
           "items",
           "next_cursor"
+        ]
+      },
+      "GuardrailPolicyEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "guardrail_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "input",
+              "input_parallel",
+              "output",
+              "output_stream"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "block",
+              "redact",
+              "mask",
+              "annotate"
+            ]
+          },
+          "monitor": {
+            "type": "boolean"
+          },
+          "mandatory": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "guardrail_id",
+          "revision_id",
+          "phase",
+          "action"
+        ]
+      },
+      "GuardrailPolicyInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailPolicyEntry"
+            },
+            "maxItems": 128
+          }
+        },
+        "required": [
+          "name",
+          "entries"
+        ]
+      },
+      "GuardrailPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailPolicyEntry"
+            },
+            "maxItems": 128
+          },
+          "etag": {
+            "type": "string"
+          },
+          "active_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "retired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "policy_id",
+          "project_id",
+          "name",
+          "entries",
+          "etag",
+          "revision_id"
+        ]
+      },
+      "GuardrailAttachment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "installation",
+              "organization",
+              "project",
+              "route",
+              "api-key"
+            ]
+          },
+          "scope_id": {
+            "type": "string"
+          },
+          "policy_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "etag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "scope_id",
+          "policy_revision_id",
+          "order"
+        ]
+      },
+      "GuardrailSegment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "role": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8388608
+          },
+          "kind": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "untrusted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ]
+      },
+      "GuardrailEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "guardrail_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "input",
+              "input_parallel",
+              "output",
+              "output_stream"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "block",
+              "redact",
+              "mask",
+              "annotate"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "blocked",
+              "redacted",
+              "masked",
+              "annotated",
+              "monitored",
+              "failed_open",
+              "failed_closed",
+              "skipped"
+            ]
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32
+          },
+          "latency_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "guardrail_id",
+          "revision",
+          "phase",
+          "action",
+          "outcome",
+          "latency_ms"
+        ]
+      },
+      "GuardrailApplyInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "policy_revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "input",
+              "input_parallel",
+              "output",
+              "output_stream"
+            ]
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailSegment"
+            },
+            "maxItems": 2048
+          }
+        },
+        "required": [
+          "policy_revision_id",
+          "phase",
+          "segments"
+        ]
+      },
+      "GuardrailApplyResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailSegment"
+            },
+            "maxItems": 2048
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardrailEvidence"
+            },
+            "maxItems": 512
+          },
+          "blocked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "segments",
+          "decisions",
+          "blocked"
+        ]
+      },
+      "GuardrailActivation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "revision_id"
+        ]
+      },
+      "GuardrailCredentialInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "credential": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "project_id",
+          "name",
+          "credential"
+        ]
+      },
+      "ConfigurationGuardrailPolicyEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "guardrail": {
+                  "type": "string"
+                },
+                "phase": {
+                  "type": "string",
+                  "enum": [
+                    "input",
+                    "input_parallel",
+                    "output",
+                    "output_stream"
+                  ]
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "block",
+                    "redact",
+                    "mask",
+                    "annotate"
+                  ]
+                },
+                "monitor": {
+                  "type": "boolean"
+                },
+                "mandatory": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "guardrail",
+                "phase",
+                "action"
+              ]
+            }
+          }
+        },
+        "required": [
+          "name",
+          "project",
+          "entries"
+        ]
+      },
+      "ConfigurationGuardrailAttachment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "installation",
+              "organization",
+              "project",
+              "route",
+              "api-key"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "policy": {
+            "type": "string"
+          },
+          "policy_project": {
+            "type": "string"
+          },
+          "order": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scope",
+          "policy",
+          "policy_project",
+          "order"
         ]
       }
     },
@@ -56534,6 +57151,949 @@
         "tags": [
           "observability"
         ]
+      }
+    },
+    "/api/v1/guardrails/{guardrail_id}/activate": {
+      "post": {
+        "operationId": "activate_guardrail",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guardrail_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailActivation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/guardrail-policies": {
+      "get": {
+        "operationId": "list_guardrail_policies",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GuardrailPolicy"
+                      },
+                      "maxItems": 1001
+                    }
+                  },
+                  "required": []
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_guardrail_policy",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailPolicy"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailPolicyInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/guardrail-policies/{policy_id}": {
+      "get": {
+        "operationId": "get_guardrail_policy",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailPolicy"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "update_guardrail_policy",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailPolicy"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailPolicyInput"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_guardrail_policy",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/guardrail-policies/{policy_id}/revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_guardrail_policy_revision",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailPolicy"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/guardrail-policies/{policy_id}/activate": {
+      "post": {
+        "operationId": "activate_guardrail_policy",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailActivation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/guardrail-attachments": {
+      "get": {
+        "operationId": "list_guardrail_attachments",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GuardrailAttachment"
+                      },
+                      "maxItems": 10000
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_guardrail_attachment",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "keys"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "manage_organization"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "manage_organization"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailAttachment"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailAttachment"
+              }
+            }
+          }
+        },
+        "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route, and keys for an API key. Scope and project ownership are checked again during the write."
+      }
+    },
+    "/api/v1/guardrail-attachments/{attachment_id}": {
+      "delete": {
+        "operationId": "delete_guardrail_attachment",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "keys"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "manage_organization"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "manage_organization"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route, and keys for an API key. Scope and project ownership are checked again during the write."
+      }
+    },
+    "/api/v1/guardrails/evaluate": {
+      "post": {
+        "operationId": "evaluate_guardrails",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "playground"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailApplyResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailApplyInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/guardrail-credentials": {
+      "post": {
+        "operationId": "create_guardrail_credential",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "project_id"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardrailCredentialInput"
+              }
+            }
+          }
+        }
       }
     }
   },

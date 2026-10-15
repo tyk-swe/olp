@@ -39,6 +39,10 @@ semantic versioning and take their source from root `package.json`;
 
 ### Changed
 
+- Configuration exports use `openllmproxy.dev/config/v2` for guardrail
+  definitions, policies and attachments; version 1 imports are normalized into
+  the new format. Migration 0068 adds the guardrail platform and converts
+  historical route policies without changing their source revisions.
 - Condense and refresh operational/developer documentation; move repository
   guidance into contributor/console guides and remove `AGENTS.md`.
 - The reference catalog is `openllmproxy.dev/catalog/v2`, carrying the new
@@ -60,6 +64,11 @@ semantic versioning and take their source from root `package.json`;
 
 ### Added
 
+- A guardrail platform with immutable definitions and policies, scoped
+  attachments, built-in detectors, external and model evaluators, confined WASM
+  plugins, streaming enforcement and content-free decision evidence. The
+  console includes editors and a playground; `/v1/guardrails/apply` has generated
+  Go and TypeScript clients. See [guardrails](docs/guardrails.md).
 - Price components for every structure the major vendors publish: audio and
   image rates with cached shares, input-token tiers, time-of-day windows,
   per-request and per-tool-call fees and a batch multiplier, priced exactly in

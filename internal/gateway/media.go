@@ -269,6 +269,11 @@ func (s *Server) prepareMedia(ctx context.Context, x *call, authority access.Aut
 
 // planMedia plans x.route for one media operation.
 func (s *Server) planMedia(ctx context.Context, x *call) *Error {
+	if x.snapshot().GuardrailEngine(x.route.Slug, x.keyID) != nil {
+		if e := x.guardrailSurfaceGate(x.route); e != nil {
+			return e
+		}
+	}
 	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
 		return e
 	}

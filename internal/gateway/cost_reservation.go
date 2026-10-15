@@ -375,6 +375,11 @@ func (s *Server) settleAdmission(ctx context.Context, x *call) {
 		return
 	}
 	s.recordCost(x)
+	if x.operationOverride == "guardrail" {
+		actual := x.estimate
+		settleKey(ctx, x.lease, x.dispatched, &actual, s.log)
+		return
+	}
 	settleKey(ctx, x.lease, x.dispatched, x.settledTokens(), s.log)
 }
 

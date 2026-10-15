@@ -69,3 +69,21 @@ func checkOutputRules(policy *contentpolicy.Compiled, texts []operations.Text) (
 	}
 	return decisions, nil
 }
+
+// GuardrailInput exposes the operation-owned inspection surface after defaults.
+func (p *Plan) GuardrailInput() ([]operations.Text, error) {
+	if p.template.codec.InputText == nil {
+		return nil, fail("guardrail_surface_unavailable", "/request", "guardrail_input", "The operation has no text inspection contract.")
+	}
+	return p.template.codec.InputText(p.effective)
+}
+
+// GuardrailOutput uses the operation's own result contract. Vectors and other
+// opaque payloads must never be mistaken for an empty, successfully inspected
+// text response.
+func (p *Plan) GuardrailOutput(result Result) ([]operations.Text, error) {
+	if p.template.codec.OutputText == nil {
+		return nil, fail("guardrail_surface_unavailable", "/result", "guardrail_output", "The operation has no text inspection contract.")
+	}
+	return p.template.codec.OutputText(result.Envelope)
+}

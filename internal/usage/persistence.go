@@ -95,16 +95,16 @@ const markReceiptPersistedSQL = `UPDATE olp.request_metadata_event_receipts
 const insertRequestSQL = `INSERT INTO olp.requests
         (id, runtime_generation_id, api_key_id, budget_group_id, route_slug, operation, surface,
          started_at, completed_at, status_code, error_class, total_latency_ms, first_byte_ms,
-         attempt_count, created_at, attribution, policy_decisions, origin, parent_request_id, end_user_digest, budget_boundary, payload_captured)
+         attempt_count, created_at, attribution, policy_decisions, origin, parent_request_id, end_user_digest, budget_boundary, payload_captured,guardrail_decisions,evaluator_guardrail_id)
     VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, $14::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($8, now()),
-            $15::jsonb, $16::jsonb, $17, $18::uuid, $19, $20, $21)
+            $15::jsonb, $16::jsonb, $17, $18::uuid, $19, $20, $21,$22::jsonb,$23::uuid)
     ON CONFLICT (id, started_at) DO NOTHING`
 
 const insertAttemptSQL = `INSERT INTO olp.attempts
         (id, request_id, request_started_at, ordinal, provider_id, upstream_model,
          started_at, completed_at, status_code, error_class, committed, latency_ms,
-         first_byte_ms, routing)
-    VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         first_byte_ms, routing,guardrail_decisions)
+    VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12, $13, $14,$15::jsonb)
     ON CONFLICT (request_id, ordinal) DO NOTHING`
 
 const insertAnchorSQL = `INSERT INTO olp.usage_request_anchors (request_id, request_started_at)
@@ -377,7 +377,7 @@ func insertRequestRows(ctx context.Context, tx pgx.Tx, ev *Event, validated *Val
 		validated.StatusCode, ev.ErrorClass, latency, validated.FirstByteMS,
 		validated.AttemptCount, ev.BudgetGroupID, string(AttributionJSON(ev.Attribution)),
 		string(contentpolicy.DecisionsJSON(ev.PolicyDecisions)), cmp.Or(ev.Origin, OriginCaller),
-		ev.ParentRequestID, ev.EndUserDigest, ev.BudgetBoundary, ev.PayloadCaptured); err != nil {
+		ev.ParentRequestID, ev.EndUserDigest, ev.BudgetBoundary, ev.PayloadCaptured, guardrailJSON(ev.GuardrailDecisions), ev.EvaluatorGuardrailID); err != nil {
 		return fmt.Errorf("persist request metadata request: %w", err)
 	}
 	for _, attempt := range validated.Attempts {
@@ -393,7 +393,7 @@ func insertRequestRows(ctx context.Context, tx pgx.Tx, ev *Event, validated *Val
 			ev.RequestStartedAt, attempt.Ordinal, attempt.Attempt.ProviderID,
 			attempt.Attempt.UpstreamModel, attempt.Attempt.StartedAt, attemptCompletedAt,
 			attempt.StatusCode, attempt.Attempt.ErrorClass, attempt.Attempt.Committed,
-			attemptLatency, attempt.FirstByteMS, routing); err != nil {
+			attemptLatency, attempt.FirstByteMS, routing, guardrailJSON(attempt.Attempt.GuardrailDecisions)); err != nil {
 			return fmt.Errorf("persist request metadata attempt: %w", err)
 		}
 	}
@@ -577,4 +577,12 @@ func applyIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost stri
 		aggregates[i].RequestID = ev.RequestID
 	}
 	return append(snapshots, aggregates...), nil
+}
+
+func guardrailJSON(v any) string {
+	b, _ := json.Marshal(v)
+	if string(b) == "null" {
+		return "[]"
+	}
+	return string(b)
 }

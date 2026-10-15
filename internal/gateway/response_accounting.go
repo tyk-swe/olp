@@ -60,7 +60,7 @@ func (s *Server) pendingGenerationUsage(x *call, fact *AttemptFact, metadata map
 	ev := accountingEvent(Envelope{
 		AccountingID: x.request.accountingID(), KeyID: x.keyID,
 		BudgetGroupID: x.budgetGroupID, Attribution: x.attribution, EndUserDigest: x.endUserDigest,
-		PolicyDecisions: x.policyDecisions, Route: x.named().Slug,
+		EvaluatorGuardrailID: x.evaluatorGuardrailID, GuardrailDecisions: x.guardrailEvidence(), PolicyDecisions: x.policyDecisions, Route: x.named().Slug,
 		Operation: x.family.Operation(), Surface: x.family.Surface(),
 		RuntimeGenerationID: x.request.release.Snapshot.Generation.ID,
 		StartedAt:           x.request.startedAt, CompletedAt: now,

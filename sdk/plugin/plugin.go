@@ -135,6 +135,10 @@ type Signer interface {
 // request's features and never its content. A match can only narrow the
 // route's targets or delegate to another route; an error falls through to
 // the route's next selector.
+type Guardrail interface {
+	EvaluateGuardrail(context.Context, abi.GuardrailRequest) (abi.GuardrailVerdict, error)
+}
+
 type RoutePredicate interface {
 	MatchRoute(ctx context.Context, features RouteFeatures) (RouteVerdict, error)
 }
@@ -225,6 +229,7 @@ var methods = map[string]func(ctx context.Context, params json.RawMessage) (any,
 	abi.MethodGrantPoll:      optional(abi.MethodGrantPoll, invalidParams, GrantPoller.PollGrant),
 	abi.MethodGrantRefresh:   optional(abi.MethodGrantRefresh, "A grant_refresh call carries the grant to refresh.", GrantRefresher.RefreshGrant),
 	abi.MethodCarry:          carry,
+	abi.MethodGuardrail:      optional(abi.MethodGuardrail, "A guardrail call carries bounded segments.", Guardrail.EvaluateGuardrail),
 	abi.MethodRoutePredicate: optional(abi.MethodRoutePredicate, "A route_predicate call carries the request's features.", RoutePredicate.MatchRoute),
 }
 

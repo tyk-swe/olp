@@ -335,7 +335,7 @@ func TestCORSExposesEveryHeaderTheGatewayAdds(t *testing.T) {
 		for name := range strings.SplitSeq(w.Header().Get("Access-Control-Expose-Headers"), ",") {
 			exposed[strings.ToLower(strings.TrimSpace(name))] = true
 		}
-		names := []string{"X-Request-Id", "Retry-After", "X-Should-Retry", "X-OLP-Delivery-Replay",
+		names := []string{"X-OLP-Guardrails", "X-Request-Id", "Retry-After", "X-Should-Retry", "X-OLP-Delivery-Replay",
 			headerAttempts, headerRouteRevision, headerProvider, headerCost}
 		if strings.HasPrefix(path, "/anthropic/") {
 			// The Anthropic SDKs report an error's request id from this header.

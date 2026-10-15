@@ -365,8 +365,11 @@ func normalizeDocument(doc *Document) {
 // plugin profiles its plugin providers name. It returns the plugins this
 // installation can't use yet, by digest, with why: they block the plan.
 func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Document) (map[string]string, error) {
-	if doc.APIVersion != APIVersion {
+	if doc.APIVersion != APIVersion && doc.APIVersion != LegacyAPIVersion {
 		return nil, access.Fail(422, "unsupported_api_version", "The artifact declares an unsupported api_version.")
+	}
+	if err := normalizeGuardrailVersion(doc); err != nil {
+		return nil, err
 	}
 	normalizeDocument(doc)
 	if err := s.validateMCPServers(doc); err != nil {
@@ -376,6 +379,9 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		return nil, err
 	}
 	if err := validateGuardrails(doc); err != nil {
+		return nil, err
+	}
+	if err := validateGuardrailPolicies(doc); err != nil {
 		return nil, err
 	}
 	if err := validateSCIMMappings(doc); err != nil {
@@ -853,6 +859,9 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		return nil, err
 	}
 	if err = s.planSinks(ctx, q, doc, bindings, result); err != nil {
+		return nil, err
+	}
+	if err = planGuardrailPolicies(ctx, q, doc, state, result); err != nil {
 		return nil, err
 	}
 	if err = planGuardrails(ctx, q, doc, state, result); err != nil {

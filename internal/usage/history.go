@@ -8,6 +8,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
 // RequestFilters narrow the request explorer. Every field is optional; the
@@ -42,6 +43,7 @@ type Cursor struct {
 // metadata plus the usage its attempts accounted for. Token totals and money
 // are absent (null) when no fact exists yet, which is different from zero.
 type RequestSummary struct {
+	EvaluatorGuardrailID    *string                  `json:"evaluator_guardrail_id,omitempty"`
 	BudgetBoundary          string                   `json:"budget_boundary,omitempty"`
 	ID                      string                   `json:"id"`
 	RuntimeGenerationID     string                   `json:"runtime_generation_id"`
@@ -77,6 +79,7 @@ type RequestSummary struct {
 	UsageComplete           *bool                    `json:"usage_complete"`
 	EndUserDigest           string                   `json:"end_user_digest"`
 	Attribution             map[string]string        `json:"attribution"`
+	GuardrailDecisions      []guardrails.Evidence    `json:"guardrail_decisions"`
 	PolicyDecisions         []contentpolicy.Decision `json:"policy_decisions"`
 	PayloadCaptured         bool                     `json:"payload_captured"`
 }
@@ -85,48 +88,49 @@ type RequestSummary struct {
 // provenance that explains why this provider served it and the charge evidence
 // that explains what it cost.
 type AttemptDetail struct {
-	Routing                 *Routing         `json:"routing"`
-	ID                      string           `json:"id"`
-	Ordinal                 int32            `json:"ordinal"`
-	ProviderID              string           `json:"provider_id"`
-	ProviderName            string           `json:"provider_name"`
-	UpstreamModel           string           `json:"upstream_model"`
-	StartedAt               time.Time        `json:"started_at"`
-	CompletedAt             *time.Time       `json:"completed_at"`
-	StatusCode              *int32           `json:"status_code"`
-	ErrorClass              *string          `json:"error_class"`
-	Committed               bool             `json:"committed"`
-	LatencyMS               *int64           `json:"latency_ms"`
-	FirstByteMS             *int64           `json:"first_byte_ms"`
-	ChargeStatus            *string          `json:"charge_status"`
-	UsageObserved           *bool            `json:"usage_observed"`
-	UsageComplete           *bool            `json:"usage_complete"`
-	InputTokens             *int64           `json:"input_tokens"`
-	OutputTokens            *int64           `json:"output_tokens"`
-	CachedInputTokens       *int64           `json:"cached_input_tokens"`
-	CacheWriteInputTokens   *int64           `json:"cache_write_input_tokens"`
-	CacheWrite5MInputTokens *int64           `json:"cache_write_5m_input_tokens"`
-	CacheWrite1HInputTokens *int64           `json:"cache_write_1h_input_tokens"`
-	AudioInputTokens        *int64           `json:"audio_input_tokens"`
-	CachedAudioInputTokens  *int64           `json:"cached_audio_input_tokens"`
-	AudioOutputTokens       *int64           `json:"audio_output_tokens"`
-	ImageInputTokens        *int64           `json:"image_input_tokens"`
-	CachedImageInputTokens  *int64           `json:"cached_image_input_tokens"`
-	ImageOutputTokens       *int64           `json:"image_output_tokens"`
-	MediaUnits              *string          `json:"media_units"`
-	ToolCalls               map[string]int64 `json:"tool_calls"`
-	Batch                   *bool            `json:"batch"`
-	PricingComponents       []string         `json:"pricing_components"`
-	EstimatedCost           *string          `json:"estimated_cost"`
-	Currency                *string          `json:"currency"`
-	Unpriced                *bool            `json:"unpriced"`
-	PricingRevisionID       *string          `json:"pricing_revision_id"`
-	CommitmentWeight        *string          `json:"commitment_weight"`
-	CommitmentAmount        *string          `json:"commitment_amount"`
-	CommitmentPeriod        *string          `json:"commitment_period"`
-	DiscountID              *string          `json:"discount_id"`
-	Charge                  *string          `json:"charge"`
-	RateCardRevisionID      *string          `json:"rate_card_revision_id"`
+	GuardrailDecisions      []guardrails.Evidence `json:"guardrail_decisions,omitempty"`
+	Routing                 *Routing              `json:"routing"`
+	ID                      string                `json:"id"`
+	Ordinal                 int32                 `json:"ordinal"`
+	ProviderID              string                `json:"provider_id"`
+	ProviderName            string                `json:"provider_name"`
+	UpstreamModel           string                `json:"upstream_model"`
+	StartedAt               time.Time             `json:"started_at"`
+	CompletedAt             *time.Time            `json:"completed_at"`
+	StatusCode              *int32                `json:"status_code"`
+	ErrorClass              *string               `json:"error_class"`
+	Committed               bool                  `json:"committed"`
+	LatencyMS               *int64                `json:"latency_ms"`
+	FirstByteMS             *int64                `json:"first_byte_ms"`
+	ChargeStatus            *string               `json:"charge_status"`
+	UsageObserved           *bool                 `json:"usage_observed"`
+	UsageComplete           *bool                 `json:"usage_complete"`
+	InputTokens             *int64                `json:"input_tokens"`
+	OutputTokens            *int64                `json:"output_tokens"`
+	CachedInputTokens       *int64                `json:"cached_input_tokens"`
+	CacheWriteInputTokens   *int64                `json:"cache_write_input_tokens"`
+	CacheWrite5MInputTokens *int64                `json:"cache_write_5m_input_tokens"`
+	CacheWrite1HInputTokens *int64                `json:"cache_write_1h_input_tokens"`
+	AudioInputTokens        *int64                `json:"audio_input_tokens"`
+	CachedAudioInputTokens  *int64                `json:"cached_audio_input_tokens"`
+	AudioOutputTokens       *int64                `json:"audio_output_tokens"`
+	ImageInputTokens        *int64                `json:"image_input_tokens"`
+	CachedImageInputTokens  *int64                `json:"cached_image_input_tokens"`
+	ImageOutputTokens       *int64                `json:"image_output_tokens"`
+	MediaUnits              *string               `json:"media_units"`
+	ToolCalls               map[string]int64      `json:"tool_calls"`
+	Batch                   *bool                 `json:"batch"`
+	PricingComponents       []string              `json:"pricing_components"`
+	EstimatedCost           *string               `json:"estimated_cost"`
+	Currency                *string               `json:"currency"`
+	Unpriced                *bool                 `json:"unpriced"`
+	PricingRevisionID       *string               `json:"pricing_revision_id"`
+	CommitmentWeight        *string               `json:"commitment_weight"`
+	CommitmentAmount        *string               `json:"commitment_amount"`
+	CommitmentPeriod        *string               `json:"commitment_period"`
+	DiscountID              *string               `json:"discount_id"`
+	Charge                  *string               `json:"charge"`
+	RateCardRevisionID      *string               `json:"rate_card_revision_id"`
 }
 
 // RequestDetail is one request with its attempt timeline.
@@ -145,8 +149,8 @@ const requestColumns = `SELECT r.id::text, r.runtime_generation_id::text, r.api_
         u.cache_write_input_tokens, u.cache_write_5m_input_tokens, u.cache_write_1h_input_tokens,
         u.audio_input_tokens, u.cached_audio_input_tokens, u.audio_output_tokens,
         u.image_input_tokens, u.cached_image_input_tokens, u.image_output_tokens,
-        u.estimated_cost, u.charge, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions, r.end_user_digest,
-        r.origin, r.parent_request_id::text, r.budget_boundary, r.payload_captured
+        u.estimated_cost, u.charge, u.currency, u.unpriced, u.usage_complete, r.attribution, r.policy_decisions, r.guardrail_decisions, r.end_user_digest,
+        r.origin, r.parent_request_id::text, r.budget_boundary, r.payload_captured,r.evaluator_guardrail_id::text
     FROM olp.requests r LEFT JOIN LATERAL (
       SELECT SUM(f.input_tokens)::bigint AS input_tokens,
              SUM(f.output_tokens)::bigint AS output_tokens,
@@ -176,8 +180,8 @@ func (s *RequestSummary) scanTargets() []any {
 		&s.CacheWriteInputTokens, &s.CacheWrite5MInputTokens, &s.CacheWrite1HInputTokens,
 		&s.AudioInputTokens, &s.CachedAudioInputTokens, &s.AudioOutputTokens,
 		&s.ImageInputTokens, &s.CachedImageInputTokens, &s.ImageOutputTokens,
-		&s.EstimatedCost, &s.Charge, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions, &s.EndUserDigest,
-		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary, &s.PayloadCaptured}
+		&s.EstimatedCost, &s.Charge, &s.Currency, &s.Unpriced, &s.UsageComplete, &s.Attribution, &s.PolicyDecisions, &s.GuardrailDecisions, &s.EndUserDigest,
+		&s.Origin, &s.ParentRequestID, &s.BudgetBoundary, &s.PayloadCaptured, &s.EvaluatorGuardrailID}
 }
 
 // normalize pins the timestamps to UTC so the JSON always renders as Z.
@@ -321,7 +325,7 @@ const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider
         f.estimated_cost::text, btrim(f.currency), f.unpriced,
         f.pricing_revision_id::text, f.commitment_weight::text,
         f.commitment_amount::text, f.commitment_period,
-        f.discount_id::text, f.charge::text, f.rate_card_revision_id::text
+        f.discount_id::text, f.charge::text, f.rate_card_revision_id::text,a.guardrail_decisions
     FROM olp.attempts a JOIN olp.providers p ON p.id = a.provider_id
     LEFT JOIN olp.attempt_usage_facts f ON f.request_id = a.request_id
         AND f.request_started_at = a.request_started_at AND f.attempt_ordinal = a.ordinal
@@ -362,7 +366,7 @@ func GetRequest(ctx context.Context, q access.Queryer, id string) (RequestDetail
 			&attempt.EstimatedCost,
 			&attempt.Currency, &attempt.Unpriced, &attempt.PricingRevisionID,
 			&attempt.CommitmentWeight, &attempt.CommitmentAmount, &attempt.CommitmentPeriod,
-			&attempt.DiscountID, &attempt.Charge, &attempt.RateCardRevisionID); err != nil {
+			&attempt.DiscountID, &attempt.Charge, &attempt.RateCardRevisionID, &attempt.GuardrailDecisions); err != nil {
 			return RequestDetail{}, fmt.Errorf("read request attempts: %w", err)
 		}
 		if attemptToolCalls != nil {

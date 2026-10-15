@@ -188,3 +188,13 @@ func (m *BusinessMetrics) WritePrometheus(body *strings.Builder) {
 	fmt.Fprintf(body, "# HELP olp_metrics_series_active Business metric sample series admitted under the cap.\n# TYPE olp_metrics_series_active gauge\nolp_metrics_series_active %d\n", m.used)
 	fmt.Fprintf(body, "# HELP olp_metrics_series_overflow_total Observations refused because admitting new series would exceed the cap.\n# TYPE olp_metrics_series_overflow_total counter\nolp_metrics_series_overflow_total %d\n", m.overflow)
 }
+
+// Guardrail records bounded execution labels; it never accepts matched values.
+func (m *BusinessMetrics) Guardrail(labels BusinessLabels, phase, action, outcome string, latencyMS int64) {
+	if m == nil {
+		return
+	}
+	extra := m.labels(labels, "phase="+metricQuoted(phase), "action="+metricQuoted(action), "outcome="+metricQuoted(outcome))
+	m.add("olp_guardrail_decisions_total", extra, 1, nil)
+	m.add("olp_guardrail_duration_seconds", extra, float64(latencyMS)/1000, BusinessLatencyBuckets)
+}

@@ -916,12 +916,33 @@ func (e ConfigurationCapabilityEntryMode) Valid() bool {
 // Defines values for ConfigurationDocumentApiVersion.
 const (
 	OpenllmproxyDevconfigv1 ConfigurationDocumentApiVersion = "openllmproxy.dev/config/v1"
+	OpenllmproxyDevconfigv2 ConfigurationDocumentApiVersion = "openllmproxy.dev/config/v2"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationDocumentApiVersion enum.
 func (e ConfigurationDocumentApiVersion) Valid() bool {
 	switch e {
 	case OpenllmproxyDevconfigv1:
+		return true
+	case OpenllmproxyDevconfigv2:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationGuardrailOnError.
+const (
+	ConfigurationGuardrailOnErrorFailClosed ConfigurationGuardrailOnError = "fail_closed"
+	ConfigurationGuardrailOnErrorFailOpen   ConfigurationGuardrailOnError = "fail_open"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationGuardrailOnError enum.
+func (e ConfigurationGuardrailOnError) Valid() bool {
+	switch e {
+	case ConfigurationGuardrailOnErrorFailClosed:
+		return true
+	case ConfigurationGuardrailOnErrorFailOpen:
 		return true
 	default:
 		return false
@@ -930,13 +951,130 @@ func (e ConfigurationDocumentApiVersion) Valid() bool {
 
 // Defines values for ConfigurationGuardrailType.
 const (
-	ConfigurationGuardrailTypeBuiltinRegex ConfigurationGuardrailType = "builtin.regex"
+	ConfigurationGuardrailTypeAzureContentSafety ConfigurationGuardrailType = "azure.content_safety"
+	ConfigurationGuardrailTypeAzurePromptShields ConfigurationGuardrailType = "azure.prompt_shields"
+	ConfigurationGuardrailTypeBedrock            ConfigurationGuardrailType = "bedrock"
+	ConfigurationGuardrailTypeBuiltinKeywords    ConfigurationGuardrailType = "builtin.keywords"
+	ConfigurationGuardrailTypeBuiltinPii         ConfigurationGuardrailType = "builtin.pii"
+	ConfigurationGuardrailTypeBuiltinRegex       ConfigurationGuardrailType = "builtin.regex"
+	ConfigurationGuardrailTypeBuiltinSchema      ConfigurationGuardrailType = "builtin.schema"
+	ConfigurationGuardrailTypeBuiltinSecrets     ConfigurationGuardrailType = "builtin.secrets"
+	ConfigurationGuardrailTypeBuiltinTools       ConfigurationGuardrailType = "builtin.tools"
+	ConfigurationGuardrailTypeLakera             ConfigurationGuardrailType = "lakera"
+	ConfigurationGuardrailTypeModel              ConfigurationGuardrailType = "model"
+	ConfigurationGuardrailTypeModelArmor         ConfigurationGuardrailType = "model_armor"
+	ConfigurationGuardrailTypePlugin             ConfigurationGuardrailType = "plugin"
+	ConfigurationGuardrailTypePresidio           ConfigurationGuardrailType = "presidio"
+	ConfigurationGuardrailTypeWebhook            ConfigurationGuardrailType = "webhook"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationGuardrailType enum.
 func (e ConfigurationGuardrailType) Valid() bool {
 	switch e {
+	case ConfigurationGuardrailTypeAzureContentSafety:
+		return true
+	case ConfigurationGuardrailTypeAzurePromptShields:
+		return true
+	case ConfigurationGuardrailTypeBedrock:
+		return true
+	case ConfigurationGuardrailTypeBuiltinKeywords:
+		return true
+	case ConfigurationGuardrailTypeBuiltinPii:
+		return true
 	case ConfigurationGuardrailTypeBuiltinRegex:
+		return true
+	case ConfigurationGuardrailTypeBuiltinSchema:
+		return true
+	case ConfigurationGuardrailTypeBuiltinSecrets:
+		return true
+	case ConfigurationGuardrailTypeBuiltinTools:
+		return true
+	case ConfigurationGuardrailTypeLakera:
+		return true
+	case ConfigurationGuardrailTypeModel:
+		return true
+	case ConfigurationGuardrailTypeModelArmor:
+		return true
+	case ConfigurationGuardrailTypePlugin:
+		return true
+	case ConfigurationGuardrailTypePresidio:
+		return true
+	case ConfigurationGuardrailTypeWebhook:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationGuardrailAttachmentScope.
+const (
+	ConfigurationGuardrailAttachmentScopeApiKey       ConfigurationGuardrailAttachmentScope = "api-key"
+	ConfigurationGuardrailAttachmentScopeInstallation ConfigurationGuardrailAttachmentScope = "installation"
+	ConfigurationGuardrailAttachmentScopeOrganization ConfigurationGuardrailAttachmentScope = "organization"
+	ConfigurationGuardrailAttachmentScopeProject      ConfigurationGuardrailAttachmentScope = "project"
+	ConfigurationGuardrailAttachmentScopeRoute        ConfigurationGuardrailAttachmentScope = "route"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationGuardrailAttachmentScope enum.
+func (e ConfigurationGuardrailAttachmentScope) Valid() bool {
+	switch e {
+	case ConfigurationGuardrailAttachmentScopeApiKey:
+		return true
+	case ConfigurationGuardrailAttachmentScopeInstallation:
+		return true
+	case ConfigurationGuardrailAttachmentScopeOrganization:
+		return true
+	case ConfigurationGuardrailAttachmentScopeProject:
+		return true
+	case ConfigurationGuardrailAttachmentScopeRoute:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationGuardrailPolicyEntryEntriesAction.
+const (
+	ConfigurationGuardrailPolicyEntryEntriesActionAnnotate ConfigurationGuardrailPolicyEntryEntriesAction = "annotate"
+	ConfigurationGuardrailPolicyEntryEntriesActionBlock    ConfigurationGuardrailPolicyEntryEntriesAction = "block"
+	ConfigurationGuardrailPolicyEntryEntriesActionMask     ConfigurationGuardrailPolicyEntryEntriesAction = "mask"
+	ConfigurationGuardrailPolicyEntryEntriesActionRedact   ConfigurationGuardrailPolicyEntryEntriesAction = "redact"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationGuardrailPolicyEntryEntriesAction enum.
+func (e ConfigurationGuardrailPolicyEntryEntriesAction) Valid() bool {
+	switch e {
+	case ConfigurationGuardrailPolicyEntryEntriesActionAnnotate:
+		return true
+	case ConfigurationGuardrailPolicyEntryEntriesActionBlock:
+		return true
+	case ConfigurationGuardrailPolicyEntryEntriesActionMask:
+		return true
+	case ConfigurationGuardrailPolicyEntryEntriesActionRedact:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationGuardrailPolicyEntryEntriesPhase.
+const (
+	ConfigurationGuardrailPolicyEntryEntriesPhaseInput         ConfigurationGuardrailPolicyEntryEntriesPhase = "input"
+	ConfigurationGuardrailPolicyEntryEntriesPhaseInputParallel ConfigurationGuardrailPolicyEntryEntriesPhase = "input_parallel"
+	ConfigurationGuardrailPolicyEntryEntriesPhaseOutput        ConfigurationGuardrailPolicyEntryEntriesPhase = "output"
+	ConfigurationGuardrailPolicyEntryEntriesPhaseOutputStream  ConfigurationGuardrailPolicyEntryEntriesPhase = "output_stream"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationGuardrailPolicyEntryEntriesPhase enum.
+func (e ConfigurationGuardrailPolicyEntryEntriesPhase) Valid() bool {
+	switch e {
+	case ConfigurationGuardrailPolicyEntryEntriesPhaseInput:
+		return true
+	case ConfigurationGuardrailPolicyEntryEntriesPhaseInputParallel:
+		return true
+	case ConfigurationGuardrailPolicyEntryEntriesPhaseOutput:
+		return true
+	case ConfigurationGuardrailPolicyEntryEntriesPhaseOutputStream:
 		return true
 	default:
 		return false
@@ -1011,22 +1149,24 @@ func (e ConfigurationPlanItemAction) Valid() bool {
 
 // Defines values for ConfigurationPlanItemKind.
 const (
-	ConfigurationPlanItemKindBillingImport      ConfigurationPlanItemKind = "billing_import"
-	ConfigurationPlanItemKindCatalogPublication ConfigurationPlanItemKind = "catalog_publication"
-	ConfigurationPlanItemKindConfiguration      ConfigurationPlanItemKind = "configuration"
-	ConfigurationPlanItemKindCredential         ConfigurationPlanItemKind = "credential"
-	ConfigurationPlanItemKindDiscount           ConfigurationPlanItemKind = "discount"
-	ConfigurationPlanItemKindGuardrail          ConfigurationPlanItemKind = "guardrail"
-	ConfigurationPlanItemKindMcpServer          ConfigurationPlanItemKind = "mcp_server"
-	ConfigurationPlanItemKindNetworkCredential  ConfigurationPlanItemKind = "network_credential"
-	ConfigurationPlanItemKindPlugin             ConfigurationPlanItemKind = "plugin"
-	ConfigurationPlanItemKindPricing            ConfigurationPlanItemKind = "pricing"
-	ConfigurationPlanItemKindProject            ConfigurationPlanItemKind = "project"
-	ConfigurationPlanItemKindProvider           ConfigurationPlanItemKind = "provider"
-	ConfigurationPlanItemKindRateCard           ConfigurationPlanItemKind = "rate_card"
-	ConfigurationPlanItemKindRoute              ConfigurationPlanItemKind = "route"
-	ConfigurationPlanItemKindRouteTemplate      ConfigurationPlanItemKind = "route_template"
-	ConfigurationPlanItemKindSink               ConfigurationPlanItemKind = "sink"
+	ConfigurationPlanItemKindBillingImport       ConfigurationPlanItemKind = "billing_import"
+	ConfigurationPlanItemKindCatalogPublication  ConfigurationPlanItemKind = "catalog_publication"
+	ConfigurationPlanItemKindConfiguration       ConfigurationPlanItemKind = "configuration"
+	ConfigurationPlanItemKindCredential          ConfigurationPlanItemKind = "credential"
+	ConfigurationPlanItemKindDiscount            ConfigurationPlanItemKind = "discount"
+	ConfigurationPlanItemKindGuardrail           ConfigurationPlanItemKind = "guardrail"
+	ConfigurationPlanItemKindGuardrailAttachment ConfigurationPlanItemKind = "guardrail_attachment"
+	ConfigurationPlanItemKindGuardrailPolicy     ConfigurationPlanItemKind = "guardrail_policy"
+	ConfigurationPlanItemKindMcpServer           ConfigurationPlanItemKind = "mcp_server"
+	ConfigurationPlanItemKindNetworkCredential   ConfigurationPlanItemKind = "network_credential"
+	ConfigurationPlanItemKindPlugin              ConfigurationPlanItemKind = "plugin"
+	ConfigurationPlanItemKindPricing             ConfigurationPlanItemKind = "pricing"
+	ConfigurationPlanItemKindProject             ConfigurationPlanItemKind = "project"
+	ConfigurationPlanItemKindProvider            ConfigurationPlanItemKind = "provider"
+	ConfigurationPlanItemKindRateCard            ConfigurationPlanItemKind = "rate_card"
+	ConfigurationPlanItemKindRoute               ConfigurationPlanItemKind = "route"
+	ConfigurationPlanItemKindRouteTemplate       ConfigurationPlanItemKind = "route_template"
+	ConfigurationPlanItemKindSink                ConfigurationPlanItemKind = "sink"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationPlanItemKind enum.
@@ -1043,6 +1183,10 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 	case ConfigurationPlanItemKindDiscount:
 		return true
 	case ConfigurationPlanItemKindGuardrail:
+		return true
+	case ConfigurationPlanItemKindGuardrailAttachment:
+		return true
+	case ConfigurationPlanItemKindGuardrailPolicy:
 		return true
 	case ConfigurationPlanItemKindMcpServer:
 		return true
@@ -1194,6 +1338,7 @@ func (e ConfigurationWorkloadIssuerAlgorithms) Valid() bool {
 
 // Defines values for ConfigurationWorkloadMappingScopes.
 const (
+	ConfigurationWorkloadMappingScopesGuardrails ConfigurationWorkloadMappingScopes = "guardrails"
 	ConfigurationWorkloadMappingScopesInference  ConfigurationWorkloadMappingScopes = "inference"
 	ConfigurationWorkloadMappingScopesModelsRead ConfigurationWorkloadMappingScopes = "models_read"
 )
@@ -1201,6 +1346,8 @@ const (
 // Valid indicates whether the value is a known member of the ConfigurationWorkloadMappingScopes enum.
 func (e ConfigurationWorkloadMappingScopes) Valid() bool {
 	switch e {
+	case ConfigurationWorkloadMappingScopesGuardrails:
+		return true
 	case ConfigurationWorkloadMappingScopesInference:
 		return true
 	case ConfigurationWorkloadMappingScopesModelsRead:
@@ -1212,16 +1359,16 @@ func (e ConfigurationWorkloadMappingScopes) Valid() bool {
 
 // Defines values for ContentPolicyRuleAction.
 const (
-	Block  ContentPolicyRuleAction = "block"
-	Redact ContentPolicyRuleAction = "redact"
+	ContentPolicyRuleActionBlock  ContentPolicyRuleAction = "block"
+	ContentPolicyRuleActionRedact ContentPolicyRuleAction = "redact"
 )
 
 // Valid indicates whether the value is a known member of the ContentPolicyRuleAction enum.
 func (e ContentPolicyRuleAction) Valid() bool {
 	switch e {
-	case Block:
+	case ContentPolicyRuleActionBlock:
 		return true
-	case Redact:
+	case ContentPolicyRuleActionRedact:
 		return true
 	default:
 		return false
@@ -1459,15 +1606,75 @@ func (e CreateExportSinkRequestType) Valid() bool {
 	}
 }
 
+// Defines values for CreateGuardrailRequestOnError.
+const (
+	CreateGuardrailRequestOnErrorFailClosed CreateGuardrailRequestOnError = "fail_closed"
+	CreateGuardrailRequestOnErrorFailOpen   CreateGuardrailRequestOnError = "fail_open"
+)
+
+// Valid indicates whether the value is a known member of the CreateGuardrailRequestOnError enum.
+func (e CreateGuardrailRequestOnError) Valid() bool {
+	switch e {
+	case CreateGuardrailRequestOnErrorFailClosed:
+		return true
+	case CreateGuardrailRequestOnErrorFailOpen:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateGuardrailRequestType.
 const (
-	CreateGuardrailRequestTypeBuiltinRegex CreateGuardrailRequestType = "builtin.regex"
+	CreateGuardrailRequestTypeAzureContentSafety CreateGuardrailRequestType = "azure.content_safety"
+	CreateGuardrailRequestTypeAzurePromptShields CreateGuardrailRequestType = "azure.prompt_shields"
+	CreateGuardrailRequestTypeBedrock            CreateGuardrailRequestType = "bedrock"
+	CreateGuardrailRequestTypeBuiltinKeywords    CreateGuardrailRequestType = "builtin.keywords"
+	CreateGuardrailRequestTypeBuiltinPii         CreateGuardrailRequestType = "builtin.pii"
+	CreateGuardrailRequestTypeBuiltinRegex       CreateGuardrailRequestType = "builtin.regex"
+	CreateGuardrailRequestTypeBuiltinSchema      CreateGuardrailRequestType = "builtin.schema"
+	CreateGuardrailRequestTypeBuiltinSecrets     CreateGuardrailRequestType = "builtin.secrets"
+	CreateGuardrailRequestTypeBuiltinTools       CreateGuardrailRequestType = "builtin.tools"
+	CreateGuardrailRequestTypeLakera             CreateGuardrailRequestType = "lakera"
+	CreateGuardrailRequestTypeModel              CreateGuardrailRequestType = "model"
+	CreateGuardrailRequestTypeModelArmor         CreateGuardrailRequestType = "model_armor"
+	CreateGuardrailRequestTypePlugin             CreateGuardrailRequestType = "plugin"
+	CreateGuardrailRequestTypePresidio           CreateGuardrailRequestType = "presidio"
+	CreateGuardrailRequestTypeWebhook            CreateGuardrailRequestType = "webhook"
 )
 
 // Valid indicates whether the value is a known member of the CreateGuardrailRequestType enum.
 func (e CreateGuardrailRequestType) Valid() bool {
 	switch e {
+	case CreateGuardrailRequestTypeAzureContentSafety:
+		return true
+	case CreateGuardrailRequestTypeAzurePromptShields:
+		return true
+	case CreateGuardrailRequestTypeBedrock:
+		return true
+	case CreateGuardrailRequestTypeBuiltinKeywords:
+		return true
+	case CreateGuardrailRequestTypeBuiltinPii:
+		return true
 	case CreateGuardrailRequestTypeBuiltinRegex:
+		return true
+	case CreateGuardrailRequestTypeBuiltinSchema:
+		return true
+	case CreateGuardrailRequestTypeBuiltinSecrets:
+		return true
+	case CreateGuardrailRequestTypeBuiltinTools:
+		return true
+	case CreateGuardrailRequestTypeLakera:
+		return true
+	case CreateGuardrailRequestTypeModel:
+		return true
+	case CreateGuardrailRequestTypeModelArmor:
+		return true
+	case CreateGuardrailRequestTypePlugin:
+		return true
+	case CreateGuardrailRequestTypePresidio:
+		return true
+	case CreateGuardrailRequestTypeWebhook:
 		return true
 	default:
 		return false
@@ -1801,15 +2008,279 @@ func (e GrantEnrollmentStatusStatus) Valid() bool {
 	}
 }
 
+// Defines values for GuardrailApplyInputPhase.
+const (
+	GuardrailApplyInputPhaseInput         GuardrailApplyInputPhase = "input"
+	GuardrailApplyInputPhaseInputParallel GuardrailApplyInputPhase = "input_parallel"
+	GuardrailApplyInputPhaseOutput        GuardrailApplyInputPhase = "output"
+	GuardrailApplyInputPhaseOutputStream  GuardrailApplyInputPhase = "output_stream"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailApplyInputPhase enum.
+func (e GuardrailApplyInputPhase) Valid() bool {
+	switch e {
+	case GuardrailApplyInputPhaseInput:
+		return true
+	case GuardrailApplyInputPhaseInputParallel:
+		return true
+	case GuardrailApplyInputPhaseOutput:
+		return true
+	case GuardrailApplyInputPhaseOutputStream:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailAttachmentScope.
+const (
+	GuardrailAttachmentScopeApiKey       GuardrailAttachmentScope = "api-key"
+	GuardrailAttachmentScopeInstallation GuardrailAttachmentScope = "installation"
+	GuardrailAttachmentScopeOrganization GuardrailAttachmentScope = "organization"
+	GuardrailAttachmentScopeProject      GuardrailAttachmentScope = "project"
+	GuardrailAttachmentScopeRoute        GuardrailAttachmentScope = "route"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailAttachmentScope enum.
+func (e GuardrailAttachmentScope) Valid() bool {
+	switch e {
+	case GuardrailAttachmentScopeApiKey:
+		return true
+	case GuardrailAttachmentScopeInstallation:
+		return true
+	case GuardrailAttachmentScopeOrganization:
+		return true
+	case GuardrailAttachmentScopeProject:
+		return true
+	case GuardrailAttachmentScopeRoute:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailEvidenceAction.
+const (
+	GuardrailEvidenceActionAnnotate GuardrailEvidenceAction = "annotate"
+	GuardrailEvidenceActionBlock    GuardrailEvidenceAction = "block"
+	GuardrailEvidenceActionMask     GuardrailEvidenceAction = "mask"
+	GuardrailEvidenceActionRedact   GuardrailEvidenceAction = "redact"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailEvidenceAction enum.
+func (e GuardrailEvidenceAction) Valid() bool {
+	switch e {
+	case GuardrailEvidenceActionAnnotate:
+		return true
+	case GuardrailEvidenceActionBlock:
+		return true
+	case GuardrailEvidenceActionMask:
+		return true
+	case GuardrailEvidenceActionRedact:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailEvidenceOutcome.
+const (
+	GuardrailEvidenceOutcomeAnnotated    GuardrailEvidenceOutcome = "annotated"
+	GuardrailEvidenceOutcomeBlocked      GuardrailEvidenceOutcome = "blocked"
+	GuardrailEvidenceOutcomeFailedClosed GuardrailEvidenceOutcome = "failed_closed"
+	GuardrailEvidenceOutcomeFailedOpen   GuardrailEvidenceOutcome = "failed_open"
+	GuardrailEvidenceOutcomeMasked       GuardrailEvidenceOutcome = "masked"
+	GuardrailEvidenceOutcomeMonitored    GuardrailEvidenceOutcome = "monitored"
+	GuardrailEvidenceOutcomePassed       GuardrailEvidenceOutcome = "passed"
+	GuardrailEvidenceOutcomeRedacted     GuardrailEvidenceOutcome = "redacted"
+	GuardrailEvidenceOutcomeSkipped      GuardrailEvidenceOutcome = "skipped"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailEvidenceOutcome enum.
+func (e GuardrailEvidenceOutcome) Valid() bool {
+	switch e {
+	case GuardrailEvidenceOutcomeAnnotated:
+		return true
+	case GuardrailEvidenceOutcomeBlocked:
+		return true
+	case GuardrailEvidenceOutcomeFailedClosed:
+		return true
+	case GuardrailEvidenceOutcomeFailedOpen:
+		return true
+	case GuardrailEvidenceOutcomeMasked:
+		return true
+	case GuardrailEvidenceOutcomeMonitored:
+		return true
+	case GuardrailEvidenceOutcomePassed:
+		return true
+	case GuardrailEvidenceOutcomeRedacted:
+		return true
+	case GuardrailEvidenceOutcomeSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailEvidencePhase.
+const (
+	GuardrailEvidencePhaseInput         GuardrailEvidencePhase = "input"
+	GuardrailEvidencePhaseInputParallel GuardrailEvidencePhase = "input_parallel"
+	GuardrailEvidencePhaseOutput        GuardrailEvidencePhase = "output"
+	GuardrailEvidencePhaseOutputStream  GuardrailEvidencePhase = "output_stream"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailEvidencePhase enum.
+func (e GuardrailEvidencePhase) Valid() bool {
+	switch e {
+	case GuardrailEvidencePhaseInput:
+		return true
+	case GuardrailEvidencePhaseInputParallel:
+		return true
+	case GuardrailEvidencePhaseOutput:
+		return true
+	case GuardrailEvidencePhaseOutputStream:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailPolicyEntryAction.
+const (
+	GuardrailPolicyEntryActionAnnotate GuardrailPolicyEntryAction = "annotate"
+	GuardrailPolicyEntryActionBlock    GuardrailPolicyEntryAction = "block"
+	GuardrailPolicyEntryActionMask     GuardrailPolicyEntryAction = "mask"
+	GuardrailPolicyEntryActionRedact   GuardrailPolicyEntryAction = "redact"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailPolicyEntryAction enum.
+func (e GuardrailPolicyEntryAction) Valid() bool {
+	switch e {
+	case GuardrailPolicyEntryActionAnnotate:
+		return true
+	case GuardrailPolicyEntryActionBlock:
+		return true
+	case GuardrailPolicyEntryActionMask:
+		return true
+	case GuardrailPolicyEntryActionRedact:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailPolicyEntryPhase.
+const (
+	GuardrailPolicyEntryPhaseInput         GuardrailPolicyEntryPhase = "input"
+	GuardrailPolicyEntryPhaseInputParallel GuardrailPolicyEntryPhase = "input_parallel"
+	GuardrailPolicyEntryPhaseOutput        GuardrailPolicyEntryPhase = "output"
+	GuardrailPolicyEntryPhaseOutputStream  GuardrailPolicyEntryPhase = "output_stream"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailPolicyEntryPhase enum.
+func (e GuardrailPolicyEntryPhase) Valid() bool {
+	switch e {
+	case GuardrailPolicyEntryPhaseInput:
+		return true
+	case GuardrailPolicyEntryPhaseInputParallel:
+		return true
+	case GuardrailPolicyEntryPhaseOutput:
+		return true
+	case GuardrailPolicyEntryPhaseOutputStream:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailResponseOnError.
+const (
+	GuardrailResponseOnErrorFailClosed GuardrailResponseOnError = "fail_closed"
+	GuardrailResponseOnErrorFailOpen   GuardrailResponseOnError = "fail_open"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailResponseOnError enum.
+func (e GuardrailResponseOnError) Valid() bool {
+	switch e {
+	case GuardrailResponseOnErrorFailClosed:
+		return true
+	case GuardrailResponseOnErrorFailOpen:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GuardrailResponseType.
 const (
-	GuardrailResponseTypeBuiltinRegex GuardrailResponseType = "builtin.regex"
+	GuardrailResponseTypeAzureContentSafety GuardrailResponseType = "azure.content_safety"
+	GuardrailResponseTypeAzurePromptShields GuardrailResponseType = "azure.prompt_shields"
+	GuardrailResponseTypeBedrock            GuardrailResponseType = "bedrock"
+	GuardrailResponseTypeBuiltinKeywords    GuardrailResponseType = "builtin.keywords"
+	GuardrailResponseTypeBuiltinPii         GuardrailResponseType = "builtin.pii"
+	GuardrailResponseTypeBuiltinRegex       GuardrailResponseType = "builtin.regex"
+	GuardrailResponseTypeBuiltinSchema      GuardrailResponseType = "builtin.schema"
+	GuardrailResponseTypeBuiltinSecrets     GuardrailResponseType = "builtin.secrets"
+	GuardrailResponseTypeBuiltinTools       GuardrailResponseType = "builtin.tools"
+	GuardrailResponseTypeLakera             GuardrailResponseType = "lakera"
+	GuardrailResponseTypeModel              GuardrailResponseType = "model"
+	GuardrailResponseTypeModelArmor         GuardrailResponseType = "model_armor"
+	GuardrailResponseTypePlugin             GuardrailResponseType = "plugin"
+	GuardrailResponseTypePresidio           GuardrailResponseType = "presidio"
+	GuardrailResponseTypeWebhook            GuardrailResponseType = "webhook"
 )
 
 // Valid indicates whether the value is a known member of the GuardrailResponseType enum.
 func (e GuardrailResponseType) Valid() bool {
 	switch e {
+	case GuardrailResponseTypeAzureContentSafety:
+		return true
+	case GuardrailResponseTypeAzurePromptShields:
+		return true
+	case GuardrailResponseTypeBedrock:
+		return true
+	case GuardrailResponseTypeBuiltinKeywords:
+		return true
+	case GuardrailResponseTypeBuiltinPii:
+		return true
 	case GuardrailResponseTypeBuiltinRegex:
+		return true
+	case GuardrailResponseTypeBuiltinSchema:
+		return true
+	case GuardrailResponseTypeBuiltinSecrets:
+		return true
+	case GuardrailResponseTypeBuiltinTools:
+		return true
+	case GuardrailResponseTypeLakera:
+		return true
+	case GuardrailResponseTypeModel:
+		return true
+	case GuardrailResponseTypeModelArmor:
+		return true
+	case GuardrailResponseTypePlugin:
+		return true
+	case GuardrailResponseTypePresidio:
+		return true
+	case GuardrailResponseTypeWebhook:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GuardrailRevisionResponseOnError.
+const (
+	GuardrailRevisionResponseOnErrorFailClosed GuardrailRevisionResponseOnError = "fail_closed"
+	GuardrailRevisionResponseOnErrorFailOpen   GuardrailRevisionResponseOnError = "fail_open"
+)
+
+// Valid indicates whether the value is a known member of the GuardrailRevisionResponseOnError enum.
+func (e GuardrailRevisionResponseOnError) Valid() bool {
+	switch e {
+	case GuardrailRevisionResponseOnErrorFailClosed:
+		return true
+	case GuardrailRevisionResponseOnErrorFailOpen:
 		return true
 	default:
 		return false
@@ -3237,19 +3708,19 @@ func (e RouteLegVia) Valid() bool {
 
 // Defines values for RouteTemplateResultOutcome.
 const (
-	Draft     RouteTemplateResultOutcome = "draft"
-	Published RouteTemplateResultOutcome = "published"
-	Skipped   RouteTemplateResultOutcome = "skipped"
+	RouteTemplateResultOutcomeDraft     RouteTemplateResultOutcome = "draft"
+	RouteTemplateResultOutcomePublished RouteTemplateResultOutcome = "published"
+	RouteTemplateResultOutcomeSkipped   RouteTemplateResultOutcome = "skipped"
 )
 
 // Valid indicates whether the value is a known member of the RouteTemplateResultOutcome enum.
 func (e RouteTemplateResultOutcome) Valid() bool {
 	switch e {
-	case Draft:
+	case RouteTemplateResultOutcomeDraft:
 		return true
-	case Published:
+	case RouteTemplateResultOutcomePublished:
 		return true
-	case Skipped:
+	case RouteTemplateResultOutcomeSkipped:
 		return true
 	default:
 		return false
@@ -3775,6 +4246,24 @@ func (e UpdateExportSinkRequestFilterOutcome) Valid() bool {
 	}
 }
 
+// Defines values for UpdateGuardrailRequestOnError.
+const (
+	UpdateGuardrailRequestOnErrorFailClosed UpdateGuardrailRequestOnError = "fail_closed"
+	UpdateGuardrailRequestOnErrorFailOpen   UpdateGuardrailRequestOnError = "fail_open"
+)
+
+// Valid indicates whether the value is a known member of the UpdateGuardrailRequestOnError enum.
+func (e UpdateGuardrailRequestOnError) Valid() bool {
+	switch e {
+	case UpdateGuardrailRequestOnErrorFailClosed:
+		return true
+	case UpdateGuardrailRequestOnErrorFailOpen:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UpdateNotificationDestinationRequestType.
 const (
 	UpdateNotificationDestinationRequestTypeDiscord   UpdateNotificationDestinationRequestType = "discord"
@@ -3927,6 +4416,7 @@ func (e WorkloadIssuerWriteAlgorithms) Valid() bool {
 
 // Defines values for WorkloadMappingScopes.
 const (
+	WorkloadMappingScopesGuardrails WorkloadMappingScopes = "guardrails"
 	WorkloadMappingScopesInference  WorkloadMappingScopes = "inference"
 	WorkloadMappingScopesModelsRead WorkloadMappingScopes = "models_read"
 )
@@ -3934,6 +4424,8 @@ const (
 // Valid indicates whether the value is a known member of the WorkloadMappingScopes enum.
 func (e WorkloadMappingScopes) Valid() bool {
 	switch e {
+	case WorkloadMappingScopesGuardrails:
+		return true
 	case WorkloadMappingScopesInference:
 		return true
 	case WorkloadMappingScopesModelsRead:
@@ -5336,8 +5828,10 @@ type ConfigurationDocument struct {
 	BudgetTimeZone nullable.Nullable[string] `json:"budget_time_zone,omitempty"`
 
 	// ExportedAt Informational only; excluded from the artifact digest
-	ExportedAt *time.Time                `json:"exported_at,omitempty"`
-	Guardrails *[]ConfigurationGuardrail `json:"guardrails,omitempty"`
+	ExportedAt           *time.Time                           `json:"exported_at,omitempty"`
+	GuardrailAttachments *[]ConfigurationGuardrailAttachment  `json:"guardrail_attachments,omitempty"`
+	GuardrailPolicies    *[]ConfigurationGuardrailPolicyEntry `json:"guardrail_policies,omitempty"`
+	Guardrails           *[]ConfigurationGuardrail            `json:"guardrails,omitempty"`
 
 	// InstallationBudget Installation cap. Omitted or null preserves destination policy; an empty policy clears it. Exports always include the current policy. Changes require settings permission.
 	InstallationBudget nullable.Nullable[BudgetPolicy] `json:"installation_budget,omitempty"`
@@ -5381,16 +5875,54 @@ type ConfigurationExportResponse struct {
 
 // ConfigurationGuardrail defines model for ConfigurationGuardrail.
 type ConfigurationGuardrail struct {
-	Name string `json:"name"`
+	Configuration *map[string]interface{}        `json:"configuration,omitempty"`
+	Name          string                         `json:"name"`
+	OnError       *ConfigurationGuardrailOnError `json:"on_error,omitempty"`
 
 	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
-	Policy  ContentPolicy              `json:"policy"`
-	Project string                     `json:"project"`
-	Type    ConfigurationGuardrailType `json:"type"`
+	Policy    *ContentPolicy             `json:"policy,omitempty"`
+	Project   string                     `json:"project"`
+	TimeoutMs *int64                     `json:"timeout_ms,omitempty"`
+	Type      ConfigurationGuardrailType `json:"type"`
 }
+
+// ConfigurationGuardrailOnError defines model for ConfigurationGuardrail.OnError.
+type ConfigurationGuardrailOnError string
 
 // ConfigurationGuardrailType defines model for ConfigurationGuardrail.Type.
 type ConfigurationGuardrailType string
+
+// ConfigurationGuardrailAttachment defines model for ConfigurationGuardrailAttachment.
+type ConfigurationGuardrailAttachment struct {
+	Name          *string                               `json:"name,omitempty"`
+	Order         int                                   `json:"order"`
+	Policy        string                                `json:"policy"`
+	PolicyProject string                                `json:"policy_project"`
+	Project       *string                               `json:"project,omitempty"`
+	Scope         ConfigurationGuardrailAttachmentScope `json:"scope"`
+}
+
+// ConfigurationGuardrailAttachmentScope defines model for ConfigurationGuardrailAttachment.Scope.
+type ConfigurationGuardrailAttachmentScope string
+
+// ConfigurationGuardrailPolicyEntry defines model for ConfigurationGuardrailPolicyEntry.
+type ConfigurationGuardrailPolicyEntry struct {
+	Entries []struct {
+		Action    ConfigurationGuardrailPolicyEntryEntriesAction `json:"action"`
+		Guardrail string                                         `json:"guardrail"`
+		Mandatory *bool                                          `json:"mandatory,omitempty"`
+		Monitor   *bool                                          `json:"monitor,omitempty"`
+		Phase     ConfigurationGuardrailPolicyEntryEntriesPhase  `json:"phase"`
+	} `json:"entries"`
+	Name    string `json:"name"`
+	Project string `json:"project"`
+}
+
+// ConfigurationGuardrailPolicyEntryEntriesAction defines model for ConfigurationGuardrailPolicyEntry.Entries.Action.
+type ConfigurationGuardrailPolicyEntryEntriesAction string
+
+// ConfigurationGuardrailPolicyEntryEntriesPhase defines model for ConfigurationGuardrailPolicyEntry.Entries.Phase.
+type ConfigurationGuardrailPolicyEntryEntriesPhase string
 
 // ConfigurationMCPServer defines model for ConfigurationMCPServer.
 type ConfigurationMCPServer struct {
@@ -5576,7 +6108,7 @@ type ConfigurationRouteEntry struct {
 
 	// CallerCostExempt Caller-paid ingress route (default false). Requires caller credentials on every foreground target and equal policy on fallback/selector routes. Usage and prices remain recorded, and rate/token/concurrency limits remain enforced; caller attempts are excluded from USD budget admission and accrual. Operator-authenticated probes, shadows and independently admitted classifiers retain their own budgets.
 	CallerCostExempt *bool                            `json:"caller_cost_exempt,omitempty"`
-	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy"`
+	ContentPolicy    nullable.Nullable[ContentPolicy] `json:"content_policy,omitempty"`
 
 	// ExposeUpstreamModels Explicitly disclose upstream model names in route catalogs.
 	ExposeUpstreamModels *bool `json:"expose_upstream_models,omitempty"`
@@ -6017,13 +6549,19 @@ type CreateExportSinkRequestType string
 
 // CreateGuardrailRequest defines model for CreateGuardrailRequest.
 type CreateGuardrailRequest struct {
-	Name string `json:"name"`
+	Configuration *map[string]interface{}        `json:"configuration,omitempty"`
+	Name          string                         `json:"name"`
+	OnError       *CreateGuardrailRequestOnError `json:"on_error,omitempty"`
 
 	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
-	Policy    ContentPolicy              `json:"policy"`
+	Policy    *ContentPolicy             `json:"policy,omitempty"`
 	ProjectId openapi_types.UUID         `json:"project_id"`
+	TimeoutMs *int64                     `json:"timeout_ms,omitempty"`
 	Type      CreateGuardrailRequestType `json:"type"`
 }
+
+// CreateGuardrailRequestOnError defines model for CreateGuardrailRequest.OnError.
+type CreateGuardrailRequestOnError string
 
 // CreateGuardrailRequestType defines model for CreateGuardrailRequest.Type.
 type CreateGuardrailRequestType string
@@ -6621,17 +7159,119 @@ type GrantEnrollmentStatus struct {
 // GrantEnrollmentStatusStatus `pending` until the operator approves the device upstream; `completed` once the grant created a credential version; `denied` when the operator denied the device; `expired` when the device authorization expired first.
 type GrantEnrollmentStatusStatus string
 
+// GuardrailActivation defines model for GuardrailActivation.
+type GuardrailActivation struct {
+	RevisionId openapi_types.UUID `json:"revision_id"`
+}
+
+// GuardrailApplyInput defines model for GuardrailApplyInput.
+type GuardrailApplyInput struct {
+	Phase            GuardrailApplyInputPhase `json:"phase"`
+	PolicyRevisionId openapi_types.UUID       `json:"policy_revision_id"`
+	Segments         []GuardrailSegment       `json:"segments"`
+}
+
+// GuardrailApplyInputPhase defines model for GuardrailApplyInput.Phase.
+type GuardrailApplyInputPhase string
+
+// GuardrailApplyResult defines model for GuardrailApplyResult.
+type GuardrailApplyResult struct {
+	Blocked   bool                `json:"blocked"`
+	Decisions []GuardrailEvidence `json:"decisions"`
+	Segments  []GuardrailSegment  `json:"segments"`
+}
+
+// GuardrailAttachment defines model for GuardrailAttachment.
+type GuardrailAttachment struct {
+	Etag             *string                  `json:"etag,omitempty"`
+	Id               *openapi_types.UUID      `json:"id,omitempty"`
+	Order            int                      `json:"order"`
+	PolicyRevisionId openapi_types.UUID       `json:"policy_revision_id"`
+	Scope            GuardrailAttachmentScope `json:"scope"`
+	ScopeId          string                   `json:"scope_id"`
+}
+
+// GuardrailAttachmentScope defines model for GuardrailAttachment.Scope.
+type GuardrailAttachmentScope string
+
+// GuardrailCredentialInput defines model for GuardrailCredentialInput.
+type GuardrailCredentialInput struct {
+	Credential map[string]interface{} `json:"credential"`
+	Name       string                 `json:"name"`
+	ProjectId  openapi_types.UUID     `json:"project_id"`
+}
+
+// GuardrailEvidence defines model for GuardrailEvidence.
+type GuardrailEvidence struct {
+	Action      GuardrailEvidenceAction  `json:"action"`
+	Categories  *[]string                `json:"categories,omitempty"`
+	GuardrailId string                   `json:"guardrail_id"`
+	LatencyMs   int64                    `json:"latency_ms"`
+	Outcome     GuardrailEvidenceOutcome `json:"outcome"`
+	Phase       GuardrailEvidencePhase   `json:"phase"`
+	Revision    string                   `json:"revision"`
+}
+
+// GuardrailEvidenceAction defines model for GuardrailEvidence.Action.
+type GuardrailEvidenceAction string
+
+// GuardrailEvidenceOutcome defines model for GuardrailEvidence.Outcome.
+type GuardrailEvidenceOutcome string
+
+// GuardrailEvidencePhase defines model for GuardrailEvidence.Phase.
+type GuardrailEvidencePhase string
+
 // GuardrailListResponse defines model for GuardrailListResponse.
 type GuardrailListResponse struct {
 	Items      []GuardrailResponse       `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
 
+// GuardrailPolicy defines model for GuardrailPolicy.
+type GuardrailPolicy struct {
+	ActiveRevisionId nullable.Nullable[openapi_types.UUID] `json:"active_revision_id,omitempty"`
+	Entries          []GuardrailPolicyEntry                `json:"entries"`
+	Etag             string                                `json:"etag"`
+	Id               openapi_types.UUID                    `json:"id"`
+	Name             string                                `json:"name"`
+	PolicyId         openapi_types.UUID                    `json:"policy_id"`
+	ProjectId        string                                `json:"project_id"`
+	RetiredAt        nullable.Nullable[time.Time]          `json:"retired_at,omitempty"`
+	Revision         *int64                                `json:"revision,omitempty"`
+	RevisionId       openapi_types.UUID                    `json:"revision_id"`
+}
+
+// GuardrailPolicyEntry defines model for GuardrailPolicyEntry.
+type GuardrailPolicyEntry struct {
+	Action      GuardrailPolicyEntryAction `json:"action"`
+	GuardrailId openapi_types.UUID         `json:"guardrail_id"`
+	Mandatory   *bool                      `json:"mandatory,omitempty"`
+	Monitor     *bool                      `json:"monitor,omitempty"`
+	Phase       GuardrailPolicyEntryPhase  `json:"phase"`
+	RevisionId  openapi_types.UUID         `json:"revision_id"`
+}
+
+// GuardrailPolicyEntryAction defines model for GuardrailPolicyEntry.Action.
+type GuardrailPolicyEntryAction string
+
+// GuardrailPolicyEntryPhase defines model for GuardrailPolicyEntry.Phase.
+type GuardrailPolicyEntryPhase string
+
+// GuardrailPolicyInput defines model for GuardrailPolicyInput.
+type GuardrailPolicyInput struct {
+	Entries   []GuardrailPolicyEntry `json:"entries"`
+	Name      string                 `json:"name"`
+	ProjectId *openapi_types.UUID    `json:"project_id,omitempty"`
+}
+
 // GuardrailResponse defines model for GuardrailResponse.
 type GuardrailResponse struct {
-	Etag string             `json:"etag"`
-	Id   openapi_types.UUID `json:"id"`
-	Name string             `json:"name"`
+	ActiveRevisionId nullable.Nullable[openapi_types.UUID] `json:"active_revision_id,omitempty"`
+	Configuration    *map[string]interface{}               `json:"configuration,omitempty"`
+	Etag             string                                `json:"etag"`
+	Id               openapi_types.UUID                    `json:"id"`
+	Name             string                                `json:"name"`
+	OnError          *GuardrailResponseOnError             `json:"on_error,omitempty"`
 
 	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
 	Policy     ContentPolicy                `json:"policy"`
@@ -6639,21 +7279,41 @@ type GuardrailResponse struct {
 	RetiredAt  nullable.Nullable[time.Time] `json:"retired_at"`
 	Revision   int64                        `json:"revision"`
 	RevisionId openapi_types.UUID           `json:"revision_id"`
+	TimeoutMs  *int64                       `json:"timeout_ms,omitempty"`
 	Type       GuardrailResponseType        `json:"type"`
 }
+
+// GuardrailResponseOnError defines model for GuardrailResponse.OnError.
+type GuardrailResponseOnError string
 
 // GuardrailResponseType defines model for GuardrailResponse.Type.
 type GuardrailResponseType string
 
 // GuardrailRevisionResponse defines model for GuardrailRevisionResponse.
 type GuardrailRevisionResponse struct {
-	CreatedAt   time.Time          `json:"created_at"`
-	GuardrailId openapi_types.UUID `json:"guardrail_id"`
-	Id          openapi_types.UUID `json:"id"`
+	Configuration *map[string]interface{}           `json:"configuration,omitempty"`
+	CreatedAt     time.Time                         `json:"created_at"`
+	GuardrailId   openapi_types.UUID                `json:"guardrail_id"`
+	Id            openapi_types.UUID                `json:"id"`
+	OnError       *GuardrailRevisionResponseOnError `json:"on_error,omitempty"`
 
 	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
-	Policy   ContentPolicy `json:"policy"`
-	Revision int64         `json:"revision"`
+	Policy    ContentPolicy `json:"policy"`
+	Revision  int64         `json:"revision"`
+	TimeoutMs *int64        `json:"timeout_ms,omitempty"`
+}
+
+// GuardrailRevisionResponseOnError defines model for GuardrailRevisionResponse.OnError.
+type GuardrailRevisionResponseOnError string
+
+// GuardrailSegment defines model for GuardrailSegment.
+type GuardrailSegment struct {
+	Id        string  `json:"id"`
+	Kind      *string `json:"kind,omitempty"`
+	Role      *string `json:"role,omitempty"`
+	Text      string  `json:"text"`
+	ToolName  *string `json:"tool_name,omitempty"`
+	Untrusted *bool   `json:"untrusted,omitempty"`
 }
 
 // HealthProbe Opts the connection into active health probes: bounded synthetic requests accounted to the installation.
@@ -7793,6 +8453,7 @@ type PluginListResponse struct {
 // PluginManifest What a plugin declared at install. It never changes for a digest.
 type PluginManifest struct {
 	Description *string `json:"description,omitempty"`
+	Guardrail   *bool   `json:"guardrail,omitempty"`
 
 	// Name Identifies the plugin across its versions; several digests of one plugin may be installed side by side.
 	Name string `json:"name"`
@@ -9312,15 +9973,17 @@ type RequestDetailResponse struct {
 	Currency    nullable.Nullable[string]    `json:"currency,omitempty"`
 
 	// EndUserDigest Project-scoped HMAC-SHA256 identity, or empty when not identified. Never the raw identifier.
-	EndUserDigest     *string                   `json:"end_user_digest,omitempty"`
-	ErrorClass        nullable.Nullable[string] `json:"error_class,omitempty"`
-	EstimatedCost     nullable.Nullable[string] `json:"estimated_cost,omitempty"`
-	FirstByteMs       nullable.Nullable[int64]  `json:"first_byte_ms,omitempty"`
-	Id                openapi_types.UUID        `json:"id"`
-	ImageInputTokens  nullable.Nullable[int64]  `json:"image_input_tokens,omitempty"`
-	ImageOutputTokens nullable.Nullable[int64]  `json:"image_output_tokens,omitempty"`
-	InputTokens       nullable.Nullable[int64]  `json:"input_tokens,omitempty"`
-	Operation         string                    `json:"operation"`
+	EndUserDigest        *string                               `json:"end_user_digest,omitempty"`
+	ErrorClass           nullable.Nullable[string]             `json:"error_class,omitempty"`
+	EstimatedCost        nullable.Nullable[string]             `json:"estimated_cost,omitempty"`
+	EvaluatorGuardrailId nullable.Nullable[openapi_types.UUID] `json:"evaluator_guardrail_id,omitempty"`
+	FirstByteMs          nullable.Nullable[int64]              `json:"first_byte_ms,omitempty"`
+	GuardrailDecisions   *[]GuardrailEvidence                  `json:"guardrail_decisions,omitempty"`
+	Id                   openapi_types.UUID                    `json:"id"`
+	ImageInputTokens     nullable.Nullable[int64]              `json:"image_input_tokens,omitempty"`
+	ImageOutputTokens    nullable.Nullable[int64]              `json:"image_output_tokens,omitempty"`
+	InputTokens          nullable.Nullable[int64]              `json:"input_tokens,omitempty"`
+	Operation            string                                `json:"operation"`
 
 	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 	Origin       RequestOrigin            `json:"origin"`
@@ -9427,15 +10090,17 @@ type RequestSummary struct {
 	Currency    nullable.Nullable[string]    `json:"currency,omitempty"`
 
 	// EndUserDigest Project-scoped HMAC-SHA256 identity, or empty when not identified. Never the raw identifier.
-	EndUserDigest     *string                   `json:"end_user_digest,omitempty"`
-	ErrorClass        nullable.Nullable[string] `json:"error_class,omitempty"`
-	EstimatedCost     nullable.Nullable[string] `json:"estimated_cost,omitempty"`
-	FirstByteMs       nullable.Nullable[int64]  `json:"first_byte_ms,omitempty"`
-	Id                openapi_types.UUID        `json:"id"`
-	ImageInputTokens  nullable.Nullable[int64]  `json:"image_input_tokens,omitempty"`
-	ImageOutputTokens nullable.Nullable[int64]  `json:"image_output_tokens,omitempty"`
-	InputTokens       nullable.Nullable[int64]  `json:"input_tokens,omitempty"`
-	Operation         string                    `json:"operation"`
+	EndUserDigest        *string                               `json:"end_user_digest,omitempty"`
+	ErrorClass           nullable.Nullable[string]             `json:"error_class,omitempty"`
+	EstimatedCost        nullable.Nullable[string]             `json:"estimated_cost,omitempty"`
+	EvaluatorGuardrailId nullable.Nullable[openapi_types.UUID] `json:"evaluator_guardrail_id,omitempty"`
+	FirstByteMs          nullable.Nullable[int64]              `json:"first_byte_ms,omitempty"`
+	GuardrailDecisions   *[]GuardrailEvidence                  `json:"guardrail_decisions,omitempty"`
+	Id                   openapi_types.UUID                    `json:"id"`
+	ImageInputTokens     nullable.Nullable[int64]              `json:"image_input_tokens,omitempty"`
+	ImageOutputTokens    nullable.Nullable[int64]              `json:"image_output_tokens,omitempty"`
+	InputTokens          nullable.Nullable[int64]              `json:"input_tokens,omitempty"`
+	Operation            string                                `json:"operation"`
 
 	// Origin caller: an API key's request. shadow: a mirrored request. classifier: a selector's classification call. probe: an active health probe. playground: a console member's Playground call. Shadow, probe and Playground requests belong to the installation and carry no key.
 	Origin       RequestOrigin            `json:"origin"`
@@ -10954,11 +11619,17 @@ type UpdateExportSinkRequestFilterOutcome string
 
 // UpdateGuardrailRequest defines model for UpdateGuardrailRequest.
 type UpdateGuardrailRequest struct {
-	Name string `json:"name"`
+	Configuration *map[string]interface{}        `json:"configuration,omitempty"`
+	Name          string                         `json:"name"`
+	OnError       *UpdateGuardrailRequestOnError `json:"on_error,omitempty"`
 
 	// Policy Route content policy: ordered RE2 rules enforced on inspectable request and unary response text. Absent or null disables enforcement.
-	Policy ContentPolicy `json:"policy"`
+	Policy    *ContentPolicy `json:"policy,omitempty"`
+	TimeoutMs *int64         `json:"timeout_ms,omitempty"`
 }
+
+// UpdateGuardrailRequestOnError defines model for UpdateGuardrailRequest.OnError.
+type UpdateGuardrailRequestOnError string
 
 // UpdateInstallationBrandingRequest defines model for UpdateInstallationBrandingRequest.
 type UpdateInstallationBrandingRequest struct {
@@ -11687,6 +12358,45 @@ type ApplyConfigurationParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// CreateGuardrailAttachmentParams defines parameters for CreateGuardrailAttachment.
+type CreateGuardrailAttachmentParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteGuardrailAttachmentParams defines parameters for DeleteGuardrailAttachment.
+type DeleteGuardrailAttachmentParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// CreateGuardrailCredentialParams defines parameters for CreateGuardrailCredential.
+type CreateGuardrailCredentialParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// CreateGuardrailPolicyParams defines parameters for CreateGuardrailPolicy.
+type CreateGuardrailPolicyParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteGuardrailPolicyParams defines parameters for DeleteGuardrailPolicy.
+type DeleteGuardrailPolicyParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// UpdateGuardrailPolicyParams defines parameters for UpdateGuardrailPolicy.
+type UpdateGuardrailPolicyParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// ActivateGuardrailPolicyParams defines parameters for ActivateGuardrailPolicy.
+type ActivateGuardrailPolicyParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
 // ListGuardrailsParams defines parameters for ListGuardrails.
 type ListGuardrailsParams struct {
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -11709,6 +12419,12 @@ type DeleteGuardrailParams struct {
 type UpdateGuardrailParams struct {
 	IfMatch        string `json:"If-Match"`
 	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ActivateGuardrailParams defines parameters for ActivateGuardrail.
+type ActivateGuardrailParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
 }
 
 // ListInvitationsParams defines parameters for ListInvitations.
@@ -13247,11 +13963,32 @@ type ApplyConfigurationJSONRequestBody = ConfigurationPromotionRequest
 // PlanConfigurationJSONRequestBody defines body for PlanConfiguration for application/json ContentType.
 type PlanConfigurationJSONRequestBody = ConfigurationPromotionRequest
 
+// CreateGuardrailAttachmentJSONRequestBody defines body for CreateGuardrailAttachment for application/json ContentType.
+type CreateGuardrailAttachmentJSONRequestBody = GuardrailAttachment
+
+// CreateGuardrailCredentialJSONRequestBody defines body for CreateGuardrailCredential for application/json ContentType.
+type CreateGuardrailCredentialJSONRequestBody = GuardrailCredentialInput
+
+// CreateGuardrailPolicyJSONRequestBody defines body for CreateGuardrailPolicy for application/json ContentType.
+type CreateGuardrailPolicyJSONRequestBody = GuardrailPolicyInput
+
+// UpdateGuardrailPolicyJSONRequestBody defines body for UpdateGuardrailPolicy for application/json ContentType.
+type UpdateGuardrailPolicyJSONRequestBody = GuardrailPolicyInput
+
+// ActivateGuardrailPolicyJSONRequestBody defines body for ActivateGuardrailPolicy for application/json ContentType.
+type ActivateGuardrailPolicyJSONRequestBody = GuardrailActivation
+
 // CreateGuardrailJSONRequestBody defines body for CreateGuardrail for application/json ContentType.
 type CreateGuardrailJSONRequestBody = CreateGuardrailRequest
 
+// EvaluateGuardrailsJSONRequestBody defines body for EvaluateGuardrails for application/json ContentType.
+type EvaluateGuardrailsJSONRequestBody = GuardrailApplyInput
+
 // UpdateGuardrailJSONRequestBody defines body for UpdateGuardrail for application/json ContentType.
 type UpdateGuardrailJSONRequestBody = UpdateGuardrailRequest
+
+// ActivateGuardrailJSONRequestBody defines body for ActivateGuardrail for application/json ContentType.
+type ActivateGuardrailJSONRequestBody = GuardrailActivation
 
 // CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
 type CreateInvitationJSONRequestBody = CreateInvitationRequest
