@@ -23,9 +23,19 @@
     updateCapturePolicy,
     updateExportSink,
     type CapturePolicy,
-    type ExportSink,
-    type FocusDataset
+    type ExportSink
   } from '$lib/features/observability/api';
+  import {
+    buildSinkSettings,
+    validateSinkSettings
+  } from '$lib/features/observability/sinkSettings';
+  import {
+    focusDatasetStatus,
+    lagSeconds,
+    sinkSettingsSummary,
+    streamState,
+    streamStatuses
+  } from '$lib/features/observability/presentation';
   import { observabilityKeys } from '$lib/features/observability/observabilityKeys';
 
   import {
@@ -131,10 +141,6 @@
   const focusStartMin = isoDay(89);
   const focusStartMax = isoDay(0);
 
-  const stripeEventPattern = /^[A-Za-z0-9_.:-]{1,100}$/;
-  const stripeCustomerPattern = /^cus_[A-Za-z0-9]{1,250}$/;
-  const stripeFieldPattern = /^[A-Za-z0-9_]{1,64}$/;
-
   let editingSink = $state<ExportSink | null>(null);
   let sinkName = $state('');
   let sinkType = $state<ExportSink['type']>('https');
@@ -205,75 +211,6 @@
     sinkStreams = sinkStreams.includes(stream)
       ? sinkStreams.filter((value) => value !== stream)
       : [...sinkStreams, stream];
-  }
-
-  // sinkSettings builds the format-specific settings document; null means no
-  // settings field is sent.
-  function sinkSettings(): Record<string, unknown> | null {
-    if (sinkFormat === 'csv_gzip') {
-      const settings: Record<string, unknown> = {
-        cost_basis: sinkFocusCostBasis
-      };
-      if (sinkFocusStartDate) settings.start_date = sinkFocusStartDate;
-      return settings;
-    }
-    if (sinkFormat === 'cloudevents') {
-      return sinkCeSource.trim() ? { source: sinkCeSource.trim() } : null;
-    }
-    if (sinkFormat === 'stripe') {
-      const settings: Record<string, unknown> = {
-        event_name: sinkStripeEvent.trim(),
-        value: sinkStripeValue,
-        customers: Object.fromEntries(
-          sinkCustomers
-            .filter((row) => row.project && row.customer.trim())
-            .map((row) => [row.project, row.customer.trim()])
-        )
-      };
-      if (sinkStripeCustomerKey.trim())
-        settings.customer_key = sinkStripeCustomerKey.trim();
-      if (sinkStripeValueKey.trim())
-        settings.value_key = sinkStripeValueKey.trim();
-      return settings;
-    }
-    return null;
-  }
-
-  // validateSinkSettings mirrors the server's settings rules so a bad form
-  // stops at the browser rather than the API.
-  function validateSinkSettings(): string {
-    if (sinkFormat === 'csv_gzip' && sinkFocusStartDate) {
-      const start = Date.parse(sinkFocusStartDate + 'T00:00:00Z');
-      const earliest = Date.now() - 89 * 24 * 60 * 60 * 1000;
-      if (!Number.isFinite(start) || start < earliest)
-        return 'Start date must be within the last 90 days.';
-    }
-    if (sinkFormat === 'stripe') {
-      if (!editingSink && !sinkStripeKey.trim())
-        return 'An enabled Stripe sink needs a restricted API key.';
-      if (!stripeEventPattern.test(sinkStripeEvent.trim()))
-        return 'The Stripe event name must be 1-100 characters of letters, digits, _, ., : or -.';
-      const rows = sinkCustomers.filter(
-        (row) => row.project || row.customer.trim()
-      );
-      if (!rows.length) return 'Map at least one project to a Stripe customer.';
-      for (const row of rows) {
-        if (!row.project) return 'Each customer mapping needs a project.';
-        if (!stripeCustomerPattern.test(row.customer.trim()))
-          return 'Stripe customer IDs look like cus_….';
-      }
-      if (
-        sinkStripeCustomerKey.trim() &&
-        !stripeFieldPattern.test(sinkStripeCustomerKey.trim())
-      )
-        return 'The customer key must be 1-64 letters, digits or underscores.';
-      if (
-        sinkStripeValueKey.trim() &&
-        !stripeFieldPattern.test(sinkStripeValueKey.trim())
-      )
-        return 'The value key must be 1-64 letters, digits or underscores.';
-    }
-    return '';
   }
 
   function sinkFilterValue() {
@@ -362,11 +299,26 @@
     error = notice = '';
     let committed = false;
     try {
-      const settingsError = validateSinkSettings();
+      const draft = {
+        format: sinkFormat,
+        focusCostBasis: sinkFocusCostBasis,
+        focusStartDate: sinkFocusStartDate,
+        ceSource: sinkCeSource,
+        stripeEvent: sinkStripeEvent,
+        stripeValue: sinkStripeValue,
+        customers: sinkCustomers,
+        stripeCustomerKey: sinkStripeCustomerKey,
+        stripeValueKey: sinkStripeValueKey
+      };
+      const settingsError = validateSinkSettings(draft, {
+        editing: !!editing,
+        stripeKey: sinkStripeKey
+      });
       if (settingsError) {
         error = settingsError;
         return;
       }
+      const settings = buildSinkSettings(draft);
       let credential: unknown;
       if (sinkType === 'stripe_meter') {
         // A Stripe sink carries exactly one credential shape.
@@ -385,7 +337,7 @@
           name: sinkName.trim(),
           destination: sinkDestination.trim(),
           filter: sinkFilterValue(),
-          ...(sinkSettings() ? { settings: sinkSettings()! } : {}),
+          ...(settings ? { settings } : {}),
           ...(sinkClearCredential
             ? { credential: null }
             : credential !== undefined
@@ -407,7 +359,7 @@
           streams: sinkStreams as ExportSink['streams'],
           format: sinkFormat as ExportSink['format'],
           filter: sinkFilterValue(),
-          settings: sinkSettings(),
+          settings,
           ...(credential !== undefined
             ? { credential: credential as Record<string, unknown> }
             : {})
@@ -654,38 +606,6 @@
     }
   }
 
-  type SinkStreamStatus = {
-    stream?: string;
-    pending?: number;
-    pending_error_codes?: string[];
-    delivered_total?: number;
-    failures_total?: number;
-    gaps_total?: number;
-    last_success_at?: string | null;
-    last_attempt_at?: string | null;
-    oldest_pending_at?: string | null;
-  };
-
-  function streamStatuses(sink: ExportSink): SinkStreamStatus[] {
-    return (sink.status ?? []) as SinkStreamStatus[];
-  }
-
-  function lagSeconds(status: SinkStreamStatus): number {
-    return status.oldest_pending_at &&
-      Number.isFinite(Date.parse(status.oldest_pending_at))
-      ? Math.max(0, (Date.now() - Date.parse(status.oldest_pending_at)) / 1000)
-      : 0;
-  }
-
-  function streamState(status: SinkStreamStatus): string {
-    if (status.pending == null) return 'unknown';
-    if (status.pending > 0)
-      return (status.pending_error_codes ?? []).length > 0
-        ? 'failing'
-        : 'pending';
-    return 'idle';
-  }
-
   let gapSinkId = $state('');
   const gapQuery = createQuery(() => ({
     queryKey: [...observabilityKeys.sinks(), 'gaps', gapSinkId],
@@ -707,35 +627,6 @@
   function toggleDatasets(sink: ExportSink) {
     datasetSinkId =
       datasetSinkId === sink.export_sink_id ? '' : sink.export_sink_id;
-  }
-
-  function focusDatasetStatus(dataset: FocusDataset): string {
-    if (dataset.last_error_code) return dataset.last_error_code;
-    return dataset.current ? 'Current' : 'Restatement pending';
-  }
-
-  // A one-line summary of the sink's format-specific settings.
-  function sinkSettingsSummary(sink: ExportSink): string {
-    const settings = (sink.settings ?? {}) as Record<string, unknown>;
-    const parts: string[] = [];
-    if (sink.format === 'csv_gzip') {
-      parts.push(
-        `Cost basis: ${settings.cost_basis === 'charge' ? 'charge' : 'cost'}`
-      );
-      if (settings.start_date)
-        parts.push(`from ${settings.start_date as string}`);
-    } else if (sink.format === 'cloudevents') {
-      if (settings.source) parts.push(`Source: ${settings.source as string}`);
-    } else if (sink.format === 'stripe') {
-      parts.push(
-        `Meter: ${(settings.event_name as string) ?? ''} (${(settings.value as string) ?? ''})`
-      );
-      const customers = (settings.customers ?? {}) as Record<string, string>;
-      parts.push(
-        `${Object.keys(customers).length} customer${Object.keys(customers).length === 1 ? '' : 's'}`
-      );
-    }
-    return parts.join(' · ');
   }
 
   function sinkOptionLabel(id: string) {

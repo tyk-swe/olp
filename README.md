@@ -102,6 +102,7 @@ Start with [concepts](docs/concepts.md) and the [compatibility matrix](docs/comp
 | --- | --- |
 | Connect providers and publish routes | [Routing](docs/provider-routing.md), [profiles](docs/provider-profiles.md), [plugins](docs/plugins.md), [plugin SDK](docs/plugin-authoring.md) |
 | Deploy and operate | [Deployment](docs/deployment.md), [configuration](docs/configuration.md), [operations](docs/operations.md), [pricing](docs/pricing.md), [performance](docs/performance.md) |
+| Export costs and reconcile invoices | [FinOps](docs/finops.md) |
 | Manage access and secrets | [Access](docs/access.md), [security](docs/security.md), [external secrets](docs/external-secrets.md) |
 | Automate management | [CLI, Go client and MCP](docs/operator-cli.md), [GitHub Actions](docs/configuration-actions.md), [Terraform/OpenTofu](docs/terraform.md) |
 | Use clients and subscription accounts | [Qualified clients](docs/clients.md), [code mode](docs/features/code-mode.md), [qualification limits](docs/qualification/code-mode.md) |

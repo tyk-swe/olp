@@ -32,16 +32,10 @@ func fetchAnthropic(ctx context.Context, client *http.Client, endpoint *string, 
 	for _, id := range scope.WorkspaceIDs {
 		workspaces[id] = true
 	}
-	days := map[string]map[string]lineSum{}
-	page := ""
+	days := reportAccumulator{}
 	for pages := 0; pages < maxPages; pages++ {
-		params := q
-		if page != "" {
-			params = cloneQuery(q)
-			params.Set("page", page)
-		}
 		var doc anthropicCostPage
-		err := get(ctx, client, base+"?"+params.Encode(), func(r *http.Request) {
+		err := get(ctx, client, base+"?"+q.Encode(), func(r *http.Request) {
 			r.Header.Set("x-api-key", string(key))
 			r.Header.Set("anthropic-version", "2023-06-01")
 		}, &doc)
@@ -55,9 +49,7 @@ func fetchAnthropic(ctx context.Context, client *http.Client, endpoint *string, 
 			} else {
 				return nil, failFetch("response", errors.New("bucket has no starting_at day"))
 			}
-			if days[day] == nil {
-				days[day] = map[string]lineSum{}
-			}
+			days.ensureDay(day)
 			for _, result := range bucket.Results {
 				workspace := "default"
 				if result.WorkspaceID != nil && *result.WorkspaceID != "" {
@@ -70,25 +62,13 @@ func fetchAnthropic(ctx context.Context, client *http.Client, endpoint *string, 
 				if err != nil {
 					return nil, failFetch("response", err)
 				}
-				amount := cents.Shift(-2)
-				lineItem := "unspecified"
-				if result.Description != nil && *result.Description != "" {
-					lineItem = truncateLineItem(*result.Description)
-				} else if result.CostType != nil && *result.CostType != "" {
-					lineItem = truncateLineItem(*result.CostType)
-				}
-				sum := days[day][lineItem]
-				sum.amount = sum.amount.Add(amount)
-				if result.Currency != "" {
-					sum.currency = upperCurrency(result.Currency)
-				}
-				days[day][lineItem] = sum
+				days.add(day, cents.Shift(-2), result.Currency, result.Description, result.CostType)
 			}
 		}
 		if !doc.HasMore || doc.NextPage == "" {
 			return days, nil
 		}
-		page = doc.NextPage
+		q.Set("page", doc.NextPage)
 	}
 	return nil, failFetch("response", errors.New("cost report exceeded 20 pages"))
 }

@@ -27,7 +27,10 @@ import (
 // request metadata into accounting, the detector that turns an unclean
 // gateway shutdown into a recorded completeness gap, the maintenance loop that
 // rolls up and expires stored usage, and the cost reconciliation leader that
-// republishes budget windows into the shared limiter. Each task supervises
+// republishes budget windows into the shared limiter. Export delivery drains
+// the durable queue, the FOCUS worker maintains its dataset ledger, and the
+// independent billing importer polls provider cost reports. These three tasks
+// need PostgreSQL and egress, not the coordination store. Each task supervises
 // itself, checkpoints its own liveness, and stops when ctx is cancelled; the
 // returned function waits for all of them to have stopped.
 // vk is the consumer's own Valkey client: its blocking stream reads would

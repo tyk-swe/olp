@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -37,16 +36,10 @@ func fetchOpenAI(ctx context.Context, client *http.Client, endpoint *string, key
 	for _, id := range scope.ProjectIDs {
 		q.Add("project_ids[]", id)
 	}
-	days := map[string]map[string]lineSum{}
-	page := ""
+	days := reportAccumulator{}
 	for pages := 0; pages < maxPages; pages++ {
-		params := q
-		if page != "" {
-			params = cloneQuery(q)
-			params.Set("page", page)
-		}
 		var doc openAICostsPage
-		err := get(ctx, client, base+"?"+params.Encode(), func(r *http.Request) {
+		err := get(ctx, client, base+"?"+q.Encode(), func(r *http.Request) {
 			r.Header.Set("Authorization", "Bearer "+string(key))
 		}, &doc)
 		if err != nil {
@@ -54,30 +47,19 @@ func fetchOpenAI(ctx context.Context, client *http.Client, endpoint *string, key
 		}
 		for _, bucket := range doc.Data {
 			day := dayOf(bucket.StartTime)
-			if days[day] == nil {
-				days[day] = map[string]lineSum{}
-			}
+			days.ensureDay(day)
 			for _, result := range bucket.Results {
 				amount, err := decimalValue(result.Amount.Value)
 				if err != nil {
 					return nil, failFetch("response", err)
 				}
-				lineItem := "unspecified"
-				if result.LineItem != nil && *result.LineItem != "" {
-					lineItem = truncateLineItem(*result.LineItem)
-				}
-				sum := days[day][lineItem]
-				sum.amount = sum.amount.Add(amount)
-				if result.Amount.Currency != "" {
-					sum.currency = upperCurrency(result.Amount.Currency)
-				}
-				days[day][lineItem] = sum
+				days.add(day, amount, result.Amount.Currency, result.LineItem)
 			}
 		}
 		if !doc.HasMore || doc.NextPage == "" {
 			return days, nil
 		}
-		page = doc.NextPage
+		q.Set("page", doc.NextPage)
 	}
 	return nil, failFetch("response", errors.New("cost report exceeded 20 pages"))
 }
@@ -99,30 +81,4 @@ type openAICostsPage struct {
 	} `json:"data"`
 	HasMore  bool   `json:"has_more"`
 	NextPage string `json:"next_page"`
-}
-
-func cloneQuery(v url.Values) url.Values {
-	out := make(url.Values, len(v)+1)
-	for k, values := range v {
-		out[k] = append([]string{}, values...)
-	}
-	return out
-}
-
-// truncateLineItem bounds a vendor label to the stored column's 256
-// characters.
-func truncateLineItem(value string) string {
-	runes := []rune(value)
-	if len(runes) <= 256 {
-		return value
-	}
-	return string(runes[:256])
-}
-
-// upperCurrency normalizes the vendor's currency tag for storage.
-func upperCurrency(currency string) string {
-	if len(currency) > 3 {
-		currency = currency[:3]
-	}
-	return strings.ToUpper(currency)
 }

@@ -34,6 +34,8 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Admission token estimates: tokenizers, the request walker, per-family counters | `internal/operations/tokenization/estimate/` |
 | Cost reservation at admission; rate-limit and gateway metadata response headers | `internal/gateway/cost_reservation.go`, `response_headers.go` |
 | Accounting, pricing, request history, ingestion, retention, notification delivery | `internal/usage/` and `console/src/lib/features/usage/` |
+| Provider billing configuration, invoice imports and reconciliation | `internal/billing/` and billing files in `console/src/lib/features/providers/` |
+| Export sinks, queued metering delivery, FOCUS datasets and payload capture | `internal/export/` and `console/src/lib/features/observability/` |
 | Playground execution state, request composition, routing inspection | `console/src/lib/features/inference/playground/` |
 | Uploads, durable media jobs, reconciliation | `internal/media/` and `console/src/lib/features/media/` |
 | Configuration, connections, startup, shutdown | `internal/config/`, `internal/process/`, `internal/database/` |

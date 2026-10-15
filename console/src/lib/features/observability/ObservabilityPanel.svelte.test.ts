@@ -799,6 +799,44 @@ it('creates a CloudEvents sink locked to metering with a source', async () => {
   );
 });
 
+it('sends blank CloudEvents settings as null on create and omits them on edit', async () => {
+  const sink: ExportSink = {
+    ...httpsSink,
+    format: 'cloudevents',
+    streams: ['metering'],
+    settings: { source: '/original' }
+  };
+  vi.mocked(listExportSinks).mockResolvedValue([sink]);
+  vi.mocked(createExportSink).mockResolvedValue(sink);
+  vi.mocked(updateExportSink).mockResolvedValue(sink);
+  await render();
+
+  choose('#sink-name', 'Events');
+  choose('#sink-format', 'cloudevents');
+  choose('#sink-destination', 'https://events.example.com');
+  choose('#sink-ce-source', '  ');
+  host
+    .querySelector<HTMLFormElement>('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(createExportSink).toHaveBeenCalledWith(
+    expect.objectContaining({ settings: null }),
+    expect.any(String)
+  );
+
+  clickButton('Edit');
+  choose('#sink-ce-source', '  ');
+  host
+    .querySelector<HTMLFormElement>('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(updateExportSink).toHaveBeenCalledWith(sink, {
+    name: sink.name,
+    destination: sink.destination,
+    filter: null
+  });
+});
+
 it('creates a Stripe sink with the api_key credential and customer map', async () => {
   vi.mocked(createExportSink).mockResolvedValue(httpsSink);
   await render();

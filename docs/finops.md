@@ -1,11 +1,15 @@
 # FinOps export and invoice reconciliation
 
-Three deliveries cover cost accounting outside OLP: the `metering` stream to
+Three workflows cover cost accounting outside OLP: the `metering` stream to
 CloudEvents consumers and Stripe Billing meters, FOCUS 1.4 cost-and-usage
 datasets on object storage, and provider invoice imports that reconcile
-attributed spend against billed spend. All three run on the export worker's
-durable queue or the FOCUS ledger, are content-free, and are idempotent under
-redelivery.
+attributed spend against billed spend. The export worker delivers metering
+records from a durable queue; a separate FOCUS worker generates and delivers
+datasets through the FOCUS ledger. The billing importer independently polls
+provider cost reports and stores daily invoice totals using PostgreSQL and
+provider egress, without the export queue or coordination store. All three
+are content-free. Export retries preserve event or dataset identity; invoice
+imports replace the stored totals for the fetched days.
 
 ## Metering stream
 

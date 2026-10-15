@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -239,13 +238,6 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		return err
 	}
 	return i.storeDays(ctx, row, days)
-}
-
-// lineSum accumulates one (day, line_item) across project/workspace groups
-// and across pages.
-type lineSum struct {
-	amount   decimal.Decimal
-	currency string
 }
 
 // client builds the connection-scoped HTTP client the import's provider
